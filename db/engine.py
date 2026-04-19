@@ -1,0 +1,40 @@
+from collections.abc import AsyncGenerator
+
+from sqlalchemy import Connection, inspect, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from pathlib import Path
+
+from core.config import get_config
+
+_cfg = get_config()
+Path(_cfg.work_dir).mkdir(parents=True, exist_ok=True)
+DATABASE_URL = _cfg.database_url
+from db.models import Base
+
+
+def _migrate(conn: Connection) -> None:
+    """Apply any schema changes not covered by create_all (existing tables)."""
+    inspector = inspect(conn)
+    msg_cols = {c["name"] for c in inspector.get_columns("messages")}
+    if "status" not in msg_cols:
+        conn.execute(text("ALTER TABLE messages ADD COLUMN status VARCHAR DEFAULT 'done'"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_steps_message_id ON steps (message_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_steps_conversation_id ON steps (conversation_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_automation_runs_automation_id ON automation_runs (automation_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"))
+
+engine = create_async_engine(DATABASE_URL, echo=False)
+async_session = async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def init_db() -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate)
+
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session() as session:
+        yield session
