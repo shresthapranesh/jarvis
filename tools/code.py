@@ -25,6 +25,13 @@ async def run_python(code: str) -> str:
             proc.kill()
             await proc.communicate()
             return "Error: execution timed out (30s limit)"
+        except asyncio.CancelledError:
+            proc.kill()
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=5)
+            except asyncio.TimeoutError:
+                pass
+            raise
         output = stdout.decode().strip()
         if stderr.decode().strip():
             output = (output + "\n[stderr]\n" + stderr.decode().strip()).strip()

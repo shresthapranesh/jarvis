@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import Connection, inspect, text
+from sqlalchemy import Connection, event, inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from pathlib import Path
@@ -26,6 +26,16 @@ def _migrate(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"))
 
 engine = create_async_engine(DATABASE_URL, echo=False)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn: object, _record: object) -> None:
+    cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.close()
+
+
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 

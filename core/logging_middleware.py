@@ -13,6 +13,7 @@ async def log_tool_calls(request, handler):
     args = request.tool_call["args"]
     logger.info("→ %s %s", name, args)
     result = await handler(request)
-    content = result.content if isinstance(result.content, str) else str(result.content)
+    raw = getattr(result, "content", result)
+    content = raw if isinstance(raw, str) else str(raw)
     logger.info("← %s (%d chars)", name, len(content))
     return result

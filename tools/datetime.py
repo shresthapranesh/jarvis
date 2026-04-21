@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 
-def get_current_datetime() -> dict:
+async def get_current_datetime() -> dict:
     """Return the current UTC date, time, and timezone. Use this whenever you need to know today's date or the current time."""
     now = datetime.now(timezone.utc)
     return {
