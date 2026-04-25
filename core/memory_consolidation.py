@@ -10,7 +10,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.model_catalog import AVAILABLE_MODELS
 from db import async_session
-from db.ops import get_recent_messages
+from db.ops import get_default_model, get_recent_messages
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ Rules:
 
 async def consolidate_memory(
     store: AsyncSqliteStore,
-    model_id: str = "google_genai:gemini-2.0-flash",
+    model_id: str | None = None,
 ) -> str:
     """Read recent DB messages + current AGENTS.md, call LLM to update memory, write back."""
 
@@ -46,8 +46,10 @@ async def consolidate_memory(
         if ts:
             last_run_at = datetime.fromisoformat(ts)
 
-    # 2. Fetch recent messages
+    # 2. Fetch recent messages and resolve model
     async with async_session() as session:
+        if model_id is None:
+            model_id = await get_default_model(session)
         messages = await get_recent_messages(session, since=last_run_at, limit=200)
 
     now_iso = datetime.now(timezone.utc).isoformat()
