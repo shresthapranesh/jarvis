@@ -112,6 +112,16 @@ class AutomationRun(Base):
     automation: Mapped["Automation"] = relationship("Automation", back_populates="runs")
 
 
+# ── Config settings ───────────────────────────────────────────────────────────
+
+class ConfigSetting(Base):
+    __tablename__ = "config_settings"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 # ── Workflow models ────────────────────────────────────────────────────────────
 
 class Workflow(Base):

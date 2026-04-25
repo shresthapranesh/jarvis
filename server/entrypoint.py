@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import pathlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -51,7 +52,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._store = store
         state._http_client = http
         register_memory_consolidation_job()
+
+        _tg_app = None
+        _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        if _tg_token:
+            from server.telegram_bot import build_application
+            _tg_app = build_application(_tg_token)
+            await _tg_app.initialize()
+            await _tg_app.updater.start_polling()
+            await _tg_app.start()
+
         yield
+
+        if _tg_app is not None:
+            await _tg_app.updater.stop()
+            await _tg_app.stop()
+            await _tg_app.shutdown()
+
         state._async_checkpointer = None
         state._store = None
         state._http_client = None

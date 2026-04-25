@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import Automation, AutomationRun, Conversation, Message, Step, Workflow, WorkflowRun
+from db.models import Automation, AutomationRun, ConfigSetting, Conversation, Message, Step, Workflow, WorkflowRun
 
 
 async def create_conversation(session: AsyncSession, model: str, title: str | None) -> Conversation:
@@ -371,6 +371,37 @@ async def get_recent_messages(
         }
         for r in reversed(rows)
     ]
+
+
+# ── Config settings CRUD ──────────────────────────────────────────────────────
+
+async def get_setting(session: AsyncSession, key: str) -> str | None:
+    row = await session.get(ConfigSetting, key)
+    return row.value if row else None
+
+
+async def set_setting(session: AsyncSession, key: str, value: str) -> None:
+    row = await session.get(ConfigSetting, key)
+    if row:
+        row.value = value
+        row.updated_at = datetime.now(timezone.utc)
+    else:
+        session.add(ConfigSetting(key=key, value=value))
+    await session.commit()
+
+
+async def delete_setting(session: AsyncSession, key: str) -> bool:
+    row = await session.get(ConfigSetting, key)
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.commit()
+    return True
+
+
+async def list_settings(session: AsyncSession) -> list[ConfigSetting]:
+    result = await session.execute(select(ConfigSetting).order_by(ConfigSetting.key))
+    return list(result.scalars().all())
 
 
 async def append_node_result(

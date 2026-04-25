@@ -17,6 +17,8 @@ from rich.table import Table
 from core.model_catalog import DEFAULT_MODEL
 
 app = typer.Typer(help="General-purpose research and analysis agent.")
+config_app = typer.Typer(help="Manage persistent configuration.")
+app.add_typer(config_app, name="config")
 
 
 @app.callback()
@@ -228,6 +230,71 @@ def download_voice():
         console.print(f"[green]✓[/green] Saved: {dest}")
 
     console.print("[bold green]Done.[/bold green]")
+
+
+def _run_db(coro):
+    import asyncio
+    from db.engine import init_db
+    from db import async_session
+    async def _inner():
+        await init_db()
+        async with async_session() as session:
+            return await coro(session)
+    return asyncio.run(_inner())
+
+
+@config_app.command("set")
+def config_set(
+    key: Annotated[str, typer.Argument(help="Config key (e.g. telegram.allowed_users)")],
+    value: Annotated[str, typer.Argument(help="Value to store")],
+) -> None:
+    """Set a config value."""
+    from db.ops import set_setting
+    _run_db(lambda s: set_setting(s, key, value))
+    rprint(f"[green]✓[/green] {key} = {value}")
+
+
+@config_app.command("get")
+def config_get(
+    key: Annotated[str, typer.Argument(help="Config key to retrieve")],
+) -> None:
+    """Get a config value."""
+    from db.ops import get_setting
+    value = _run_db(lambda s: get_setting(s, key))
+    if value is None:
+        rprint(f"[yellow]Not set:[/yellow] {key}")
+    else:
+        rprint(f"{key} = {value}")
+
+
+@config_app.command("list")
+def config_list() -> None:
+    """List all config settings."""
+    from db.ops import list_settings
+    rows = _run_db(lambda s: list_settings(s))
+    if not rows:
+        rprint("[yellow]No config settings found.[/yellow]")
+        return
+    table = Table(title="Config Settings", show_header=True, header_style="bold cyan")
+    table.add_column("Key", style="white")
+    table.add_column("Value", style="green")
+    table.add_column("Updated", style="dim")
+    for row in rows:
+        table.add_row(row.key, row.value, row.updated_at.strftime("%Y-%m-%d %H:%M"))
+    console.print(table)
+
+
+@config_app.command("delete")
+def config_delete(
+    key: Annotated[str, typer.Argument(help="Config key to delete")],
+) -> None:
+    """Delete a config setting."""
+    from db.ops import delete_setting
+    deleted = _run_db(lambda s: delete_setting(s, key))
+    if deleted:
+        rprint(f"[green]✓[/green] Deleted: {key}")
+    else:
+        rprint(f"[yellow]Not found:[/yellow] {key}")
 
 
 if __name__ == "__main__":
