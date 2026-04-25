@@ -26,6 +26,10 @@ async def get_or_create_conversation(
         result = await session.get(Conversation, conversation_id)
         if result:
             return result
+        conv = Conversation(id=conversation_id, model=model, title=title)
+        session.add(conv)
+        await session.commit()
+        return conv
     return await create_conversation(session, model, title)
 
 
