@@ -10,10 +10,9 @@ import time
 from telegram import Bot, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
-from core.agents import DEFAULT_MODEL
 from core.state import TaskState, _background_tasks, _tasks, stream_task_events
 from db import async_session
-from db.ops import add_message, get_or_create_conversation, get_setting
+from db.ops import add_message, get_default_model, get_or_create_conversation, get_setting
 from server.routes_chat import _run_agent_task
 
 logger = logging.getLogger(__name__)
@@ -29,6 +28,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id if update.effective_user else None
     async with async_session() as session:
         raw = await get_setting(session, "telegram.allowed_users")
+        model = await get_default_model(session)
     allowed = {int(x.strip()) for x in raw.split(",") if x.strip()} if raw else set()
     if user_id not in allowed:
         return
@@ -41,17 +41,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     placeholder_id = sent.message_id
 
     async with async_session() as session:
-        conv = await get_or_create_conversation(session, conv_id, DEFAULT_MODEL, text[:60])
+        conv = await get_or_create_conversation(session, conv_id, model, text[:60])
         await add_message(session, conv.id, "user", text)
         task_msg = await add_message(
-            session, conv.id, "assistant", "", model=DEFAULT_MODEL, status="running"
+            session, conv.id, "assistant", "", model=model, status="running"
         )
 
     task_id = task_msg.id
     task_state = TaskState()
     _tasks[task_id] = task_state
 
-    t = asyncio.create_task(_run_agent_task(task_id, text, DEFAULT_MODEL, conv_id))
+    t = asyncio.create_task(_run_agent_task(task_id, text, model, conv_id))
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 

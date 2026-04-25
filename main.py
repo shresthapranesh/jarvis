@@ -19,6 +19,8 @@ from core.model_catalog import DEFAULT_MODEL
 app = typer.Typer(help="General-purpose research and analysis agent.")
 config_app = typer.Typer(help="Manage persistent configuration.")
 app.add_typer(config_app, name="config")
+model_app = typer.Typer(help="Manage models.")
+app.add_typer(model_app, name="model")
 
 
 @app.callback()
@@ -58,6 +60,9 @@ def run(
 ):
     """Run the research agent on a query and display the report."""
     from core.agents import build_agent
+    from db.ops import get_default_model
+    if model == DEFAULT_MODEL:
+        model = _run_db(lambda s: get_default_model(s))
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
         format="%(message)s",
@@ -295,6 +300,37 @@ def config_delete(
         rprint(f"[green]✓[/green] Deleted: {key}")
     else:
         rprint(f"[yellow]Not found:[/yellow] {key}")
+
+
+@model_app.command("list")
+def model_list() -> None:
+    """List all available models."""
+    from core.model_catalog import AVAILABLE_MODELS
+    from db.ops import get_default_model
+    current_default = _run_db(lambda s: get_default_model(s))
+
+    table = Table(title="Available Models", show_header=True, header_style="bold cyan")
+    table.add_column("ID", style="white")
+    table.add_column("Label", style="green")
+    table.add_column("", style="yellow")
+    for m in AVAILABLE_MODELS:
+        marker = "◀ default" if m.id == current_default else ""
+        table.add_row(m.id, m.label, marker)
+    console.print(table)
+
+
+@model_app.command("set-default")
+def model_set_default(
+    model_id: Annotated[str, typer.Argument(help="Model ID (copy from 'model list')")],
+) -> None:
+    """Set the default model used when no model is specified."""
+    from core.model_catalog import is_valid_model
+    from db.ops import set_setting
+    if not is_valid_model(model_id):
+        rprint(f"[red]Unknown model:[/red] {model_id}\nRun 'model list' to see available IDs.")
+        raise typer.Exit(code=1)
+    _run_db(lambda s: set_setting(s, "default.model", model_id))
+    rprint(f"[green]✓[/green] Default model set to: {model_id}")
 
 
 if __name__ == "__main__":

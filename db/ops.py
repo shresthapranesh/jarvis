@@ -404,6 +404,12 @@ async def list_settings(session: AsyncSession) -> list[ConfigSetting]:
     return list(result.scalars().all())
 
 
+async def get_default_model(session: AsyncSession) -> str:
+    from core.model_catalog import DEFAULT_MODEL as _CATALOG_DEFAULT
+    value = await get_setting(session, "default.model")
+    return value if value else _CATALOG_DEFAULT
+
+
 async def append_node_result(
     session: AsyncSession,
     run_id: str,
