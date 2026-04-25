@@ -7,8 +7,7 @@ Multi-agent AI research platform. Users submit queries via web UI or CLI; specia
 
 ```
 jarvis/
-├── main.py               # CLI entrypoint (typer): run, serve
-├── server.py             # Thin shim — re-exports app from http_server.entrypoint
+├── main.py               # CLI entrypoint (typer): run, start, config *, model *
 ├── core/
 │   ├── agents.py         # build_agent(model) — LangGraph agent factory + subagents
 │   ├── model_catalog.py  # AVAILABLE_MODELS, DEFAULT_MODEL, is_valid_model()
@@ -20,16 +19,18 @@ jarvis/
 │   ├── document_extractor.py  # PDF/DOCX/XLSX text extraction
 │   └── logging_middleware.py
 ├── db/
-│   ├── models.py         # ORM: Conversation, Message, Step, Automation, AutomationRun, Workflow, WorkflowRun
+│   ├── models.py         # ORM: Conversation, Message, Step, Automation, AutomationRun, Workflow, WorkflowRun, ConfigSetting
 │   ├── ops.py            # Async CRUD functions
 │   └── engine.py         # DB init, _migrate(), async_session, get_session
-├── http_server/
-│   ├── entrypoint.py     # FastAPI app, lifespan, router wiring
+├── server/
+│   ├── entrypoint.py     # FastAPI app, lifespan, router wiring, Telegram bot lifecycle
+│   ├── telegram_bot.py   # Optional Telegram bot (enabled by TELEGRAM_BOT_TOKEN env var)
 │   ├── routes_chat.py    # /run, /stop, /resume, /stream/{task_id}, /conversations
 │   ├── routes_automations.py  # /automations CRUD + /stream/automation/{run_id}
 │   ├── routes_workflows.py    # /workflows CRUD + /stream/workflow/{run_id}
 │   ├── routes_live.py    # WebSocket / live endpoints
-│   └── routes_media.py   # TTS, transcription
+│   ├── routes_media.py   # TTS, transcription
+│   └── routes_memory.py  # Memory endpoints
 ├── workflow/
 │   ├── engine.py         # BFS workflow executor — execute_workflow()
 │   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode + _emit()
@@ -51,9 +52,23 @@ jarvis/
 
 **Backend:**
 ```bash
-uv run uvicorn server:app --reload   # start API server on :8000
-uv run python main.py run "<query>"  # CLI one-shot query
-uv add <package>                     # add dependency (updates pyproject.toml + uv.lock)
+uv run uvicorn server.entrypoint:app --reload   # start API server on :8000
+uv run python main.py run "<query>"             # CLI one-shot query
+uv add <package>                                # add dependency (updates pyproject.toml + uv.lock)
+```
+
+**Config CLI:**
+```bash
+uv run python main.py config set <key> <value>   # e.g. config set telegram.allowed_users "123456789"
+uv run python main.py config get <key>
+uv run python main.py config list
+uv run python main.py config delete <key>
+```
+
+**Model CLI:**
+```bash
+uv run python main.py model list                         # show all models with labels; marks current default
+uv run python main.py model set-default <model-id>      # persist default to DB
 ```
 
 **Frontend** (always use `pnpm`, not npm):
@@ -67,7 +82,7 @@ pnpm build     # build to ../static/dist/ (served by FastAPI in prod)
 
 ### Adding a new API endpoint
 1. Add async CRUD function(s) to `db/ops.py` if DB access needed
-2. Add endpoint to the relevant router in `http_server/routes_*.py` — return `JSONResponse`, use `Annotated[AsyncSession, Depends(get_session)]`
+2. Add endpoint to the relevant router in `server/routes_*.py` — return `JSONResponse`, use `Annotated[AsyncSession, Depends(get_session)]`
 3. Add proxy entry in `frontend/vite.config.ts` under `server.proxy`
 4. Add fetch function to `frontend/src/lib/api.ts`
 5. Add TypeScript types to `frontend/src/lib/types.ts`
@@ -138,7 +153,15 @@ Visual graph executor (`workflow/engine.py`):
 - All ForeignKey columns carry `index=True`; new ones must too
 
 ## Default Model
-`google_genai:gemma-4-31b-it` — requires `GOOGLE_API_KEY`. See `core/model_catalog.py` for full list. Ollama and AWS Bedrock models also available.
+Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`). Can be overridden at runtime via `uv run python main.py model set-default <id>` — stored in the `config_settings` DB table under key `default.model`. `get_default_model(session)` in `db/ops.py` returns the DB value or falls back to the catalog default. Ollama and AWS Bedrock models also available — see `core/model_catalog.py`.
+
+## Telegram Bot
+Optional — enabled by setting the `TELEGRAM_BOT_TOKEN` environment variable before starting the server. Implemented in `server/telegram_bot.py`:
+- Uses `python-telegram-bot` v22 (async, long-polling)
+- Allowlist: `uv run python main.py config set telegram.allowed_users "123456789,987654321"` — **rejects all users by default when empty**
+- Each Telegram chat gets its own LangGraph thread (`telegram_{chat_id}`) for persistent memory
+- Streams the response by editing a placeholder message every ~1 second
+- Bot token env var: `TELEGRAM_BOT_TOKEN`; user IDs can be obtained from @userinfobot on Telegram
 
 ## Environment
 - Python 3.13, managed with `uv`

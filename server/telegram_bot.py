@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 _EDIT_INTERVAL = 1.0
 _MAX_MSG_LEN = 4000
+_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+_LOADING_TEXT = "thinking..."
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -58,28 +61,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     asyncio.create_task(_stream_to_telegram(context.bot, chat_id, placeholder_id, task_state))
 
 
+async def _loading_animation(bot: Bot, chat_id: int, message_id: int) -> None:
+    from telegram.constants import ChatAction
+    frame = 0
+    while True:
+        spinner = _SPINNER[frame % len(_SPINNER)]
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=f"{spinner} {_LOADING_TEXT}",
+            )
+        except Exception:
+            pass
+        frame += 1
+        await asyncio.sleep(0.7)
+
+
 async def _stream_to_telegram(
     bot: Bot, chat_id: int, message_id: int, state: TaskState
 ) -> None:
+    loading_task = asyncio.create_task(_loading_animation(bot, chat_id, message_id))
     accumulated = ""
     last_edit = 0.0
 
-    async for event in stream_task_events(state):
-        if event["event"] == "token":
-            data = json.loads(event["data"])
-            if data.get("source") == "main":
-                accumulated += data.get("text", "")
-                now = time.monotonic()
-                if accumulated and now - last_edit >= _EDIT_INTERVAL:
-                    try:
-                        await bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=message_id,
-                            text=accumulated[:_MAX_MSG_LEN],
-                        )
-                        last_edit = now
-                    except Exception as exc:
-                        logger.debug("edit_message_text: %s", exc)
+    try:
+        async for event in stream_task_events(state):
+            if event["event"] == "token":
+                data = json.loads(event["data"])
+                if data.get("source") == "main":
+                    if not loading_task.done():
+                        loading_task.cancel()
+                    accumulated += data.get("text", "")
+                    now = time.monotonic()
+                    if accumulated and now - last_edit >= _EDIT_INTERVAL:
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                text=accumulated[:_MAX_MSG_LEN],
+                            )
+                            last_edit = now
+                        except Exception as exc:
+                            logger.debug("edit_message_text: %s", exc)
+    finally:
+        if not loading_task.done():
+            loading_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loading_task
 
     final = accumulated[:_MAX_MSG_LEN] if accumulated else "(no response)"
     try:
