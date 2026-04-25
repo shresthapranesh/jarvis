@@ -123,18 +123,11 @@ async def tts_endpoint(req: TTSRequest) -> Response:
 
 # ── Transcribe ───────────────────────────────────────────────────────────────
 
-@router.post("/transcribe")
-async def transcribe_endpoint(audio: UploadFile) -> JSONResponse:
-    data = await audio.read(_MAX_AUDIO_BYTES + 1)
-    if len(data) > _MAX_AUDIO_BYTES:
-        return JSONResponse(
-            {"error": f"audio exceeds {_MAX_AUDIO_BYTES // (1024 * 1024)} MiB limit"},
-            status_code=413,
-        )
-    suffix = pathlib.Path(audio.filename or "audio.webm").suffix or ".webm"
+async def transcribe_bytes(data: bytes, suffix: str = ".ogg") -> str:
+    """Transcribe raw audio bytes using the local Whisper model."""
     loop = asyncio.get_running_loop()
 
-    def run_transcription() -> str:
+    def _run() -> str:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
             f.write(data)
             fname = f.name
@@ -154,5 +147,17 @@ async def transcribe_endpoint(audio: UploadFile) -> JSONResponse:
             except OSError:
                 pass
 
-    text = await loop.run_in_executor(None, run_transcription)
+    return await loop.run_in_executor(None, _run)
+
+
+@router.post("/transcribe")
+async def transcribe_endpoint(audio: UploadFile) -> JSONResponse:
+    data = await audio.read(_MAX_AUDIO_BYTES + 1)
+    if len(data) > _MAX_AUDIO_BYTES:
+        return JSONResponse(
+            {"error": f"audio exceeds {_MAX_AUDIO_BYTES // (1024 * 1024)} MiB limit"},
+            status_code=413,
+        )
+    suffix = pathlib.Path(audio.filename or "audio.webm").suffix or ".webm"
+    text = await transcribe_bytes(data, suffix)
     return JSONResponse({"text": text})

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -11,6 +12,7 @@ import time
 from telegram import Bot, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
+from core.schemas import AttachmentIn
 from core.state import TaskState, _background_tasks, _tasks, stream_task_events
 from db import async_session
 from db.ops import add_message, get_default_model, get_or_create_conversation, get_setting
@@ -24,31 +26,93 @@ _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"
 _LOADING_TEXT = "thinking..."
 
 
+async def _check_and_get_model(user_id: int | None, chat_id: int) -> str | None:
+    """Return the model for this chat, or None if the user is not on the allowlist."""
+    async with async_session() as session:
+        raw = await get_setting(session, "telegram.allowed_users")
+        allowed = {int(x.strip()) for x in raw.split(",") if x.strip()} if raw else set()
+        if user_id not in allowed:
+            return None
+        return await get_default_model(session)
+
+
+async def _dispatch(
+    bot: Bot,
+    chat_id: int,
+    model: str,
+    user_content: str,
+    db_user_content: str,
+    placeholder_text: str,
+    attachments: list[AttachmentIn] | None = None,
+) -> None:
+    """Create DB records, start the agent task, and kick off streaming."""
+    conv_id = f"telegram_{chat_id}"
+    sent = await bot.send_message(chat_id=chat_id, text=placeholder_text)
+    placeholder_id = sent.message_id
+
+    async with async_session() as session:
+        conv = await get_or_create_conversation(session, conv_id, model, db_user_content[:60])
+        await add_message(session, conv.id, "user", db_user_content)
+        task_msg = await add_message(session, conv.id, "assistant", "", model=model, status="running")
+
+    task_id = task_msg.id
+    task_state = TaskState()
+    _tasks[task_id] = task_state
+
+    t = asyncio.create_task(_run_agent_task(task_id, user_content, model, conv_id, attachments=attachments))
+    _background_tasks[task_id] = t
+    t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
+
+    asyncio.create_task(_stream_to_telegram(bot, chat_id, placeholder_id, task_state))
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
 
     user_id = update.effective_user.id if update.effective_user else None
-    async with async_session() as session:
-        raw = await get_setting(session, "telegram.allowed_users")
-        model = await get_default_model(session)
-    allowed = {int(x.strip()) for x in raw.split(",") if x.strip()} if raw else set()
-    if user_id not in allowed:
+    chat_id = update.message.chat_id
+    model = await _check_and_get_model(user_id, chat_id)
+    if model is None:
         return
 
-    chat_id = update.message.chat_id
     text = update.message.text
-    conv_id = f"telegram_{chat_id}"
+    await _dispatch(context.bot, chat_id, model, text, text, "...")
 
-    sent = await context.bot.send_message(chat_id=chat_id, text="...")
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from server.routes_media import transcribe_bytes
+
+    if not update.message:
+        return
+    voice = update.message.voice or update.message.audio
+    if not voice:
+        return
+
+    user_id = update.effective_user.id if update.effective_user else None
+    chat_id = update.message.chat_id
+    model = await _check_and_get_model(user_id, chat_id)
+    if model is None:
+        return
+
+    sent = await context.bot.send_message(chat_id=chat_id, text="⏳ Transcribing...")
     placeholder_id = sent.message_id
 
+    tg_file = await voice.get_file()
+    buf = await tg_file.download_as_bytearray()
+    suffix = ".ogg" if update.message.voice else ".mp3"
+    text = await transcribe_bytes(bytes(buf), suffix=suffix)
+    if not text:
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=placeholder_id, text="(could not transcribe audio)"
+        )
+        return
+
+    conv_id = f"telegram_{chat_id}"
     async with async_session() as session:
         conv = await get_or_create_conversation(session, conv_id, model, text[:60])
-        await add_message(session, conv.id, "user", text)
-        task_msg = await add_message(
-            session, conv.id, "assistant", "", model=model, status="running"
-        )
+        await add_message(session, conv.id, "user", f"[Voice] {text}")
+        task_msg = await add_message(session, conv.id, "assistant", "", model=model, status="running")
 
     task_id = task_msg.id
     task_state = TaskState()
@@ -59,6 +123,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
     asyncio.create_task(_stream_to_telegram(context.bot, chat_id, placeholder_id, task_state))
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.photo:
+        return
+
+    user_id = update.effective_user.id if update.effective_user else None
+    chat_id = update.message.chat_id
+    model = await _check_and_get_model(user_id, chat_id)
+    if model is None:
+        return
+
+    photo = update.message.photo[-1]
+    tg_file = await photo.get_file()
+    buf = await tg_file.download_as_bytearray()
+    b64 = base64.b64encode(bytes(buf)).decode()
+    attachment = AttachmentIn(
+        type="image", name="photo.jpg", mime_type="image/jpeg",
+        data=b64, size=len(buf),
+    )
+    query = update.message.caption or "What's in this image?"
+
+    await _dispatch(
+        context.bot, chat_id, model,
+        user_content=query,
+        db_user_content=f"[Photo] {query}",
+        placeholder_text="...",
+        attachments=[attachment],
+    )
 
 
 async def _loading_animation(bot: Bot, chat_id: int, message_id: int) -> None:
@@ -120,5 +213,7 @@ async def _stream_to_telegram(
 
 def build_application(token: str) -> Application:
     app = Application.builder().token(token).build()
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app
