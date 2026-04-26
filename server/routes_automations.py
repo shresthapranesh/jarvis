@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import tempfile
+
+logger = logging.getLogger(__name__)
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
@@ -222,11 +225,13 @@ async def _execute_automation_bg(
 
         state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
 
-    except Exception as exc:
+    except BaseException as exc:
         err_text = str(exc)
         async with async_session() as session:
             await finish_automation_run(session, run_id, "error", None, err_text)
         state.events.append({"event": "error", "data": json.dumps({"error": err_text})})
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
 
     finally:
         state.done = True
@@ -348,9 +353,14 @@ async def trigger_automation(
     run = await create_automation_run(session, automation_id, "manual")
     _tasks[run.id] = TaskState()
 
+    def _task_done(t: asyncio.Task, run_id: str) -> None:
+        _background_tasks.pop(run_id, None)
+        if not t.cancelled() and (exc := t.exception()):
+            logger.error("automation run %s raised unhandled %s", run_id, type(exc).__name__, exc_info=exc)
+
     t = asyncio.create_task(_execute_automation_bg(automation_id, run_id=run.id, triggered_by="manual"))
     _background_tasks[run.id] = t
-    t.add_done_callback(lambda _t: _background_tasks.pop(run.id, None))
+    t.add_done_callback(lambda _t: _task_done(_t, run.id))
 
     return JSONResponse({"run_id": run.id})
 

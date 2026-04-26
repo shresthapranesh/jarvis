@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
+
+logger = logging.getLogger(__name__)
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -92,7 +95,7 @@ async def _execute_workflow_bg(
                 error=None,
             )
 
-    except Exception as exc:
+    except BaseException as exc:
         err = str(exc)
         async with async_session() as session:
             await finish_workflow_run(session, run_id, "error", None, None, err)
@@ -100,6 +103,8 @@ async def _execute_workflow_bg(
             "event": "workflow_error",
             "data": json.dumps({"error": err, "run_id": run_id}),
         })
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
 
     finally:
         state.done = True
@@ -189,11 +194,16 @@ async def trigger_workflow_run(
     # Register TaskState BEFORE returning — prevents SSE client race condition
     _tasks[run.id] = TaskState()
 
+    def _task_done(t: asyncio.Task, run_id: str) -> None:
+        _background_tasks.pop(run_id, None)
+        if not t.cancelled() and (exc := t.exception()):
+            logger.error("workflow run %s raised unhandled %s", run_id, type(exc).__name__, exc_info=exc)
+
     t = asyncio.create_task(
         _execute_workflow_bg(workflow_id, run.id, request.inputs)
     )
     _background_tasks[run.id] = t
-    t.add_done_callback(lambda _t: _background_tasks.pop(run.id, None))
+    t.add_done_callback(lambda _t: _task_done(_t, run.id))
 
     return JSONResponse({"run_id": run.id}, status_code=202)
 

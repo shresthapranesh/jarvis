@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -110,7 +113,7 @@ async def _run_agent_task(
             "conversation_id": conv_id,
         })})
 
-    except Exception as exc:
+    except BaseException as exc:
         coalescer.flush_all()
         state.events.append({"event": "error", "data": json.dumps({"error": str(exc)})})
         try:
@@ -118,6 +121,8 @@ async def _run_agent_task(
                 await update_message_status(session, task_id, "error")
         except Exception:
             pass
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
 
     finally:
         if state.resume_future and not state.resume_future.done():
@@ -152,11 +157,16 @@ async def run_agent(
 
     _tasks[task_msg.id] = TaskState()
 
+    def _task_done(t: asyncio.Task, task_id: str) -> None:
+        _background_tasks.pop(task_id, None)
+        if not t.cancelled() and (exc := t.exception()):
+            logger.error("task %s raised unhandled %s", task_id, type(exc).__name__, exc_info=exc)
+
     t = asyncio.create_task(_run_agent_task(
         task_msg.id, request.query, request.model, conv.id, request.attachments
     ))
     _background_tasks[task_msg.id] = t
-    t.add_done_callback(lambda _t: _background_tasks.pop(task_msg.id, None))
+    t.add_done_callback(lambda _t: _task_done(_t, task_msg.id))
 
     return JSONResponse({"task_id": task_msg.id, "conversation_id": conv.id})
 

@@ -32,7 +32,15 @@ class ModelSpec:
 
         if self.provider == "bedrock":
             from langchain_aws import ChatBedrock
-            return ChatBedrock(model=model_name)
+            return ChatBedrock(
+                model=model_name,
+                model_kwargs={
+                    "thinking": {
+                        "type": "enabled",
+                        "budget_tokens": 5000,
+                    },
+                },
+            )
 
         raise ValueError(f"Unknown provider '{self.provider}' for model '{self.id}'")
 
