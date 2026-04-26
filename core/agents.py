@@ -10,6 +10,7 @@ from deepagents.middleware.subagents import CompiledSubAgent, SubAgent
 from deepagents.middleware.summarization import create_summarization_tool_middleware
 
 from .logging_middleware import log_tool_calls
+from .strip_thinking_middleware import StripThinkingMiddleware
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
@@ -200,7 +201,7 @@ def _build_cached(model: str, checkpointer, store):
         backend=backend,
         memory=[get_config().memory_file],
         checkpointer=checkpointer,
-        middleware=[create_summarization_tool_middleware(llm, backend), log_tool_calls],
+        middleware=[StripThinkingMiddleware(), create_summarization_tool_middleware(llm, backend), log_tool_calls],
     )
 
 
