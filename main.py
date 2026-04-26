@@ -40,20 +40,18 @@ REPORTS_DIR = pathlib.Path("reports")
 
 
 def _setup_logging(debug: bool, work_dir: Path) -> None:
+    root = logging.getLogger()
+    root.handlers.clear()
     if debug:
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="%(message)s",
-            handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
-        )
+        root.setLevel(logging.DEBUG)
+        root.addHandler(RichHandler(console=console, rich_tracebacks=True, show_path=False))
     else:
         from logging.handlers import RotatingFileHandler
         work_dir.mkdir(parents=True, exist_ok=True)
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
-            handlers=[RotatingFileHandler(work_dir / "jarvis.log", maxBytes=10 * 1024 * 1024, backupCount=3)],
-        )
+        handler = RotatingFileHandler(work_dir / "jarvis.log", maxBytes=10 * 1024 * 1024, backupCount=3)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(name)s %(message)s"))
+        root.setLevel(logging.INFO)
+        root.addHandler(handler)
 
 
 def _resolve_report_path(filename: str) -> pathlib.Path:
@@ -178,7 +176,7 @@ def start(
         )
     )
 
-    uvicorn.run(app, host=host, port=port, reload=reload)
+    uvicorn.run(app, host=host, port=port, reload=reload, log_config=None)
 
 
 @app.command("download-voice")
