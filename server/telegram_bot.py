@@ -7,6 +7,7 @@ import base64
 import contextlib
 import json
 import logging
+import os
 import time
 
 from telegram import Bot, Update
@@ -22,8 +23,6 @@ logger = logging.getLogger(__name__)
 
 _EDIT_INTERVAL = 1.0
 _MAX_MSG_LEN = 4000
-_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-_LOADING_TEXT = "thinking..."
 
 
 async def _check_and_get_model(user_id: int | None, chat_id: int) -> str | None:
@@ -154,28 +153,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def _loading_animation(bot: Bot, chat_id: int, message_id: int) -> None:
+async def _loading_animation(bot: Bot, chat_id: int) -> None:
     from telegram.constants import ChatAction
-    frame = 0
     while True:
-        spinner = _SPINNER[frame % len(_SPINNER)]
-        try:
+        with contextlib.suppress(Exception):
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=f"{spinner} {_LOADING_TEXT}",
-            )
-        except Exception:
-            pass
-        frame += 1
-        await asyncio.sleep(0.7)
+        await asyncio.sleep(4.0)
 
 
 async def _stream_to_telegram(
     bot: Bot, chat_id: int, message_id: int, state: TaskState
 ) -> None:
-    loading_task = asyncio.create_task(_loading_animation(bot, chat_id, message_id))
+    loading_task = asyncio.create_task(_loading_animation(bot, chat_id))
     accumulated = ""
     last_edit = 0.0
 
@@ -212,7 +201,15 @@ async def _stream_to_telegram(
 
 
 def build_application(token: str) -> Application:
-    app = Application.builder().token(token).build()
+    builder = Application.builder().token(token)
+    proxy = (
+        os.environ.get("TELEGRAM_PROXY_URL")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("ALL_PROXY")
+    )
+    if proxy:
+        builder = builder.proxy(proxy).get_updates_proxy(proxy)
+    app = builder.build()
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
