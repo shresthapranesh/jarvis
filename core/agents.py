@@ -66,6 +66,7 @@ subagents: list[SubAgent | CompiledSubAgent] = [
             "parent agent."
         ),
         "tools": [smart_browser],
+        "middleware": [log_tool_calls],
     },
     {
         "name": "researcher",
@@ -83,6 +84,7 @@ subagents: list[SubAgent | CompiledSubAgent] = [
             "Return a structured summary with key facts and source URLs."
         ),
         "tools": [get_current_datetime, web_search, fetch_page, playwright_browse, extract_links, read_file],
+        "middleware": [log_tool_calls],
     },
     {
         "name": "coder",
@@ -98,6 +100,7 @@ subagents: list[SubAgent | CompiledSubAgent] = [
             "Always show the code you ran and its output in your response."
         ),
         "tools": [run_python, read_file, write_file, list_files],
+        "middleware": [log_tool_calls],
     },
     {
         "name": "financial_analyst",
@@ -113,6 +116,7 @@ subagents: list[SubAgent | CompiledSubAgent] = [
             "for company-specific news. Return a structured summary of the financials."
         ),
         "tools": [get_stock_data, get_historical_prices, get_earnings, compare_stocks, get_ticker_news],
+        "middleware": [log_tool_calls],
     },
     {
         "name": "writer",
@@ -127,6 +131,7 @@ subagents: list[SubAgent | CompiledSubAgent] = [
             "Use list_files to check what already exists, then save with write_file to outputs/<name>.md."
         ),
         "tools": [get_current_datetime, write_file, read_file, list_files],
+        "middleware": [log_tool_calls],
     },
 ]
 
