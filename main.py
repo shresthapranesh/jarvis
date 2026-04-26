@@ -39,6 +39,23 @@ console = Console()
 REPORTS_DIR = pathlib.Path("reports")
 
 
+def _setup_logging(debug: bool, work_dir: Path) -> None:
+    if debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(message)s",
+            handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
+        )
+    else:
+        from logging.handlers import RotatingFileHandler
+        work_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
+            handlers=[RotatingFileHandler(work_dir / "jarvis.log", maxBytes=10 * 1024 * 1024, backupCount=3)],
+        )
+
+
 def _resolve_report_path(filename: str) -> pathlib.Path:
     """Resolve a report filename to a Path, handling missing extension or directory prefix."""
     p = pathlib.Path(filename)
@@ -55,19 +72,16 @@ def _resolve_report_path(filename: str) -> pathlib.Path:
 def run(
     query: Annotated[str, typer.Argument(help="The research question or topic to investigate.")],
     model: Annotated[str, typer.Option(help="Model identifier to use.")] = DEFAULT_MODEL,
-    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Show agent tool call logs.")] = False,
+    debug: Annotated[bool, typer.Option("--debug", help="Log to console at DEBUG level (default: write to ~/.jarvis/jarvis.log).")] = False,
     no_save: Annotated[bool, typer.Option("--no-save", help="Do not save the report to disk.")] = False,
 ):
     """Run the research agent on a query and display the report."""
     from core.agents import build_agent
+    from core.config import get_config
     from db.ops import get_default_model
     if model == DEFAULT_MODEL:
         model = _run_db(lambda s: get_default_model(s))
-    logging.basicConfig(
-        level=logging.INFO if verbose else logging.WARNING,
-        format="%(message)s",
-        handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
-    )
+    _setup_logging(debug, get_config().work_dir)
 
     full_query = query
     if no_save:
@@ -140,18 +154,15 @@ def view(
 def start(
     host: str = typer.Option("127.0.0.1", help="Bind address."),
     port: int = typer.Option(8000, help="TCP port."),
-    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable INFO-level logging.")] = False,
+    debug: Annotated[bool, typer.Option("--debug", help="Log to console at DEBUG level (default: write to ~/.jarvis/jarvis.log).")] = False,
     reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
 ):
     """Start the web server and stream agent results via SSE."""
     import uvicorn
+    from core.config import get_config
     from server.entrypoint import app
 
-    logging.basicConfig(
-        level=logging.INFO if verbose else logging.WARNING,
-        format="%(message)s",
-        handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
-    )
+    _setup_logging(debug, get_config().work_dir)
 
     url = f"http://{host}:{port}"
     console.print(
