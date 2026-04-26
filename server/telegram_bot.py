@@ -41,13 +41,10 @@ async def _dispatch(
     model: str,
     user_content: str,
     db_user_content: str,
-    placeholder_text: str,
     attachments: list[AttachmentIn] | None = None,
 ) -> None:
     """Create DB records, start the agent task, and kick off streaming."""
     conv_id = f"telegram_{chat_id}"
-    sent = await bot.send_message(chat_id=chat_id, text=placeholder_text)
-    placeholder_id = sent.message_id
 
     async with async_session() as session:
         conv = await get_or_create_conversation(session, conv_id, model, db_user_content[:60])
@@ -62,7 +59,7 @@ async def _dispatch(
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
-    asyncio.create_task(_stream_to_telegram(bot, chat_id, placeholder_id, task_state))
+    asyncio.create_task(_stream_to_telegram(bot, chat_id, None, task_state))
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -76,7 +73,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     text = update.message.text
-    await _dispatch(context.bot, chat_id, model, text, text, "...")
+    await _dispatch(context.bot, chat_id, model, text, text)
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -148,7 +145,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.bot, chat_id, model,
         user_content=query,
         db_user_content=f"[Photo] {query}",
-        placeholder_text="...",
         attachments=[attachment],
     )
 
@@ -162,7 +158,7 @@ async def _loading_animation(bot: Bot, chat_id: int) -> None:
 
 
 async def _stream_to_telegram(
-    bot: Bot, chat_id: int, message_id: int, state: TaskState
+    bot: Bot, chat_id: int, message_id: int | None, state: TaskState
 ) -> None:
     loading_task = asyncio.create_task(_loading_animation(bot, chat_id))
     accumulated = ""
@@ -179,11 +175,15 @@ async def _stream_to_telegram(
                     now = time.monotonic()
                     if accumulated and now - last_edit >= _EDIT_INTERVAL:
                         try:
-                            await bot.edit_message_text(
-                                chat_id=chat_id,
-                                message_id=message_id,
-                                text=accumulated[:_MAX_MSG_LEN],
-                            )
+                            if message_id is None:
+                                sent = await bot.send_message(chat_id=chat_id, text=accumulated[:_MAX_MSG_LEN])
+                                message_id = sent.message_id
+                            else:
+                                await bot.edit_message_text(
+                                    chat_id=chat_id,
+                                    message_id=message_id,
+                                    text=accumulated[:_MAX_MSG_LEN],
+                                )
                             last_edit = now
                         except Exception as exc:
                             logger.debug("edit_message_text: %s", exc)
@@ -195,7 +195,10 @@ async def _stream_to_telegram(
 
     final = accumulated[:_MAX_MSG_LEN] if accumulated else "(no response)"
     try:
-        await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final)
+        if message_id is None:
+            await bot.send_message(chat_id=chat_id, text=final)
+        else:
+            await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=final)
     except Exception as exc:
         logger.debug("final edit_message_text: %s", exc)
 
