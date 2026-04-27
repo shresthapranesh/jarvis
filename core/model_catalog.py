@@ -21,14 +21,11 @@ class ModelSpec:
 
         if self.provider == "ollama":
             from langchain_ollama import ChatOllama
-            return ChatOllama(model=model_name, reasoning=True)
+            return ChatOllama(model=model_name)
 
         if self.provider == "google_genai":
             from langchain_google_genai import ChatGoogleGenerativeAI
-            return ChatGoogleGenerativeAI(
-                model=model_name,
-                thinking={"thinking_budget": 5000},
-            )
+            return ChatGoogleGenerativeAI(model=model_name)
 
         if self.provider == "bedrock":
             from langchain_aws import ChatBedrock
