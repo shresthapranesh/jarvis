@@ -174,6 +174,11 @@ class TokenCoalescer:
         self._thinking_chunks: dict[str, list[str]] = {}
         self._thinking_lengths: dict[str, int] = {}
         self._thinking_first_enqueued: dict[str, float] = {}
+        # Staged tokens from the main-agent model_request node. Held until we know
+        # whether the turn ends with tool_calls (intermediate → discard) or a final
+        # answer (no tool_calls → commit to coalescer + accumulated).
+        self._staged_text: list[tuple[str, str]] = []   # (text, source)
+        self._staged_think: list[tuple[str, str]] = []  # (text, source)
 
     def add_token(self, text: str, source: str) -> None:
         if not text:
@@ -185,6 +190,30 @@ class TokenCoalescer:
         if not text:
             return
         self._add_to_bucket(text, source, self._thinking_chunks, self._thinking_lengths, self._thinking_first_enqueued, self._flush_thinking)
+
+    def stage_token(self, text: str, source: str) -> None:
+        """Hold a main-agent text token until commit_staged() or discard_staged()."""
+        if text:
+            self._staged_text.append((text, source))
+
+    def stage_thinking(self, text: str, source: str) -> None:
+        if text:
+            self._staged_think.append((text, source))
+
+    def commit_staged(self, accumulated: list[str]) -> None:
+        """Flush staged tokens to UI — model_request ended with no tool_calls (final answer)."""
+        for text, source in self._staged_text:
+            accumulated.append(text)
+            self.add_token(text, source)
+        self._staged_text.clear()
+        for text, source in self._staged_think:
+            self.add_thinking(text, source)
+        self._staged_think.clear()
+
+    def discard_staged(self) -> None:
+        """Drop staged tokens — model_request ended with tool_calls (intermediate step)."""
+        self._staged_text.clear()
+        self._staged_think.clear()
 
     def flush_all(self) -> None:
         for source in list(self._chunks.keys()):
@@ -274,8 +303,11 @@ async def _process_chunk(
         if isinstance(content, str):
             if content:
                 if not ns:
-                    accumulated.append(content)
-                coalescer.add_token(content, source)
+                    # Main agent: stage tokens — only released when model_request
+                    # completes with no tool_calls (final answer).
+                    coalescer.stage_token(content, source)
+                else:
+                    coalescer.add_token(content, source)
         elif isinstance(content, list):
             # Reasoning models (Ollama reasoning=True, Gemini thinking, Bedrock extended
             # thinking) return content as a list of typed blocks. Extract both thinking
@@ -287,13 +319,17 @@ async def _process_chunk(
                 if btype == "thinking":
                     thinking_text = block.get("thinking", "")
                     if thinking_text:
-                        coalescer.add_thinking(thinking_text, source)
+                        if not ns:
+                            coalescer.stage_thinking(thinking_text, source)
+                        else:
+                            coalescer.add_thinking(thinking_text, source)
                 elif btype == "text":
                     text = block.get("text", "")
                     if text:
                         if not ns:
-                            accumulated.append(text)
-                        coalescer.add_token(text, source)
+                            coalescer.stage_token(text, source)
+                        else:
+                            coalescer.add_token(text, source)
         return False
 
     if mode == "custom":
@@ -338,6 +374,18 @@ async def _process_chunk(
             return True
 
         if isinstance(data, dict):
+            # Resolve staged main-agent tokens before emitting any step events.
+            # When model_request ends with tool_calls → intermediate step, discard.
+            # When it ends with no tool_calls → final answer, commit to UI.
+            for node_name, node_data in data.items():
+                if node_name == "model_request" and isinstance(node_data, dict) and not ns:
+                    msgs = node_data.get("messages", [])
+                    has_tool_calls = any(bool(getattr(m, "tool_calls", None)) for m in msgs)
+                    if has_tool_calls:
+                        coalescer.discard_staged()
+                    else:
+                        coalescer.commit_staged(accumulated)
+
             step_records: list[tuple[str, str, str]] = []
             for node_name, node_data in data.items():
                 if not node_name or node_name.startswith("__"):
