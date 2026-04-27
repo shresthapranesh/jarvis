@@ -22,10 +22,8 @@ async def live_ws(websocket: WebSocket) -> None:
         await websocket.close(code=1008, reason=f"unknown model {model!r}")
         return
 
-    # One thread_id per socket lets the checkpointer chain turns together,
-    # so deepagents' SummarizationMiddleware can evict+offload older messages
-    # once instead of re-running summarization against a full-history replay
-    # on every turn.
+    # One thread_id per socket lets the checkpointer chain turns together
+    # so the pre_model_hook summarization persists its result across turns.
     thread_id = f"live-{uuid4()}"
     config = {"configurable": {"thread_id": thread_id}}
 

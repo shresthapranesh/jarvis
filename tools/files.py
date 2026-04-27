@@ -1,21 +1,63 @@
-"""File management tools: read, write, and list files on disk."""
+"""File management tools: read, write, and list files on disk.
+
+Paths under memory/ are transparently routed to the AsyncSqliteStore so
+agent memory persists in the database rather than as loose files on disk.
+"""
+
+from __future__ import annotations
 
 import asyncio
 import pathlib
+from typing import Annotated
+
+from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedStore
+from langgraph.store.base import BaseStore
+
+_MEMORY_PREFIX = "memory/"
 
 
-async def write_file(filepath: str, content: str) -> str:
-    """Write text content to a file, creating parent directories as needed."""
+@tool
+async def write_file(
+    filepath: str,
+    content: str,
+    store: Annotated[BaseStore, InjectedStore()],
+) -> str:
+    """Write text content to a file, creating parent directories as needed.
+
+    Paths starting with memory/ are saved to the persistent memory store.
+    All other paths are written to the filesystem.
+    """
+    if filepath.startswith(_MEMORY_PREFIX):
+        key = filepath[len(_MEMORY_PREFIX):]
+        await store.aput(("memory",), key, {"content": content})
+        return f"Saved to memory store: {key}"
+
     def _sync() -> str:
         path = pathlib.Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        return f"Report saved to {path}"
+        return f"Written to {path}"
     return await asyncio.to_thread(_sync)
 
 
-async def read_file(filepath: str) -> str:
-    """Read text content from a file."""
+@tool
+async def read_file(
+    filepath: str,
+    store: Annotated[BaseStore, InjectedStore()],
+) -> str:
+    """Read text content from a file.
+
+    Paths starting with memory/ are read from the persistent memory store.
+    All other paths are read from the filesystem.
+    """
+    if filepath.startswith(_MEMORY_PREFIX):
+        key = filepath[len(_MEMORY_PREFIX):]
+        item = await store.aget(("memory",), key)
+        if item is None:
+            return f"Not found in memory store: {key}"
+        return item.value.get("content", "")
+
     def _sync() -> str:
         path = pathlib.Path(filepath)
         if not path.exists():
@@ -24,6 +66,7 @@ async def read_file(filepath: str) -> str:
     return await asyncio.to_thread(_sync)
 
 
+@tool
 async def list_files(directory: str) -> str:
     """List files in a directory."""
     def _sync() -> str:

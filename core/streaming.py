@@ -297,13 +297,24 @@ async def _process_chunk(
         return False
 
     if mode == "custom":
-        if isinstance(data, dict) and data.get("type") == "browser_step":
+        if not isinstance(data, dict):
+            return False
+        event_type = data.get("type")
+        if event_type == "browser_step":
             coalescer.flush_all()
             state.events.append({"event": "browser_step", "data": json.dumps({
                 "thought": data.get("thought"),
                 "actions": data.get("actions"),
                 "source": source,
             })})
+            _notify(state)
+        elif event_type == "worker_done":
+            coalescer.flush_all()
+            idx = data.get("idx", "?")
+            task = data.get("task", "")
+            result = data.get("result", "")
+            text = f"\n**[Worker {idx}]** {task}\n{result}\n"
+            state.events.append({"event": "token", "data": json.dumps({"text": text, "source": "worker"})})
             _notify(state)
         return False
 
