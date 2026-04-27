@@ -49,7 +49,7 @@ def _run_scheduled_automation(automation_id: str) -> None:
     AsyncSqliteSaver stay on a single loop.
     """
     # Lazy import to break the scheduler <-> routes_automations cycle.
-    from http_server.routes_automations import _execute_automation_bg  # noqa: PLC0415
+    from server.routes_automations import _execute_automation_bg  # noqa: PLC0415
 
     if state._main_loop is None:
         return

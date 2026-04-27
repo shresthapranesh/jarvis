@@ -94,7 +94,7 @@ async def consolidate_memory(
     ])
     new_memory = response.content
     if isinstance(new_memory, list):
-        new_memory = next((b["text"] for b in new_memory if b.get("type") == "text"), "")
+        new_memory = next((b["text"] for b in new_memory if isinstance(b, dict) and b.get("type") == "text"), "")  # type: ignore[index]
     new_memory = new_memory.strip()[:32_000]
 
     # 6. Write updated memory back to store
