@@ -19,6 +19,10 @@ async def execute(code: str) -> str:
     This is the primary tool for all computational tasks. You have full access to
     everything installed in the Python environment.
 
+    Stateless: each call runs in a FRESH subprocess. Variables, imports, and
+    in-memory data do NOT persist between calls — batch related work into one
+    call rather than splitting it across many.
+
     Common patterns:
       Web requests:      import httpx; r = httpx.get("https://..."); print(r.text)
       Async web:         import asyncio, httpx

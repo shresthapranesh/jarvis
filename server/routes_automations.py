@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from core.agents import DEFAULT_MODEL, build_agent, is_valid_model
+from core.log_callback import AgentLogger
 from db import async_session, get_session
 from db.models import Automation, AutomationRun
 from db.ops import (
@@ -97,7 +98,7 @@ async def _execute_prompt_type(
 
     async for raw_chunk in agent.astream(
         {"messages": [{"role": "user", "content": auto.prompt_text or ""}]},
-        config={"recursion_limit": 100},
+        config={"recursion_limit": 100, "callbacks": [AgentLogger()]},
         stream_mode=STREAM_MODES,
         subgraphs=True,
     ):

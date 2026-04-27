@@ -15,9 +15,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from core.agents import build_agent, is_valid_model
+from core.log_callback import AgentLogger
 from core.schemas import ConversationUpdate, ResumePayload, RunRequest, _invalid_model_response
 from core.state import TaskState, _background_tasks, _notify, _tasks, get_async_checkpointer, get_store, stream_task_events
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _build_message_content, _finalize_message, _process_chunk
@@ -51,7 +53,11 @@ async def _run_agent_task(
     content = await _build_message_content(query, attachments, model)
 
     agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
-    config = {"configurable": {"thread_id": conv_id}, "recursion_limit": 100}
+    config = {
+        "configurable": {"thread_id": conv_id},
+        "recursion_limit": 100,
+        "callbacks": [AgentLogger()],
+    }
     stream_input: Any = {"messages": [{"role": "user", "content": content}]}
 
     try:
@@ -109,6 +115,15 @@ async def _run_agent_task(
         final_message = "".join(accumulated)
         await _finalize_message(task_id, final_message, "stopped")
         state.events.append({"event": "stopped", "data": json.dumps({
+            "message": final_message,
+            "conversation_id": conv_id,
+        })})
+
+    except GraphRecursionError:
+        coalescer.flush_all()
+        final_message = "".join(accumulated) or "(agent reached iteration limit)"
+        await _finalize_message(task_id, final_message, "done")
+        state.events.append({"event": "done", "data": json.dumps({
             "message": final_message,
             "conversation_id": conv_id,
         })})

@@ -4,6 +4,7 @@ import pathlib
 import threading
 from pathlib import Path
 from typing import Annotated, Optional
+from uuid import uuid4
 
 import typer
 from rich import print as rprint
@@ -21,6 +22,8 @@ config_app = typer.Typer(help="Manage persistent configuration.")
 app.add_typer(config_app, name="config")
 model_app = typer.Typer(help="Manage models.")
 app.add_typer(model_app, name="model")
+memory_app = typer.Typer(help="Manage agent memory (AGENTS.md in the LangGraph store).")
+app.add_typer(memory_app, name="memory")
 
 
 @app.callback()
@@ -40,18 +43,8 @@ REPORTS_DIR = pathlib.Path("reports")
 
 
 def _setup_logging(debug: bool, work_dir: Path) -> None:
-    root = logging.getLogger()
-    root.handlers.clear()
-    if debug:
-        root.setLevel(logging.DEBUG)
-        root.addHandler(RichHandler(console=console, rich_tracebacks=True, show_path=False))
-    else:
-        from logging.handlers import RotatingFileHandler
-        work_dir.mkdir(parents=True, exist_ok=True)
-        handler = RotatingFileHandler(work_dir / "jarvis.log", maxBytes=10 * 1024 * 1024, backupCount=3)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(name)s %(message)s"))
-        root.setLevel(logging.INFO)
-        root.addHandler(handler)
+    from core.log_setup import setup_logging
+    setup_logging(work_dir, level=logging.DEBUG if debug else logging.INFO, console=debug)
 
 
 def _resolve_report_path(filename: str) -> pathlib.Path:
@@ -85,21 +78,32 @@ def run(
     if no_save:
         full_query += " Do not save the report to disk."
 
-    agent = build_agent(model)
+    from langgraph.checkpoint.memory import MemorySaver
+
+    agent = build_agent(model, checkpointer=MemorySaver())
     result: dict = {}
     error: list[Exception] = []
+    cli_thread_id = f"cli-{uuid4()}"
 
-    def _run():
+    from core.log_callback import AgentLogger
+
+    async def _run() -> None:
         try:
-            result.update(agent.invoke({"messages": [{"role": "user", "content": full_query}]}, config={"recursion_limit": 100}))
+            result.update(await agent.ainvoke(
+                {"messages": [{"role": "user", "content": full_query}]},
+                config={
+                    "configurable": {"thread_id": cli_thread_id},
+                    "recursion_limit": 100,
+                    "callbacks": [AgentLogger()],
+                },
+            ))
         except Exception as exc:
             error.append(exc)
 
     with Progress(SpinnerColumn(), TextColumn("[bold blue]{task.description}"), console=console) as progress:
         progress.add_task("Running agents...", start=True, total=None)
-        t = threading.Thread(target=_run)
-        t.start()
-        t.join()
+        import asyncio
+        asyncio.run(_run())
 
     if error:
         rprint(f"[bold red]Error:[/bold red] {error[0]}")
@@ -340,6 +344,112 @@ def model_set_default(
         raise typer.Exit(code=1)
     _run_db(lambda s: set_setting(s, "default.model", model_id))
     rprint(f"[green]✓[/green] Default model set to: {model_id}")
+
+
+# ── memory subcommands ──────────────────────────────────────────────────────
+#
+# AGENTS.md is stored in the LangGraph AsyncSqliteStore, which lives in the
+# checkpoints DB (NOT database.db). Path defaults to ~/.jarvis/checkpoints.db
+# but is overridable via CHECKPOINTS_DB or --work-dir. The store row uses
+# prefix='memory', key='AGENTS.md', and a JSON value with a "content" field.
+
+_MEMORY_PREFIX = "memory"
+_MEMORY_KEY = "AGENTS.md"
+
+
+def _memory_db_path() -> Path:
+    from core.config import get_config
+    return Path(get_config().checkpoints_db)
+
+
+def _memory_connect():
+    import sqlite3
+    db_path = _memory_db_path()
+    if not db_path.exists():
+        rprint(f"[red]checkpoints DB not found:[/red] {db_path}\nStart the server once to initialize it.")
+        raise typer.Exit(code=1)
+    return sqlite3.connect(db_path)
+
+
+@memory_app.command("show")
+def memory_show() -> None:
+    """Print the current AGENTS.md memory stored in the LangGraph store."""
+    import json
+    con = _memory_connect()
+    try:
+        row = con.execute(
+            "SELECT value, updated_at FROM store WHERE prefix=? AND key=?",
+            (_MEMORY_PREFIX, _MEMORY_KEY),
+        ).fetchone()
+    finally:
+        con.close()
+    if row is None:
+        rprint("[yellow]No memory entry stored.[/yellow] The agent will use only the hardcoded system prompt.")
+        return
+    value, updated_at = row
+    try:
+        content = json.loads(value).get("content", "")
+    except json.JSONDecodeError:
+        content = value
+    rprint(f"[dim]Updated: {updated_at} ({len(content)} chars)[/dim]\n")
+    console.print(Panel(Markdown(content), title="[bold cyan]AGENTS.md[/bold cyan]", border_style="cyan"))
+
+
+@memory_app.command("reset")
+def memory_reset(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Delete the AGENTS.md memory entry. The agent will fall back to the hardcoded system prompt."""
+    db_path = _memory_db_path()
+    if not yes:
+        confirm = typer.confirm(f"Delete agent memory in {db_path}?", default=False)
+        if not confirm:
+            rprint("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(code=1)
+    con = _memory_connect()
+    try:
+        cur = con.execute(
+            "DELETE FROM store WHERE prefix=? AND key=?",
+            (_MEMORY_PREFIX, _MEMORY_KEY),
+        )
+        con.commit()
+        if cur.rowcount == 0:
+            rprint("[yellow]No memory entry to delete.[/yellow]")
+        else:
+            rprint(f"[green]✓[/green] Deleted memory entry from {db_path}")
+    finally:
+        con.close()
+
+
+@memory_app.command("set")
+def memory_set(
+    file: Annotated[Path, typer.Argument(help="Path to a markdown file whose contents replace the stored AGENTS.md.")],
+) -> None:
+    """Replace AGENTS.md memory with the contents of a local file."""
+    import json
+    from datetime import datetime, timezone
+
+    if not file.exists():
+        rprint(f"[red]File not found:[/red] {file}")
+        raise typer.Exit(code=1)
+    content = file.read_text(encoding="utf-8")
+    if not content.strip():
+        rprint("[red]Refusing to set an empty memory entry.[/red] Use 'memory reset' instead.")
+        raise typer.Exit(code=1)
+
+    value = json.dumps({"content": content})
+    now = datetime.now(timezone.utc).isoformat()
+    con = _memory_connect()
+    try:
+        con.execute(
+            "INSERT INTO store (prefix, key, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(prefix, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (_MEMORY_PREFIX, _MEMORY_KEY, value, now, now),
+        )
+        con.commit()
+    finally:
+        con.close()
+    rprint(f"[green]✓[/green] Wrote {len(content)} chars from {file} to memory in {_memory_db_path()}")
 
 
 if __name__ == "__main__":
