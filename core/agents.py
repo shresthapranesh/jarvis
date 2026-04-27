@@ -5,13 +5,14 @@ from __future__ import annotations
 import logging
 import sqlite3 as _sqlite3
 from pathlib import Path
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
@@ -44,9 +45,9 @@ logger = logging.getLogger(__name__)
 
 # ── State schema ─────────────────────────────────────────────────────────────
 
-class AgentState(TypedDict, total=False):
+class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
-    todos: list[str]
+    todos: NotRequired[list[str]]
 
 
 # ── System prompt ────────────────────────────────────────────────────────────
@@ -182,7 +183,7 @@ def _get_sync_checkpointer() -> SqliteSaver:
 
 # ── Agent builder ─────────────────────────────────────────────────────────────
 
-def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None):
+def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> CompiledStateGraph:
     spec = next((m for m in AVAILABLE_MODELS if m.id == model), None)
     if spec is None:
         raise ValueError(f"Unknown model '{model}'")
@@ -258,7 +259,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None):
 
     # ── Build graph ───────────────────────────────────────────────────────────
 
-    graph = StateGraph(AgentState)
+    graph = StateGraph(AgentState)  # type: ignore[type-var]
     graph.add_node("summarize", summarize_node)
     graph.add_node("model_request", model_request_node)
     graph.add_node("tools", ToolNode(main_tools))
@@ -280,7 +281,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None):
             response = await llm.ainvoke(list(state.get("messages", [])), config=config)
             return {"messages": [response]}
 
-        worker_graph = StateGraph(AgentState)
+        worker_graph = StateGraph(AgentState)  # type: ignore[type-var]
         worker_graph.add_node("agent", worker_model)
         worker_graph.add_node("tools", ToolNode(worker_tools))
         worker_graph.add_edge(START, "agent")
@@ -292,17 +293,17 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None):
     return compiled
 
 
-_cache: dict[tuple, object] = {}
+_cache: dict[tuple, CompiledStateGraph] = {}
 
 
-def _build_cached(model: str, checkpointer, store):
+def _build_cached(model: str, checkpointer, store) -> CompiledStateGraph:
     key = (model, id(checkpointer), id(store))
     if key not in _cache:
         _cache[key] = _build_agent(model, checkpointer, store)
     return _cache[key]
 
 
-def build_agent(model: str = DEFAULT_MODEL, checkpointer=None, store: AsyncSqliteStore | None = None):
+def build_agent(model: str = DEFAULT_MODEL, checkpointer=None, store: AsyncSqliteStore | None = None) -> CompiledStateGraph:
     """Build the agent. Defaults to sync SqliteSaver for CLI; server passes async variants."""
     if checkpointer is None:
         checkpointer = _get_sync_checkpointer()

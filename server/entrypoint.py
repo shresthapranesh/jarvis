@@ -59,6 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from server.telegram_bot import build_application
             _tg_app = build_application(_tg_token)
             await _tg_app.initialize()
+            assert _tg_app.updater is not None
             await _tg_app.updater.start_polling(
                 drop_pending_updates=True,
                 allowed_updates=["message"],
@@ -68,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
 
         if _tg_app is not None:
+            assert _tg_app.updater is not None
             await _tg_app.updater.stop()
             await _tg_app.stop()
             await _tg_app.shutdown()

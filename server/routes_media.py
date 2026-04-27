@@ -136,7 +136,7 @@ async def transcribe_bytes(data: bytes, suffix: str = ".ogg") -> str:
                 import mlx_whisper  # noqa: PLC0415
                 repo = _MLX_REPO.get(_WHISPER_MODEL_SIZE, f"mlx-community/whisper-{_WHISPER_MODEL_SIZE}")
                 result = mlx_whisper.transcribe(fname, path_or_hf_repo=repo, language="en")
-                return (result.get("text") or "").strip()
+                return str(result.get("text") or "").strip()
             else:
                 model = _get_whisper_model(_WHISPER_MODEL_SIZE)
                 segments, _ = model.transcribe(fname, beam_size=5, language="en")
