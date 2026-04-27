@@ -91,7 +91,7 @@ def run(
 
     def _run():
         try:
-            result.update(agent.invoke({"messages": [{"role": "user", "content": full_query}]}))
+            result.update(agent.invoke({"messages": [{"role": "user", "content": full_query}]}, config={"recursion_limit": 100}))
         except Exception as exc:
             error.append(exc)
 

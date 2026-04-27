@@ -25,7 +25,7 @@ async def live_ws(websocket: WebSocket) -> None:
     # One thread_id per socket lets the checkpointer chain turns together
     # so the pre_model_hook summarization persists its result across turns.
     thread_id = f"live-{uuid4()}"
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
 
     try:
         while True:

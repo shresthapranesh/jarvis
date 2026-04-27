@@ -134,7 +134,7 @@ class AgentNode(BaseNode):
             store=get_store(),
         )
         thread_id = str(uuid4())
-        run_config = {"configurable": {"thread_id": thread_id}}
+        run_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
         stream_input: Any = {"messages": [{"role": "user", "content": prompt}]}
 
         final_text = ""

@@ -97,6 +97,7 @@ async def _execute_prompt_type(
 
     async for raw_chunk in agent.astream(
         {"messages": [{"role": "user", "content": auto.prompt_text or ""}]},
+        config={"recursion_limit": 100},
         stream_mode=STREAM_MODES,
         subgraphs=True,
     ):
