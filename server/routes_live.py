@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from core.agents import DEFAULT_MODEL, build_agent, is_valid_model
-from core.state import get_async_checkpointer, get_store
-from core.streaming import StreamChunk, _extract_step_data, _subagent_name_from_ns
+from core.log_callback import AgentLogger
+from core.state import TaskState, get_async_checkpointer, get_store
+from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_chunk
 
 router = APIRouter()
+
+
+async def _drain_events(state: TaskState, websocket: WebSocket, cursor: int) -> int:
+    """Forward any new TaskState.events to the websocket as JSON. Returns new cursor."""
+    while cursor < len(state.events):
+        evt = state.events[cursor]
+        cursor += 1
+        try:
+            payload = json.loads(evt.get("data") or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        await websocket.send_json({"type": evt.get("event", "message"), **payload})
+    return cursor
 
 
 @router.websocket("/ws/live")
@@ -22,10 +37,10 @@ async def live_ws(websocket: WebSocket) -> None:
         await websocket.close(code=1008, reason=f"unknown model {model!r}")
         return
 
-    # One thread_id per socket lets the checkpointer chain turns together
-    # so the pre_model_hook summarization persists its result across turns.
+    # One thread_id per socket lets the checkpointer chain turns together so
+    # the in-graph summarization persists its trim across turns.
     thread_id = f"live-{uuid4()}"
-    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
+    agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
 
     try:
         while True:
@@ -38,46 +53,32 @@ async def live_ws(websocket: WebSocket) -> None:
 
             await websocket.send_json({"type": "status", "state": "thinking"})
 
+            state = TaskState()
+            coalescer = TokenCoalescer(state)
             accumulated: list[str] = []
             stream_input: Any = {"messages": [{"role": "user", "content": text}]}
-            agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
+            event_cursor = 0
 
             try:
                 async for raw_chunk in agent.astream(
                     stream_input,
-                    config=config,
-                    stream_mode=["updates", "messages", "custom"],
+                    config={
+                        "configurable": {"thread_id": thread_id},
+                        "recursion_limit": 100,
+                        "callbacks": [AgentLogger()],
+                    },
+                    stream_mode=STREAM_MODES,
                     subgraphs=True,
                 ):
                     chunk: StreamChunk = raw_chunk  # type: ignore[assignment]
-                    ns, mode, data = chunk
-                    subagent = _subagent_name_from_ns(ns)
-                    source = "subagent" if subagent else "main"
+                    await _process_chunk(chunk, state, coalescer, accumulated)
+                    event_cursor = await _drain_events(state, websocket, event_cursor)
 
-                    if mode == "messages":
-                        token, _ = data
-                        tok_text = getattr(token, "content", "")
-                        tok_text = tok_text if isinstance(tok_text, str) else ""
-                        is_ai = getattr(token, "type", "") in ("ai", "AIMessageChunk")
-                        if tok_text and is_ai and not ns:
-                            accumulated.append(tok_text)
-                            await websocket.send_json({"type": "token", "text": tok_text})
-
-                    elif mode == "updates" and isinstance(data, dict):
-                        for node_name, node_data in data.items():
-                            if not node_name or node_name.startswith("__"):
-                                continue
-                            step_data = _extract_step_data(
-                                node_name, node_data if isinstance(node_data, dict) else {},
-                            )
-                            await websocket.send_json({
-                                "type": "step",
-                                "node": node_name,
-                                "source": source,
-                                "subagent": subagent,
-                                "data": step_data,
-                            })
+                coalescer.flush_all()
+                event_cursor = await _drain_events(state, websocket, event_cursor)
             except Exception as exc:
+                coalescer.flush_all()
+                event_cursor = await _drain_events(state, websocket, event_cursor)
                 await websocket.send_json({"type": "error", "error": str(exc)})
 
             final = "".join(accumulated)

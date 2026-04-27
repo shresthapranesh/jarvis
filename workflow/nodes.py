@@ -133,8 +133,14 @@ class AgentNode(BaseNode):
             checkpointer=get_async_checkpointer(),
             store=get_store(),
         )
+        from core.log_callback import AgentLogger
+        from langchain_core.runnables import RunnableConfig
         thread_id = str(uuid4())
-        run_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
+        run_config: RunnableConfig = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 100,
+            "callbacks": [AgentLogger()],
+        }
         stream_input: Any = {"messages": [{"role": "user", "content": prompt}]}
 
         final_text = ""

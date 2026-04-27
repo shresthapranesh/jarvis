@@ -17,6 +17,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import get_config
+from core.log_setup import setup_logging
 
 from core import state
 from db import async_session, init_db
@@ -36,6 +37,7 @@ _DIST = pathlib.Path(__file__).parent.parent / "static" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    setup_logging(get_config().work_dir, console=bool(os.environ.get("JARVIS_LOG_CONSOLE")))
     state._main_loop = asyncio.get_running_loop()
     await init_db()
     _scheduler.start()

@@ -1,11 +1,17 @@
 """Todo list tool — lets the agent track its own task list."""
 
-from langchain_core.tools import tool
+from typing import Annotated
+
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 
 
 @tool
-def write_todos(todos: list[str]) -> Command:
+def write_todos(
+    todos: list[str],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
     """Update your task list.
 
     Call at the start of complex multi-step work to plan, and update as you
@@ -19,4 +25,8 @@ def write_todos(todos: list[str]) -> Command:
         "Write summary report",
       ])
     """
-    return Command(update={"todos": todos})
+    ack = f"Updated todo list ({len(todos)} item{'s' if len(todos) != 1 else ''})."
+    return Command(update={
+        "todos": todos,
+        "messages": [ToolMessage(ack, tool_call_id=tool_call_id)],
+    })

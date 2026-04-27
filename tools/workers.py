@@ -55,8 +55,10 @@ async def spawn_workers(tasks: list[dict]) -> str:
             prompt = spec["task"]
             if ctx := spec.get("context"):
                 prompt = f"Context: {ctx}\n\nTask: {prompt}"
+            from core.log_callback import AgentLogger
             result = await worker.ainvoke(
-                {"messages": [{"role": "user", "content": prompt}]}
+                {"messages": [{"role": "user", "content": prompt}]},
+                config={"callbacks": [AgentLogger()]},
             )
             answer = result["messages"][-1].content
             logger.info("worker %d done (%d chars): %s", idx, len(answer), label)

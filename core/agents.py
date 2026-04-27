@@ -63,6 +63,11 @@ with full access to the network, filesystem, and all installed packages.
 - Do NOT paste code in your response — call execute() directly.
 - The user sees a live activity feed of your tool calls; they do not need a running commentary.
 
+## execute() is stateless
+Every execute() call runs in a **fresh subprocess**. Variables, imports, open files, and \
+in-memory data do NOT persist between calls. Batch related work into one call rather \
+than splitting it across many. Re-import packages and re-fetch data each time.
+
 ## How to work
 1. Call execute() to get data or run computation.
 2. Examine the output — check for errors, gaps, missing info.
@@ -222,20 +227,25 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
     # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
 
-    def summarize_node(state: AgentState) -> dict:
-        """Summarize old messages when conversation grows too long.
+    async def _maybe_summarize(messages: list[AnyMessage]) -> tuple[list[AnyMessage], list[AnyMessage]] | None:
+        """Trim conversation history when it grows past the threshold.
 
-        Runs before every model call. Uses RemoveMessage to replace old messages
-        in the checkpointer with a summary so we don't re-summarize each turn.
+        Returns (new_messages_for_this_turn, state_update_messages) on summarize,
+        or None if no trim is needed. The state_update_messages are
+        RemoveMessage entries plus the summary SystemMessage that get returned
+        from the model node so the checkpointer persists the trim and we don't
+        re-summarize the same history every turn.
+
+        Async so the summarization LLM call uses ``ainvoke`` and doesn't block
+        the event loop.
         """
-        messages: list[AnyMessage] = list(state.get("messages", []))
         if _estimate_chars(messages) <= _SUMMARIZE_THRESHOLD:
-            return {}
+            return None
         to_summarize = messages[:-_KEEP_RECENT]
         if not to_summarize:
-            return {}
+            return None
         try:
-            summary = llm.invoke([
+            summary = await llm.ainvoke([
                 SystemMessage(
                     "Summarize the following conversation history concisely. "
                     "Preserve all key facts, decisions, tool outputs, and results."
@@ -245,13 +255,23 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             summary_text = summary.content if isinstance(summary.content, str) else str(summary.content)
         except Exception as exc:
             logger.warning("summarization failed (%s) — skipping", exc)
-            return {}
+            return None
         logger.info("summarized %d messages into ~%d chars", len(to_summarize), len(summary_text))
+        summary_msg = SystemMessage(f"[Prior conversation summary]\n{summary_text}")
+        kept = messages[-_KEEP_RECENT:]
         removals = [RemoveMessage(id=m.id) for m in to_summarize if hasattr(m, "id") and m.id]
-        return {"messages": removals + [SystemMessage(f"[Prior conversation summary]\n{summary_text}")]}
+        # RemoveMessage isn't part of AnyMessage in the stubs but LangGraph's add_messages
+        # reducer handles it natively to evict messages from the checkpointer.
+        state_update: list = [*removals, summary_msg]
+        return [summary_msg] + kept, state_update
 
     async def model_request_node(state: AgentState, config: RunnableConfig) -> dict:
-        """Call the LLM with the current system message (memory + todos injected fresh)."""
+        """Call the LLM with the current system message (memory + todos injected fresh).
+
+        Summarization is folded in here (was its own node) so each LLM round-trip
+        costs 2 graph steps (model + tools) instead of 3. With recursion_limit=100
+        the agent gets ~50 useful round-trips, which is plenty for code-first work.
+        """
         if store is not None:
             memory = await _load_memory_from_store(store)
         else:
@@ -263,25 +283,28 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         if todos:
             todo_lines = "\n".join(f"- [ ] {t}" for t in todos)
             system = f"{system}\n\n## Current Tasks\n\n{todo_lines}"
-        messages = _strip_historical_thinking(list(state.get("messages", [])))
+        raw_messages = list(state.get("messages", []))
+        summarized = await _maybe_summarize(raw_messages)
+        if summarized is not None:
+            messages_for_llm, state_update_msgs = summarized
+        else:
+            messages_for_llm, state_update_msgs = raw_messages, []
+        messages_for_llm = _strip_historical_thinking(messages_for_llm)
         response = await llm.ainvoke(
-            [_make_system_message(system, use_cache)] + messages,
+            [_make_system_message(system, use_cache)] + messages_for_llm,
             config=config,
         )
-        return {"messages": [response]}
+        return {"messages": state_update_msgs + [response]}
 
     # ── Build graph ───────────────────────────────────────────────────────────
 
     graph = StateGraph(AgentState)  # type: ignore[type-var]
-    graph.add_node("summarize", summarize_node)
     graph.add_node("model_request", model_request_node)
     graph.add_node("tools", ToolNode(main_tools))
 
-    # summarize runs before every model call (including after each tool round-trip)
-    graph.add_edge(START, "summarize")
-    graph.add_edge("summarize", "model_request")
+    graph.add_edge(START, "model_request")
     graph.add_conditional_edges("model_request", tools_condition)
-    graph.add_edge("tools", "summarize")
+    graph.add_edge("tools", "model_request")
 
     compiled = graph.compile(checkpointer=checkpointer, store=store, name="main")
 
