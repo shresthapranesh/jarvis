@@ -56,9 +56,13 @@ async def spawn_workers(tasks: list[dict]) -> str:
             if ctx := spec.get("context"):
                 prompt = f"Context: {ctx}\n\nTask: {prompt}"
             from core.log_callback import AgentLogger
+            # Workers need a generous recursion budget — the langgraph default
+            # of 25 is half a dozen tool round-trips, often not enough for a
+            # multi-step subtask. Keep it lower than the main agent (100) so a
+            # runaway worker doesn't dominate.
             result = await worker.ainvoke(
                 {"messages": [{"role": "user", "content": prompt}]},
-                config={"callbacks": [AgentLogger()]},
+                config={"callbacks": [AgentLogger()], "recursion_limit": 50},
             )
             answer = result["messages"][-1].content
             logger.info("worker %d done (%d chars): %s", idx, len(answer), label)
