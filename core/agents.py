@@ -225,6 +225,12 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         delete_workflow,
     ]
 
+    # Bind tools so the LLM knows their schemas and emits structured tool_calls.
+    # Without this, models hallucinate function-call syntax and fail validation
+    # (Gemma's MALFORMED_FUNCTION_CALL, Claude's invalid_tool_calls, etc.).
+    # The summarizer uses the raw `llm` since it doesn't tool-call.
+    llm_with_tools = llm.bind_tools(main_tools)
+
     # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
 
     async def _maybe_summarize(messages: list[AnyMessage]) -> tuple[list[AnyMessage], list[AnyMessage]] | None:
@@ -290,7 +296,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         else:
             messages_for_llm, state_update_msgs = raw_messages, []
         messages_for_llm = _strip_historical_thinking(messages_for_llm)
-        response = await llm.ainvoke(
+        response = await llm_with_tools.ainvoke(
             [_make_system_message(system, use_cache)] + messages_for_llm,
             config=config,
         )
@@ -311,10 +317,23 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # ── Worker factory ────────────────────────────────────────────────────────
 
     worker_tools = [execute, read_file, write_file, list_files]
+    worker_llm = llm.bind_tools(worker_tools)
+
+    # Workers need their own system prompt — the parent's prompt isn't passed
+    # through, and without one a fresh worker doesn't know it should be using
+    # execute() instead of answering from training data.
+    _WORKER_SYSTEM_PROMPT = (
+        "You are a focused worker agent. Complete the task given to you using "
+        "execute(code) — Python with full network/filesystem access. Each execute() "
+        "call runs in a fresh subprocess, so batch related work into one call. "
+        "Use read_file/write_file/list_files for filesystem access if needed. "
+        "When you have a complete answer, return it concisely as your final response."
+    )
 
     def _make_worker():
         async def worker_model(state: AgentState, config: RunnableConfig) -> dict:
-            response = await llm.ainvoke(list(state.get("messages", [])), config=config)
+            messages = [_make_system_message(_WORKER_SYSTEM_PROMPT, use_cache)] + list(state.get("messages", []))
+            response = await worker_llm.ainvoke(messages, config=config)
             return {"messages": [response]}
 
         worker_graph = StateGraph(AgentState)  # type: ignore[type-var]
