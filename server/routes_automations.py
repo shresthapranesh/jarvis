@@ -92,7 +92,7 @@ def _serialize_run(run: AutomationRun) -> dict[str, Any]:
 # ── Execution engines ───────────────────────────────────────────────────────
 
 async def _execute_prompt_type(
-    auto: Automation, state: TaskState, checkpointer,
+    auto: Automation, state: TaskState, checkpointer, run_id: str,
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
@@ -100,7 +100,11 @@ async def _execute_prompt_type(
 
     async for raw_chunk in agent.astream(
         {"messages": [{"role": "user", "content": auto.prompt_text or ""}]},
-        config={"recursion_limit": 100, "callbacks": [AgentLogger()]},
+        config={
+            "configurable": {"thread_id": f"automation_{run_id}"},
+            "recursion_limit": 100,
+            "callbacks": [AgentLogger()],
+        },
         stream_mode=STREAM_MODES,
         subgraphs=True,
     ):
@@ -216,7 +220,7 @@ async def _execute_automation_bg(
 
     try:
         if auto.input_type == "prompt":
-            output = await _execute_prompt_type(auto, state, get_async_checkpointer())
+            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), run_id)
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":
