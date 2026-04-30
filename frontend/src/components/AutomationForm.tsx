@@ -1,7 +1,17 @@
 import {useEffect, useState} from 'react';
 
 import {useModels} from '../hooks/useModels';
-import type {Automation, AutomationInputType, CreateAutomationPayload} from '../lib/types';
+import type {
+  Automation,
+  AutomationInputType,
+  CreateAutomationPayload,
+  NotificationConfig,
+} from '../lib/types';
+import {
+  NotificationsEditor,
+  parseNotifications,
+  serializeNotifications,
+} from './NotificationsEditor';
 
 interface Props {
   initialValues?: Automation;
@@ -45,6 +55,9 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           enabled: initialValues.enabled,
         }
       : BLANK,
+  );
+  const [notifications, setNotifications] = useState<NotificationConfig[]>(
+    parseNotifications(initialValues?.notifications),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +106,7 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
       webhook_method: form.webhook_method || null,
       webhook_headers: form.webhook_headers || null,
       webhook_body: form.webhook_body || null,
+      notifications: serializeNotifications(notifications),
     };
 
     setSaving(true);
@@ -254,6 +268,12 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           disabled={saving}
         />
       </div>
+
+      <NotificationsEditor
+        value={notifications}
+        onChange={setNotifications}
+        disabled={saving}
+      />
 
       <div className="auto-form-check-row">
         <input

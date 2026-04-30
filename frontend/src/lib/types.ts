@@ -56,6 +56,14 @@ export interface MediaAttachment {
 
 export type AutomationInputType = 'prompt' | 'code' | 'webhook';
 
+export type NotificationOn = 'done' | 'error' | 'both';
+
+export interface NotificationConfig {
+  type: 'telegram';
+  chat_id: string;
+  on: NotificationOn;
+}
+
 export interface Automation {
   id: string;
   name: string;
@@ -70,6 +78,7 @@ export interface Automation {
   webhook_body: string | null;
   schedule: string | null;
   enabled: boolean;
+  notifications: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -111,6 +120,7 @@ export interface CreateAutomationPayload {
   webhook_body?: string | null;
   schedule?: string | null;
   enabled: boolean;
+  notifications?: string | null;
 }
 
 // ── Workflow ──────────────────────────────────────────────────────────────────
@@ -171,6 +181,7 @@ export interface Workflow {
   name: string;
   description: string | null;
   definition: string; // JSON string
+  notifications: string | null;
   created_at: string;
   updated_at: string;
 }

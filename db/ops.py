@@ -149,6 +149,7 @@ async def create_automation(
     webhook_body: str | None,
     schedule: str | None,
     enabled: bool,
+    notifications: str | None = None,
 ) -> Automation:
     auto = Automation(
         id=str(uuid4()),
@@ -164,6 +165,7 @@ async def create_automation(
         webhook_body=webhook_body,
         schedule=schedule,
         enabled=enabled,
+        notifications=notifications,
     )
     session.add(auto)
     await session.commit()
@@ -261,8 +263,15 @@ async def create_workflow(
     name: str,
     description: str | None,
     definition: str,
+    notifications: str | None = None,
 ) -> Workflow:
-    wf = Workflow(id=str(uuid4()), name=name, description=description, definition=definition)
+    wf = Workflow(
+        id=str(uuid4()),
+        name=name,
+        description=description,
+        definition=definition,
+        notifications=notifications,
+    )
     session.add(wf)
     await session.commit()
     return wf
