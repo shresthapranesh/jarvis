@@ -34,6 +34,7 @@ from db.ops import (
     list_automations,
     update_automation,
 )
+from core.notifications import parse_notifications, send_notifications
 from core.schemas import AutomationRequest, _invalid_model_response
 from core.scheduler import _register_scheduler_job, _remove_scheduler_job
 from core.state import TaskState, _background_tasks, _notify, _tasks, get_async_checkpointer, get_http_client, get_store, stream_task_events
@@ -69,6 +70,7 @@ def _serialize_automation(auto: Automation) -> dict[str, Any]:
         "webhook_body": auto.webhook_body,
         "schedule": auto.schedule,
         "enabled": auto.enabled,
+        "notifications": auto.notifications,
         "created_at": auto.created_at.isoformat(),
         "updated_at": auto.updated_at.isoformat(),
     }
@@ -227,11 +229,24 @@ async def _execute_automation_bg(
 
         state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
 
+        await send_notifications(
+            parse_notifications(auto.notifications),
+            status="done",
+            title=auto.name,
+            body=output or "",
+        )
+
     except BaseException as exc:
         err_text = str(exc)
         async with async_session() as session:
             await finish_automation_run(session, run_id, "error", None, err_text)
         state.events.append({"event": "error", "data": json.dumps({"error": err_text})})
+        await send_notifications(
+            parse_notifications(auto.notifications),
+            status="error",
+            title=auto.name,
+            body=err_text,
+        )
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
 
@@ -275,6 +290,7 @@ async def create_automation_endpoint(
         webhook_body=request.webhook_body,
         schedule=request.schedule,
         enabled=request.enabled,
+        notifications=request.notifications,
     )
 
     if auto.enabled and auto.schedule:
@@ -320,6 +336,7 @@ async def update_automation_endpoint(
         webhook_body=request.webhook_body,
         schedule=request.schedule,
         enabled=request.enabled,
+        notifications=request.notifications,
     )
     if auto is None:
         return JSONResponse({"error": "not found"}, status_code=404)

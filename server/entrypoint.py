@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 allowed_updates=["message"],
             )
             await _tg_app.start()
+            state._telegram_bot = _tg_app.bot
 
         yield
 
@@ -75,6 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await _tg_app.updater.stop()
             await _tg_app.stop()
             await _tg_app.shutdown()
+            state._telegram_bot = None
 
         state._async_checkpointer = None
         state._store = None

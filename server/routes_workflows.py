@@ -28,6 +28,7 @@ from db.ops import (
     list_workflows,
     update_workflow,
 )
+from core.notifications import parse_notifications, send_notifications
 from core.schemas import WorkflowCreateRequest, WorkflowRunRequest, WorkflowUpdateRequest
 from core.state import TaskState, _background_tasks, _notify, _tasks, stream_task_events
 from workflow.engine import execute_workflow
@@ -43,6 +44,7 @@ def _serialize_workflow(wf: Workflow) -> dict[str, Any]:
         "name": wf.name,
         "description": wf.description,
         "definition": wf.definition,
+        "notifications": wf.notifications,
         "created_at": wf.created_at.isoformat(),
         "updated_at": wf.updated_at.isoformat(),
     }
@@ -95,6 +97,13 @@ async def _execute_workflow_bg(
                 error=None,
             )
 
+        await send_notifications(
+            parse_notifications(wf.notifications),
+            status="done",
+            title=wf.name,
+            body=json.dumps(final_outputs, indent=2),
+        )
+
     except BaseException as exc:
         err = str(exc)
         async with async_session() as session:
@@ -103,6 +112,12 @@ async def _execute_workflow_bg(
             "event": "workflow_error",
             "data": json.dumps({"error": err, "run_id": run_id}),
         })
+        await send_notifications(
+            parse_notifications(wf.notifications),
+            status="error",
+            title=wf.name,
+            body=err,
+        )
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
 
@@ -132,6 +147,7 @@ async def create_workflow_endpoint(
         name=request.name,
         description=request.description,
         definition=request.definition,
+        notifications=request.notifications,
     )
     return JSONResponse(_serialize_workflow(wf), status_code=201)
 

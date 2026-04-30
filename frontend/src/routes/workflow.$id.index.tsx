@@ -2,6 +2,11 @@ import {ReactFlowProvider} from '@xyflow/react';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useState} from 'react';
+import {
+  NotificationsEditor,
+  parseNotifications,
+  serializeNotifications,
+} from '../components/NotificationsEditor';
 import {WorkflowEditor} from '../components/WorkflowEditor';
 import {useWorkflowStream} from '../hooks/useWorkflowStream';
 import {
@@ -12,7 +17,7 @@ import {
   updateWorkflow,
 } from '../lib/api';
 import {parseDefinition, serializeDefinition} from '../lib/types';
-import type {WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
+import type {NotificationConfig, Workflow, WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
 
 export const Route = createFileRoute('/workflow/$id/')({
   component: WorkflowEditorPage,
@@ -185,6 +190,97 @@ function NodeStatusRow({nodeId, status}: NodeStatusRowProps) {
   );
 }
 
+// ── Settings modal ────────────────────────────────────────────────────────────
+
+interface SettingsModalProps {
+  workflow: Workflow;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function SettingsModal({workflow, onClose, onSaved}: SettingsModalProps) {
+  const [name, setName] = useState(workflow.name);
+  const [description, setDescription] = useState(workflow.description ?? '');
+  const [notifications, setNotifications] = useState<NotificationConfig[]>(
+    parseNotifications(workflow.notifications),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateWorkflow(workflow.id, {
+        name,
+        description: description || null,
+        notifications: serializeNotifications(notifications),
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="wf-modal-backdrop" onClick={onClose}>
+      <div
+        className="wf-modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{minWidth: 480, maxWidth: 640}}
+      >
+        <div className="wf-modal-title">Workflow Settings</div>
+        <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+          <div className="auto-form-group">
+            <label className="auto-form-label">Name</label>
+            <input
+              className="auto-form-input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={saving}
+            />
+          </div>
+          <div className="auto-form-group">
+            <label className="auto-form-label">Description</label>
+            <input
+              className="auto-form-input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              disabled={saving}
+            />
+          </div>
+          <NotificationsEditor
+            value={notifications}
+            onChange={setNotifications}
+            disabled={saving}
+          />
+          {error && <div className="error-bubble">{error}</div>}
+          <div className="wf-modal-actions">
+            <button
+              type="button"
+              className="wf-save-btn"
+              onClick={onClose}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="wf-run-btn"
+              onClick={() => void handleSave()}
+              disabled={saving || !name.trim()}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 function WorkflowEditorPage() {
@@ -204,6 +300,7 @@ function WorkflowEditorPage() {
   const [showRunPanel, setShowRunPanel] = useState(false);
   const [showInputModal, setShowInputModal] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [pendingNodes, setPendingNodes] = useState<WorkflowRFNode[]>([]);
   const [pendingEdges, setPendingEdges] = useState<WorkflowRFEdge[]>([]);
   const [pendingInputDefs, setPendingInputDefs] = useState<Record<string, string>>({});
@@ -294,6 +391,12 @@ function WorkflowEditorPage() {
           <span style={{fontSize: '0.72rem', color: 'var(--error-text)'}}>{saveError}</span>
         )}
         <button
+          className="wf-save-btn"
+          onClick={() => setShowSettings(true)}
+        >
+          Settings
+        </button>
+        <button
           className={`wf-save-btn${showHistory ? ' wf-save-btn--active' : ''}`}
           onClick={() => setShowHistory((v) => !v)}
         >
@@ -359,6 +462,15 @@ function WorkflowEditorPage() {
           defaultValues={pendingInputDefs}
           onSubmit={(inputs) => void doTriggerRun(inputs)}
           onCancel={() => setShowInputModal(false)}
+        />
+      )}
+
+      {/* Settings modal */}
+      {showSettings && (
+        <SettingsModal
+          workflow={workflow}
+          onClose={() => setShowSettings(false)}
+          onSaved={() => queryClient.invalidateQueries({queryKey: ['workflow', id]})}
         />
       )}
     </div>

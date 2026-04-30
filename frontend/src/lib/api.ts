@@ -148,6 +148,7 @@ export async function createWorkflow(p: {
   name: string;
   description?: string | null;
   definition: string;
+  notifications?: string | null;
 }): Promise<Workflow> {
   const res = await fetch('/workflows', {
     method: 'POST',
@@ -166,7 +167,12 @@ export async function getWorkflow(id: string): Promise<Workflow> {
 
 export async function updateWorkflow(
   id: string,
-  p: {name?: string | null; description?: string | null; definition?: string | null},
+  p: {
+    name?: string | null;
+    description?: string | null;
+    definition?: string | null;
+    notifications?: string | null;
+  },
 ): Promise<Workflow> {
   const res = await fetch(`/workflows/${id}`, {
     method: 'PUT',

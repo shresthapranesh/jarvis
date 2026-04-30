@@ -24,6 +24,7 @@ _async_checkpointer: AsyncSqliteSaver | None = None
 _store: AsyncSqliteStore | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 _http_client: httpx.AsyncClient | None = None
+_telegram_bot: object | None = None  # telegram.Bot when set; lazy-typed to avoid forcing import
 
 
 def get_async_checkpointer() -> AsyncSqliteSaver:
@@ -45,6 +46,11 @@ def get_http_client() -> httpx.AsyncClient:
     if _http_client is None:
         raise RuntimeError("http client not initialized — server lifespan has not started")
     return _http_client
+
+
+def get_telegram_bot():
+    """Return the process-wide telegram.Bot if the bot is enabled, else None."""
+    return _telegram_bot
 
 
 # ── Task registry ────────────────────────────────────────────────────────────

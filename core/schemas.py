@@ -40,6 +40,7 @@ class AutomationRequest(BaseModel):
     webhook_body: str | None = None
     schedule: str | None = None
     enabled: bool = True
+    notifications: str | None = None  # JSON array of channel configs
 
 
 class ResumePayload(BaseModel):
@@ -56,12 +57,14 @@ class WorkflowCreateRequest(BaseModel):
     name: str
     description: str | None = None
     definition: str = "{}"  # JSON string
+    notifications: str | None = None  # JSON array of channel configs
 
 
 class WorkflowUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     definition: str | None = None  # JSON string
+    notifications: str | None = None  # JSON array of channel configs
 
 
 class WorkflowRunRequest(BaseModel):

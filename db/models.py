@@ -86,6 +86,8 @@ class Automation(Base):
     schedule: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # cron expression or null
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    notifications: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of channel configs
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
@@ -131,6 +133,8 @@ class Workflow(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     definition: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON
+
+    notifications: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of channel configs
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(

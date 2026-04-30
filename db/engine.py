@@ -24,6 +24,12 @@ def _migrate(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_steps_conversation_id ON steps (conversation_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_automation_runs_automation_id ON automation_runs (automation_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"))
+    auto_cols = {c["name"] for c in inspector.get_columns("automations")}
+    if "notifications" not in auto_cols:
+        conn.execute(text("ALTER TABLE automations ADD COLUMN notifications TEXT"))
+    wf_cols = {c["name"] for c in inspector.get_columns("workflows")}
+    if "notifications" not in wf_cols:
+        conn.execute(text("ALTER TABLE workflows ADD COLUMN notifications TEXT"))
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 
