@@ -1,233 +1,185 @@
 import {useQuery, useMutation, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute} from '@tanstack/react-router';
-import {marked} from 'marked';
-import {useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 
 import {AutomationForm} from '../components/AutomationForm';
-import {useAutomationStream} from '../hooks/useAutomationStream';
+import {AutomationRunsPanel} from '../components/AutomationRunsPanel';
+import {ConfirmDialog} from '../components/ConfirmDialog';
 import {
-  listAutomations,
+  BoltIcon,
+  CalendarIcon,
+  ChevronDownIcon,
+  ClockIcon,
+  CodeIcon,
+  EditIcon,
+  PlayIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+  WebhookIcon,
+  XIcon,
+} from '../components/icons';
+import {
   createAutomation,
-  updateAutomation,
   deleteAutomation,
-  triggerAutomation,
-  listAutomationRuns,
+  formatNextRun,
   formatRelativeTime,
+  listAutomations,
+  triggerAutomation,
+  updateAutomation,
 } from '../lib/api';
-import type {Automation, AutomationRun, CreateAutomationPayload} from '../lib/types';
+import {useToast} from '../lib/toast';
+import type {Automation, AutomationInputType, CreateAutomationPayload} from '../lib/types';
 
 export const Route = createFileRoute('/automation')({component: AutomationPage});
 
-// ── Individual run row ────────────────────────────────────────────────────────
+type TypeFilter = 'all' | AutomationInputType;
+type GroupBy = 'none' | 'type' | 'schedule';
 
-function RunRow({run}: {run: AutomationRun}) {
-  const [open, setOpen] = useState(false);
-  const text = run.output ?? run.error ?? '';
-
-  return (
-    <div className="run-row">
-      <div className="run-row-header" onClick={() => text && setOpen((o) => !o)}>
-        <span className={`run-status run-status--${run.status}`}>{run.status}</span>
-        <span className="run-meta">
-          {run.triggered_by} · {formatRelativeTime(run.started_at)}
-          {run.finished_at &&
-            ` · ${Math.round((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000)}s`}
-        </span>
-        {text && <span className="run-toggle-hint">{open ? '▲' : '▼'}</span>}
-      </div>
-      {open && text && (
-        <div
-          className="run-output agent-bubble"
-          dangerouslySetInnerHTML={{__html: marked.parse(text) as string}}
-        />
-      )}
-    </div>
-  );
+function TypeIcon({type, size = 14}: {type: AutomationInputType; size?: number}) {
+  if (type === 'prompt') return <BoltIcon size={size} />;
+  if (type === 'code') return <CodeIcon size={size} />;
+  return <WebhookIcon size={size} />;
 }
 
-// ── Run history panel ─────────────────────────────────────────────────────────
-
-function RunHistory({automationId}: {automationId: string}) {
-  const {data: runs = [], isLoading} = useQuery({
-    queryKey: ['automation-runs', automationId],
-    queryFn: () => listAutomationRuns(automationId),
-    staleTime: 10_000,
-  });
-
-  if (isLoading) return <div className="run-empty">Loading runs…</div>;
-  if (runs.length === 0) return <div className="run-empty">No runs yet.</div>;
-
-  return (
-    <div className="run-list">
-      {runs.map((r) => (
-        <RunRow key={r.id} run={r} />
-      ))}
-    </div>
-  );
+function railVariant(auto: Automation): string {
+  if (!auto.enabled) return 'off';
+  if (auto.last_run_status === 'running') return 'run';
+  if (auto.last_run_status === 'error') return 'err';
+  if (auto.last_run_status === 'done') return 'ok';
+  return 'idle';
 }
 
-// ── Live output after manual trigger ─────────────────────────────────────────
+// ── Card ──────────────────────────────────────────────────────────────────────
 
-function LiveOutput({runId, automationId}: {runId: string; automationId: string}) {
-  const {streaming, text, error} = useAutomationStream(runId, automationId);
-
-  if (error) return <div className="error-bubble run-live-error">⚠ {error}</div>;
-
-  return (
-    <div className={`agent-bubble run-live-output${streaming ? ' streaming' : ''}`}>
-      {text ? (
-        <div dangerouslySetInnerHTML={{__html: marked.parse(text) as string}} />
-      ) : (
-        <div className="thinking">
-          <div className="thinking-dots">
-            <span />
-            <span />
-            <span />
-          </div>
-        </div>
-      )}
-      {streaming && <span className="cursor" />}
-    </div>
-  );
-}
-
-// ── Automation row ────────────────────────────────────────────────────────────
-
-function AutomationRow({
-  auto,
-  onEdit,
-  onDeleted,
-}: {
+interface CardProps {
   auto: Automation;
-  onEdit: (a: Automation) => void;
-  onDeleted: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const [showHistory, setShowHistory] = useState(false);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [triggerError, setTriggerError] = useState<string | null>(null);
+  onOpen: (auto: Automation) => void;
+  onEdit: (auto: Automation) => void;
+  onDelete: (auto: Automation) => void;
+  onTrigger: (auto: Automation) => void;
+  onToggle: (auto: Automation) => void;
+}
 
-  const toggleMutation = useMutation({
-    mutationFn: () =>
-      updateAutomation(auto.id, {
-        name: auto.name,
-        description: auto.description,
-        input_type: auto.input_type,
-        prompt_text: auto.prompt_text,
-        model: auto.model,
-        code_text: auto.code_text,
-        webhook_url: auto.webhook_url,
-        webhook_method: auto.webhook_method,
-        webhook_headers: auto.webhook_headers,
-        webhook_body: auto.webhook_body,
-        schedule: auto.schedule,
-        enabled: !auto.enabled,
-      }),
-    onSuccess: () => queryClient.invalidateQueries({queryKey: ['automations']}),
-  });
+function AutomationCard({auto, onOpen, onEdit, onDelete, onTrigger, onToggle}: CardProps) {
+  const rail = railVariant(auto);
+  const [now, setNow] = useState(Date.now());
 
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteAutomation(auto.id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({queryKey: ['automations']});
-      onDeleted();
-    },
-  });
+  // Refresh "next run" countdown every 30s
+  useEffect(() => {
+    if (!auto.next_run_at) return;
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [auto.next_run_at]);
 
-  async function handleTrigger() {
-    setTriggerError(null);
-    setActiveRunId(null);
-    try {
-      const {run_id} = await triggerAutomation(auto.id);
-      setActiveRunId(run_id);
-      setShowHistory(true);
-    } catch (err) {
-      setTriggerError((err as Error).message);
-    }
-  }
+  // touch `now` so it doesn't get tree-shaken
+  void now;
 
   return (
-    <div className="automation-row">
-      <div className="automation-row-main">
-        <div className="automation-info">
-          <span className="automation-name">{auto.name}</span>
-          {auto.description && <span className="automation-desc">{auto.description}</span>}
-          <div className="automation-badges">
-            <span className={`automation-badge automation-badge--${auto.input_type}`}>
-              {auto.input_type}
-            </span>
-            {auto.schedule ? (
-              <span className="automation-badge automation-badge--schedule">{auto.schedule}</span>
-            ) : (
-              <span className="automation-badge automation-badge--adhoc">ad-hoc</span>
-            )}
-          </div>
+    <div
+      className={`auto-card auto-card--rail-${rail}${!auto.enabled ? ' auto-card--off' : ''}`}
+      onClick={() => onOpen(auto)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onOpen(auto);
+      }}
+    >
+      <div className={`auto-card-rail auto-card-rail--${rail}`} aria-hidden="true" />
+
+      <div className={`auto-card-icon auto-card-icon--${auto.input_type}`}>
+        <TypeIcon type={auto.input_type} size={16} />
+      </div>
+
+      <div className="auto-card-main">
+        <div className="auto-card-titlebar">
+          <span className="auto-card-name">{auto.name}</span>
+          {!auto.enabled && <span className="auto-card-paused-pill">Paused</span>}
         </div>
-
-        <div className="automation-actions">
-          <label className="auto-toggle" title={auto.enabled ? 'Disable' : 'Enable'}>
-            <input
-              type="checkbox"
-              checked={auto.enabled}
-              onChange={() => toggleMutation.mutate()}
-              disabled={toggleMutation.isPending}
-            />
-            <span className="auto-toggle-track" />
-          </label>
-
-          <button
-            className="automation-btn"
-            title="Show run history"
-            onClick={() => setShowHistory((h) => !h)}
-          >
-            {showHistory ? '▲ Runs' : '▼ Runs'}
-          </button>
-
-          <button
-            className="automation-btn automation-btn--primary"
-            title="Trigger now"
-            onClick={handleTrigger}
-          >
-            ▶ Run
-          </button>
-
-          <button className="automation-btn" title="Edit" onClick={() => onEdit(auto)}>
-            ✎
-          </button>
-
-          <button
-            className="automation-btn automation-btn--danger"
-            title="Delete"
-            onClick={() => deleteMutation.mutate()}
-            disabled={deleteMutation.isPending}
-          >
-            ✕
-          </button>
+        {auto.description && <div className="auto-card-desc">{auto.description}</div>}
+        <div className="auto-card-badges">
+          <span className={`auto-card-badge auto-card-badge--${auto.input_type}`}>
+            {auto.input_type}
+          </span>
+          {auto.schedule ? (
+            <span className="auto-card-badge auto-card-badge--schedule" title={`cron: ${auto.schedule}`}>
+              <CalendarIcon size={11} />
+              {auto.schedule}
+            </span>
+          ) : (
+            <span className="auto-card-badge auto-card-badge--adhoc">ad-hoc</span>
+          )}
         </div>
       </div>
 
-      {triggerError && (
-        <div className="error-bubble" style={{margin: '8px 14px'}}>
-          ⚠ {triggerError}
-        </div>
-      )}
+      <div className="auto-card-meta-col">
+        {auto.next_run_at && auto.enabled && (
+          <div className="auto-card-meta-line auto-card-meta-line--next">
+            <ClockIcon size={11} />
+            <span>Next {formatNextRun(auto.next_run_at)}</span>
+          </div>
+        )}
+        {auto.last_run_at && (
+          <div className="auto-card-meta-line auto-card-meta-line--last">
+            <span className={`run-status-dot run-status-dot--${auto.last_run_status ?? 'done'}`} />
+            <span>Last {formatRelativeTime(auto.last_run_at)}</span>
+          </div>
+        )}
+        {!auto.last_run_at && (
+          <div className="auto-card-meta-line auto-card-meta-line--last auto-card-meta-line--never">
+            Never run
+          </div>
+        )}
+        {(auto.total_count_7d ?? 0) > 0 && (
+          <div className="auto-card-meta-line auto-card-meta-line--stats">
+            {auto.success_count_7d ?? 0}/{auto.total_count_7d} ok · 7d
+          </div>
+        )}
+      </div>
 
-      {activeRunId && (
-        <div style={{padding: '0 14px 10px'}}>
-          <LiveOutput runId={activeRunId} automationId={auto.id} />
-        </div>
-      )}
-
-      {showHistory && (
-        <div className="run-history">
-          <RunHistory automationId={auto.id} />
-        </div>
-      )}
+      <div className="auto-card-actions" onClick={(e) => e.stopPropagation()}>
+        <button
+          className="auto-card-action"
+          title={auto.enabled ? 'Pause schedule' : 'Resume schedule'}
+          onClick={() => onToggle(auto)}
+        >
+          {auto.enabled ? (
+            <span className="auto-card-toggle-on" aria-label="Enabled">
+              <span className="auto-card-toggle-dot" />
+            </span>
+          ) : (
+            <span className="auto-card-toggle-off" aria-label="Disabled">
+              <span className="auto-card-toggle-dot" />
+            </span>
+          )}
+        </button>
+        <button
+          className="auto-card-action auto-card-action--play"
+          title="Run now"
+          onClick={() => onTrigger(auto)}
+        >
+          <PlayIcon size={13} />
+        </button>
+        <button
+          className="auto-card-action"
+          title="Edit"
+          onClick={() => onEdit(auto)}
+        >
+          <EditIcon size={14} />
+        </button>
+        <button
+          className="auto-card-action auto-card-action--danger"
+          title="Delete"
+          onClick={() => onDelete(auto)}
+        >
+          <TrashIcon size={14} />
+        </button>
+      </div>
     </div>
   );
 }
 
-// ── Automation form panel (slide-in) ──────────────────────────────────────────
+// ── Form panel (slide-in, kept structurally same) ─────────────────────────────
 
 function AutomationFormPanel({
   editing,
@@ -237,16 +189,31 @@ function AutomationFormPanel({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   async function handleSave(payload: CreateAutomationPayload) {
-    if (editing) {
-      await updateAutomation(editing.id, payload);
-    } else {
-      await createAutomation(payload);
+    try {
+      if (editing) {
+        await updateAutomation(editing.id, payload);
+        toast.push('Automation updated', 'success');
+      } else {
+        await createAutomation(payload);
+        toast.push('Automation created', 'success');
+      }
+      await queryClient.invalidateQueries({queryKey: ['automations']});
+      onClose();
+    } catch (err) {
+      toast.push((err as Error).message || 'Failed to save', 'error');
     }
-    await queryClient.invalidateQueries({queryKey: ['automations']});
-    onClose();
   }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   return (
     <>
@@ -254,8 +221,8 @@ function AutomationFormPanel({
       <div className="auto-panel">
         <div className="auto-panel-header">
           <span>{editing ? 'Edit Automation' : 'New Automation'}</span>
-          <button className="sidebar-close" onClick={onClose}>
-            ✕
+          <button className="sidebar-close" onClick={onClose} aria-label="Close">
+            <XIcon size={14} />
           </button>
         </div>
         <div className="auto-panel-body">
@@ -273,26 +240,79 @@ function AutomationFormPanel({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 function AutomationPage() {
-  const {
-    data: automations = [],
-    isLoading,
-    error,
-  } = useQuery({
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
+  const {data: automations = [], isLoading, error} = useQuery({
     queryKey: ['automations'],
     queryFn: listAutomations,
+    refetchInterval: 30_000,
     staleTime: 15_000,
   });
 
   const [showForm, setShowForm] = useState(false);
   const [editingAuto, setEditingAuto] = useState<Automation | null>(null);
+  const [openedAuto, setOpenedAuto] = useState<Automation | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Automation | null>(null);
+
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [groupBy, setGroupBy] = useState<GroupBy>('none');
+
+  const toggleMutation = useMutation({
+    mutationFn: (auto: Automation) =>
+      updateAutomation(auto.id, {
+        name: auto.name,
+        description: auto.description,
+        input_type: auto.input_type,
+        prompt_text: auto.prompt_text,
+        model: auto.model,
+        code_text: auto.code_text,
+        webhook_url: auto.webhook_url,
+        webhook_method: auto.webhook_method,
+        webhook_headers: auto.webhook_headers,
+        webhook_body: auto.webhook_body,
+        schedule: auto.schedule,
+        enabled: !auto.enabled,
+        notifications: auto.notifications,
+      }),
+    onSuccess: (_d, auto) => {
+      queryClient.invalidateQueries({queryKey: ['automations']});
+      toast.push(auto.enabled ? 'Automation paused' : 'Automation enabled', 'success');
+    },
+    onError: (err: Error) => toast.push(err.message || 'Failed to update', 'error'),
+  });
+
+  const triggerMutation = useMutation({
+    mutationFn: (auto: Automation) => triggerAutomation(auto.id),
+    onSuccess: (_d, auto) => {
+      setOpenedAuto(auto);
+      toast.push(`Started "${auto.name}"`, 'info');
+      queryClient.invalidateQueries({queryKey: ['automation-runs', auto.id]});
+    },
+    onError: (err: Error) => toast.push(err.message || 'Failed to trigger', 'error'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (auto: Automation) => deleteAutomation(auto.id),
+    onSuccess: (_d, auto) => {
+      queryClient.invalidateQueries({queryKey: ['automations']});
+      if (openedAuto?.id === auto.id) setOpenedAuto(null);
+      setConfirmDelete(null);
+      toast.push(`Deleted "${auto.name}"`, 'success');
+    },
+    onError: (err: Error) => toast.push(err.message || 'Failed to delete', 'error'),
+  });
 
   function openCreate() {
     setEditingAuto(null);
+    setOpenedAuto(null);
     setShowForm(true);
   }
 
   function openEdit(auto: Automation) {
     setEditingAuto(auto);
+    setOpenedAuto(null);
     setShowForm(true);
   }
 
@@ -301,34 +321,229 @@ function AutomationPage() {
     setEditingAuto(null);
   }
 
+  function openRunsPanel(auto: Automation) {
+    setShowForm(false);
+    setOpenedAuto(auto);
+  }
+
+  // ── Derived: filtered + grouped ──────────────────────────────────────────
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return automations.filter((a) => {
+      if (typeFilter !== 'all' && a.input_type !== typeFilter) return false;
+      if (q) {
+        const hay = `${a.name} ${a.description ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [automations, search, typeFilter]);
+
+  const grouped = useMemo(() => {
+    if (groupBy === 'none') return [{label: '', items: filtered}];
+    const map = new Map<string, Automation[]>();
+    for (const a of filtered) {
+      const key =
+        groupBy === 'type'
+          ? a.input_type
+          : a.schedule
+          ? 'Scheduled'
+          : 'Ad-hoc';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(a);
+    }
+    const order =
+      groupBy === 'type' ? ['prompt', 'code', 'webhook'] : ['Scheduled', 'Ad-hoc'];
+    return order
+      .filter((k) => map.has(k))
+      .map((k) => ({label: k, items: map.get(k)!}));
+  }, [filtered, groupBy]);
+
+  // ── KPIs ─────────────────────────────────────────────────────────────────
+  const kpiTotal = automations.length;
+  const kpiActive = automations.filter((a) => a.enabled).length;
+  const kpiRuns7d = automations.reduce((s, a) => s + (a.total_count_7d ?? 0), 0);
+  const kpiSuccess7d = automations.reduce((s, a) => s + (a.success_count_7d ?? 0), 0);
+  const successRate = kpiRuns7d > 0 ? Math.round((kpiSuccess7d / kpiRuns7d) * 100) : null;
+
   return (
     <div className="automation-page">
-      <div className="automation-header">
-        <span className="automation-page-title">Automations</span>
-        <button className="auto-new-btn" onClick={openCreate}>
-          + New
-        </button>
-      </div>
+      <header className="auto-page-header">
+        <div className="auto-page-titlerow">
+          <div className="auto-page-title-block">
+            <h1 className="auto-page-title">Automations</h1>
+            <span className="auto-page-subtitle">
+              Scheduled and on-demand jobs.
+            </span>
+          </div>
+          <button className="auto-new-btn-v2" onClick={openCreate}>
+            <PlusIcon size={13} />
+            <span>New automation</span>
+          </button>
+        </div>
 
-      <div className="automation-list-container">
-        {isLoading && <div className="auto-empty">Loading…</div>}
-        {error && <div className="error-bubble auto-empty">⚠ {(error as Error).message}</div>}
+        <div className="auto-kpis">
+          <div className="auto-kpi">
+            <div className="auto-kpi-value">{kpiTotal}</div>
+            <div className="auto-kpi-label">Total</div>
+          </div>
+          <div className="auto-kpi">
+            <div className="auto-kpi-value">
+              {kpiActive}
+              <span className="auto-kpi-value-suffix">/ {kpiTotal}</span>
+            </div>
+            <div className="auto-kpi-label">Active</div>
+          </div>
+          <div className="auto-kpi">
+            <div className="auto-kpi-value">{kpiRuns7d}</div>
+            <div className="auto-kpi-label">Runs · 7d</div>
+          </div>
+          <div className="auto-kpi">
+            <div className="auto-kpi-value">
+              {successRate !== null ? `${successRate}%` : '—'}
+            </div>
+            <div className="auto-kpi-label">Success · 7d</div>
+          </div>
+        </div>
+
+        {automations.length > 0 && (
+          <div className="auto-filters">
+            <div className="auto-search">
+              <SearchIcon size={13} />
+              <input
+                type="text"
+                placeholder="Search by name or description…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  className="auto-search-clear"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                >
+                  <XIcon size={11} />
+                </button>
+              )}
+            </div>
+            <div className="auto-filter-pills">
+              {(['all', 'prompt', 'code', 'webhook'] as TypeFilter[]).map((t) => (
+                <button
+                  key={t}
+                  className={`auto-filter-pill${typeFilter === t ? ' auto-filter-pill--on' : ''}`}
+                  onClick={() => setTypeFilter(t)}
+                >
+                  {t === 'all' ? 'All' : t}
+                </button>
+              ))}
+            </div>
+            <div className="auto-group-by">
+              <label htmlFor="group-by">Group</label>
+              <select
+                id="group-by"
+                value={groupBy}
+                onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+              >
+                <option value="none">None</option>
+                <option value="type">By type</option>
+                <option value="schedule">By schedule</option>
+              </select>
+              <ChevronDownIcon size={11} />
+            </div>
+          </div>
+        )}
+      </header>
+
+      <div className="auto-list-container">
+        {isLoading && <div className="auto-empty-msg">Loading…</div>}
+        {error && (
+          <div className="error-bubble auto-empty-msg">
+            ⚠ {(error as Error).message}
+          </div>
+        )}
+
         {!isLoading && automations.length === 0 && (
-          <div className="auto-empty">
-            No automations yet.
-            <button className="auto-new-btn" style={{marginLeft: 12}} onClick={openCreate}>
-              Create one
+          <div className="auto-empty-state">
+            <div className="auto-empty-glow">
+              <BoltIcon size={28} />
+            </div>
+            <h2>No automations yet</h2>
+            <p>
+              Schedule prompts, run scripts on a cron, or trigger webhooks. Anything
+              you'd want to fire automatically — set it up here.
+            </p>
+            <button className="auto-new-btn-v2" onClick={openCreate}>
+              <PlusIcon size={13} />
+              <span>Create your first automation</span>
             </button>
           </div>
         )}
-        <div className="automation-list">
-          {automations.map((auto) => (
-            <AutomationRow key={auto.id} auto={auto} onEdit={openEdit} onDeleted={() => {}} />
-          ))}
-        </div>
+
+        {!isLoading && automations.length > 0 && filtered.length === 0 && (
+          <div className="auto-empty-msg">
+            No automations match your filters.
+          </div>
+        )}
+
+        {grouped.map((group) => (
+          <section key={group.label || 'all'} className="auto-group">
+            {group.label && (
+              <div className="auto-group-label">
+                <span>{group.label}</span>
+                <span className="auto-group-count">{group.items.length}</span>
+              </div>
+            )}
+            <div className="auto-card-list">
+              {group.items.map((auto) => (
+                <AutomationCard
+                  key={auto.id}
+                  auto={auto}
+                  onOpen={openRunsPanel}
+                  onEdit={openEdit}
+                  onDelete={(a) => setConfirmDelete(a)}
+                  onTrigger={(a) => triggerMutation.mutate(a)}
+                  onToggle={(a) => toggleMutation.mutate(a)}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
 
       {showForm && <AutomationFormPanel editing={editingAuto} onClose={closeForm} />}
+
+      {openedAuto && !showForm && (
+        <AutomationRunsPanel
+          automation={openedAuto}
+          onClose={() => setOpenedAuto(null)}
+          onEdit={openEdit}
+        />
+      )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Delete automation?"
+        danger
+        confirmLabel="Delete"
+        requireTypedName={confirmDelete?.name ?? null}
+        message={
+          confirmDelete && (
+            <>
+              <p>
+                This permanently deletes <strong>{confirmDelete.name}</strong> and all
+                of its run history{' '}
+                {(confirmDelete.total_count_7d ?? 0) > 0 && (
+                  <>({confirmDelete.total_count_7d} runs in the last 7 days)</>
+                )}
+                .
+              </p>
+              <p className="confirm-warn">This cannot be undone.</p>
+            </>
+          )
+        }
+        onConfirm={() => confirmDelete && deleteMutation.mutate(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

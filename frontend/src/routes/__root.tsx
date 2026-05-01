@@ -4,6 +4,7 @@ import {useCallback, useEffect, useState} from 'react';
 
 import {ConversationList} from '../components/ConversationList';
 import {checkHealth} from '../lib/api';
+import {ToastProvider} from '../lib/toast';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -56,6 +57,7 @@ function RootLayout() {
   }, [navigate, toggleNav]);
 
   return (
+    <ToastProvider>
     <div className="app-shell">
       <aside className={`left-panel${navCollapsed ? ' collapsed' : ''}`}>
         <div className="left-panel-header">
@@ -155,6 +157,7 @@ function RootLayout() {
         <Outlet />
       </main>
     </div>
+    </ToastProvider>
   );
 }
 
