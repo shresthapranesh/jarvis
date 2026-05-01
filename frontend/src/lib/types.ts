@@ -81,6 +81,12 @@ export interface Automation {
   notifications: string | null;
   created_at: string;
   updated_at: string;
+  // Stats fields — present on list endpoint, absent on single-record endpoints
+  next_run_at?: string | null;
+  last_run_status?: AutomationRunStatus | null;
+  last_run_at?: string | null;
+  success_count_7d?: number;
+  total_count_7d?: number;
 }
 
 export type AutomationRunStatus = 'running' | 'done' | 'error';

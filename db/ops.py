@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -179,6 +179,70 @@ async def get_automation(session: AsyncSession, automation_id: str) -> Automatio
 async def list_automations(session: AsyncSession) -> list[Automation]:
     result = await session.execute(select(Automation).order_by(Automation.created_at.desc()))
     return list(result.scalars().all())
+
+
+async def list_automations_with_stats(
+    session: AsyncSession,
+) -> list[tuple[Automation, dict[str, Any]]]:
+    """Return automations alongside aggregate stats from the last 7 days plus
+    the latest run's status and timestamp (regardless of age)."""
+    automations = await list_automations(session)
+    if not automations:
+        return []
+
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+
+    agg_rows = (
+        await session.execute(
+            select(
+                AutomationRun.automation_id,
+                func.count(AutomationRun.id).label("total_7d"),
+                func.sum(
+                    case((AutomationRun.status == "done", 1), else_=0)
+                ).label("success_7d"),
+            )
+            .where(AutomationRun.started_at >= since)
+            .group_by(AutomationRun.automation_id)
+        )
+    ).all()
+    agg_by_id = {r.automation_id: r for r in agg_rows}
+
+    latest_subq = (
+        select(
+            AutomationRun.automation_id,
+            func.max(AutomationRun.started_at).label("latest_at"),
+        )
+        .group_by(AutomationRun.automation_id)
+        .subquery()
+    )
+    latest_rows = (
+        await session.execute(
+            select(AutomationRun.automation_id, AutomationRun.status, AutomationRun.started_at)
+            .join(
+                latest_subq,
+                (AutomationRun.automation_id == latest_subq.c.automation_id)
+                & (AutomationRun.started_at == latest_subq.c.latest_at),
+            )
+        )
+    ).all()
+    latest_by_id = {r.automation_id: r for r in latest_rows}
+
+    out: list[tuple[Automation, dict[str, Any]]] = []
+    for auto in automations:
+        agg = agg_by_id.get(auto.id)
+        latest = latest_by_id.get(auto.id)
+        out.append(
+            (
+                auto,
+                {
+                    "total_count_7d": int(agg.total_7d) if agg else 0,
+                    "success_count_7d": int(agg.success_7d or 0) if agg else 0,
+                    "last_run_status": latest.status if latest else None,
+                    "last_run_at": latest.started_at.isoformat() if latest else None,
+                },
+            )
+        )
+    return out
 
 
 async def update_automation(session: AsyncSession, automation_id: str, **kwargs: Any) -> Automation | None:

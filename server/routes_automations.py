@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 from collections.abc import AsyncIterator
@@ -32,6 +33,7 @@ from db.ops import (
     get_automation_run,
     list_automation_runs,
     list_automations,
+    list_automations_with_stats,
     update_automation,
 )
 from core.notifications import parse_notifications, send_notifications
@@ -55,8 +57,22 @@ def _validate_cron(schedule: str | None) -> JSONResponse | None:
 
 # ── Serializers ──────────────────────────────────────────────────────────────
 
-def _serialize_automation(auto: Automation) -> dict[str, Any]:
-    return {
+def _compute_next_run_at(auto: Automation) -> str | None:
+    if not (auto.schedule and auto.enabled):
+        return None
+    try:
+        trigger = CronTrigger.from_crontab(auto.schedule, timezone=timezone.utc)
+        next_fire = trigger.get_next_fire_time(None, datetime.now(timezone.utc))
+        return next_fire.isoformat() if next_fire else None
+    except Exception:
+        return None
+
+
+def _serialize_automation(
+    auto: Automation,
+    stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "id": auto.id,
         "name": auto.name,
         "description": auto.description,
@@ -73,7 +89,11 @@ def _serialize_automation(auto: Automation) -> dict[str, Any]:
         "notifications": auto.notifications,
         "created_at": auto.created_at.isoformat(),
         "updated_at": auto.updated_at.isoformat(),
+        "next_run_at": _compute_next_run_at(auto),
     }
+    if stats is not None:
+        payload.update(stats)
+    return payload
 
 
 def _serialize_run(run: AutomationRun) -> dict[str, Any]:
@@ -266,8 +286,8 @@ async def _execute_automation_bg(
 async def get_automations(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> JSONResponse:
-    automations = await list_automations(session)
-    return JSONResponse([_serialize_automation(a) for a in automations])
+    rows = await list_automations_with_stats(session)
+    return JSONResponse([_serialize_automation(a, stats) for a, stats in rows])
 
 
 @router.post("/automations")
