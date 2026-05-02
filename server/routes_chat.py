@@ -20,6 +20,7 @@ from langgraph.types import Command
 
 from core.agents import build_agent, is_valid_model
 from core.log_callback import AgentLogger
+from core.safety import gate_input, gate_output
 from core.schemas import ConversationUpdate, ResumePayload, RunRequest, _invalid_model_response
 from core.state import TaskState, _background_tasks, _notify, _tasks, get_async_checkpointer, get_store, stream_task_events
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _build_message_content, _finalize_message, _process_chunk
@@ -50,17 +51,30 @@ async def _run_agent_task(
     accumulated: list[str] = []
     step_seq_ref = [0]
     coalescer = TokenCoalescer(state)
-    content = await _build_message_content(query, attachments, model)
-
-    agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
-    config = {
-        "configurable": {"thread_id": conv_id},
-        "recursion_limit": 100,
-        "callbacks": [AgentLogger()],
-    }
-    stream_input: Any = {"messages": [{"role": "user", "content": content}]}
 
     try:
+        # Input gate — judge the user's prompt before spinning up the agent.
+        rejection = await gate_input(query, model)
+        if rejection:
+            await _finalize_message(task_id, rejection, "blocked")
+            state.events.append({"event": "safety_input_blocked", "data": json.dumps({
+                "message": rejection, "conversation_id": conv_id,
+            })})
+            state.events.append({"event": "done", "data": json.dumps({
+                "message": rejection, "conversation_id": conv_id,
+            })})
+            return
+
+        content = await _build_message_content(query, attachments, model)
+
+        agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
+        config = {
+            "configurable": {"thread_id": conv_id},
+            "recursion_limit": 100,
+            "callbacks": [AgentLogger()],
+        }
+        stream_input: Any = {"messages": [{"role": "user", "content": content}]}
+
         while True:
             interrupted = False
             async for raw_chunk in agent.astream(  # type: ignore[call-overload]
@@ -98,15 +112,25 @@ async def _run_agent_task(
         coalescer.flush_all()
         final_message = "".join(accumulated)
         if state.cancelled:
+            # Cancelled mid-run — partial output is non-final; skip the gate.
             await _finalize_message(task_id, final_message, "stopped")
             state.events.append({"event": "stopped", "data": json.dumps({
                 "message": final_message,
                 "conversation_id": conv_id,
             })})
         else:
-            await _finalize_message(task_id, final_message, "done")
+            persisted, output_verdict = await gate_output(final_message, model)
+            status = "blocked" if output_verdict else "done"
+            await _finalize_message(task_id, persisted, status)
+            if output_verdict:
+                state.events.append({"event": "safety_output_blocked", "data": json.dumps({
+                    "severity": output_verdict.severity,
+                    "reason": output_verdict.reason,
+                    "redacted_message": persisted,
+                    "conversation_id": conv_id,
+                })})
             state.events.append({"event": "done", "data": json.dumps({
-                "message": final_message,
+                "message": persisted,
                 "conversation_id": conv_id,
             })})
 
@@ -122,9 +146,18 @@ async def _run_agent_task(
     except GraphRecursionError:
         coalescer.flush_all()
         final_message = "".join(accumulated) or "(agent reached iteration limit)"
-        await _finalize_message(task_id, final_message, "done")
+        persisted, output_verdict = await gate_output(final_message, model)
+        status = "blocked" if output_verdict else "done"
+        await _finalize_message(task_id, persisted, status)
+        if output_verdict:
+            state.events.append({"event": "safety_output_blocked", "data": json.dumps({
+                "severity": output_verdict.severity,
+                "reason": output_verdict.reason,
+                "redacted_message": persisted,
+                "conversation_id": conv_id,
+            })})
         state.events.append({"event": "done", "data": json.dumps({
-            "message": final_message,
+            "message": persisted,
             "conversation_id": conv_id,
         })})
 

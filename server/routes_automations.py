@@ -22,6 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from core.agents import DEFAULT_MODEL, build_agent, is_valid_model
 from core.log_callback import AgentLogger
+from core.safety import gate_input, gate_output
 from db import async_session, get_session
 from db.models import Automation, AutomationRun
 from db.ops import (
@@ -239,8 +240,32 @@ async def _execute_automation_bg(
     state = _tasks[run_id]
 
     try:
+        status = "done"
+        notify_status = "done"
+
         if auto.input_type == "prompt":
-            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), run_id)
+            model = auto.model or DEFAULT_MODEL
+            rejection = await gate_input(auto.prompt_text or "", model)
+            if rejection:
+                output = rejection
+                status = "blocked"
+                notify_status = "blocked"
+                state.events.append({"event": "safety_input_blocked", "data": json.dumps({
+                    "message": rejection, "run_id": run_id,
+                })})
+            else:
+                raw_output = await _execute_prompt_type(auto, state, get_async_checkpointer(), run_id)
+                gated, output_verdict = await gate_output(raw_output, model)
+                output = gated
+                if output_verdict:
+                    status = "blocked"
+                    notify_status = "blocked"
+                    state.events.append({"event": "safety_output_blocked", "data": json.dumps({
+                        "severity": output_verdict.severity,
+                        "reason": output_verdict.reason,
+                        "redacted_output": gated,
+                        "run_id": run_id,
+                    })})
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":
@@ -249,13 +274,13 @@ async def _execute_automation_bg(
             raise ValueError(f"Unknown input_type: {auto.input_type}")
 
         async with async_session() as session:
-            await finish_automation_run(session, run_id, "done", output, None)
+            await finish_automation_run(session, run_id, status, output, None)
 
         state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
 
         await send_notifications(
             parse_notifications(auto.notifications),
-            status="done",
+            status=notify_status,
             title=auto.name,
             body=output or "",
         )

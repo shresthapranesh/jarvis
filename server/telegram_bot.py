@@ -13,6 +13,7 @@ import time
 from telegram import Bot, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
+from core.safety import gate_input, gate_output
 from core.schemas import AttachmentIn
 from core.state import TaskState, _background_tasks, _tasks, stream_task_events
 from db import async_session
@@ -44,6 +45,12 @@ async def _dispatch(
     attachments: list[AttachmentIn] | None = None,
 ) -> None:
     """Create DB records, start the agent task, and kick off streaming."""
+    rejection = await gate_input(user_content, model)
+    if rejection:
+        with contextlib.suppress(Exception):
+            await bot.send_message(chat_id=chat_id, text=rejection)
+        return
+
     conv_id = f"telegram_{chat_id}"
 
     async with async_session() as session:
@@ -59,7 +66,7 @@ async def _dispatch(
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
-    asyncio.create_task(_stream_to_telegram(bot, chat_id, None, task_state))
+    asyncio.create_task(_stream_to_telegram(bot, chat_id, None, task_state, model))
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -104,6 +111,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
+    rejection = await gate_input(text, model)
+    if rejection:
+        with contextlib.suppress(Exception):
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=placeholder_id, text=rejection,
+            )
+        return
+
     conv_id = f"telegram_{chat_id}"
     async with async_session() as session:
         conv = await get_or_create_conversation(session, conv_id, model, text[:60])
@@ -118,7 +133,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
-    asyncio.create_task(_stream_to_telegram(context.bot, chat_id, placeholder_id, task_state))
+    asyncio.create_task(_stream_to_telegram(context.bot, chat_id, placeholder_id, task_state, model))
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -158,7 +173,7 @@ async def _loading_animation(bot: Bot, chat_id: int) -> None:
 
 
 async def _stream_to_telegram(
-    bot: Bot, chat_id: int, message_id: int | None, state: TaskState
+    bot: Bot, chat_id: int, message_id: int | None, state: TaskState, model: str,
 ) -> None:
     loading_task = asyncio.create_task(_loading_animation(bot, chat_id))
     accumulated = ""
@@ -194,6 +209,8 @@ async def _stream_to_telegram(
             await loading_task
 
     final = accumulated[:_MAX_MSG_LEN] if accumulated else "(no response)"
+    final, _output_verdict = await gate_output(final, model)
+    final = final[:_MAX_MSG_LEN]
     try:
         if message_id is None:
             await bot.send_message(chat_id=chat_id, text=final)

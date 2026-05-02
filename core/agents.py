@@ -23,8 +23,8 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     ModelSpec,
     is_valid_model,
 )
-from tools.execute import execute
-from tools.files import list_files, read_file, write_file
+from .safety import make_safe_execute, make_safe_write_file
+from tools.files import list_files, read_file
 from tools.todos import write_todos
 from tools.workers import set_worker_factory, spawn_workers
 from tools.automations import (
@@ -208,10 +208,15 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     llm = spec.build_llm()
     use_cache = spec.provider in ("bedrock", "anthropic")
 
+    # Safety wrappers — judge runs on the same model as the agent for now.
+    # Override at the call site once a config knob is wired up.
+    safe_execute = make_safe_execute(model)
+    safe_write_file = make_safe_write_file(model)
+
     main_tools = [
-        execute,
+        safe_execute,
         read_file,
-        write_file,
+        safe_write_file,
         list_files,
         write_todos,
         spawn_workers,
@@ -316,7 +321,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
     # ── Worker factory ────────────────────────────────────────────────────────
 
-    worker_tools = [execute, read_file, write_file, list_files]
+    worker_tools = [safe_execute, read_file, safe_write_file, list_files]
     worker_llm = llm.bind_tools(worker_tools)
 
     # Workers need their own system prompt — the parent's prompt isn't passed
