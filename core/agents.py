@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3 as _sqlite3
 from pathlib import Path
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -23,10 +23,11 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     ModelSpec,
     is_valid_model,
 )
-from .safety import make_safe_execute, make_safe_write_file
+from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write_file
+from tools.artifacts import list_artifacts as artifact_list, read_artifact
 from tools.files import list_files, read_file
 from tools.todos import write_todos
-from tools.workers import set_worker_factory, spawn_workers
+from tools.workers import register_role_factory, spawn_workers
 from tools.automations import (
     create_automation,
     delete_automation,
@@ -82,13 +83,34 @@ than splitting it across many. Re-import packages and re-fetch data each time.
   Current date/time:  import datetime; print(datetime.datetime.now())
   Shell commands:     import subprocess; subprocess.run(["git", "log", "--oneline"])
 
-For independent subtasks that can run in parallel, use spawn_workers([
-  {"task": "...", "context": "optional background"},
-  {"task": "..."},
-]) — workers run concurrently and all results are returned when the last one finishes.
+For independent subtasks that can run in parallel, use spawn_workers. Each task \
+takes an optional `role` — pick the most specific fitting one:
+  - "researcher" — finds and verifies information from the web / source material
+  - "coder"      — writes or modifies code (read, edit, run, iterate)
+  - "writer"     — produces final-quality prose (no execute, file ops only)
+  - "general"    — fallback when nothing else fits (full toolset)
+
+Example:
+  spawn_workers([
+    {"role": "researcher", "task": "Find current US, China, and EU GDP"},
+    {"role": "researcher", "task": "Find current US, China, and EU population"},
+    {"role": "writer", "task": "Draft a one-paragraph comparison from {data}"},
+  ])
+
+Workers run concurrently and all results are returned when the last one finishes.
 
 For files: read_file / write_file / list_files for simple access; \
-or use pathlib inside execute().\
+or use pathlib inside execute().
+
+## Artifacts (deliverables)
+When the user asks for a finished document — a report, draft, brief, resume, \
+plan, summary write-up, etc. — call `write_artifact(title, content)` instead \
+of `write_file`. Artifacts open in the user's side panel where they can read, \
+edit, copy, and download them; scratch files do not. To revise an existing \
+artifact, pass the `artifact_id` returned from a prior call. Use `read_artifact` \
+to load one back, and `list_artifacts` to see what already exists. Don't paste \
+the full artifact body into your final reply — a one-line confirmation referring \
+to the artifact title is enough; the user can already see it.\
 """
 
 # ── Thinking-block stripper (not persisted — runs at model-call time) ────────
@@ -134,21 +156,36 @@ def _strip_historical_thinking(messages: list[AnyMessage]) -> list[AnyMessage]:
 
 # ── Summarization constants ───────────────────────────────────────────────────
 
-_SUMMARIZE_THRESHOLD = 120_000  # chars (~30k tokens); trigger well before 200k context
-_KEEP_RECENT = 10               # messages to keep verbatim
+_SUMMARIZE_TOKEN_THRESHOLD = 100_000  # tokens; well under typical 200k context
+_KEEP_RECENT = 10                     # messages to keep verbatim
 
 
-def _estimate_chars(messages: list[AnyMessage]) -> int:
-    total = 0
-    for m in messages:
-        c = m.content
-        if isinstance(c, str):
-            total += len(c)
-        elif isinstance(c, list):
-            for block in c:
-                if isinstance(block, dict):
-                    total += len(block.get("text", "") or block.get("thinking", ""))
-    return total
+def _message_text(m: AnyMessage) -> str:
+    """Flatten a message's content to a single string for token counting."""
+    c = m.content
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        parts: list[str] = []
+        for block in c:
+            if isinstance(block, dict):
+                parts.append(block.get("text", "") or block.get("thinking", ""))
+        return "".join(parts)
+    return ""
+
+
+def _estimate_tokens(messages: list[AnyMessage], llm) -> int:
+    """Best-effort token count, falling back to a chars-per-token heuristic.
+
+    Uses the LLM's own tokenizer when available (most LangChain chat models
+    expose `get_num_tokens_from_messages`); otherwise approximates at 4
+    chars per token, which is roughly correct for English/code and biases
+    high (so we summarise sooner) for token-dense content.
+    """
+    try:
+        return cast(Any, llm).get_num_tokens_from_messages(messages)
+    except Exception:
+        return sum(len(_message_text(m)) for m in messages) // 4
 
 
 # ── System message builder ───────────────────────────────────────────────────
@@ -212,12 +249,16 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # Override at the call site once a config knob is wired up.
     safe_execute = make_safe_execute(model)
     safe_write_file = make_safe_write_file(model)
+    safe_write_artifact = make_safe_write_artifact(model)
 
     main_tools = [
         safe_execute,
         read_file,
         safe_write_file,
         list_files,
+        safe_write_artifact,
+        read_artifact,
+        artifact_list,
         write_todos,
         spawn_workers,
         list_automations,
@@ -250,7 +291,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         Async so the summarization LLM call uses ``ainvoke`` and doesn't block
         the event loop.
         """
-        if _estimate_chars(messages) <= _SUMMARIZE_THRESHOLD:
+        if _estimate_tokens(messages, llm) <= _SUMMARIZE_TOKEN_THRESHOLD:
             return None
         to_summarize = messages[:-_KEEP_RECENT]
         if not to_summarize:
@@ -319,37 +360,72 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
     compiled = graph.compile(checkpointer=checkpointer, store=store, name="main")
 
-    # ── Worker factory ────────────────────────────────────────────────────────
+    # ── Worker pool — role-typed ──────────────────────────────────────────────
+    # Each role gets a tuned prompt and a tool subset. The subgraph compiles
+    # with `name=role`, so LangGraph's namespace surfaces the role to the
+    # streaming layer (which already labels by subagent name).
 
-    worker_tools = [safe_execute, read_file, safe_write_file, list_files]
-    worker_llm = llm.bind_tools(worker_tools)
+    _ROLE_PROMPTS = {
+        "general": (
+            "You are a focused worker agent. Complete the task given to you using "
+            "execute(code) — Python with full network/filesystem access. Each execute() "
+            "call runs in a fresh subprocess, so batch related work into one call. "
+            "Use read_file/write_file/list_files for filesystem access if needed. "
+            "When you have a complete answer, return it concisely as your final response."
+        ),
+        "researcher": (
+            "You are a research worker. Your job is to find and verify information. "
+            "Use execute(code) with httpx or playwright to fetch web pages and APIs; "
+            "use read_file when given local source material. Prefer primary sources. "
+            "Cite URLs in your final answer. If you cannot find something, say so "
+            "explicitly — do not guess. Return your findings concisely."
+        ),
+        "coder": (
+            "You are a code worker. Your job is to write or modify code precisely. "
+            "Read the existing code (read_file / list_files) before changing it. Make "
+            "minimal, focused edits. Use execute(code) to run, test, and verify. When "
+            "something fails, fix the underlying cause; do not paper over it. Return "
+            "a short summary of what you changed and any test output."
+        ),
+        "writer": (
+            "You are a writing worker. Your job is to produce final-quality prose. "
+            "Read source material via read_file before drafting. Match the requested "
+            "length, tone, and audience. You do NOT have execute() — no shell, no "
+            "code. Save drafts via write_file when asked. Return the final text."
+        ),
+    }
 
-    # Workers need their own system prompt — the parent's prompt isn't passed
-    # through, and without one a fresh worker doesn't know it should be using
-    # execute() instead of answering from training data.
-    _WORKER_SYSTEM_PROMPT = (
-        "You are a focused worker agent. Complete the task given to you using "
-        "execute(code) — Python with full network/filesystem access. Each execute() "
-        "call runs in a fresh subprocess, so batch related work into one call. "
-        "Use read_file/write_file/list_files for filesystem access if needed. "
-        "When you have a complete answer, return it concisely as your final response."
-    )
+    _ROLE_TOOLS: dict[str, list] = {
+        "general":    [safe_execute, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list],
+        "researcher": [safe_execute, read_file, read_artifact, artifact_list],
+        "coder":      [safe_execute, read_file, safe_write_file, list_files],
+        "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list],
+    }
 
-    def _make_worker():
-        async def worker_model(state: AgentState, config: RunnableConfig) -> dict:
-            messages = [_make_system_message(_WORKER_SYSTEM_PROMPT, use_cache)] + list(state.get("messages", []))
-            response = await worker_llm.ainvoke(messages, config=config)
-            return {"messages": [response]}
+    def _make_role_factory(role: str):
+        prompt = _ROLE_PROMPTS[role]
+        tools = _ROLE_TOOLS[role]
+        role_llm = llm.bind_tools(tools)
 
-        worker_graph = StateGraph(AgentState)  # type: ignore[type-var]
-        worker_graph.add_node("agent", worker_model)
-        worker_graph.add_node("tools", ToolNode(worker_tools))
-        worker_graph.add_edge(START, "agent")
-        worker_graph.add_conditional_edges("agent", tools_condition)
-        worker_graph.add_edge("tools", "agent")
-        return worker_graph.compile(name="worker")
+        def factory():
+            async def role_model(state: AgentState, config: RunnableConfig) -> dict:
+                messages = [_make_system_message(prompt, use_cache)] + list(state.get("messages", []))
+                response = await role_llm.ainvoke(messages, config=config)
+                return {"messages": [response]}
 
-    set_worker_factory(_make_worker)
+            g = StateGraph(AgentState)  # type: ignore[type-var]
+            g.add_node("agent", role_model)
+            g.add_node("tools", ToolNode(tools))
+            g.add_edge(START, "agent")
+            g.add_conditional_edges("agent", tools_condition)
+            g.add_edge("tools", "agent")
+            return g.compile(name=role)
+
+        return factory
+
+    for role in _ROLE_PROMPTS:
+        register_role_factory(role, _make_role_factory(role))
+
     return compiled
 
 

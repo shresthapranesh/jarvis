@@ -31,6 +31,10 @@ class ModelSpec:
             from langchain_aws import ChatBedrock
             return ChatBedrock(model=model_name)
 
+        if self.provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+            return ChatAnthropic(model_name=model_name, timeout=None, stop=None)
+
         raise ValueError(f"Unknown provider '{self.provider}' for model '{self.id}'")
 
 
@@ -43,6 +47,9 @@ AVAILABLE_MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("ollama:llama3.3",                       "Llama 3.3 (Ollama)",    "ollama"),
     ModelSpec("ollama:qwen3:32b",                      "Qwen3 32B (Ollama)",    "ollama"),
     ModelSpec("bedrock:us.anthropic.claude-sonnet-4-6",                      "Claude Sonnet 4.6 (AWS Bedrock)",    "bedrock"),
+    ModelSpec("anthropic:claude-opus-4-7",                                   "Claude Opus 4.7 (Anthropic)",        "anthropic"),
+    ModelSpec("anthropic:claude-sonnet-4-6",                                 "Claude Sonnet 4.6 (Anthropic)",      "anthropic"),
+    ModelSpec("anthropic:claude-haiku-4-5-20251001",                         "Claude Haiku 4.5 (Anthropic)",       "anthropic"),
 )
 
 DEFAULT_MODEL: str = AVAILABLE_MODELS[0].id

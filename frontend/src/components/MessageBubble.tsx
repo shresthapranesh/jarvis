@@ -27,7 +27,19 @@ function SpinnerIcon() {
 }
 
 import {describeStep, getStepPreview} from '../lib/steps';
+import type {SafetyBlock} from '../hooks/useStream';
 import type {Message, Step} from '../lib/types';
+
+function SafetyBanner({block}: {block: SafetyBlock}) {
+  const layerLabel = block.layer === 'input' ? 'Input blocked' : 'Output redacted';
+  const sev = block.severity ? ` · ${block.severity}` : '';
+  return (
+    <div className={`safety-banner safety-banner--${block.layer}`}>
+      <span className="safety-banner__label">⚠ {layerLabel}{sev}</span>
+      {block.reason && <span className="safety-banner__reason">{block.reason}</span>}
+    </div>
+  );
+}
 
 type ContentPart =
   | {type: 'text'; text: string}
@@ -161,10 +173,11 @@ interface StreamingBubbleProps {
   text: string;
   thinkingText: string;
   steps: Step[];
+  safetyBlock?: SafetyBlock | null;
   onShowSteps?: (steps: Step[]) => void;
 }
 
-export function StreamingBubble({text, thinkingText, steps, onShowSteps}: StreamingBubbleProps) {
+export function StreamingBubble({text, thinkingText, steps, safetyBlock, onShowSteps}: StreamingBubbleProps) {
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
@@ -196,10 +209,11 @@ export function StreamingBubble({text, thinkingText, steps, onShowSteps}: Stream
 
   return (
     <div className="turn">
+      {safetyBlock && <SafetyBanner block={safetyBlock} />}
       {text ? (
-        <div className="agent-bubble streaming">
+        <div className={`agent-bubble streaming${safetyBlock ? ' agent-bubble--blocked' : ''}`}>
           <span dangerouslySetInnerHTML={{__html: marked.parse(text) as string}} />
-          <span className="cursor" />
+          {!safetyBlock && <span className="cursor" />}
         </div>
       ) : (
         <div className="working-widget">
@@ -329,10 +343,21 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
   }
 
   const html = marked.parse(message.content) as string;
+  const blocked = message.status === 'blocked';
+  // Persisted blocks have no streaming-side reason payload; the bubble
+  // content itself carries the rejection/redaction text. Infer the layer
+  // from the content prefix so users still see which gate fired.
+  const persistedBlock: SafetyBlock | null = blocked
+    ? {layer: message.content.startsWith('[OUTPUT REDACTED') ? 'output' : 'input'}
+    : null;
 
   return (
     <div className="turn">
-      <div className="agent-bubble" dangerouslySetInnerHTML={{__html: html}} />
+      {persistedBlock && <SafetyBanner block={persistedBlock} />}
+      <div
+        className={`agent-bubble${blocked ? ' agent-bubble--blocked' : ''}`}
+        dangerouslySetInnerHTML={{__html: html}}
+      />
       <div className={`turn-actions${ttsState !== 'idle' ? ' turn-actions--tts-active' : ''}`}>
         <button
           className={`copy-btn${copied ? ' copy-btn--copied' : ''}`}

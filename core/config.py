@@ -28,6 +28,7 @@ class AppConfig:
     checkpoints_db: str
     memory_file: str
     conversation_history_dir: str
+    artifacts_dir: Path
     piper_voice: str
     whisper_model: str
 
@@ -35,6 +36,10 @@ class AppConfig:
     def from_env(cls, overrides: dict[str, Any]) -> AppConfig:
         work_dir = Path(
             overrides.get("work_dir") or os.environ.get("WORK_DIR", str(Path.home() / ".jarvis"))
+        ).resolve()
+        artifacts_dir = Path(
+            overrides.get("artifacts_dir")
+            or os.environ.get("ARTIFACTS_DIR", str(work_dir / "artifacts"))
         ).resolve()
         return cls(
             work_dir=work_dir,
@@ -47,6 +52,7 @@ class AppConfig:
                 or os.environ.get("MEMORY_FILE", "memory/AGENTS.md"),
             conversation_history_dir=overrides.get("conversation_history_dir")
                 or os.environ.get("CONVERSATION_HISTORY_DIR", "conversation_history"),
+            artifacts_dir=artifacts_dir,
             piper_voice=overrides.get("piper_voice")
                 or os.environ.get("PIPER_VOICE", "voices/en_US-hfc_female-medium.onnx"),
             whisper_model=overrides.get("whisper_model")

@@ -206,6 +206,29 @@ export interface WorkflowRun {
   finished_at: string | null;
 }
 
+// ── Artifacts ─────────────────────────────────────────────────────────────────
+
+export interface Artifact {
+  id: string;
+  title: string;
+  kind: string;
+  conversation_id: string | null;
+  message_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArtifactDetail extends Artifact {
+  content: string;
+}
+
+export interface ArtifactRef {
+  id: string;
+  title: string;
+  action: 'created' | 'updated';
+  preview?: string;
+}
+
 export type NodeExecStatus = 'pending' | 'running' | 'done' | 'error';
 
 export interface NodeStatus {

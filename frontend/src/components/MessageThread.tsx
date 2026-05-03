@@ -1,3 +1,4 @@
+import type {SafetyBlock} from '../hooks/useStream';
 import type {Message, Step} from '../lib/types';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
 
@@ -8,6 +9,7 @@ interface Props {
   streamingSteps?: Step[];
   isStreaming?: boolean;
   streamError?: string;
+  streamSafetyBlock?: SafetyBlock | null;
   bottomRef: React.RefObject<HTMLDivElement | null>;
   onShowSteps?: (steps: Step[]) => void;
 }
@@ -19,6 +21,7 @@ export function MessageThread({
   streamingSteps,
   isStreaming,
   streamError,
+  streamSafetyBlock,
   bottomRef,
   onShowSteps,
 }: Props) {
@@ -32,6 +35,7 @@ export function MessageThread({
           text={streamingText ?? ''}
           thinkingText={streamingThinkingText ?? ''}
           steps={streamingSteps ?? []}
+          safetyBlock={streamSafetyBlock ?? null}
           onShowSteps={onShowSteps}
         />
       )}

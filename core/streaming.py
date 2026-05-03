@@ -33,31 +33,18 @@ STREAM_MODES: Sequence[StreamMode] = ["updates", "messages", "custom"]
 
 # ── Step data extraction ─────────────────────────────────────────────────────
 
-# Subagent names the UI labels by name. Duplicated here instead of imported
-# from agents.py because this is a purely presentational concern — the server
-# just needs to know which tokens in the LangGraph subgraph namespace are
-# friendly names vs. opaque checkpoint ids.
-_KNOWN_SUBAGENTS = frozenset({
-    "web_researcher", "researcher", "coder", "financial_analyst", "writer",
-})
-
 
 def _subagent_name_from_ns(ns: tuple[str, ...] | None) -> str | None:
-    """Pull a friendly subagent name out of a LangGraph subgraph namespace.
+    """Pull a label out of a LangGraph subgraph namespace.
 
-    `ns` looks like `('task:researcher:abc123',)` or `('task:coder',)` —
-    the task tool dispatches subagents and encodes their name into the
-    namespace. We split on `:`, match against the known subagent names,
-    and fall back to the first colon-segment so the UI still has
-    something to show if the naming scheme ever drifts.
+    `ns` looks like `('worker:abc123',)` or `('task:something',)`. We use
+    the first colon-segment as the label so the UI has something to show
+    next to streamed events; the agent currently only spawns generic
+    workers, so there are no specialised subagent names to recognise.
     """
     if not ns:
         return None
-    first = ns[0]
-    for token in first.split(":"):
-        if token in _KNOWN_SUBAGENTS:
-            return token
-    return first.split(":", 1)[0] or None
+    return ns[0].split(":", 1)[0] or None
 
 
 def _extract_step_data(node_name: str, node_data: dict) -> str:
@@ -326,6 +313,11 @@ async def _process_chunk(
             result = data.get("result", "")
             text = f"\n**[Worker {idx}]** {task}\n{result}\n"
             state.events.append({"event": "token", "data": json.dumps({"text": text, "source": "worker"})})
+            _notify(state)
+        elif event_type == "artifact":
+            coalescer.flush_all()
+            payload = {k: v for k, v in data.items() if k != "type"}
+            state.events.append({"event": "artifact", "data": json.dumps(payload)})
             _notify(state)
         elif event_type in ("safety_review_start", "safety_review_passed", "safety_review_blocked"):
             # Surface the judge's activity as a step so the UI sidebar shows it

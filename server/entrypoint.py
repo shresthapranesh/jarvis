@@ -18,10 +18,12 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import get_config
 from core.log_setup import setup_logging
+from core.safety import configure_judge_model
 
 from core import state
 from db import async_session, init_db
-from db.ops import list_enabled_scheduled_automations
+from db.ops import get_setting, list_enabled_scheduled_automations
+from .routes_artifacts import router as artifacts_router
 from .routes_automations import router as automations_router
 from .routes_chat import router as chat_router
 from .routes_live import router as live_router
@@ -42,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     _scheduler.start()
     async with async_session() as session:
+        configure_judge_model(await get_setting(session, "safety.judge_model"))
         automations = await list_enabled_scheduled_automations(session)
         for auto in automations:
             _register_scheduler_job(auto)
@@ -102,6 +105,7 @@ app.include_router(automations_router)
 app.include_router(live_router)
 app.include_router(memory_router)
 app.include_router(workflows_router)
+app.include_router(artifacts_router)
 
 
 # ── SPA fallback — must be last ──────────────────────────────────────────────

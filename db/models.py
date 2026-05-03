@@ -124,6 +124,29 @@ class ConfigSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+# ── Artifacts ──────────────────────────────────────────────────────────────────
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, default="markdown")
+
+    conversation_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("conversations.id"), nullable=True, index=True
+    )
+    message_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("messages.id"), nullable=True, index=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 # ── Workflow models ────────────────────────────────────────────────────────────
 
 class Workflow(Base):

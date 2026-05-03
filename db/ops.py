@@ -9,7 +9,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import Automation, AutomationRun, ConfigSetting, Conversation, Message, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Message, Step, Workflow, WorkflowRun
 
 
 async def create_conversation(session: AsyncSession, model: str, title: str | None) -> Conversation:
@@ -485,6 +485,65 @@ async def get_default_model(session: AsyncSession) -> str:
     from core.model_catalog import DEFAULT_MODEL as _CATALOG_DEFAULT
     value = await get_setting(session, "default.model")
     return value if value else _CATALOG_DEFAULT
+
+
+# ── Artifact CRUD ─────────────────────────────────────────────────────────────
+
+async def create_artifact(
+    session: AsyncSession,
+    title: str,
+    filename: str,
+    kind: str = "markdown",
+    conversation_id: str | None = None,
+    message_id: str | None = None,
+) -> Artifact:
+    art = Artifact(
+        id=str(uuid4()),
+        title=title,
+        filename=filename,
+        kind=kind,
+        conversation_id=conversation_id,
+        message_id=message_id,
+    )
+    session.add(art)
+    await session.commit()
+    return art
+
+
+async def get_artifact(session: AsyncSession, artifact_id: str) -> Artifact | None:
+    return await session.get(Artifact, artifact_id)
+
+
+async def list_artifacts(
+    session: AsyncSession, conversation_id: str | None = None
+) -> list[Artifact]:
+    q = select(Artifact).order_by(Artifact.updated_at.desc())
+    if conversation_id is not None:
+        q = q.where(Artifact.conversation_id == conversation_id)
+    result = await session.execute(q)
+    return list(result.scalars().all())
+
+
+async def update_artifact(
+    session: AsyncSession, artifact_id: str, **kwargs: Any
+) -> Artifact | None:
+    art = await session.get(Artifact, artifact_id)
+    if art is None:
+        return None
+    for key, value in kwargs.items():
+        setattr(art, key, value)
+    art.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return art
+
+
+async def delete_artifact(session: AsyncSession, artifact_id: str) -> bool:
+    art = await session.get(Artifact, artifact_id)
+    if art is None:
+        return False
+    await session.delete(art)
+    await session.commit()
+    return True
 
 
 async def append_node_result(

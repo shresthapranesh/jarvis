@@ -1,25 +1,44 @@
-"""Dynamic parallel worker spawning."""
+"""Dynamic parallel worker spawning with role-typed worker pool.
+
+The parent agent calls `spawn_workers` to fan out independent subtasks. Each
+task can request a `role` — `researcher`, `coder`, `writer`, or `general`
+(the default for back-compat) — and gets a worker built with a role-specific
+prompt and tool subset. All workers run concurrently via `asyncio.gather`.
+
+Factories are registered by `core/agents.py` at agent-build time via
+`register_role_factory`. The legacy `set_worker_factory` entry point is kept
+as a back-compat shim that registers under `"general"`.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
-# Injected by build_agent at startup — avoids circular imports.
-_worker_factory: Any = None
+# Registry — populated by core/agents.py during build_agent. Keyed by role
+# name; value is a zero-arg callable returning a fresh compiled worker graph.
+_role_factories: dict[str, Callable[[], Any]] = {}
+
+DEFAULT_ROLE = "general"
 
 
-def set_worker_factory(factory) -> None:
-    """Register the callable that creates a fresh worker agent.
-    Called once from core/agents.py after the agent builder is defined."""
-    global _worker_factory
-    _worker_factory = factory
+def register_role_factory(role: str, factory: Callable[[], Any]) -> None:
+    """Register a worker-graph factory under a role name."""
+    _role_factories[role] = factory
+
+
+def set_worker_factory(factory: Callable[[], Any]) -> None:
+    """Back-compat shim — registers under the default role.
+
+    Older callers that only know about a single worker type still work.
+    """
+    register_role_factory(DEFAULT_ROLE, factory)
 
 
 @tool
@@ -29,29 +48,44 @@ async def spawn_workers(tasks: list[dict]) -> str:
     Each task is a dict with:
       "task":    (required) natural-language description of what to do
       "context": (optional) extra background the worker should know
+      "role":    (optional) one of "researcher", "coder", "writer", "general"
+                 — defaults to "general"
 
-    Workers run in parallel with asyncio and return when all complete.
-    Each worker has access to execute(), read_file(), write_file(), list_files().
+    Roles tune the worker's prompt and tool subset:
+      - researcher → execute() + read_file. Best for finding/verifying facts.
+      - coder      → full toolset. Best for writing/editing code.
+      - writer     → read_file + write_file (no execute). Best for prose.
+      - general    → full toolset, generic prompt. Fallback.
 
-    Use this when you have independent subtasks that benefit from parallelism:
-      - Researching multiple topics simultaneously
-      - Processing multiple files at once
-      - Running separate analyses on different data sets
+    Workers run in parallel and return when all complete.
 
     Example:
       spawn_workers([
-        {"task": "Find the latest GDP data for the US"},
-        {"task": "Find the latest GDP data for China"},
-        {"task": "Find the latest GDP data for the EU"},
+        {"role": "researcher", "task": "Find current US/China/EU GDP"},
+        {"role": "researcher", "task": "Find current US/China/EU population"},
+        {"role": "writer", "task": "Draft a one-paragraph comparison"},
       ])
     """
-    if _worker_factory is None:
-        return "Error: worker factory not initialized"
+    if not _role_factories:
+        return "Error: no worker roles registered"
 
-    async def run_one(spec: dict, idx: int) -> tuple[int, str, str | Exception]:
+    async def run_one(spec: dict, idx: int) -> tuple[int, str, str, str | Exception]:
         label = spec.get("task", "")[:80]
+        role = spec.get("role") or DEFAULT_ROLE
+        factory = _role_factories.get(role)
+        if factory is None:
+            available = ", ".join(sorted(_role_factories))
+            err = f"Unknown role '{role}' (available: {available})"
+            await adispatch_custom_event("worker_done", {
+                "type": "worker_done",
+                "idx": idx,
+                "role": role,
+                "task": label,
+                "result": f"ERROR: {err}",
+            })
+            return idx, role, label, err
         try:
-            worker = _worker_factory()
+            worker = factory()
             prompt = spec["task"]
             if ctx := spec.get("context"):
                 prompt = f"Context: {ctx}\n\nTask: {prompt}"
@@ -65,32 +99,35 @@ async def spawn_workers(tasks: list[dict]) -> str:
                 config={"callbacks": [AgentLogger()], "recursion_limit": 50},
             )
             answer = result["messages"][-1].content
-            logger.info("worker %d done (%d chars): %s", idx, len(answer), label)
+            logger.info("worker %d (%s) done (%d chars): %s", idx, role, len(answer), label)
             await adispatch_custom_event("worker_done", {
                 "type": "worker_done",
                 "idx": idx,
+                "role": role,
                 "task": label,
                 "result": answer,
             })
-            return idx, label, answer
+            return idx, role, label, answer
         except Exception as exc:
-            logger.warning("worker %d failed: %s — %s", idx, label, exc)
+            logger.warning("worker %d (%s) failed: %s — %s", idx, role, label, exc)
             await adispatch_custom_event("worker_done", {
                 "type": "worker_done",
                 "idx": idx,
+                "role": role,
                 "task": label,
                 "result": f"ERROR: {exc}",
             })
-            return idx, label, exc
+            return idx, role, label, exc
 
     jobs = [run_one(spec, i) for i, spec in enumerate(tasks, 1)]
     outcomes = await asyncio.gather(*jobs)
 
     parts: list[str] = []
-    for _, label, result in sorted(outcomes, key=lambda x: x[0]):
+    for _, role, label, result in sorted(outcomes, key=lambda x: x[0]):
+        prefix = f"Task ({role}): {label}"
         if isinstance(result, Exception):
-            parts.append(f"Task: {label}\nERROR: {result}")
+            parts.append(f"{prefix}\nERROR: {result}")
         else:
-            parts.append(f"Task: {label}\n{result}")
+            parts.append(f"{prefix}\n{result}")
 
     return "\n\n---\n\n".join(parts)

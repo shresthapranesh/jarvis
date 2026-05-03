@@ -3,6 +3,7 @@ import {createFileRoute} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 
 import {ActivitySidebar} from '../components/ActivitySidebar';
+import {ArtifactPanel} from '../components/ArtifactPanel';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
@@ -28,7 +29,7 @@ function ConversationPage() {
 
   // Find a running task in the loaded messages (handles reconnect automatically)
   const runningMsg = conv.messages.find((m) => m.role === 'assistant' && m.status === 'running');
-  const {streaming, text, thinkingText, steps, error, pendingInterrupt} = useStream(runningMsg?.id ?? null, id);
+  const {streaming, text, thinkingText, steps, artifacts, error, pendingInterrupt, safetyBlock} = useStream(runningMsg?.id ?? null, id);
 
   const queryClient = useQueryClient();
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
@@ -37,6 +38,17 @@ function ConversationPage() {
   // Right panel state
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelSteps, setPanelSteps] = useState<Step[]>([]);
+  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+
+  // Auto-open artifact panel when the agent produces a new artifact mid-stream.
+  useEffect(() => {
+    if (artifacts.length > 0) {
+      const latest = artifacts[artifacts.length - 1];
+      setSelectedArtifactId(latest.id);
+      setArtifactPanelOpen(true);
+    }
+  }, [artifacts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep panel steps current while streaming (only if panel is already open)
   useEffect(() => {
@@ -103,6 +115,7 @@ function ConversationPage() {
         streamingSteps={isActive ? steps : undefined}
         isStreaming={isActive}
         streamError={error ?? undefined}
+        streamSafetyBlock={isActive ? safetyBlock : null}
         bottomRef={bottomRef}
         onShowSteps={handleShowSteps}
       />
@@ -112,6 +125,28 @@ function ConversationPage() {
           isLive={isActive}
           onClose={() => setPanelOpen(false)}
         />
+      )}
+      {artifactPanelOpen && (
+        <ArtifactPanel
+          conversationId={id}
+          selectedId={selectedArtifactId}
+          onSelect={setSelectedArtifactId}
+          onClose={() => setArtifactPanelOpen(false)}
+        />
+      )}
+      {!artifactPanelOpen && artifacts.length > 0 && (
+        <button
+          className="artifact-fab"
+          onClick={() => setArtifactPanelOpen(true)}
+          type="button"
+          title="Show artifacts"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+          {artifacts.length} artifact{artifacts.length !== 1 ? 's' : ''}
+        </button>
       )}
       <footer className="page-footer">
         {pendingInterrupt && runningMsg && (

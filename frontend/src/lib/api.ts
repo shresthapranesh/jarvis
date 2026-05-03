@@ -1,4 +1,6 @@
 import type {
+  Artifact,
+  ArtifactDetail,
   Automation,
   AutomationRun,
   Conversation,
@@ -211,6 +213,44 @@ export async function getWorkflowRun(runId: string): Promise<WorkflowRun> {
   const res = await fetch(`/workflow-runs/${runId}`);
   if (!res.ok) throw new Error(`Failed to fetch workflow run: ${res.status}`);
   return res.json();
+}
+
+// ── Artifacts ────────────────────────────────────────────────────────────────
+
+export async function listArtifacts(conversationId?: string | null): Promise<Artifact[]> {
+  const url = conversationId
+    ? `/artifacts?conversation_id=${encodeURIComponent(conversationId)}`
+    : '/artifacts';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch artifacts: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchArtifact(id: string): Promise<ArtifactDetail> {
+  const res = await fetch(`/artifacts/${id}`);
+  if (!res.ok) throw new Error(`Failed to fetch artifact: ${res.status}`);
+  return res.json();
+}
+
+export async function updateArtifact(
+  id: string,
+  body: {title?: string; content?: string},
+): Promise<void> {
+  const res = await fetch(`/artifacts/${id}`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to update artifact: ${res.status}`);
+}
+
+export async function deleteArtifact(id: string): Promise<void> {
+  const res = await fetch(`/artifacts/${id}`, {method: 'DELETE'});
+  if (!res.ok) throw new Error(`Failed to delete artifact: ${res.status}`);
+}
+
+export function artifactDownloadUrl(id: string): string {
+  return `/artifacts/${id}/raw`;
 }
 
 export function formatRelativeTime(isoString: string): string {

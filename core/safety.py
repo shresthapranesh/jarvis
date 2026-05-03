@@ -27,10 +27,14 @@ The `tool` field on each event distinguishes layer (`"execute"`,
 
 from __future__ import annotations
 
+import ast as _ast
+import hashlib
 import logging
+from collections import OrderedDict
 from typing import Annotated, Any, Literal, cast
 
-from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import InjectedToolArg, tool
 from langgraph.config import get_stream_writer
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
@@ -38,6 +42,7 @@ from pydantic import BaseModel, Field
 
 from .model_catalog import AVAILABLE_MODELS
 
+from tools.artifacts import write_artifact as _write_artifact_tool
 from tools.execute import execute as _execute_tool
 from tools.files import write_file as _write_file_tool
 
@@ -90,17 +95,38 @@ Reason: one short sentence the agent will read and act on. Be concrete \
 
 _judge_cache: dict[str, object] = {}
 
+# Process-wide override. When set (typically from server lifespan reading
+# the `safety.judge_model` config row), every layer uses this model for
+# the judge regardless of which model the agent itself is running.
+# Default `None` means "use the agent's own model" (the v1 behaviour).
+_judge_model_override: str | None = None
+
+
+def configure_judge_model(model_id: str | None) -> None:
+    """Override the judge model used by all safety layers.
+
+    Pass ``None`` to fall back to the agent's own model.
+    Called once from the server lifespan after reading the config row.
+    """
+    global _judge_model_override
+    _judge_model_override = model_id or None
+
+
+def _effective_model(default: str) -> str:
+    return _judge_model_override or default
+
 
 def _get_judge(model_id: str):
-    cached = _judge_cache.get(model_id)
+    resolved = _effective_model(model_id)
+    cached = _judge_cache.get(resolved)
     if cached is not None:
         return cached
-    spec = next((m for m in AVAILABLE_MODELS if m.id == model_id), None)
+    spec = next((m for m in AVAILABLE_MODELS if m.id == resolved), None)
     if spec is None:
-        raise ValueError(f"Unknown safety judge model '{model_id}'")
+        raise ValueError(f"Unknown safety judge model '{resolved}'")
     llm = spec.build_llm()
     judge = llm.with_structured_output(SafetyVerdict)
-    _judge_cache[model_id] = judge
+    _judge_cache[resolved] = judge
     return judge
 
 
@@ -108,6 +134,84 @@ def _truncate(text: str, limit: int = 4000) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n... [truncated {len(text) - limit} chars]"
+
+
+# ── AST fast-path for execute() ──────────────────────────────────────────────
+
+# Modules whose presence forces an LLM judge call. Anything not on this list
+# (math, statistics, json, re, hashlib, datetime, itertools, functools,
+# collections, decimal, fractions, uuid, dataclasses, enum, typing, pandas,
+# numpy, scipy, …) is considered pure compute and auto-allowed.
+_AST_DENIED_MODULES = frozenset({
+    "os", "subprocess", "socket", "shutil", "pathlib", "tempfile",
+    "ctypes", "mmap", "fcntl", "pwd", "grp", "resource", "signal",
+    "multiprocessing", "threading",
+    "smtplib", "ftplib", "telnetlib", "paramiko", "ssl", "http",
+    "urllib", "urllib3", "requests", "httpx", "aiohttp", "websockets",
+    "pickle", "marshal", "shelve", "dbm",
+    "yfinance", "playwright", "selenium",
+})
+
+# Built-ins that escape static analysis and must always be reviewed.
+_AST_DENIED_BUILTINS = frozenset({
+    "open", "eval", "exec", "compile", "__import__", "input",
+})
+
+
+def _ast_quickcheck(code: str) -> str | None:
+    """Return None when the code is clearly safe, else a short reason string.
+
+    Conservative: anything we can't classify (parse error, dunder access,
+    denied import, denied builtin call) returns a reason and forces the
+    LLM judge. The fast-path only catches obvious pure-compute cases.
+    """
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError:
+        return "syntax error"
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Import):
+            for alias in node.names:
+                root = alias.name.partition(".")[0]
+                if root in _AST_DENIED_MODULES:
+                    return f"imports {root}"
+        elif isinstance(node, _ast.ImportFrom):
+            root = (node.module or "").partition(".")[0]
+            if root in _AST_DENIED_MODULES:
+                return f"imports from {root}"
+        elif isinstance(node, _ast.Call):
+            func = node.func
+            if isinstance(func, _ast.Name) and func.id in _AST_DENIED_BUILTINS:
+                return f"calls {func.id}()"
+        elif isinstance(node, _ast.Attribute):
+            # Dunder attribute access (`obj.__class__.__bases__`, etc.) is a
+            # classic Python sandbox-escape pattern.
+            if node.attr.startswith("__") and node.attr.endswith("__"):
+                return f"accesses {node.attr}"
+    return None
+
+
+_VERDICT_CACHE_MAX = 512
+_verdict_cache: "OrderedDict[tuple[str, str, str], SafetyVerdict]" = OrderedDict()
+
+
+def _cache_key(layer: str, judge_model: str, payload: str) -> tuple[str, str, str]:
+    digest = hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return (layer, _effective_model(judge_model), digest)
+
+
+def _cache_get(key: tuple[str, str, str]) -> SafetyVerdict | None:
+    verdict = _verdict_cache.get(key)
+    if verdict is not None:
+        _verdict_cache.move_to_end(key)
+    return verdict
+
+
+def _cache_put(key: tuple[str, str, str], verdict: SafetyVerdict) -> None:
+    _verdict_cache[key] = verdict
+    _verdict_cache.move_to_end(key)
+    while len(_verdict_cache) > _VERDICT_CACHE_MAX:
+        _verdict_cache.popitem(last=False)
 
 
 async def _judge_text(
@@ -122,19 +226,30 @@ async def _judge_text(
 
     Shared plumbing for the per-call review and the input/output gates.
     `layer` is just for logging — "execute"/"write_file"/"input"/"output".
-    Fail-open by default on judge errors.
+    Fail-open by default on judge errors. Identical (layer, model, payload)
+    triples reuse a cached verdict to skip the LLM call entirely.
     """
+    key = _cache_key(layer, judge_model, user_prompt)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
     judge = _get_judge(judge_model)
     try:
-        verdict = await cast(Any, judge).ainvoke([
+        verdict_obj = await cast(Any, judge).ainvoke([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ])
-        if isinstance(verdict, SafetyVerdict):
-            return verdict
-        return SafetyVerdict.model_validate(verdict)
+        verdict = (
+            verdict_obj if isinstance(verdict_obj, SafetyVerdict)
+            else SafetyVerdict.model_validate(verdict_obj)
+        )
+        _cache_put(key, verdict)
+        return verdict
     except Exception as exc:
         logger.warning("safety judge failed for %s (%s) — fail-mode=%s", layer, exc, fail_mode)
+        # Don't cache fail-open/closed verdicts: the judge may recover and
+        # we don't want to lock in a fallback decision for the rest of the
+        # process lifetime.
         if fail_mode == "closed":
             return SafetyVerdict(
                 block=True,
@@ -186,15 +301,56 @@ def make_safe_execute(judge_model: str, fail_mode: str = "open"):
     @tool("execute", description=_execute_tool.description)
     async def safe_execute(code: str) -> str:
         _emit("safety_review_start", tool="execute", preview=_truncate(code, 200))
+        ast_reason = _ast_quickcheck(code)
+        if ast_reason is None:
+            _emit("safety_review_passed", tool="execute", via="ast")
+            return await cast(Any, _execute_tool).coroutine(code=code)
         verdict = await _review("execute", f"code:\n{code}", judge_model, fail_mode)
         if verdict.block:
             _emit("safety_review_blocked", tool="execute", severity=verdict.severity, reason=verdict.reason)
-            logger.info("execute blocked by safety judge: %s", verdict.reason)
+            logger.info("execute blocked by safety judge: %s (ast: %s)", verdict.reason, ast_reason)
             return _blocked_message("execute", verdict)
-        _emit("safety_review_passed", tool="execute")
+        _emit("safety_review_passed", tool="execute", via="llm")
         return await cast(Any, _execute_tool).coroutine(code=code)
 
     return safe_execute
+
+
+def make_safe_write_artifact(judge_model: str, fail_mode: str = "open"):
+    """Build a wrapped `write_artifact` tool that runs the judge first.
+
+    Artifacts go to a managed directory (``AppConfig.artifacts_dir``), so path
+    traversal isn't a concern — but the *content* may still contain leaked
+    credentials or harmful instructions. The judge sees the title and body and
+    can block before anything hits disk or the side panel.
+    """
+
+    @tool("write_artifact", description=_write_artifact_tool.description)
+    async def safe_write_artifact(
+        title: str,
+        content: str,
+        artifact_id: str | None = None,
+        config: Annotated[RunnableConfig | None, InjectedToolArg] = None,
+    ) -> str:
+        payload = f"title: {title}\n\ncontent:\n{content}"
+        _emit("safety_review_start", tool="write_artifact", preview=_truncate(title, 200))
+        verdict = await _review("write_artifact", payload, judge_model, fail_mode)
+        if verdict.block:
+            _emit(
+                "safety_review_blocked",
+                tool="write_artifact",
+                severity=verdict.severity,
+                reason=verdict.reason,
+                title=title,
+            )
+            logger.info("write_artifact blocked by safety judge: %s (%s)", verdict.reason, title)
+            return _blocked_message("write_artifact", verdict)
+        _emit("safety_review_passed", tool="write_artifact", title=title)
+        return await cast(Any, _write_artifact_tool).coroutine(
+            title=title, content=content, artifact_id=artifact_id, config=config,
+        )
+
+    return safe_write_artifact
 
 
 def make_safe_write_file(judge_model: str, fail_mode: str = "open"):

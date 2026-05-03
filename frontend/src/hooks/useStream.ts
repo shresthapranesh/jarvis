@@ -1,12 +1,18 @@
 import {useQueryClient} from '@tanstack/react-query';
 import {useEffect, useRef, useState} from 'react';
 
-import type {Step} from '../lib/types';
+import type {ArtifactRef, Step} from '../lib/types';
 
 export interface BrowserStep {
   thought: unknown;
   actions: unknown[];
   at: string;
+}
+
+export interface SafetyBlock {
+  layer: 'input' | 'output';
+  severity?: 'low' | 'medium' | 'high';
+  reason?: string;
 }
 
 interface StreamState {
@@ -15,8 +21,10 @@ interface StreamState {
   thinkingText: string;
   steps: Step[];
   browserSteps: BrowserStep[];
+  artifacts: ArtifactRef[];
   error: string | null;
   pendingInterrupt: {id: string; question: string} | null;
+  safetyBlock: SafetyBlock | null;
 }
 
 export function useStream(taskId: string | null, conversationId: string | null) {
@@ -28,8 +36,10 @@ export function useStream(taskId: string | null, conversationId: string | null) 
     thinkingText: '',
     steps: [],
     browserSteps: [],
+    artifacts: [],
     error: null,
     pendingInterrupt: null,
+    safetyBlock: null,
   });
 
   useEffect(() => {
@@ -45,8 +55,10 @@ export function useStream(taskId: string | null, conversationId: string | null) 
       thinkingText: '',
       steps: [],
       browserSteps: [],
+      artifacts: [],
       error: null,
       pendingInterrupt: null,
+      safetyBlock: null,
     });
 
     let seqCounter = 0;
@@ -101,6 +113,17 @@ export function useStream(taskId: string | null, conversationId: string | null) 
                 created_at: new Date().toISOString(),
               };
               setState((s) => ({...s, steps: [...s.steps, step]}));
+            } else if (eventType === 'artifact') {
+              const ref: ArtifactRef = {
+                id: parsed['id'] as string,
+                title: parsed['title'] as string,
+                action: (parsed['action'] as 'created' | 'updated') ?? 'created',
+                preview: parsed['preview'] as string | undefined,
+              };
+              setState((s) => {
+                const others = s.artifacts.filter((a) => a.id !== ref.id);
+                return {...s, artifacts: [...others, ref]};
+              });
             } else if (eventType === 'browser_step') {
               const browserStep: BrowserStep = {
                 thought: parsed['thought'],
@@ -122,11 +145,28 @@ export function useStream(taskId: string | null, conversationId: string | null) 
                   ? {...s, pendingInterrupt: null}
                   : s,
               );
+            } else if (eventType === 'safety_input_blocked') {
+              setState((s) => ({
+                ...s,
+                safetyBlock: {layer: 'input'},
+                text: (parsed['message'] as string) ?? s.text,
+              }));
+            } else if (eventType === 'safety_output_blocked') {
+              setState((s) => ({
+                ...s,
+                safetyBlock: {
+                  layer: 'output',
+                  severity: parsed['severity'] as SafetyBlock['severity'],
+                  reason: parsed['reason'] as string,
+                },
+                text: (parsed['redacted_message'] as string) ?? s.text,
+              }));
             } else if (eventType === 'done' || eventType === 'stopped') {
               setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null}));
               await queryClient.invalidateQueries({queryKey: ['conversations']});
               if (conversationId) {
                 await queryClient.invalidateQueries({queryKey: ['conversation', conversationId]});
+                await queryClient.invalidateQueries({queryKey: ['artifacts', conversationId]});
               }
             } else if (eventType === 'error') {
               setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null, error: parsed['error'] as string}));

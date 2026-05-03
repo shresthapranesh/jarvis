@@ -18,6 +18,7 @@ export default defineConfig({
       '/transcribe': 'http://localhost:8000',
       '/workflows': 'http://localhost:8000',
       '/workflow-runs': 'http://localhost:8000',
+      '/artifacts': 'http://localhost:8000',
     },
   },
   build: {
