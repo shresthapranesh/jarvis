@@ -219,13 +219,13 @@ export async function getWorkflowRun(runId: string): Promise<WorkflowRun> {
 // ── Tasks (global running tasks) ─────────────────────────────────────────────
 
 export async function listRunningTasks(): Promise<RunningTask[]> {
-  const res = await fetch('/tasks');
+  const res = await fetch('/task-runs');
   if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
   return res.json();
 }
 
 export async function stopRunningTask(id: string): Promise<void> {
-  const res = await fetch(`/tasks/${id}/stop`, {method: 'POST'});
+  const res = await fetch(`/task-runs/${id}/stop`, {method: 'POST'});
   if (!res.ok) throw new Error(`Failed to stop task: ${res.status}`);
 }
 

@@ -17,7 +17,7 @@ from core.state import _background_tasks, _tasks
 router = APIRouter()
 
 
-@router.get("/tasks")
+@router.get("/task-runs")
 async def list_running_tasks() -> JSONResponse:
     """Return all currently-tracked tasks. Sorted newest-first."""
     rows = [
@@ -37,7 +37,7 @@ async def list_running_tasks() -> JSONResponse:
     return JSONResponse(rows)
 
 
-@router.post("/tasks/{task_id}/stop")
+@router.post("/task-runs/{task_id}/stop")
 async def stop_running_task(task_id: str) -> JSONResponse:
     """Cooperatively cancel a task regardless of its kind.
 

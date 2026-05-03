@@ -12,7 +12,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
@@ -122,4 +122,3 @@ if _DIST.exists():
             return FileResponse(str(file))
         return FileResponse(str(_INDEX))
 
-    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="ui")
