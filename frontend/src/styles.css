@@ -4651,3 +4651,173 @@ body {
 .artifact-fab:hover {
   filter: brightness(1.1);
 }
+
+/* ── Tasks page ── */
+.tasks-page {
+  padding: 32px 40px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.tasks-header {
+  margin-bottom: 24px;
+}
+.tasks-header h1 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--text);
+}
+.tasks-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  max-width: 540px;
+  line-height: 1.5;
+}
+
+.tasks-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.tasks-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 6px 4px 12px;
+  transition: background 0.12s, border-color 0.12s;
+}
+.task-row:hover {
+  background: var(--surface2);
+}
+
+.task-row-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 0.88rem;
+  text-align: left;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.task-row-main:disabled {
+  cursor: default;
+}
+
+.task-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.task-kind-badge--chat {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.task-kind-badge--automation {
+  background: rgba(251, 191, 119, 0.15);
+  color: var(--warning-text);
+}
+.task-kind-badge--workflow {
+  background: var(--webhook-bg);
+  color: var(--webhook-text);
+}
+
+.task-label {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.task-elapsed {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.task-flag {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.task-flag--interrupt {
+  background: rgba(96, 165, 250, 0.18);
+  color: var(--accent);
+}
+.task-flag--cancelling {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.task-stop-btn {
+  font-size: 0.78rem;
+  padding: 6px 14px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 6px;
+  color: var(--error-text);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: filter 0.12s;
+}
+.task-stop-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+.task-stop-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Nav badge (count chip on sidebar links) ── */
+.nav-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--accent);
+  color: #06121f;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.nav-badge--compact {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 14px;
+  height: 14px;
+  font-size: 0.6rem;
+  padding: 0 3px;
+}

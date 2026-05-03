@@ -203,7 +203,11 @@ async def run_agent(
     await add_message(session, conv.id, "user", display_content)
     task_msg = await add_message(session, conv.id, "assistant", "", model=request.model, status="running")
 
-    _tasks[task_msg.id] = TaskState()
+    _tasks[task_msg.id] = TaskState(
+        kind="chat",
+        label=conv.title or request.query[:60],
+        parent_id=conv.id,
+    )
 
     def _task_done(t: asyncio.Task, task_id: str) -> None:
         _background_tasks.pop(task_id, None)

@@ -229,6 +229,21 @@ export interface ArtifactRef {
   preview?: string;
 }
 
+// ── Running tasks (global registry) ──────────────────────────────────────────
+
+export type TaskKind = 'chat' | 'automation' | 'workflow';
+
+export interface RunningTask {
+  id: string;
+  kind: TaskKind;
+  label: string;
+  parent_id: string | null;
+  started_at: string;
+  has_interrupt: boolean;
+  cancelled: boolean;
+  done: boolean;
+}
+
 export type NodeExecStatus = 'pending' | 'running' | 'done' | 'error';
 
 export interface NodeStatus {

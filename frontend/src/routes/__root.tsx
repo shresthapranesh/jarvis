@@ -3,7 +3,7 @@ import {createRootRouteWithContext, Link, Outlet, useNavigate} from '@tanstack/r
 import {useCallback, useEffect, useState} from 'react';
 
 import {ConversationList} from '../components/ConversationList';
-import {checkHealth} from '../lib/api';
+import {checkHealth, listRunningTasks} from '../lib/api';
 import {ToastProvider} from '../lib/toast';
 
 interface RouterContext {
@@ -19,6 +19,14 @@ function RootLayout() {
   });
 
   const healthy = data?.status === 'ok';
+
+  const {data: runningTasks} = useQuery({
+    queryKey: ['running-tasks'],
+    queryFn: listRunningTasks,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: false,
+  });
+  const runningCount = runningTasks?.length ?? 0;
 
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem('nav-collapsed') === 'true',
@@ -149,6 +157,32 @@ function RootLayout() {
               <line x1="18" y1="9" x2="12" y2="15" />
             </svg>
             {!navCollapsed && <span>Workflows</span>}
+          </Link>
+          <Link
+            to="/tasks"
+            className="nav-link"
+            activeProps={{className: 'nav-link active'}}
+            title="Tasks"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <polyline points="12 7 12 12 15 14" />
+            </svg>
+            {!navCollapsed && <span>Tasks</span>}
+            {runningCount > 0 && (
+              <span className={`nav-badge${navCollapsed ? ' nav-badge--compact' : ''}`}>
+                {runningCount}
+              </span>
+            )}
           </Link>
         </div>
         {!navCollapsed && <ConversationList />}

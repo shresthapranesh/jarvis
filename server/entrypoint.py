@@ -29,6 +29,7 @@ from .routes_chat import router as chat_router
 from .routes_live import router as live_router
 from .routes_media import router as media_router
 from .routes_memory import router as memory_router
+from .routes_tasks import router as tasks_router
 from .routes_workflows import router as workflows_router
 from core.scheduler import _register_scheduler_job, _scheduler, register_memory_consolidation_job
 
@@ -106,6 +107,7 @@ app.include_router(live_router)
 app.include_router(memory_router)
 app.include_router(workflows_router)
 app.include_router(artifacts_router)
+app.include_router(tasks_router)
 
 
 # ── SPA fallback — must be last ──────────────────────────────────────────────

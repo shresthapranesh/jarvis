@@ -130,6 +130,8 @@ async def _execute_prompt_type(
         subgraphs=True,
     ):
         chunk: StreamChunk = raw_chunk  # type: ignore[assignment]
+        if state.cancelled:
+            break
         interrupted = await _process_chunk(
             chunk, state, coalescer, accumulated, persist_steps=False,
         )
@@ -151,6 +153,7 @@ async def _execute_code_type(auto: Automation, state: TaskState) -> str:
         fname = f.name
 
     proc: asyncio.subprocess.Process | None = None
+    cancel_watcher: asyncio.Task | None = None
     try:
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -172,6 +175,20 @@ async def _execute_code_type(auto: Automation, state: TaskState) -> str:
                 _notify(state)
             await proc.wait()  # type: ignore[union-attr]
 
+        async def watch_cancel() -> None:
+            # Polling check is cheap and keeps this independent from
+            # threading.Event without requiring loop integration.
+            while not state.cancelled:
+                await asyncio.sleep(0.2)
+            if proc and proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+
+        cancel_watcher = asyncio.create_task(watch_cancel())
+
         try:
             await asyncio.wait_for(drain_and_wait(), timeout=_CODE_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
@@ -184,8 +201,13 @@ async def _execute_code_type(auto: Automation, state: TaskState) -> str:
                 f"code timed out after {_CODE_TIMEOUT_SECONDS:.0f}s and was killed"
             )
 
+        if state.cancelled:
+            raise asyncio.CancelledError()
+
         return "".join(output_lines).strip()
     finally:
+        if cancel_watcher is not None and not cancel_watcher.done():
+            cancel_watcher.cancel()
         if proc is not None and proc.returncode is None:
             try:
                 proc.kill()
@@ -236,6 +258,13 @@ async def _execute_automation_bg(
         if run_id is None:
             run = await create_automation_run(session, automation_id, triggered_by)
             run_id = run.id
+            # Scheduled path: caller didn't pre-register the TaskState; do it
+            # here so the run shows up in /tasks and stays cancellable.
+            _tasks[run_id] = TaskState(
+                kind="automation",
+                label=auto.name,
+                parent_id=automation_id,
+            )
 
     state = _tasks[run_id]
 
@@ -273,17 +302,26 @@ async def _execute_automation_bg(
         else:
             raise ValueError(f"Unknown input_type: {auto.input_type}")
 
+        if state.cancelled:
+            async with async_session() as session:
+                await finish_automation_run(session, run_id, "stopped", output, None)
+            state.events.append({"event": "stopped", "data": json.dumps({"output": output, "run_id": run_id})})
+        else:
+            async with async_session() as session:
+                await finish_automation_run(session, run_id, status, output, None)
+            state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
+
+            await send_notifications(
+                parse_notifications(auto.notifications),
+                status=notify_status,
+                title=auto.name,
+                body=output or "",
+            )
+
+    except asyncio.CancelledError:
         async with async_session() as session:
-            await finish_automation_run(session, run_id, status, output, None)
-
-        state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
-
-        await send_notifications(
-            parse_notifications(auto.notifications),
-            status=notify_status,
-            title=auto.name,
-            body=output or "",
-        )
+            await finish_automation_run(session, run_id, "stopped", None, None)
+        state.events.append({"event": "stopped", "data": json.dumps({"run_id": run_id})})
 
     except BaseException as exc:
         err_text = str(exc)
@@ -419,7 +457,11 @@ async def trigger_automation(
         return JSONResponse({"error": "not found"}, status_code=404)
 
     run = await create_automation_run(session, automation_id, "manual")
-    _tasks[run.id] = TaskState()
+    _tasks[run.id] = TaskState(
+        kind="automation",
+        label=auto.name,
+        parent_id=automation_id,
+    )
 
     def _task_done(t: asyncio.Task, run_id: str) -> None:
         _background_tasks.pop(run_id, None)
@@ -431,6 +473,24 @@ async def trigger_automation(
     t.add_done_callback(lambda _t: _task_done(_t, run.id))
 
     return JSONResponse({"run_id": run.id})
+
+
+@router.post("/automations/runs/{run_id}/stop")
+async def stop_automation_run(run_id: str) -> JSONResponse:
+    state = _tasks.get(run_id)
+    if state is None:
+        return JSONResponse({"error": "run not found or already finished"}, status_code=404)
+    if state.done:
+        return JSONResponse({"error": "run already finished"}, status_code=400)
+
+    state.cancelled = True
+    state._stop_event.set()
+
+    bg_task = _background_tasks.get(run_id)
+    if bg_task and not bg_task.done():
+        bg_task.cancel()
+
+    return JSONResponse({"ok": True, "run_id": run_id})
 
 
 @router.get("/automations/{automation_id}/runs")

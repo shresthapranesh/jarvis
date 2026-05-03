@@ -54,7 +54,7 @@ SSE events emitted:
 
 from __future__ import annotations
 
-import json
+import asyncio
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any
@@ -181,6 +181,9 @@ async def execute_workflow(
     node_records: list[dict] = []
 
     while queue:
+        if task_state.cancelled:
+            raise asyncio.CancelledError()
+
         node_id = queue.popleft()
 
         if node_id in executed:

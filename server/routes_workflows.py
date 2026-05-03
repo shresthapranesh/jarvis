@@ -104,6 +104,14 @@ async def _execute_workflow_bg(
             body=json.dumps(final_outputs, indent=2),
         )
 
+    except asyncio.CancelledError:
+        async with async_session() as session:
+            await finish_workflow_run(session, run_id, "stopped", None, None, None)
+        state.events.append({
+            "event": "workflow_stopped",
+            "data": json.dumps({"run_id": run_id}),
+        })
+
     except BaseException as exc:
         err = str(exc)
         async with async_session() as session:
@@ -208,7 +216,11 @@ async def trigger_workflow_run(
     run = await create_workflow_run(session, workflow_id, json.dumps(request.inputs))
 
     # Register TaskState BEFORE returning — prevents SSE client race condition
-    _tasks[run.id] = TaskState()
+    _tasks[run.id] = TaskState(
+        kind="workflow",
+        label=wf.name,
+        parent_id=workflow_id,
+    )
 
     def _task_done(t: asyncio.Task, run_id: str) -> None:
         _background_tasks.pop(run_id, None)
@@ -222,6 +234,24 @@ async def trigger_workflow_run(
     t.add_done_callback(lambda _t: _task_done(_t, run.id))
 
     return JSONResponse({"run_id": run.id}, status_code=202)
+
+
+@router.post("/workflow-runs/{run_id}/stop")
+async def stop_workflow_run(run_id: str) -> JSONResponse:
+    state = _tasks.get(run_id)
+    if state is None:
+        return JSONResponse({"error": "run not found or already finished"}, status_code=404)
+    if state.done:
+        return JSONResponse({"error": "run already finished"}, status_code=400)
+
+    state.cancelled = True
+    state._stop_event.set()
+
+    bg_task = _background_tasks.get(run_id)
+    if bg_task and not bg_task.done():
+        bg_task.cancel()
+
+    return JSONResponse({"ok": True, "run_id": run_id})
 
 
 @router.get("/workflows/{workflow_id}/runs")

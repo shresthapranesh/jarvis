@@ -8,6 +8,7 @@ import type {
   CreateAutomationPayload,
   MediaAttachment,
   ModelCatalog,
+  RunningTask,
   Workflow,
   WorkflowRun,
 } from './types';
@@ -213,6 +214,19 @@ export async function getWorkflowRun(runId: string): Promise<WorkflowRun> {
   const res = await fetch(`/workflow-runs/${runId}`);
   if (!res.ok) throw new Error(`Failed to fetch workflow run: ${res.status}`);
   return res.json();
+}
+
+// ── Tasks (global running tasks) ─────────────────────────────────────────────
+
+export async function listRunningTasks(): Promise<RunningTask[]> {
+  const res = await fetch('/tasks');
+  if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
+  return res.json();
+}
+
+export async function stopRunningTask(id: string): Promise<void> {
+  const res = await fetch(`/tasks/${id}/stop`, {method: 'POST'});
+  if (!res.ok) throw new Error(`Failed to stop task: ${res.status}`);
 }
 
 // ── Artifacts ────────────────────────────────────────────────────────────────

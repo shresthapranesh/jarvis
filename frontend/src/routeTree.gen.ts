@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkflowRouteImport } from './routes/workflow'
+import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as AutomationRouteImport } from './routes/automation'
 import { Route as IndexRouteImport } from './routes/index'
@@ -22,6 +23,11 @@ import { Route as WorkflowIdRunsRunIdRouteImport } from './routes/workflow.$id.r
 const WorkflowRoute = WorkflowRouteImport.update({
   id: '/workflow',
   path: '/workflow',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TasksRoute = TasksRouteImport.update({
+  id: '/tasks',
+  path: '/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LiveRoute = LiveRouteImport.update({
@@ -69,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/automation': typeof AutomationRoute
   '/live': typeof LiveRoute
+  '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
@@ -80,6 +87,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/automation': typeof AutomationRoute
   '/live': typeof LiveRoute
+  '/tasks': typeof TasksRoute
   '/c/$id': typeof CIdRoute
   '/workflow': typeof WorkflowIndexRoute
   '/workflow/$id': typeof WorkflowIdIndexRoute
@@ -90,6 +98,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/automation': typeof AutomationRoute
   '/live': typeof LiveRoute
+  '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
@@ -103,6 +112,7 @@ export interface FileRouteTypes {
     | '/'
     | '/automation'
     | '/live'
+    | '/tasks'
     | '/workflow'
     | '/c/$id'
     | '/workflow/$id'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
     | '/'
     | '/automation'
     | '/live'
+    | '/tasks'
     | '/c/$id'
     | '/workflow'
     | '/workflow/$id'
@@ -123,6 +134,7 @@ export interface FileRouteTypes {
     | '/'
     | '/automation'
     | '/live'
+    | '/tasks'
     | '/workflow'
     | '/c/$id'
     | '/workflow/$id'
@@ -135,6 +147,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AutomationRoute: typeof AutomationRoute
   LiveRoute: typeof LiveRoute
+  TasksRoute: typeof TasksRoute
   WorkflowRoute: typeof WorkflowRouteWithChildren
   CIdRoute: typeof CIdRoute
 }
@@ -146,6 +159,13 @@ declare module '@tanstack/react-router' {
       path: '/workflow'
       fullPath: '/workflow'
       preLoaderRoute: typeof WorkflowRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tasks': {
+      id: '/tasks'
+      path: '/tasks'
+      fullPath: '/tasks'
+      preLoaderRoute: typeof TasksRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/live': {
@@ -239,6 +259,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AutomationRoute: AutomationRoute,
   LiveRoute: LiveRoute,
+  TasksRoute: TasksRoute,
   WorkflowRoute: WorkflowRouteWithChildren,
   CIdRoute: CIdRoute,
 }

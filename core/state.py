@@ -12,10 +12,15 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Literal
 
 import httpx
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
+
+
+TaskKind = Literal["chat", "automation", "workflow"]
 
 
 # ── Infrastructure globals (set by lifespan, read everywhere) ────────────────
@@ -62,6 +67,13 @@ class TaskState:
     cancelled: bool = False
     pending_interrupt_id: str | None = None
     resume_future: asyncio.Future | None = None
+    # Self-describing fields surfaced by the global /tasks endpoint.
+    # Default-initialized for backwards compat; each subsystem sets them
+    # at registration time.
+    kind: TaskKind = "chat"
+    label: str = ""
+    parent_id: str | None = None
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     _waiters: list[asyncio.Future] = field(default_factory=list)
     _stop_event: threading.Event = field(default_factory=threading.Event)
 
