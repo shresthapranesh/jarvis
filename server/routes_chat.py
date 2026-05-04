@@ -201,7 +201,10 @@ async def _run_agent_task(
             state.resume_future.cancel()
         state.done = True
         _notify(state)
-        _tasks.pop(task_id, None)
+        # Delay popping the task so the frontend UI can show the "done" or
+        # "stopped" state for a few seconds before the row vanishes.
+        loop = asyncio.get_running_loop()
+        loop.call_later(5.0, lambda tid=task_id: _tasks.pop(tid, None))
 
 
 # ── Run endpoint ─────────────────────────────────────────────────────────────

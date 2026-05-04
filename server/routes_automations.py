@@ -265,6 +265,9 @@ async def _execute_automation_bg(
                 label=auto.name,
                 parent_id=automation_id,
             )
+            # Add to background_tasks so the stop endpoint can cancel it.
+            if (t := asyncio.current_task()) is not None:
+                _background_tasks[run_id] = t
 
     state = _tasks[run_id]
 
@@ -340,7 +343,8 @@ async def _execute_automation_bg(
     finally:
         state.done = True
         _notify(state)
-        _tasks.pop(run_id, None)
+        loop = asyncio.get_running_loop()
+        loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
 
 
 # ── CRUD endpoints ───────────────────────────────────────────────────────────

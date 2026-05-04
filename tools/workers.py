@@ -98,7 +98,18 @@ async def spawn_workers(tasks: list[dict]) -> str:
                 {"messages": [{"role": "user", "content": prompt}]},
                 config={"callbacks": [AgentLogger()], "recursion_limit": 50},
             )
-            answer = result["messages"][-1].content
+            raw_content = result["messages"][-1].content
+            # Thinking models (Anthropic extended thinking, Bedrock) return
+            # content as a list of typed blocks, not a plain string.  Extract
+            # the text portion so downstream consumers (the main agent's
+            # ToolMessage, len(), adispatch_custom_event) get a string.
+            if isinstance(raw_content, list):
+                answer = " ".join(
+                    b.get("text", "") for b in raw_content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ).strip() or str(raw_content)
+            else:
+                answer = str(raw_content)
             logger.info("worker %d (%s) done (%d chars): %s", idx, role, len(answer), label)
             await adispatch_custom_event("worker_done", {
                 "type": "worker_done",

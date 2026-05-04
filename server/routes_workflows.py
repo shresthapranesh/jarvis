@@ -132,7 +132,8 @@ async def _execute_workflow_bg(
     finally:
         state.done = True
         _notify(state)
-        _tasks.pop(run_id, None)
+        loop = asyncio.get_running_loop()
+        loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
 
 
 # ── Workflow CRUD ─────────────────────────────────────────────────────────────

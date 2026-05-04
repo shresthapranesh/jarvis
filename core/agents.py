@@ -7,7 +7,7 @@ import sqlite3 as _sqlite3
 from pathlib import Path
 from typing import Annotated, Any, NotRequired, TypedDict, cast
 
-from langchain_core.messages import AIMessage, AnyMessage, RemoveMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -139,15 +139,16 @@ def _strip_thinking_from_message(msg: AIMessage) -> AIMessage:
 
 
 def _strip_historical_thinking(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """Strip thinking blocks from all AIMessages except the most recent one."""
-    last_ai = -1
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], AIMessage):
-            last_ai = i
-            break
+    """Strip thinking blocks from ALL AIMessages in the history.
+
+    Thinking block signatures don't survive checkpointer round-trips, so
+    keeping any historical thinking block risks Bedrock/Anthropic rejecting
+    with "thinking.signature: Field required".  The model generates fresh
+    thinking each turn — it doesn't need to see its own prior reasoning.
+    """
     result: list[AnyMessage] = []
-    for i, msg in enumerate(messages):
-        if isinstance(msg, AIMessage) and i != last_ai:
+    for msg in messages:
+        if isinstance(msg, AIMessage):
             result.append(_strip_thinking_from_message(msg))
         else:
             result.append(msg)
@@ -333,16 +334,73 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         """
         if _estimate_tokens(messages, llm) <= _SUMMARIZE_TOKEN_THRESHOLD:
             return None
-        to_summarize = messages[:-_KEEP_RECENT]
+
+        # Find a safe split point that never breaks an AIMessage→ToolMessage
+        # group.  Anthropic (and Bedrock) reject messages where a tool_use
+        # block has no matching tool_result, or a tool_result references a
+        # tool_use_id that doesn't exist in the preceding assistant turn.
+        #
+        # Walk backward from the ideal split (len - _KEEP_RECENT) until we
+        # find a message that is NOT a ToolMessage and whose predecessor (if
+        # an AIMessage) has no pending tool_calls.  That gives us a clean
+        # boundary: everything before it is a complete exchange.
+        ideal = max(len(messages) - _KEEP_RECENT, 0)
+        split = ideal
+        while split > 0:
+            msg_at_split = messages[split]
+            # A ToolMessage at the split means its parent AIMessage is in
+            # to_summarize but the result would be in kept — not allowed.
+            if getattr(msg_at_split, "type", "") == "tool":
+                split -= 1
+                continue
+            # The message just before the split is in to_summarize.  If it's
+            # an AIMessage with tool_calls, the matching ToolMessages would be
+            # at split+ — also not allowed.
+            prev = messages[split - 1]
+            if isinstance(prev, AIMessage) and getattr(prev, "tool_calls", None):
+                split -= 1
+                continue
+            break
+
+        to_summarize = messages[:split]
         if not to_summarize:
             return None
+
+        # Build a safe message list for the summarization LLM call.
+        # Anthropic rejects raw tool-call exchanges (tool_use without
+        # tool_result, etc.), so we convert the history into plain
+        # HumanMessage/AIMessage text that any model can digest.
+        safe_msgs: list[AnyMessage] = []
+        for m in to_summarize:
+            mtype = getattr(m, "type", "")
+            if mtype == "human":
+                safe_msgs.append(m)
+            elif mtype == "ai":
+                text = _message_text(m)
+                tool_calls = getattr(m, "tool_calls", [])
+                if tool_calls:
+                    tc_desc = ", ".join(
+                        f"{tc.get('name', '?')}({', '.join(f'{k}=...' for k in (tc.get('args') or {}))})"
+                        for tc in tool_calls
+                    )
+                    text = f"{text}\n[Called tools: {tc_desc}]" if text else f"[Called tools: {tc_desc}]"
+                if text:
+                    safe_msgs.append(AIMessage(content=text))
+            elif mtype == "tool":
+                # Fold tool results into the preceding AI turn's context
+                tool_name = getattr(m, "name", "tool")
+                tool_content = str(getattr(m, "content", ""))[:500]
+                safe_msgs.append(HumanMessage(content=f"[Tool result from {tool_name}]: {tool_content}"))
+            elif isinstance(m, SystemMessage):
+                safe_msgs.append(m)
+
         try:
             summary = await llm.ainvoke([
                 SystemMessage(
                     "Summarize the following conversation history concisely. "
                     "Preserve all key facts, decisions, tool outputs, and results."
                 ),
-                *to_summarize,
+                *safe_msgs,
             ])
             summary_text = summary.content if isinstance(summary.content, str) else str(summary.content)
         except Exception as exc:
@@ -350,7 +408,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             return None
         logger.info("summarized %d messages into ~%d chars", len(to_summarize), len(summary_text))
         summary_msg = SystemMessage(f"[Prior conversation summary]\n{summary_text}")
-        kept = messages[-_KEEP_RECENT:]
+        kept = messages[split:]
         removals = [RemoveMessage(id=m.id) for m in to_summarize if hasattr(m, "id") and m.id]
         # RemoveMessage isn't part of AnyMessage in the stubs but LangGraph's add_messages
         # reducer handles it natively to evict messages from the checkpointer.
