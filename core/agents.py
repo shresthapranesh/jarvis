@@ -197,6 +197,46 @@ def _make_system_message(text: str, cache: bool) -> SystemMessage:
     return SystemMessage(text)
 
 
+def _system_text(msg: SystemMessage) -> str:
+    c = msg.content
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return "\n".join(
+            b.get("text", "") for b in c
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
+def _build_llm_messages(
+    system_text: str,
+    cache: bool,
+    history: list[AnyMessage],
+) -> list[AnyMessage]:
+    """Build the message list for an LLM call with exactly one SystemMessage.
+
+    Bedrock/Anthropic reject "multiple non-consecutive system messages". The
+    summarizer adds its result to state as a SystemMessage via the
+    checkpointer's add_messages reducer, which appends it after the kept
+    user/assistant/tool turns. On the next turn that summary System ends up
+    after non-system messages — a non-consecutive system — so we fold any
+    embedded SystemMessages into the prompt text and prepend a single
+    SystemMessage at index 0.
+    """
+    extras: list[str] = []
+    rest: list[AnyMessage] = []
+    for m in history:
+        if isinstance(m, SystemMessage):
+            text = _system_text(m).strip()
+            if text:
+                extras.append(text)
+        else:
+            rest.append(m)
+    final_text = system_text if not extras else system_text + "\n\n" + "\n\n".join(extras)
+    return [_make_system_message(final_text, cache)] + rest
+
+
 # ── Memory loading ────────────────────────────────────────────────────────────
 
 async def _load_memory_from_store(store) -> str | None:
@@ -343,7 +383,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             messages_for_llm, state_update_msgs = raw_messages, []
         messages_for_llm = _strip_historical_thinking(messages_for_llm)
         response = await llm_with_tools.ainvoke(
-            [_make_system_message(system, use_cache)] + messages_for_llm,
+            _build_llm_messages(system, use_cache, messages_for_llm),
             config=config,
         )
         return {"messages": state_update_msgs + [response]}
@@ -409,14 +449,16 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
         def factory():
             async def role_model(state: AgentState, config: RunnableConfig) -> dict:
-                # Strip thinking blocks from historical AIMessages — same as the
-                # main agent. Bedrock/Anthropic require a signature on every
-                # thinking block, and signatures don't always survive checkpoint
-                # serialization, so dropping historical thinking blocks (keeping
-                # only the most recent) avoids "thinking.signature: Field required".
+                # Strip historical thinking blocks (signatures don't survive
+                # checkpoint round-trips → Bedrock rejects with "thinking.
+                # signature: Field required"), and route through
+                # _build_llm_messages so any embedded SystemMessages are
+                # collapsed into the single system prompt.
                 history = _strip_historical_thinking(list(state.get("messages", [])))
-                messages = [_make_system_message(prompt, use_cache)] + history
-                response = await role_llm.ainvoke(messages, config=config)
+                response = await role_llm.ainvoke(
+                    _build_llm_messages(prompt, use_cache, history),
+                    config=config,
+                )
                 return {"messages": [response]}
 
             g = StateGraph(AgentState)  # type: ignore[type-var]
