@@ -39,6 +39,18 @@ export interface Conversation {
   messages: Message[];
 }
 
+// One paginated page of messages. The first page (no `before` cursor) holds the
+// most-recent messages; subsequent pages step further back in time. `messages`
+// is oldest-first within the page so the frontend can prepend pages directly.
+export interface MessagePage {
+  id: string;
+  title: string | null;
+  model: string;
+  created_at: string;
+  messages: Message[];
+  has_more: boolean;
+}
+
 export interface StreamingMessage {
   text: string;
   steps: Step[];

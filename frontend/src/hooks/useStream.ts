@@ -1,6 +1,7 @@
 import {useQueryClient} from '@tanstack/react-query';
 import {useEffect, useRef, useState} from 'react';
 
+import {refetchConversationFirstPage} from '../lib/api';
 import type {ArtifactRef, Step} from '../lib/types';
 
 export interface BrowserStep {
@@ -165,14 +166,14 @@ export function useStream(taskId: string | null, conversationId: string | null) 
               setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null}));
               await queryClient.invalidateQueries({queryKey: ['conversations']});
               if (conversationId) {
-                await queryClient.invalidateQueries({queryKey: ['conversation', conversationId]});
+                await refetchConversationFirstPage(queryClient, conversationId);
                 await queryClient.invalidateQueries({queryKey: ['artifacts', conversationId]});
               }
             } else if (eventType === 'error') {
               setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null, error: parsed['error'] as string}));
               await queryClient.invalidateQueries({queryKey: ['conversations']});
               if (conversationId) {
-                await queryClient.invalidateQueries({queryKey: ['conversation', conversationId]});
+                await refetchConversationFirstPage(queryClient, conversationId);
               }
             }
           }

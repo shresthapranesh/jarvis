@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -42,6 +42,10 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
     steps: Mapped[list[Step]] = relationship(
         "Step", back_populates="message", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_messages_conv_created", "conversation_id", "created_at"),
     )
 
 

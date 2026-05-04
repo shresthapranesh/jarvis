@@ -20,6 +20,7 @@ def _migrate(conn: Connection) -> None:
     if "status" not in msg_cols:
         conn.execute(text("ALTER TABLE messages ADD COLUMN status VARCHAR DEFAULT 'done'"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conv_created ON messages (conversation_id, created_at)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_steps_message_id ON steps (message_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_steps_conversation_id ON steps (conversation_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_automation_runs_automation_id ON automation_runs (automation_id)"))

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Annotated, Any
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,35 @@ from db.models import Message
 from db.ops import (
     add_message,
     delete_conversation,
-    get_conversation,
+    get_conversation_meta,
     get_or_create_conversation,
     list_conversations,
+    list_messages_paginated,
     update_conversation_title,
     update_message_status,
 )
+
+
+def _serialize_message(msg: Message) -> dict:
+    return {
+        "id": msg.id,
+        "role": msg.role,
+        "content": msg.content,
+        "model": msg.model,
+        "status": msg.status,
+        "created_at": msg.created_at.isoformat(),
+        "steps": [
+            {
+                "id": s.id,
+                "node": s.node,
+                "source": s.source,
+                "data": s.data,
+                "seq": s.seq,
+                "created_at": s.created_at.isoformat(),
+            }
+            for s in sorted(msg.steps, key=lambda x: x.seq)
+        ],
+    }
 
 
 router = APIRouter()
@@ -314,38 +338,28 @@ async def get_conversations(
 async def get_conversation_detail(
     conv_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = 10,
+    before: str | None = None,
 ) -> JSONResponse:
-    conv = await get_conversation(session, conv_id)
+    conv = await get_conversation_meta(session, conv_id)
     if conv is None:
         return JSONResponse({"error": "not found"}, status_code=404)
 
-    def serialize_message(msg: Message) -> dict:
-        return {
-            "id": msg.id,
-            "role": msg.role,
-            "content": msg.content,
-            "model": msg.model,
-            "status": msg.status,
-            "created_at": msg.created_at.isoformat(),
-            "steps": [
-                {
-                    "id": s.id,
-                    "node": s.node,
-                    "source": s.source,
-                    "data": s.data,
-                    "seq": s.seq,
-                    "created_at": s.created_at.isoformat(),
-                }
-                for s in sorted(msg.steps, key=lambda x: x.seq)
-            ],
-        }
+    try:
+        before_dt = datetime.fromisoformat(before) if before else None
+    except ValueError:
+        return JSONResponse({"error": "invalid `before` timestamp"}, status_code=400)
+
+    limit = max(1, min(limit, 100))
+    msgs, has_more = await list_messages_paginated(session, conv_id, limit, before_dt)
 
     return JSONResponse({
         "id": conv.id,
         "title": conv.title,
         "model": conv.model,
         "created_at": conv.created_at.isoformat(),
-        "messages": [serialize_message(m) for m in conv.messages],
+        "messages": [_serialize_message(m) for m in msgs],
+        "has_more": has_more,
     })
 
 

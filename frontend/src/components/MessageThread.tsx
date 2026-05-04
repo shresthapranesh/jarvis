@@ -11,6 +11,9 @@ interface Props {
   streamError?: string;
   streamSafetyBlock?: SafetyBlock | null;
   bottomRef: React.RefObject<HTMLDivElement | null>;
+  topRef?: React.RefObject<HTMLDivElement | null>;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
+  isLoadingOlder?: boolean;
   onShowSteps?: (steps: Step[]) => void;
 }
 
@@ -23,10 +26,17 @@ export function MessageThread({
   streamError,
   streamSafetyBlock,
   bottomRef,
+  topRef,
+  containerRef,
+  isLoadingOlder,
   onShowSteps,
 }: Props) {
   return (
-    <div id="messages">
+    <div id="messages" ref={containerRef}>
+      {topRef && <div ref={topRef} className="messages-top-sentinel" />}
+      {isLoadingOlder && (
+        <div className="messages-loading-older">Loading older messages…</div>
+      )}
       {messages.map((msg) => (
         <MessageBubble key={msg.id} message={msg} onShowSteps={onShowSteps} />
       ))}

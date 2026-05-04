@@ -122,15 +122,38 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
         await session.commit()
 
 
-async def get_conversation(session: AsyncSession, conv_id: str) -> Conversation | None:
-    result = await session.execute(
-        select(Conversation)
-        .where(Conversation.id == conv_id)
-        .options(
-            selectinload(Conversation.messages).selectinload(Message.steps)
-        )
+async def get_conversation_meta(session: AsyncSession, conv_id: str) -> Conversation | None:
+    return await session.get(Conversation, conv_id)
+
+
+async def list_messages_paginated(
+    session: AsyncSession,
+    conv_id: str,
+    limit: int = 10,
+    before: datetime | None = None,
+) -> tuple[list[Message], bool]:
+    """Return up to `limit` messages older than `before` (or the most recent if None),
+    ordered oldest-first within the page, plus a `has_more` flag.
+
+    Uses a lookahead trick: fetch `limit + 1` rows ordered DESC; if we got the
+    extra row, more pages exist. Drop the extra and reverse to chronological order.
+    """
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .options(selectinload(Message.steps))
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(limit + 1)
     )
-    return result.scalar_one_or_none()
+    if before is not None:
+        stmt = stmt.where(Message.created_at < before)
+    result = await session.execute(stmt)
+    rows = list(result.scalars().all())
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]
+    rows.reverse()
+    return rows, has_more
 
 
 # ── Automation CRUD ────────────────────────────────────────────────────────────

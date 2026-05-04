@@ -378,6 +378,18 @@ body {
   border-radius: 3px;
 }
 
+.messages-top-sentinel {
+  height: 1px;
+  flex-shrink: 0;
+}
+
+.messages-loading-older {
+  align-self: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 4px 0;
+}
+
 @keyframes msg-enter {
   from {
     opacity: 0;

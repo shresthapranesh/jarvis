@@ -1,12 +1,14 @@
+import type {InfiniteData, QueryClient} from '@tanstack/react-query';
+
 import type {
   Artifact,
   ArtifactDetail,
   Automation,
   AutomationRun,
-  Conversation,
   ConversationSummary,
   CreateAutomationPayload,
   MediaAttachment,
+  MessagePage,
   ModelCatalog,
   RunningTask,
   Workflow,
@@ -25,10 +27,40 @@ export async function fetchConversations(): Promise<ConversationSummary[]> {
   return res.json();
 }
 
-export async function fetchConversation(id: string): Promise<Conversation> {
-  const res = await fetch(`/conversations/${id}`);
+export const CONVERSATION_PAGE_SIZE = 10;
+
+export async function fetchConversationPage(
+  id: string,
+  before?: string,
+  limit: number = CONVERSATION_PAGE_SIZE,
+): Promise<MessagePage> {
+  const params = new URLSearchParams({limit: String(limit)});
+  if (before) params.set('before', before);
+  const res = await fetch(`/conversations/${id}?${params.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch conversation: ${res.status}`);
   return res.json();
+}
+
+// Refetch only the most-recent page of a conversation's infinite query, leaving
+// older cached pages intact. Default `invalidateQueries` on an infinite query
+// refetches every loaded page, which would re-download the user's whole
+// scrolled-up history on every new message — defeating pagination.
+export async function refetchConversationFirstPage(
+  queryClient: QueryClient,
+  conversationId: string,
+): Promise<void> {
+  const queryKey = ['conversation', conversationId];
+  queryClient.setQueryData<InfiniteData<MessagePage, string | undefined>>(
+    queryKey,
+    (old) => {
+      if (!old || old.pages.length === 0) return old;
+      return {
+        pages: old.pages.slice(0, 1),
+        pageParams: old.pageParams.slice(0, 1),
+      };
+    },
+  );
+  await queryClient.invalidateQueries({queryKey});
 }
 
 export async function startTask(
