@@ -409,7 +409,13 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
         def factory():
             async def role_model(state: AgentState, config: RunnableConfig) -> dict:
-                messages = [_make_system_message(prompt, use_cache)] + list(state.get("messages", []))
+                # Strip thinking blocks from historical AIMessages — same as the
+                # main agent. Bedrock/Anthropic require a signature on every
+                # thinking block, and signatures don't always survive checkpoint
+                # serialization, so dropping historical thinking blocks (keeping
+                # only the most recent) avoids "thinking.signature: Field required".
+                history = _strip_historical_thinking(list(state.get("messages", [])))
+                messages = [_make_system_message(prompt, use_cache)] + history
                 response = await role_llm.ainvoke(messages, config=config)
                 return {"messages": [response]}
 
