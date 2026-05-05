@@ -17,7 +17,7 @@ from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg, tool
-from langgraph.config import get_stream_writer
+from langgraph.config import get_config as _get_lg_config, get_stream_writer
 
 from core.config import get_config
 from db import async_session
@@ -32,6 +32,13 @@ logger = logging.getLogger(__name__)
 
 
 def _conversation_id_from_config(config: RunnableConfig | None) -> str | None:
+    try:
+        lg_config = _get_lg_config()
+        thread_id = (lg_config.get("configurable") or {}).get("thread_id")
+        if thread_id:
+            return str(thread_id)
+    except Exception:
+        pass
     if not config:
         return None
     configurable = config.get("configurable") or {}

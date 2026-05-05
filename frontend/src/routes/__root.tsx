@@ -4,6 +4,7 @@ import {useCallback, useEffect, useState} from 'react';
 
 import {ConversationList} from '../components/ConversationList';
 import {checkHealth, listRunningTasks} from '../lib/api';
+import type {RunningTask} from '../lib/types';
 import {ToastProvider} from '../lib/toast';
 
 interface RouterContext {
@@ -23,8 +24,7 @@ function RootLayout() {
   const {data: runningTasks} = useQuery({
     queryKey: ['running-tasks'],
     queryFn: listRunningTasks,
-    refetchInterval: 2000,
-    refetchIntervalInBackground: false,
+    refetchInterval: (query) => ((query.state.data as RunningTask[] | undefined)?.length ?? 0) > 0 ? 2000 : false,
   });
   const runningCount = runningTasks?.length ?? 0;
 

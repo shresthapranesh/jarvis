@@ -21,7 +21,7 @@ function TasksPage() {
   const {data: tasks = [], isLoading} = useQuery({
     queryKey: ['running-tasks'],
     queryFn: listRunningTasks,
-    refetchInterval: 2000,
+    refetchInterval: (query) => ((query.state.data as RunningTask[] | undefined)?.length ?? 0) > 0 ? 2000 : false,
   });
 
   const stopMutation = useMutation({

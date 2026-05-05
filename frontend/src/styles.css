@@ -1218,6 +1218,30 @@ body {
   opacity: 0.35;
   cursor: not-allowed;
 }
+.attach-btn--active {
+  color: var(--accent);
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(96, 165, 250, 0.12);
+}
+.attach-btn--artifact {
+  position: relative;
+}
+.artifact-btn-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
 
 /* ── Attachment preview strip ── */
 .attachment-strip {

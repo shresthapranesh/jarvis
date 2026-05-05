@@ -61,6 +61,7 @@ export async function refetchConversationFirstPage(
     },
   );
   await queryClient.invalidateQueries({queryKey});
+  await queryClient.invalidateQueries({queryKey: ['running-tasks']});
 }
 
 export async function startTask(

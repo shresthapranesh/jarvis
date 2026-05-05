@@ -167,6 +167,7 @@ function ConversationPage() {
       // msg). Trim cached pages to page 0 then refetch — keeps the user's
       // scrolled-up history out of an unnecessary refetch.
       await refetchConversationFirstPage(queryClient, id);
+      void queryClient.invalidateQueries({queryKey: ['running-tasks']});
     } finally {
       setPendingUser(null);
     }
@@ -222,20 +223,6 @@ function ConversationPage() {
           onClose={() => setArtifactPanelOpen(false)}
         />
       )}
-      {!artifactPanelOpen && totalArtifactCount > 0 && (
-        <button
-          className="artifact-fab"
-          onClick={() => setArtifactPanelOpen(true)}
-          type="button"
-          title="Show artifacts"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
-          {totalArtifactCount} artifact{totalArtifactCount !== 1 ? 's' : ''}
-        </button>
-      )}
       <footer className="page-footer">
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt
@@ -247,6 +234,9 @@ function ConversationPage() {
           onSubmit={handleSubmit}
           disabled={isActive}
           onStop={handleStop}
+          artifactCount={totalArtifactCount}
+          artifactPanelOpen={artifactPanelOpen}
+          onToggleArtifacts={() => setArtifactPanelOpen((v) => !v)}
         />
       </footer>
     </div>

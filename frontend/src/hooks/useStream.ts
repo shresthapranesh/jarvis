@@ -28,20 +28,31 @@ interface StreamState {
   safetyBlock: SafetyBlock | null;
 }
 
+const EMPTY_STATE: StreamState = {
+  streaming: false,
+  text: '',
+  thinkingText: '',
+  steps: [],
+  browserSteps: [],
+  artifacts: [],
+  error: null,
+  pendingInterrupt: null,
+  safetyBlock: null,
+};
+
 export function useStream(taskId: string | null, conversationId: string | null) {
   const queryClient = useQueryClient();
   const abortRef = useRef<AbortController | null>(null);
-  const [state, setState] = useState<StreamState>({
-    streaming: false,
-    text: '',
-    thinkingText: '',
-    steps: [],
-    browserSteps: [],
-    artifacts: [],
-    error: null,
-    pendingInterrupt: null,
-    safetyBlock: null,
-  });
+  const [state, setState] = useState<StreamState>(EMPTY_STATE);
+
+  // Reset state synchronously the moment taskId changes, so we never render
+  // a frame where `text` is from the previous task while `runningMsg` already
+  // points at a new one.
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(taskId);
+  if (activeTaskId !== taskId) {
+    setActiveTaskId(taskId);
+    setState(taskId ? {...EMPTY_STATE, streaming: true} : EMPTY_STATE);
+  }
 
   useEffect(() => {
     if (!taskId) return;
@@ -49,18 +60,6 @@ export function useStream(taskId: string | null, conversationId: string | null) 
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-
-    setState({
-      streaming: true,
-      text: '',
-      thinkingText: '',
-      steps: [],
-      browserSteps: [],
-      artifacts: [],
-      error: null,
-      pendingInterrupt: null,
-      safetyBlock: null,
-    });
 
     let seqCounter = 0;
 
@@ -165,6 +164,7 @@ export function useStream(taskId: string | null, conversationId: string | null) 
             } else if (eventType === 'done' || eventType === 'stopped') {
               setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null}));
               await queryClient.invalidateQueries({queryKey: ['conversations']});
+              await queryClient.invalidateQueries({queryKey: ['running-tasks']});
               if (conversationId) {
                 await refetchConversationFirstPage(queryClient, conversationId);
                 await queryClient.invalidateQueries({queryKey: ['artifacts', conversationId]});
@@ -172,6 +172,7 @@ export function useStream(taskId: string | null, conversationId: string | null) 
             } else if (eventType === 'error') {
               setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null, error: parsed['error'] as string}));
               await queryClient.invalidateQueries({queryKey: ['conversations']});
+              await queryClient.invalidateQueries({queryKey: ['running-tasks']});
               if (conversationId) {
                 await refetchConversationFirstPage(queryClient, conversationId);
               }
