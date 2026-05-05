@@ -28,8 +28,8 @@ class ModelSpec:
             return ChatGoogleGenerativeAI(model=model_name)
 
         if self.provider == "bedrock":
-            from langchain_aws import ChatBedrock
-            return ChatBedrock(model=model_name)
+            from langchain_aws import ChatBedrockConverse
+            return ChatBedrockConverse(model=model_name)
 
         if self.provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
