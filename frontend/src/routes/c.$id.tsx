@@ -1,5 +1,5 @@
-import {useSuspenseInfiniteQuery, useQueryClient} from '@tanstack/react-query';
-import {createFileRoute} from '@tanstack/react-router';
+import {useQuery, useSuspenseInfiniteQuery, useQueryClient} from '@tanstack/react-query';
+import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 
 import {ActivitySidebar} from '../components/ActivitySidebar';
@@ -8,7 +8,7 @@ import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {useStream} from '../hooks/useStream';
-import {fetchConversationPage, refetchConversationFirstPage, startTask, stopTask} from '../lib/api';
+import {fetchConversationPage, listArtifacts, refetchConversationFirstPage, startTask, stopTask} from '../lib/api';
 import type {MediaAttachment, Message, MessagePage, Step} from '../lib/types';
 
 const CONVERSATION_QUERY_OPTIONS = (id: string) => ({
@@ -24,6 +24,8 @@ const CONVERSATION_QUERY_OPTIONS = (id: string) => ({
 });
 
 export const Route = createFileRoute('/c/$id')({
+  validateSearch: (search: Record<string, unknown>): {task?: string} =>
+    typeof search.task === 'string' ? {task: search.task} : {},
   loader: ({context, params}) =>
     context.queryClient.ensureInfiniteQueryData(CONVERSATION_QUERY_OPTIONS(params.id)),
   component: ConversationPage,
@@ -31,6 +33,8 @@ export const Route = createFileRoute('/c/$id')({
 
 function ConversationPage() {
   const {id} = Route.useParams();
+  const {task: searchTaskId} = Route.useSearch();
+  const navigate = useNavigate();
   const {data, hasNextPage, isFetchingNextPage, fetchNextPage} = useSuspenseInfiniteQuery(
     CONVERSATION_QUERY_OPTIONS(id),
   );
@@ -43,11 +47,31 @@ function ConversationPage() {
   );
 
   const runningMsg = allMessages.find((m) => m.role === 'assistant' && m.status === 'running');
+
+  // Track the just-started task id locally so useStream can subscribe immediately
+  // — without waiting for the paginated cache refetch to surface the running
+  // assistant message. Falls back to the cache once the cache catches up.
+  const [pendingTaskId, setPendingTaskId] = useState<string | null>(searchTaskId ?? null);
+  const streamTaskId = pendingTaskId ?? runningMsg?.id ?? null;
+
   const {streaming, text, thinkingText, steps, artifacts, error, pendingInterrupt, safetyBlock} =
-    useStream(runningMsg?.id ?? null, id);
+    useStream(streamTaskId, id);
 
   const queryClient = useQueryClient();
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
+
+  // Once the paginated cache has the running/done message with this id, the
+  // cache is authoritative and we no longer need the local fallback. Also
+  // strip ?task=… from the URL once it has served its purpose.
+  useEffect(() => {
+    if (!pendingTaskId) return;
+    if (allMessages.some((m) => m.id === pendingTaskId)) {
+      setPendingTaskId(null);
+      if (searchTaskId) {
+        void navigate({to: '/c/$id', params: {id}, search: {}, replace: true});
+      }
+    }
+  }, [pendingTaskId, allMessages, searchTaskId, id, navigate]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const topRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -56,6 +80,16 @@ function ConversationPage() {
   const [panelSteps, setPanelSteps] = useState<Step[]>([]);
   const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+
+  // Persisted artifacts — keeps the FAB available after reload / on past
+  // conversations, even when the live-stream `artifacts` array is empty.
+  // useStream invalidates ['artifacts', id] on stream done, so this stays
+  // in sync without extra wiring.
+  const {data: persistedArtifacts = []} = useQuery({
+    queryKey: ['artifacts', id],
+    queryFn: () => listArtifacts(id),
+  });
+  const totalArtifactCount = Math.max(persistedArtifacts.length, artifacts.length);
 
   useEffect(() => {
     if (artifacts.length > 0) {
@@ -125,7 +159,10 @@ function ConversationPage() {
     });
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
-      await startTask(query, model, attachments, id);
+      const {task_id} = await startTask(query, model, attachments, id);
+      // Subscribe to the live stream immediately — the paginated cache may
+      // take a moment to surface the new running message via refetch.
+      setPendingTaskId(task_id);
       // Only the most-recent page changed (new user msg + new running assistant
       // msg). Trim cached pages to page 0 then refetch — keeps the user's
       // scrolled-up history out of an unnecessary refetch.
@@ -185,7 +222,7 @@ function ConversationPage() {
           onClose={() => setArtifactPanelOpen(false)}
         />
       )}
-      {!artifactPanelOpen && artifacts.length > 0 && (
+      {!artifactPanelOpen && totalArtifactCount > 0 && (
         <button
           className="artifact-fab"
           onClick={() => setArtifactPanelOpen(true)}
@@ -196,7 +233,7 @@ function ConversationPage() {
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
           </svg>
-          {artifacts.length} artifact{artifacts.length !== 1 ? 's' : ''}
+          {totalArtifactCount} artifact{totalArtifactCount !== 1 ? 's' : ''}
         </button>
       )}
       <footer className="page-footer">
