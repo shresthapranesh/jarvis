@@ -260,7 +260,13 @@ async def _process_chunk(
     source = "subagent" if subagent else "main"
 
     if mode == "messages":
-        token, _metadata = data
+        token, metadata = data
+        # Drop tokens emitted by the safety judge — its LLM call inherits the
+        # parent agent's callbacks via contextvars, so its JSON verdict /
+        # thinking blocks would otherwise leak into the user-visible stream.
+        tags = (metadata or {}).get("tags") or []
+        if "safety_judge" in tags:
+            return False
         is_ai = getattr(token, "type", "") in ("ai", "AIMessageChunk")
         if not is_ai or not hasattr(token, "content"):
             return False

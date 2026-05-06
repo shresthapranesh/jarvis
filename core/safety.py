@@ -235,10 +235,16 @@ async def _judge_text(
         return cached
     judge = _get_judge(judge_model)
     try:
-        verdict_obj = await cast(Any, judge).ainvoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ])
+        # Tag the judge call so its tokens can be filtered out of the parent
+        # agent's astream(stream_mode=["messages"]) — otherwise the judge's
+        # JSON/text/thinking output bleeds into the user-visible stream.
+        verdict_obj = await cast(Any, judge).ainvoke(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            config={"tags": ["safety_judge"], "run_name": f"safety_judge:{layer}"},
+        )
         verdict = (
             verdict_obj if isinstance(verdict_obj, SafetyVerdict)
             else SafetyVerdict.model_validate(verdict_obj)

@@ -7,7 +7,7 @@ import sqlite3 as _sqlite3
 from pathlib import Path
 from typing import Annotated, Any, NotRequired, TypedDict, cast
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -152,6 +152,45 @@ def _strip_historical_thinking(messages: list[AnyMessage]) -> list[AnyMessage]:
             result.append(_strip_thinking_from_message(msg))
         else:
             result.append(msg)
+    return result
+
+
+def _repair_orphan_tool_calls(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """Insert synthetic ToolMessages for any AIMessage tool_call_id that
+    has no matching ToolMessage following it.
+
+    Bedrock/Anthropic reject histories where a tool_use isn't paired with a
+    tool_result in the next turn ("Expected toolResult blocks at messages.N
+    .content for the following Ids: ..."). Orphans appear when the agent
+    run is cancelled between model_request and ToolNode, when ToolNode
+    crashes partway through a parallel batch, or when streaming aborts
+    mid-tool_use generation.
+    """
+    result: list[AnyMessage] = []
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        result.append(msg)
+        tool_calls = getattr(msg, "tool_calls", None) if isinstance(msg, AIMessage) else None
+        if not tool_calls:
+            i += 1
+            continue
+        expected_ids = [tc.get("id") for tc in tool_calls if tc.get("id")]
+        j = i + 1
+        seen_ids: set[str] = set()
+        while j < len(messages) and getattr(messages[j], "type", "") == "tool":
+            tcid = getattr(messages[j], "tool_call_id", None)
+            if tcid:
+                seen_ids.add(tcid)
+            result.append(messages[j])
+            j += 1
+        for tcid in expected_ids:
+            if tcid not in seen_ids:
+                result.append(ToolMessage(
+                    content="[Tool result missing — previous run was cancelled or interrupted.]",
+                    tool_call_id=tcid,
+                ))
+        i = j
     return result
 
 
@@ -440,6 +479,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         else:
             messages_for_llm, state_update_msgs = raw_messages, []
         messages_for_llm = _strip_historical_thinking(messages_for_llm)
+        messages_for_llm = _repair_orphan_tool_calls(messages_for_llm)
         response = await llm_with_tools.ainvoke(
             _build_llm_messages(system, use_cache, messages_for_llm),
             config=config,
@@ -513,6 +553,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
                 # _build_llm_messages so any embedded SystemMessages are
                 # collapsed into the single system prompt.
                 history = _strip_historical_thinking(list(state.get("messages", [])))
+                history = _repair_orphan_tool_calls(history)
                 response = await role_llm.ainvoke(
                     _build_llm_messages(prompt, use_cache, history),
                     config=config,
