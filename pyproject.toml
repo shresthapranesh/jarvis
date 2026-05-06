@@ -50,5 +50,6 @@ project-includes = [
 
 [dependency-groups]
 dev = [
+    "debugpy>=1.8.20",
     "ruff~=0.15",
 ]
