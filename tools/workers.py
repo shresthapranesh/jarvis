@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.tools import tool
+from langgraph.config import get_config as _get_lg_config
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,15 @@ async def spawn_workers(tasks: list[dict]) -> str:
     if not _role_factories:
         return "Error: no worker roles registered"
 
+    # Propagate the parent's conversation_id so worker-side tools (e.g.
+    # list_artifacts) scope to the same conversation as the main agent.
+    parent_conv_id: str | None = None
+    try:
+        parent_cfg = _get_lg_config()
+        parent_conv_id = (parent_cfg.get("configurable") or {}).get("conversation_id")
+    except Exception:
+        parent_conv_id = None
+
     async def run_one(spec: dict, idx: int) -> tuple[int, str, str, str | Exception]:
         label = spec.get("task", "")[:80]
         role = spec.get("role") or DEFAULT_ROLE
@@ -94,9 +104,15 @@ async def spawn_workers(tasks: list[dict]) -> str:
             # of 25 is half a dozen tool round-trips, often not enough for a
             # multi-step subtask. Keep it lower than the main agent (100) so a
             # runaway worker doesn't dominate.
+            worker_config: dict[str, Any] = {
+                "callbacks": [AgentLogger()],
+                "recursion_limit": 50,
+            }
+            if parent_conv_id:
+                worker_config["configurable"] = {"conversation_id": parent_conv_id}
             result = await worker.ainvoke(
                 {"messages": [{"role": "user", "content": prompt}]},
-                config={"callbacks": [AgentLogger()], "recursion_limit": 50},
+                config=worker_config,
             )
             raw_content = result["messages"][-1].content
             # Thinking models (Anthropic extended thinking, Bedrock) return

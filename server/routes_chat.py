@@ -93,7 +93,7 @@ async def _run_agent_task(
 
         agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
         config = {
-            "configurable": {"thread_id": conv_id},
+            "configurable": {"thread_id": conv_id, "conversation_id": conv_id},
             "recursion_limit": 100,
             "callbacks": [AgentLogger()],
         }

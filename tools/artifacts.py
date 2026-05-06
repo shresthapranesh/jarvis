@@ -32,18 +32,25 @@ logger = logging.getLogger(__name__)
 
 
 def _conversation_id_from_config(config: RunnableConfig | None) -> str | None:
+    """Read the DB conversation id injected by the entry point.
+
+    Distinct from `thread_id` (the LangGraph checkpointer thread): only some
+    entry points (chat, telegram) correspond to a real Conversation row.
+    CLI/automation/workflow/live runs leave this unset and the tool returns
+    a generic "no artifacts" response — which is correct for those contexts.
+    """
     try:
         lg_config = _get_lg_config()
-        thread_id = (lg_config.get("configurable") or {}).get("thread_id")
-        if thread_id:
-            return str(thread_id)
+        conv_id = (lg_config.get("configurable") or {}).get("conversation_id")
+        if conv_id:
+            return str(conv_id)
     except Exception:
         pass
     if not config:
         return None
     configurable = config.get("configurable") or {}
-    thread_id = configurable.get("thread_id")
-    return str(thread_id) if thread_id else None
+    conv_id = configurable.get("conversation_id")
+    return str(conv_id) if conv_id else None
 
 
 def _emit(event_type: str, **fields: Any) -> None:
