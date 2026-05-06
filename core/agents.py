@@ -155,32 +155,102 @@ def _strip_historical_thinking(messages: list[AnyMessage]) -> list[AnyMessage]:
     return result
 
 
+def _ai_tool_use_ids(msg: AIMessage) -> list[str]:
+    """Collect tool_use ids from BOTH .tool_calls and content blocks.
+
+    Mid-stream-cancelled accumulators can land tool_use blocks in `content`
+    while `.tool_calls` stays empty (LangChain finalises that field at the
+    end). Bedrock validates against content blocks directly, so we need the
+    union to detect every id that needs a tool_result.
+    """
+    ids: list[str] = []
+    seen: set[str] = set()
+    for tc in (getattr(msg, "tool_calls", None) or []):
+        tcid = tc.get("id") if isinstance(tc, dict) else None
+        if tcid and tcid not in seen:
+            seen.add(tcid)
+            ids.append(tcid)
+    content = getattr(msg, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                bid = block.get("id")
+                if bid and bid not in seen:
+                    seen.add(bid)
+                    ids.append(bid)
+    return ids
+
+
+def _msg_tool_result_ids(msg: AnyMessage) -> list[str]:
+    """Collect tool_result ids from a message that satisfies tool_use.
+
+    Native ToolMessage carries `tool_call_id`. Anthropic-style providers can
+    also round-trip tool_results as a HumanMessage whose content list has
+    `{"type": "tool_result", "tool_use_id": "..."}` blocks. We accept both.
+    """
+    ids: list[str] = []
+    if getattr(msg, "type", "") == "tool":
+        tcid = getattr(msg, "tool_call_id", None)
+        if tcid:
+            ids.append(tcid)
+        return ids
+    content = getattr(msg, "content", None)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                bid = block.get("tool_use_id")
+                if bid:
+                    ids.append(bid)
+    return ids
+
+
+def _is_tool_result_carrier(msg: AnyMessage) -> bool:
+    """A message that can carry tool_result blocks for the preceding AIMessage.
+
+    Native ToolMessages and HumanMessages whose content list includes any
+    tool_result block both qualify; everything else terminates the
+    paired-result window.
+    """
+    if getattr(msg, "type", "") == "tool":
+        return True
+    if isinstance(msg, HumanMessage):
+        content = getattr(msg, "content", None)
+        if isinstance(content, list):
+            return any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in content
+            )
+    return False
+
+
 def _repair_orphan_tool_calls(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """Insert synthetic ToolMessages for any AIMessage tool_call_id that
-    has no matching ToolMessage following it.
+    """Insert synthetic ToolMessages for any AIMessage tool_use id that has
+    no matching tool_result in the immediately-following window.
 
     Bedrock/Anthropic reject histories where a tool_use isn't paired with a
     tool_result in the next turn ("Expected toolResult blocks at messages.N
     .content for the following Ids: ..."). Orphans appear when the agent
     run is cancelled between model_request and ToolNode, when ToolNode
     crashes partway through a parallel batch, or when streaming aborts
-    mid-tool_use generation.
+    mid-tool_use generation (in that case the orphan id lives in the
+    AIMessage's content blocks but not yet in `.tool_calls`).
     """
     result: list[AnyMessage] = []
     i = 0
     while i < len(messages):
         msg = messages[i]
         result.append(msg)
-        tool_calls = getattr(msg, "tool_calls", None) if isinstance(msg, AIMessage) else None
-        if not tool_calls:
+        if not isinstance(msg, AIMessage):
             i += 1
             continue
-        expected_ids = [tc.get("id") for tc in tool_calls if tc.get("id")]
+        expected_ids = _ai_tool_use_ids(msg)
+        if not expected_ids:
+            i += 1
+            continue
         j = i + 1
         seen_ids: set[str] = set()
-        while j < len(messages) and getattr(messages[j], "type", "") == "tool":
-            tcid = getattr(messages[j], "tool_call_id", None)
-            if tcid:
+        while j < len(messages) and _is_tool_result_carrier(messages[j]):
+            for tcid in _msg_tool_result_ids(messages[j]):
                 seen_ids.add(tcid)
             result.append(messages[j])
             j += 1
