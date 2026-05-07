@@ -10,6 +10,7 @@ import type {
   MediaAttachment,
   MessagePage,
   ModelCatalog,
+  PersistedDocument,
   RunningTask,
   Workflow,
   WorkflowRun,
@@ -99,6 +100,29 @@ export async function renameConversation(id: string, title: string): Promise<voi
     body: JSON.stringify({title}),
   });
   if (!res.ok) throw new Error(`Failed to rename conversation: ${res.status}`);
+}
+
+export async function patchConversation(
+  id: string,
+  body: {title?: string; model?: string},
+): Promise<void> {
+  const res = await fetch(`/conversations/${id}`, {
+    method: 'PATCH',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to update conversation: ${res.status}`);
+}
+
+export async function listDocuments(conversationId: string): Promise<PersistedDocument[]> {
+  const res = await fetch(`/conversations/${conversationId}/documents`);
+  if (!res.ok) throw new Error(`Failed to list documents: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteDocument(documentId: string): Promise<void> {
+  const res = await fetch(`/documents/${documentId}`, {method: 'DELETE'});
+  if (!res.ok) throw new Error(`Failed to delete document: ${res.status}`);
 }
 
 export async function deleteConversation(id: string): Promise<void> {

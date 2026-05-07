@@ -8,7 +8,7 @@ import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {useStream} from '../hooks/useStream';
-import {fetchConversationPage, listArtifacts, refetchConversationFirstPage, startTask, stopTask} from '../lib/api';
+import {deleteDocument, fetchConversationPage, listArtifacts, listDocuments, refetchConversationFirstPage, startTask, stopTask} from '../lib/api';
 import type {MediaAttachment, Message, MessagePage, Step} from '../lib/types';
 
 const CONVERSATION_QUERY_OPTIONS = (id: string) => ({
@@ -91,6 +91,22 @@ function ConversationPage() {
   });
   const totalArtifactCount = Math.max(persistedArtifacts.length, artifacts.length);
 
+  const {data: persistedDocuments = []} = useQuery({
+    queryKey: ['documents', id],
+    queryFn: () => listDocuments(id),
+  });
+
+  const conversationModel = data.pages[0]?.model;
+
+  async function handleDeletePersistedDocument(docId: string) {
+    try {
+      await deleteDocument(docId);
+      await queryClient.invalidateQueries({queryKey: ['documents', id]});
+    } catch (err) {
+      console.error('Failed to delete document:', err);
+    }
+  }
+
   useEffect(() => {
     if (artifacts.length > 0) {
       const latest = artifacts[artifacts.length - 1];
@@ -168,6 +184,9 @@ function ConversationPage() {
       // scrolled-up history out of an unnecessary refetch.
       await refetchConversationFirstPage(queryClient, id);
       void queryClient.invalidateQueries({queryKey: ['running-tasks']});
+      if (attachments.some((a) => a.type === 'document')) {
+        void queryClient.invalidateQueries({queryKey: ['documents', id]});
+      }
     } finally {
       setPendingUser(null);
     }
@@ -237,6 +256,10 @@ function ConversationPage() {
           artifactCount={totalArtifactCount}
           artifactPanelOpen={artifactPanelOpen}
           onToggleArtifacts={() => setArtifactPanelOpen((v) => !v)}
+          conversationId={id}
+          initialModel={conversationModel}
+          persistedDocuments={persistedDocuments}
+          onDeletePersistedDocument={handleDeletePersistedDocument}
         />
       </footer>
     </div>

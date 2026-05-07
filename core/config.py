@@ -29,6 +29,7 @@ class AppConfig:
     memory_file: str
     conversation_history_dir: str
     artifacts_dir: Path
+    documents_dir: Path
     piper_voice: str
     whisper_model: str
 
@@ -40,6 +41,10 @@ class AppConfig:
         artifacts_dir = Path(
             overrides.get("artifacts_dir")
             or os.environ.get("ARTIFACTS_DIR", str(work_dir / "artifacts"))
+        ).resolve()
+        documents_dir = Path(
+            overrides.get("documents_dir")
+            or os.environ.get("DOCUMENTS_DIR", str(work_dir / "documents"))
         ).resolve()
         return cls(
             work_dir=work_dir,
@@ -53,6 +58,7 @@ class AppConfig:
             conversation_history_dir=overrides.get("conversation_history_dir")
                 or os.environ.get("CONVERSATION_HISTORY_DIR", "conversation_history"),
             artifacts_dir=artifacts_dir,
+            documents_dir=documents_dir,
             piper_voice=overrides.get("piper_voice")
                 or os.environ.get("PIPER_VOICE", "voices/en_US-hfc_female-medium.onnx"),
             whisper_model=overrides.get("whisper_model")

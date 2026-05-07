@@ -26,6 +26,7 @@ from db.ops import get_setting, list_enabled_scheduled_automations
 from .routes_artifacts import router as artifacts_router
 from .routes_automations import router as automations_router
 from .routes_chat import router as chat_router
+from .routes_documents import router as documents_router
 from .routes_live import router as live_router
 from .routes_media import router as media_router
 from .routes_memory import router as memory_router
@@ -107,6 +108,7 @@ app.include_router(live_router)
 app.include_router(memory_router)
 app.include_router(workflows_router)
 app.include_router(artifacts_router)
+app.include_router(documents_router)
 app.include_router(tasks_router)
 
 

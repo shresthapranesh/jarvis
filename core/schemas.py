@@ -24,7 +24,8 @@ class RunRequest(BaseModel):
 
 
 class ConversationUpdate(BaseModel):
-    title: str
+    title: str | None = None
+    model: str | None = None
 
 
 class AutomationRequest(BaseModel):

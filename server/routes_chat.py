@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Any
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,7 @@ from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from core.agents import build_agent, is_valid_model
+from core.config import get_config
 from core.log_callback import AgentLogger
 from core.safety import gate_input, gate_output
 from core.schemas import ConversationUpdate, ResumePayload, RunRequest, _invalid_model_response
@@ -30,12 +35,13 @@ from db import async_session, get_session
 from db.models import Message
 from db.ops import (
     add_message,
+    create_document,
     delete_conversation,
     get_conversation_meta,
     get_or_create_conversation,
     list_conversations,
     list_messages_paginated,
-    update_conversation_title,
+    update_conversation,
     update_message_status,
 )
 
@@ -227,7 +233,31 @@ async def run_agent(
     else:
         display_content = request.query
 
-    await add_message(session, conv.id, "user", display_content)
+    user_msg = await add_message(session, conv.id, "user", display_content)
+
+    if request.attachments:
+        cfg = get_config()
+        cfg.documents_dir.mkdir(parents=True, exist_ok=True)
+        for att in request.attachments:
+            if att.type != "document":
+                continue
+            try:
+                doc_id = str(uuid4())
+                ext = os.path.splitext(att.name)[1] or ".bin"
+                doc_path = cfg.documents_dir / f"{doc_id}{ext}"
+                doc_path.write_bytes(base64.b64decode(att.data))
+                await create_document(
+                    session,
+                    conversation_id=conv.id,
+                    message_id=user_msg.id,
+                    filename=att.name,
+                    mime_type=att.mime_type,
+                    size=att.size,
+                    path=str(doc_path),
+                )
+            except Exception as e:
+                logger.warning("Failed to persist document %s: %s", att.name, e)
+
     task_msg = await add_message(session, conv.id, "assistant", "", model=request.model, status="running")
 
     _tasks[task_msg.id] = TaskState(
@@ -367,12 +397,18 @@ async def get_conversation_detail(
 
 
 @router.patch("/conversations/{conv_id}")
-async def rename_conversation(
+async def patch_conversation(
     conv_id: str,
     body: ConversationUpdate,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> JSONResponse:
-    await update_conversation_title(session, conv_id, body.title)
+    if body.model is not None and not is_valid_model(body.model):
+        return _invalid_model_response(body.model)
+    if body.title is None and body.model is None:
+        return JSONResponse({"error": "no fields to update"}, status_code=400)
+    conv = await update_conversation(session, conv_id, title=body.title, model=body.model)
+    if conv is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse({"ok": True})
 
 

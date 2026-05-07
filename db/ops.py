@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Message, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Message, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ async def get_or_create_conversation(
     if conversation_id:
         result = await session.get(Conversation, conversation_id)
         if result:
+            if result.model != model:
+                result.model = model
+                await session.commit()
             return result
         conv = Conversation(id=conversation_id, model=model, title=title)
         session.add(conv)
@@ -119,6 +123,23 @@ async def update_conversation_title(session: AsyncSession, conv_id: str, title: 
         await session.commit()
 
 
+async def update_conversation(
+    session: AsyncSession,
+    conv_id: str,
+    title: str | None = None,
+    model: str | None = None,
+) -> Conversation | None:
+    conv = await session.get(Conversation, conv_id)
+    if conv is None:
+        return None
+    if title is not None:
+        conv.title = title
+    if model is not None:
+        conv.model = model
+    await session.commit()
+    return conv
+
+
 async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
     conv = await session.get(Conversation, conv_id)
     if conv is None:
@@ -129,8 +150,13 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
             select(Artifact.id).where(Artifact.conversation_id == conv_id)
         )).scalars()
     )
+    doc_paths = list(
+        (await session.execute(
+            select(Document.path).where(Document.conversation_id == conv_id)
+        )).scalars()
+    )
 
-    await session.delete(conv)  # cascades messages, steps, artifacts via ORM
+    await session.delete(conv)  # cascades messages, steps, artifacts, documents via ORM
     await session.commit()
 
     cfg = get_config()
@@ -140,6 +166,12 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
             path.unlink(missing_ok=True)
         except OSError as e:
             logger.warning("Failed to unlink artifact file %s: %s", path, e)
+
+    for raw_path in doc_paths:
+        try:
+            Path(raw_path).unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Failed to unlink document file %s: %s", raw_path, e)
 
     try:
         from core.state import get_async_checkpointer
@@ -595,6 +627,54 @@ async def delete_artifact(session: AsyncSession, artifact_id: str) -> bool:
     await session.delete(art)
     await session.commit()
     return True
+
+
+# ── Document CRUD ─────────────────────────────────────────────────────────────
+
+async def create_document(
+    session: AsyncSession,
+    conversation_id: str,
+    message_id: str | None,
+    filename: str,
+    mime_type: str,
+    size: int,
+    path: str,
+) -> Document:
+    doc = Document(
+        id=str(uuid4()),
+        conversation_id=conversation_id,
+        message_id=message_id,
+        filename=filename,
+        mime_type=mime_type,
+        size=size,
+        path=path,
+    )
+    session.add(doc)
+    await session.commit()
+    return doc
+
+
+async def get_document(session: AsyncSession, document_id: str) -> Document | None:
+    return await session.get(Document, document_id)
+
+
+async def list_documents(session: AsyncSession, conversation_id: str) -> list[Document]:
+    q = (
+        select(Document)
+        .where(Document.conversation_id == conversation_id)
+        .order_by(Document.created_at.asc())
+    )
+    result = await session.execute(q)
+    return list(result.scalars().all())
+
+
+async def delete_document(session: AsyncSession, document_id: str) -> Document | None:
+    doc = await session.get(Document, document_id)
+    if doc is None:
+        return None
+    await session.delete(doc)
+    await session.commit()
+    return doc
 
 
 async def append_node_result(

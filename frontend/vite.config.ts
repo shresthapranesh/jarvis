@@ -19,6 +19,7 @@ export default defineConfig({
       '/workflows': 'http://localhost:8000',
       '/workflow-runs': 'http://localhost:8000',
       '/artifacts': 'http://localhost:8000',
+      '/documents': 'http://localhost:8000',
       '/task-runs': 'http://localhost:8000',
     },
   },

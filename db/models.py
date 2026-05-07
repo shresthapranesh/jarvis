@@ -29,6 +29,9 @@ class Conversation(Base):
     artifacts: Mapped[list["Artifact"]] = relationship(
         "Artifact", back_populates="conversation", cascade="all, delete-orphan"
     )
+    documents: Mapped[list["Document"]] = relationship(
+        "Document", back_populates="conversation", cascade="all, delete-orphan"
+    )
 
 
 class Message(Base):
@@ -155,6 +158,29 @@ class Artifact(Base):
 
     conversation: Mapped[Optional["Conversation"]] = relationship(
         "Conversation", back_populates="artifacts"
+    )
+
+
+# ── Documents (uploaded files persisted per conversation) ─────────────────────
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id"), nullable=False, index=True
+    )
+    message_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("messages.id"), nullable=True, index=True
+    )
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    conversation: Mapped["Conversation"] = relationship(
+        "Conversation", back_populates="documents"
     )
 
 

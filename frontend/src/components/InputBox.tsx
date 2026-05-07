@@ -1,8 +1,10 @@
 import {useEffect, useRef, useState} from 'react';
+import {useQueryClient} from '@tanstack/react-query';
 
 import {useModels} from '../hooks/useModels';
 import {useWhisperSTT} from '../hooks/useWhisperSTT';
-import type {MediaAttachment} from '../lib/types';
+import {patchConversation} from '../lib/api';
+import type {MediaAttachment, PersistedDocument} from '../lib/types';
 
 interface Props {
   onSubmit: (query: string, model: string, attachments: MediaAttachment[]) => void;
@@ -11,6 +13,10 @@ interface Props {
   artifactCount?: number;
   artifactPanelOpen?: boolean;
   onToggleArtifacts?: () => void;
+  conversationId?: string;
+  initialModel?: string;
+  persistedDocuments?: PersistedDocument[];
+  onDeletePersistedDocument?: (docId: string) => void;
 }
 
 function fileTypeCategory(mimeType: string): 'image' | 'audio' | 'video' | 'document' {
@@ -20,12 +26,24 @@ function fileTypeCategory(mimeType: string): 'image' | 'audio' | 'video' | 'docu
   return 'document';
 }
 
-export function InputBox({onSubmit, disabled = false, onStop, artifactCount = 0, artifactPanelOpen = false, onToggleArtifacts}: Props) {
+export function InputBox({
+  onSubmit,
+  disabled = false,
+  onStop,
+  artifactCount = 0,
+  artifactPanelOpen = false,
+  onToggleArtifacts,
+  conversationId,
+  initialModel,
+  persistedDocuments,
+  onDeletePersistedDocument,
+}: Props) {
   const {data: catalog} = useModels();
   const [model, setModel] = useState('');
   const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const queryClient = useQueryClient();
 
   const {listening, interimText, startListening, stopListening} = useWhisperSTT(
     (text) => {
@@ -37,13 +55,29 @@ export function InputBox({onSubmit, disabled = false, onStop, artifactCount = 0,
     },
   );
 
-  // Resolve the default from the backend catalog once it arrives. Until then
-  // the select is disabled and Send is blocked by the empty-string guard.
+  // Seed the model: prefer the per-conversation `initialModel`, then fall back
+  // to the catalog default. Re-runs when the user navigates between
+  // conversations so the dropdown reflects the conversation we're in.
   useEffect(() => {
-    if (catalog && !model) {
+    if (initialModel) {
+      setModel(initialModel);
+    } else if (catalog && !model) {
       setModel(catalog.default);
     }
-  }, [catalog, model]);
+  }, [catalog, initialModel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleModelChange(newModel: string) {
+    setModel(newModel);
+    if (conversationId && newModel) {
+      try {
+        await patchConversation(conversationId, {model: newModel});
+        await queryClient.invalidateQueries({queryKey: ['conversation', conversationId]});
+        await queryClient.invalidateQueries({queryKey: ['conversations']});
+      } catch (err) {
+        console.error('Failed to persist model change:', err);
+      }
+    }
+  }
 
   function handleInput() {
     const el = textareaRef.current;
@@ -98,8 +132,32 @@ export function InputBox({onSubmit, disabled = false, onStop, artifactCount = 0,
   return (
     <div className="input-wrap">
       <div className={`input-card${disabled ? ' input-card--disabled' : ''}`}>
-        {attachments.length > 0 && (
+        {(attachments.length > 0 || (persistedDocuments && persistedDocuments.length > 0)) && (
           <div className="attachment-strip">
+            {persistedDocuments?.map((doc) => (
+              <div key={`saved-${doc.id}`} className="attachment-thumb attachment-thumb--saved" title={`${doc.filename} (saved to conversation)`}>
+                <div className="attachment-thumb-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                  </svg>
+                  <span className="attachment-thumb-name">{doc.filename}</span>
+                </div>
+                {onDeletePersistedDocument && (
+                  <button
+                    className="attachment-remove"
+                    onClick={() => onDeletePersistedDocument(doc.id)}
+                    title="Remove from conversation"
+                    type="button"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
             {attachments.map((att) => (
               <div key={att.id} className="attachment-thumb">
                 {att.type === 'image' ? (
@@ -277,7 +335,7 @@ export function InputBox({onSubmit, disabled = false, onStop, artifactCount = 0,
           <select
             className="model-input"
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => void handleModelChange(e.target.value)}
             disabled={!catalog}
             title={catalog ? undefined : 'Loading models…'}
           >

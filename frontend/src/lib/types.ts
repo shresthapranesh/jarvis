@@ -66,6 +66,16 @@ export interface MediaAttachment {
   size: number;
 }
 
+export interface PersistedDocument {
+  id: string;
+  conversation_id: string;
+  message_id: string | null;
+  filename: string;
+  mime_type: string;
+  size: number;
+  created_at: string;
+}
+
 export type AutomationInputType = 'prompt' | 'code' | 'webhook';
 
 export type NotificationOn = 'done' | 'error' | 'both';
