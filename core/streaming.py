@@ -325,6 +325,13 @@ async def _process_chunk(
             payload = {k: v for k, v in data.items() if k != "type"}
             state.events.append({"event": "artifact", "data": json.dumps(payload)})
             _notify(state)
+        elif event_type == "todos_updated":
+            coalescer.flush_all()
+            state.events.append({"event": "todos_updated", "data": json.dumps({
+                "todos": data.get("todos", []),
+                "source": source,
+            })})
+            _notify(state)
         elif event_type in ("safety_review_start", "safety_review_passed", "safety_review_blocked"):
             # Surface the judge's activity as a step so the UI sidebar shows it
             # alongside the model and tool nodes. Payload mirrors what

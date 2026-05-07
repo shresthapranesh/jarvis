@@ -1,6 +1,7 @@
 import type {SafetyBlock} from '../hooks/useStream';
-import type {Message, Step} from '../lib/types';
+import type {Message, Step, TodoItem} from '../lib/types';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
+import {TodoList} from './TodoList';
 
 interface Props {
   messages: Message[];
@@ -10,6 +11,7 @@ interface Props {
   isStreaming?: boolean;
   streamError?: string;
   streamSafetyBlock?: SafetyBlock | null;
+  todos?: TodoItem[];
   bottomRef: React.RefObject<HTMLDivElement | null>;
   topRef?: React.RefObject<HTMLDivElement | null>;
   containerRef?: React.RefObject<HTMLDivElement | null>;
@@ -25,6 +27,7 @@ export function MessageThread({
   isStreaming,
   streamError,
   streamSafetyBlock,
+  todos,
   bottomRef,
   topRef,
   containerRef,
@@ -40,6 +43,11 @@ export function MessageThread({
       {messages.map((msg) => (
         <MessageBubble key={msg.id} message={msg} onShowSteps={onShowSteps} />
       ))}
+      {todos && todos.length > 0 && (
+        <div className="turn">
+          <TodoList todos={todos} />
+        </div>
+      )}
       {isStreaming && (
         <StreamingBubble
           text={streamingText ?? ''}

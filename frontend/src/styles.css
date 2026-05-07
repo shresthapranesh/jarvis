@@ -1264,6 +1264,85 @@ body {
   color: var(--accent, #6f7bff);
 }
 
+.todo-card {
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 4px 0;
+  font-size: 0.85rem;
+}
+
+.todo-card--compact {
+  margin: 0 0 12px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.todo-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.todo-card-title {
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.todo-card-progress {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.todo-glyph {
+  flex-shrink: 0;
+  width: 1em;
+  text-align: center;
+  color: var(--text-dim);
+  font-family: ui-monospace, "SF Mono", monospace;
+}
+
+.todo-item--in_progress .todo-glyph {
+  color: var(--accent, #6f7bff);
+}
+
+.todo-item--done .todo-glyph {
+  color: var(--success, #4caf6f);
+}
+
+.todo-item--done .todo-text {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  text-decoration-color: var(--border);
+}
+
+.todo-text {
+  flex: 1;
+  color: var(--text);
+  word-break: break-word;
+}
+
 .attachment-thumb img {
   width: 100%;
   height: 100%;

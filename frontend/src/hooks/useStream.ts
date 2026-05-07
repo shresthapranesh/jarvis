@@ -2,7 +2,7 @@ import {useQueryClient} from '@tanstack/react-query';
 import {useEffect, useRef, useState} from 'react';
 
 import {refetchConversationFirstPage} from '../lib/api';
-import type {ArtifactRef, Step} from '../lib/types';
+import type {ArtifactRef, Step, TodoItem} from '../lib/types';
 
 export interface BrowserStep {
   thought: unknown;
@@ -23,6 +23,7 @@ interface StreamState {
   steps: Step[];
   browserSteps: BrowserStep[];
   artifacts: ArtifactRef[];
+  todos: TodoItem[] | null;
   error: string | null;
   pendingInterrupt: {id: string; question: string} | null;
   safetyBlock: SafetyBlock | null;
@@ -35,6 +36,7 @@ const EMPTY_STATE: StreamState = {
   steps: [],
   browserSteps: [],
   artifacts: [],
+  todos: null,
   error: null,
   pendingInterrupt: null,
   safetyBlock: null,
@@ -124,6 +126,9 @@ export function useStream(taskId: string | null, conversationId: string | null) 
                 const others = s.artifacts.filter((a) => a.id !== ref.id);
                 return {...s, artifacts: [...others, ref]};
               });
+            } else if (eventType === 'todos_updated') {
+              const todos = (parsed['todos'] as TodoItem[]) ?? [];
+              setState((s) => ({...s, todos}));
             } else if (eventType === 'browser_step') {
               const browserStep: BrowserStep = {
                 thought: parsed['thought'],
@@ -168,6 +173,7 @@ export function useStream(taskId: string | null, conversationId: string | null) 
               if (conversationId) {
                 await refetchConversationFirstPage(queryClient, conversationId);
                 await queryClient.invalidateQueries({queryKey: ['artifacts', conversationId]});
+                await queryClient.invalidateQueries({queryKey: ['todos', conversationId]});
               }
             } else if (eventType === 'error') {
               setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null, error: parsed['error'] as string}));

@@ -12,6 +12,7 @@ import type {
   ModelCatalog,
   PersistedDocument,
   RunningTask,
+  TodoItem,
   Workflow,
   WorkflowRun,
 } from './types';
@@ -123,6 +124,13 @@ export async function listDocuments(conversationId: string): Promise<PersistedDo
 export async function deleteDocument(documentId: string): Promise<void> {
   const res = await fetch(`/documents/${documentId}`, {method: 'DELETE'});
   if (!res.ok) throw new Error(`Failed to delete document: ${res.status}`);
+}
+
+export async function listTodos(conversationId: string): Promise<TodoItem[]> {
+  const res = await fetch(`/conversations/${conversationId}/todos`);
+  if (!res.ok) throw new Error(`Failed to list todos: ${res.status}`);
+  const body = await res.json();
+  return body.todos ?? [];
 }
 
 export async function deleteConversation(id: string): Promise<void> {

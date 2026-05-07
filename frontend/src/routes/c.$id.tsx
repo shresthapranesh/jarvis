@@ -8,7 +8,7 @@ import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {useStream} from '../hooks/useStream';
-import {deleteDocument, fetchConversationPage, listArtifacts, listDocuments, refetchConversationFirstPage, startTask, stopTask} from '../lib/api';
+import {deleteDocument, fetchConversationPage, listArtifacts, listDocuments, listTodos, refetchConversationFirstPage, startTask, stopTask} from '../lib/api';
 import type {MediaAttachment, Message, MessagePage, Step} from '../lib/types';
 
 const CONVERSATION_QUERY_OPTIONS = (id: string) => ({
@@ -54,7 +54,7 @@ function ConversationPage() {
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(searchTaskId ?? null);
   const streamTaskId = pendingTaskId ?? runningMsg?.id ?? null;
 
-  const {streaming, text, thinkingText, steps, artifacts, error, pendingInterrupt, safetyBlock} =
+  const {streaming, text, thinkingText, steps, artifacts, todos: liveTodos, error, pendingInterrupt, safetyBlock} =
     useStream(streamTaskId, id);
 
   const queryClient = useQueryClient();
@@ -95,6 +95,13 @@ function ConversationPage() {
     queryKey: ['documents', id],
     queryFn: () => listDocuments(id),
   });
+
+  const {data: persistedTodos = []} = useQuery({
+    queryKey: ['todos', id],
+    queryFn: () => listTodos(id),
+  });
+
+  const todos = liveTodos ?? persistedTodos;
 
   const conversationModel = data.pages[0]?.model;
 
@@ -221,6 +228,7 @@ function ConversationPage() {
         isStreaming={isActive}
         streamError={error ?? undefined}
         streamSafetyBlock={isActive ? safetyBlock : null}
+        todos={todos}
         bottomRef={bottomRef}
         topRef={topRef}
         containerRef={containerRef}
@@ -231,6 +239,7 @@ function ConversationPage() {
         <ActivitySidebar
           steps={panelSteps}
           isLive={isActive}
+          todos={todos}
           onClose={() => setPanelOpen(false)}
         />
       )}

@@ -23,7 +23,7 @@ from sse_starlette.sse import EventSourceResponse
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from core.agents import build_agent, is_valid_model
+from core.agents import _normalise_todos, build_agent, is_valid_model
 from core.config import get_config
 from core.log_callback import AgentLogger
 from core.safety import gate_input, gate_output
@@ -419,3 +419,16 @@ async def delete_conversation_endpoint(
 ) -> JSONResponse:
     await delete_conversation(session, conv_id)
     return JSONResponse({"ok": True})
+
+
+@router.get("/conversations/{conv_id}/todos")
+async def get_conversation_todos(conv_id: str) -> JSONResponse:
+    try:
+        cp = get_async_checkpointer()
+    except RuntimeError:
+        return JSONResponse({"todos": []})
+    snapshot = await cp.aget_tuple({"configurable": {"thread_id": conv_id}})
+    if snapshot is None:
+        return JSONResponse({"todos": []})
+    raw = (snapshot.checkpoint or {}).get("channel_values", {}).get("todos", [])
+    return JSONResponse({"todos": _normalise_todos(raw)})

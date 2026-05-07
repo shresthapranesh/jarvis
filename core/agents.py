@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3 as _sqlite3
 from pathlib import Path
-from typing import Annotated, Any, NotRequired, TypedDict, cast
+from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -26,7 +26,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
 from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write_file
 from tools.artifacts import list_artifacts as artifact_list, read_artifact
 from tools.files import list_files, read_file
-from tools.todos import write_todos
+from tools.todos import set_todo_status, write_todos
 from tools.workers import register_role_factory, spawn_workers
 from tools.automations import (
     create_automation,
@@ -46,9 +46,34 @@ logger = logging.getLogger(__name__)
 
 # ── State schema ─────────────────────────────────────────────────────────────
 
+class TodoItem(TypedDict):
+    text: str
+    status: Literal["pending", "in_progress", "done"]
+
+
+def _normalise_todos(raw: object) -> list[TodoItem]:
+    """Coerce todos read from state/checkpointer into a uniform shape.
+
+    Accepts both legacy `list[str]` (from older checkpoints / older
+    `write_todos` calls) and the new `list[TodoItem]` shape.
+    """
+    if not raw or not isinstance(raw, list):
+        return []
+    out: list[TodoItem] = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append({"text": item, "status": "pending"})
+        elif isinstance(item, dict) and "text" in item:
+            status = item.get("status", "pending")
+            if status not in ("pending", "in_progress", "done"):
+                status = "pending"
+            out.append({"text": str(item["text"]), "status": status})  # type: ignore[typeddict-item]
+    return out
+
+
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
-    todos: NotRequired[list[str]]
+    todos: NotRequired[list[TodoItem]]
 
 
 # ── System prompt ────────────────────────────────────────────────────────────
@@ -101,6 +126,14 @@ Workers run concurrently and all results are returned when the last one finishes
 
 For files: read_file / write_file / list_files for simple access; \
 or use pathlib inside execute().
+
+## Planning long-running work
+For any task that needs more than ~3 tool calls, call `write_todos` once at the \
+start with the steps you intend to take. As you work, call \
+`set_todo_status(index, "in_progress")` before starting an item and \
+`set_todo_status(index, "done")` after finishing it. The user sees this list \
+update live, so it doubles as your status report. Skip the todo list entirely \
+for one-shot questions — keep it for genuinely multi-step work.
 
 ## Artifacts (deliverables)
 When the user asks for a finished document — a report, draft, brief, resume, \
@@ -410,6 +443,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         read_artifact,
         artifact_list,
         write_todos,
+        set_todo_status,
         spawn_workers,
         list_automations,
         create_automation,
@@ -538,9 +572,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         system = _SYSTEM_PROMPT
         if memory:
             system = f"{system}\n\n## Agent Memory\n\n{memory}"
-        todos: list[str] = state.get("todos") or []
+        todos = _normalise_todos(state.get("todos"))
         if todos:
-            todo_lines = "\n".join(f"- [ ] {t}" for t in todos)
+            glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}
+            todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
             system = f"{system}\n\n## Current Tasks\n\n{todo_lines}"
         raw_messages = list(state.get("messages", []))
         summarized = await _maybe_summarize(raw_messages)

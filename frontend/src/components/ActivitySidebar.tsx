@@ -1,10 +1,12 @@
 import {useEffect, useRef, useState} from 'react';
 
-import type {Step} from '../lib/types';
+import type {Step, TodoItem} from '../lib/types';
+import {TodoList} from './TodoList';
 
 interface Props {
   steps: Step[];
   isLive?: boolean;
+  todos?: TodoItem[];
   onClose: () => void;
 }
 
@@ -56,7 +58,7 @@ function StepRow({step}: {step: Step}) {
   );
 }
 
-export function ActivitySidebar({steps, isLive, onClose}: Props) {
+export function ActivitySidebar({steps, isLive, todos, onClose}: Props) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll to bottom when new steps arrive during live streaming
@@ -97,6 +99,7 @@ export function ActivitySidebar({steps, isLive, onClose}: Props) {
         </button>
       </div>
       <div className="steps-panel-body" ref={bodyRef}>
+        {todos && todos.length > 0 && <TodoList todos={todos} compact />}
         {steps.length === 0 ? (
           <div className="sidebar-empty">No activity recorded.</div>
         ) : (

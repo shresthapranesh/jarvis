@@ -76,6 +76,13 @@ export interface PersistedDocument {
   created_at: string;
 }
 
+export type TodoStatus = 'pending' | 'in_progress' | 'done';
+
+export interface TodoItem {
+  text: string;
+  status: TodoStatus;
+}
+
 export type AutomationInputType = 'prompt' | 'code' | 'webhook';
 
 export type NotificationOn = 'done' | 'error' | 'both';
