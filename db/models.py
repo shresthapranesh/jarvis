@@ -26,6 +26,9 @@ class Conversation(Base):
     messages: Mapped[list[Message]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan"
     )
+    artifacts: Mapped[list["Artifact"]] = relationship(
+        "Artifact", back_populates="conversation", cascade="all, delete-orphan"
+    )
 
 
 class Message(Base):
@@ -148,6 +151,10 @@ class Artifact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+    conversation: Mapped[Optional["Conversation"]] = relationship(
+        "Conversation", back_populates="artifacts"
     )
 
 

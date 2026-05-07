@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -9,7 +10,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from core.config import get_config
 from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Message, Step, Workflow, WorkflowRun
+
+logger = logging.getLogger(__name__)
 
 
 async def create_conversation(session: AsyncSession, model: str, title: str | None) -> Conversation:
@@ -117,9 +121,33 @@ async def update_conversation_title(session: AsyncSession, conv_id: str, title: 
 
 async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
     conv = await session.get(Conversation, conv_id)
-    if conv:
-        await session.delete(conv)
-        await session.commit()
+    if conv is None:
+        return
+
+    art_ids = list(
+        (await session.execute(
+            select(Artifact.id).where(Artifact.conversation_id == conv_id)
+        )).scalars()
+    )
+
+    await session.delete(conv)  # cascades messages, steps, artifacts via ORM
+    await session.commit()
+
+    cfg = get_config()
+    for aid in art_ids:
+        path = cfg.artifacts_dir / f"{aid}.md"
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Failed to unlink artifact file %s: %s", path, e)
+
+    try:
+        from core.state import get_async_checkpointer
+        await get_async_checkpointer().adelete_thread(conv_id)
+    except RuntimeError:
+        pass
+    except Exception as e:
+        logger.warning("Failed to delete checkpoint thread %s: %s", conv_id, e)
 
 
 async def get_conversation_meta(session: AsyncSession, conv_id: str) -> Conversation | None:
