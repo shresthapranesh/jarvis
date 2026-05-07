@@ -19,25 +19,35 @@ jarvis/
 │   ├── document_extractor.py  # PDF/DOCX/XLSX text extraction
 │   └── logging_middleware.py
 ├── db/
-│   ├── models.py         # ORM: Conversation, Message, Step, Automation, AutomationRun, Workflow, WorkflowRun, ConfigSetting
+│   ├── models.py         # ORM: Conversation, Message, Step, Artifact, Document, Automation, AutomationRun, Workflow, WorkflowRun, ConfigSetting
 │   ├── ops.py            # Async CRUD functions
 │   └── engine.py         # DB init, _migrate(), async_session, get_session
 ├── server/
 │   ├── entrypoint.py     # FastAPI app, lifespan, router wiring, Telegram bot lifecycle
 │   ├── telegram_bot.py   # Optional Telegram bot (enabled by TELEGRAM_BOT_TOKEN env var)
-│   ├── routes_chat.py    # /run, /stop, /resume, /stream/{task_id}, /conversations
+│   ├── routes_chat.py    # /run, /stop, /resume, /stream/{task_id}, /conversations, /conversations/{id}/todos
 │   ├── routes_automations.py  # /automations CRUD + /stream/automation/{run_id}
 │   ├── routes_workflows.py    # /workflows CRUD + /stream/workflow/{run_id}
+│   ├── routes_artifacts.py    # /artifacts CRUD + raw download
+│   ├── routes_documents.py    # /conversations/{id}/documents, /documents/{id}, /documents/{id}/raw
 │   ├── routes_live.py    # WebSocket / live endpoints
-│   ├── routes_media.py   # TTS, transcription
-│   └── routes_memory.py  # Memory endpoints
+│   ├── routes_media.py   # TTS, transcription, /models
+│   ├── routes_memory.py  # Memory endpoints
+│   └── routes_tasks.py   # Running-tasks list endpoints
 ├── workflow/
 │   ├── engine.py         # BFS workflow executor — execute_workflow()
 │   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode + _emit()
 ├── tools/
+│   ├── execute.py        # safe_execute (Python in subprocess)
+│   ├── files.py          # read_file, write_file, list_files
+│   ├── artifacts.py      # write_artifact, read_artifact, list_artifacts
+│   ├── todos.py          # write_todos, set_todo_status (per-conversation plan)
+│   ├── workers.py        # spawn_workers (parallel role-templated subagents)
+│   ├── automations.py    # CRUD as agent tools
+│   ├── workflows.py      # CRUD as agent tools
+│   ├── browser_agent.py  # Headless browser sub-agent
 │   ├── web.py            # web_search, fetch_page, extract_links
 │   ├── code.py           # run_python
-│   ├── files.py          # read_file, write_file, list_files
 │   ├── finance.py        # get_stock_data, get_historical_prices, compare_stocks, …
 │   └── datetime.py       # get_current_datetime
 └── frontend/             # React 19 + TanStack Router/Query + Vite + TypeScript
@@ -108,6 +118,13 @@ pnpm build     # build to ../static/dist/ (served by FastAPI in prod)
 - Add function to appropriate file in `tools/`
 - Import and add to the relevant subagent's tool list in `core/agents.py`
 
+### Adding a new conversation-scoped resource
+Three exist today: artifacts (DB row + `.md` file under `artifacts_dir`), documents (DB row + raw bytes under `documents_dir`), todos (in the LangGraph checkpointer, not the SQL DB). To add a fourth that follows the same pattern:
+- Add the model to `db/models.py` with `conversation_id` FK + an `index=True`, and a relationship from `Conversation` with `cascade="all, delete-orphan"` so DB cascade fires.
+- For on-disk bytes: add a new `*_dir: Path` field to `AppConfig` in `core/config.py` (mirror `documents_dir`), and write to `{dir}/{id}{ext}` from the route handler that creates the row.
+- Extend `delete_conversation` in `db/ops.py` to collect file paths *before* the cascade and `Path(p).unlink(missing_ok=True)` them after the commit. The function already calls `adelete_thread` on the async checkpointer for langgraph state cleanup.
+- Conversation deletion intentionally cascades messages → steps → artifacts → documents via SQLAlchemy ORM cascade. SQLite FK enforcement (`PRAGMA foreign_keys=ON`) is **not** set; cascades work because SQLAlchemy emits explicit DELETEs on its own.
+
 ### Adding a new workflow node type
 - Add a class extending `BaseNode` with a `node_type` class var and `execute()` method in `workflow/nodes.py`
 - Register it in `NODE_REGISTRY` at the bottom of that file
@@ -122,7 +139,9 @@ The SSE system is central to the app. Chat, automations, and workflows all use t
 - **Do not use `_tasks.setdefault(run_id, TaskState())`** in background executors — the caller always pre-sets it; use `state = _tasks[run_id]` directly
 
 ### Chat SSE events
-`token`, `thinking_token`, `step`, `interrupt`, `interrupt_resolved`, `done`, `error`
+`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `safety_input_blocked`, `safety_output_blocked`, `done`, `stopped`, `error`
+
+Custom events (anything except `token`/`thinking_token`/`step`) are dispatched from tools via `adispatch_custom_event(name, {"type": name, ...})` (the `"type"` key is required — `core/streaming.py:_process_chunk` switches on it). Token/thinking/step events flow naturally from LangGraph stream modes.
 
 ### Automation SSE events
 `token`, `thinking_token`, `step`, `done`, `error`
@@ -146,14 +165,17 @@ Visual graph executor (`workflow/engine.py`):
 - Conditional nodes prune inactive branches via `pruned_edges`; pruned nodes never execute
 
 ## Database
-- SQLite at `./database.db` (configurable via `DATABASE_URL` env var)
+- SQLite at `~/.jarvis/database.db` (configurable via `DATABASE_URL` env var)
 - Async via `aiosqlite` + SQLAlchemy async
 - `async_session` uses `expire_on_commit=False` — no `session.refresh()` needed after commit
 - `update_*` functions must use ORM-level `setattr` (not raw SQL UPDATE) so `onupdate` callbacks fire
 - All ForeignKey columns carry `index=True`; new ones must too
+- Two SQLite files live under `~/.jarvis/`: `database.db` (app state — conversations, messages, artifacts, documents, etc.) and `checkpoints.db` (LangGraph thread state, keyed by `thread_id == conversation_id`). Conversation deletion cascades both: ORM deletes app-DB rows, then `delete_conversation` calls `adelete_thread(conv_id)` on the async checkpointer.
 
 ## Default Model
 Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`). Can be overridden at runtime via `uv run python main.py model set-default <id>` — stored in the `config_settings` DB table under key `default.model`. `get_default_model(session)` in `db/ops.py` returns the DB value or falls back to the catalog default. Ollama and AWS Bedrock models also available — see `core/model_catalog.py`.
+
+`Conversation.model` is **sticky per-conversation**: `/run` updates it whenever `request.model` differs from the stored value, and the InputBox calls `PATCH /conversations/{id}` on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model` (returned by `GET /conversations/{id}`), falling back to `catalog.default` only when no conversation exists yet.
 
 ## Telegram Bot
 Optional — enabled by setting the `TELEGRAM_BOT_TOKEN` environment variable before starting the server. Implemented in `server/telegram_bot.py`:
