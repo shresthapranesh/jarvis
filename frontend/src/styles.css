@@ -4942,3 +4942,83 @@ body {
   font-size: 0.6rem;
   padding: 0 3px;
 }
+
+/* ── Memory page ── */
+.memory-page {
+  padding: 32px 40px;
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.memory-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 4px;
+}
+.memory-header h1 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--text);
+}
+.memory-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  max-width: 640px;
+  line-height: 1.5;
+  margin: 0;
+}
+.memory-subtitle code {
+  font-size: 0.78rem;
+  background: var(--surface2);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.memory-meta {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 6px;
+}
+
+.memory-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.memory-empty p {
+  margin: 0;
+}
+.memory-empty .artifact-btn {
+  margin-top: 8px;
+}
+
+.memory-error {
+  padding: 8px 12px;
+  border: 1px solid var(--error-text, #f87171);
+  border-radius: 6px;
+  color: var(--error-text, #f87171);
+  font-size: 0.82rem;
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.memory-page .artifact-editor {
+  flex: 1;
+  min-height: 0;
+}
+.memory-page .artifact-content-textarea {
+  min-height: 480px;
+}

@@ -258,6 +258,14 @@ export interface ArtifactRef {
   preview?: string;
 }
 
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+export interface Memory {
+  content: string;
+  exists: boolean;
+  modified_at: string | null;
+}
+
 // ── Running tasks (global registry) ──────────────────────────────────────────
 
 export type TaskKind = 'chat' | 'automation' | 'workflow';

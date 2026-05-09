@@ -8,6 +8,7 @@ import type {
   ConversationSummary,
   CreateAutomationPayload,
   MediaAttachment,
+  Memory,
   MessagePage,
   ModelCatalog,
   PersistedDocument,
@@ -330,6 +331,32 @@ export async function deleteArtifact(id: string): Promise<void> {
 
 export function artifactDownloadUrl(id: string): string {
   return `/artifacts/${id}/raw`;
+}
+
+// ── Memory ───────────────────────────────────────────────────────────────────
+
+export async function fetchMemory(): Promise<Memory> {
+  const res = await fetch('/memory');
+  if (!res.ok) throw new Error(`Failed to fetch memory: ${res.status}`);
+  return res.json();
+}
+
+export async function updateMemory(content: string): Promise<Memory> {
+  const res = await fetch('/memory', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({content}),
+  });
+  if (!res.ok) throw new Error(`Failed to update memory: ${res.status}`);
+  return res.json();
+}
+
+export async function consolidateMemory(model?: string): Promise<{ok: true; result: string}> {
+  const url = model ? `/consolidate-memory?model=${encodeURIComponent(model)}` : '/consolidate-memory';
+  const res = await fetch(url, {method: 'POST'});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Failed to consolidate memory: ${res.status}`);
+  return data;
 }
 
 export function formatRelativeTime(isoString: string): string {

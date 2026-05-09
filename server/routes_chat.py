@@ -23,11 +23,11 @@ from sse_starlette.sse import EventSourceResponse
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from core.agents import _normalise_todos, build_agent, is_valid_model
+from core.agents import build_agent, is_valid_model
 from core.config import get_config
 from core.log_callback import AgentLogger
 from core.safety import gate_input, gate_output
-from core.schemas import ConversationUpdate, ResumePayload, RunRequest, _invalid_model_response
+from core.schemas import ConversationUpdate, ResumePayload, RunRequest, _invalid_model_response, _normalise_todos
 from core.state import TaskState, _background_tasks, _notify, _tasks, get_async_checkpointer, get_store, stream_task_events
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _build_message_content, _finalize_message, _process_chunk
 

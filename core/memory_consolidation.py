@@ -15,9 +15,25 @@ from db.ops import get_default_model, get_recent_messages
 logger = logging.getLogger(__name__)
 
 _MEMORY_NS = ("memory",)
-_MEMORY_KEY = "/AGENTS.md"
+_MEMORY_KEY = "AGENTS.md"
+_LEGACY_MEMORY_KEY = "/AGENTS.md"
 _META_NS = ("memory_consolidation",)
 _META_KEY = "state"
+
+
+async def _migrate_legacy_key(store: AsyncSqliteStore) -> None:
+    """Copy any data at the pre-fix `/AGENTS.md` key onto the canonical key.
+
+    The agent's runtime reader and write_file tool always used "AGENTS.md";
+    consolidation + GET /memory used "/AGENTS.md" until the keys were
+    unified. The legacy key is left in place as a backup for one release.
+    """
+    canonical = await store.aget(_MEMORY_NS, _MEMORY_KEY)
+    if canonical is not None:
+        return
+    legacy = await store.aget(_MEMORY_NS, _LEGACY_MEMORY_KEY)
+    if legacy is not None:
+        await store.aput(_MEMORY_NS, _MEMORY_KEY, legacy.value)
 
 _SYSTEM_PROMPT = """You are a memory consolidation assistant. Your job is to update
 a persistent AGENTS.md memory document that helps an AI assistant remember key facts
@@ -37,6 +53,8 @@ async def consolidate_memory(
     model_id: str | None = None,
 ) -> str:
     """Read recent DB messages + current AGENTS.md, call LLM to update memory, write back."""
+
+    await _migrate_legacy_key(store)
 
     # 1. Read last-run timestamp
     meta = await store.aget(_META_NS, _META_KEY)

@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import sqlite3 as _sqlite3
 from pathlib import Path
-from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
+from typing import Annotated, NotRequired, TypedDict
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -17,6 +17,13 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from .config import get_config
+from .messages import (
+    build_llm_messages,
+    estimate_tokens,
+    message_text,
+    repair_orphan_tool_calls,
+    strip_historical_thinking,
+)
 from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     AVAILABLE_MODELS,
     DEFAULT_MODEL,
@@ -24,6 +31,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     is_valid_model,
 )
 from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write_file
+from .schemas import TodoItem, _normalise_todos
 from tools.artifacts import list_artifacts as artifact_list, read_artifact
 from tools.files import list_files, read_file
 from tools.todos import set_todo_status, write_todos
@@ -45,31 +53,6 @@ logger = logging.getLogger(__name__)
 
 
 # ── State schema ─────────────────────────────────────────────────────────────
-
-class TodoItem(TypedDict):
-    text: str
-    status: Literal["pending", "in_progress", "done"]
-
-
-def _normalise_todos(raw: object) -> list[TodoItem]:
-    """Coerce todos read from state/checkpointer into a uniform shape.
-
-    Accepts both legacy `list[str]` (from older checkpoints / older
-    `write_todos` calls) and the new `list[TodoItem]` shape.
-    """
-    if not raw or not isinstance(raw, list):
-        return []
-    out: list[TodoItem] = []
-    for item in raw:
-        if isinstance(item, str):
-            out.append({"text": item, "status": "pending"})
-        elif isinstance(item, dict) and "text" in item:
-            status = item.get("status", "pending")
-            if status not in ("pending", "in_progress", "done"):
-                status = "pending"
-            out.append({"text": str(item["text"]), "status": status})  # type: ignore[typeddict-item]
-    return out
-
 
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
@@ -146,238 +129,10 @@ the full artifact body into your final reply — a one-line confirmation referri
 to the artifact title is enough; the user can already see it.\
 """
 
-# ── Thinking-block stripper (not persisted — runs at model-call time) ────────
-
-_THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
-
-
-def _strip_thinking_from_message(msg: AIMessage) -> AIMessage:
-    content = msg.content
-    if not isinstance(content, list):
-        return msg
-    filtered = [
-        b for b in content
-        if not (isinstance(b, dict) and b.get("type") in _THINKING_TYPES)
-    ]
-    if len(filtered) == len(content):
-        return msg
-    if not filtered:
-        filtered = [{"type": "text", "text": ""}]
-    new_msg = msg.model_copy(update={"content": filtered})
-    if "thinking" in (new_msg.additional_kwargs or {}):
-        new_msg = new_msg.model_copy(update={
-            "additional_kwargs": {k: v for k, v in new_msg.additional_kwargs.items() if k != "thinking"}
-        })
-    return new_msg
-
-
-def _strip_historical_thinking(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """Strip thinking blocks from ALL AIMessages in the history.
-
-    Thinking block signatures don't survive checkpointer round-trips, so
-    keeping any historical thinking block risks Bedrock/Anthropic rejecting
-    with "thinking.signature: Field required".  The model generates fresh
-    thinking each turn — it doesn't need to see its own prior reasoning.
-    """
-    result: list[AnyMessage] = []
-    for msg in messages:
-        if isinstance(msg, AIMessage):
-            result.append(_strip_thinking_from_message(msg))
-        else:
-            result.append(msg)
-    return result
-
-
-def _ai_tool_use_ids(msg: AIMessage) -> list[str]:
-    """Collect tool_use ids from BOTH .tool_calls and content blocks.
-
-    Mid-stream-cancelled accumulators can land tool_use blocks in `content`
-    while `.tool_calls` stays empty (LangChain finalises that field at the
-    end). Bedrock validates against content blocks directly, so we need the
-    union to detect every id that needs a tool_result.
-    """
-    ids: list[str] = []
-    seen: set[str] = set()
-    for tc in (getattr(msg, "tool_calls", None) or []):
-        tcid = tc.get("id") if isinstance(tc, dict) else None
-        if tcid and tcid not in seen:
-            seen.add(tcid)
-            ids.append(tcid)
-    content = getattr(msg, "content", None)
-    if isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_use":
-                bid = block.get("id")
-                if bid and bid not in seen:
-                    seen.add(bid)
-                    ids.append(bid)
-    return ids
-
-
-def _msg_tool_result_ids(msg: AnyMessage) -> list[str]:
-    """Collect tool_result ids from a message that satisfies tool_use.
-
-    Native ToolMessage carries `tool_call_id`. Anthropic-style providers can
-    also round-trip tool_results as a HumanMessage whose content list has
-    `{"type": "tool_result", "tool_use_id": "..."}` blocks. We accept both.
-    """
-    ids: list[str] = []
-    if getattr(msg, "type", "") == "tool":
-        tcid = getattr(msg, "tool_call_id", None)
-        if tcid:
-            ids.append(tcid)
-        return ids
-    content = getattr(msg, "content", None)
-    if isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                bid = block.get("tool_use_id")
-                if bid:
-                    ids.append(bid)
-    return ids
-
-
-def _is_tool_result_carrier(msg: AnyMessage) -> bool:
-    """A message that can carry tool_result blocks for the preceding AIMessage.
-
-    Native ToolMessages and HumanMessages whose content list includes any
-    tool_result block both qualify; everything else terminates the
-    paired-result window.
-    """
-    if getattr(msg, "type", "") == "tool":
-        return True
-    if isinstance(msg, HumanMessage):
-        content = getattr(msg, "content", None)
-        if isinstance(content, list):
-            return any(
-                isinstance(b, dict) and b.get("type") == "tool_result"
-                for b in content
-            )
-    return False
-
-
-def _repair_orphan_tool_calls(messages: list[AnyMessage]) -> list[AnyMessage]:
-    """Insert synthetic ToolMessages for any AIMessage tool_use id that has
-    no matching tool_result in the immediately-following window.
-
-    Bedrock/Anthropic reject histories where a tool_use isn't paired with a
-    tool_result in the next turn ("Expected toolResult blocks at messages.N
-    .content for the following Ids: ..."). Orphans appear when the agent
-    run is cancelled between model_request and ToolNode, when ToolNode
-    crashes partway through a parallel batch, or when streaming aborts
-    mid-tool_use generation (in that case the orphan id lives in the
-    AIMessage's content blocks but not yet in `.tool_calls`).
-    """
-    result: list[AnyMessage] = []
-    i = 0
-    while i < len(messages):
-        msg = messages[i]
-        result.append(msg)
-        if not isinstance(msg, AIMessage):
-            i += 1
-            continue
-        expected_ids = _ai_tool_use_ids(msg)
-        if not expected_ids:
-            i += 1
-            continue
-        j = i + 1
-        seen_ids: set[str] = set()
-        while j < len(messages) and _is_tool_result_carrier(messages[j]):
-            for tcid in _msg_tool_result_ids(messages[j]):
-                seen_ids.add(tcid)
-            result.append(messages[j])
-            j += 1
-        for tcid in expected_ids:
-            if tcid not in seen_ids:
-                result.append(ToolMessage(
-                    content="[Tool result missing — previous run was cancelled or interrupted.]",
-                    tool_call_id=tcid,
-                ))
-        i = j
-    return result
-
-
 # ── Summarization constants ───────────────────────────────────────────────────
 
 _SUMMARIZE_TOKEN_THRESHOLD = 100_000  # tokens; well under typical 200k context
 _KEEP_RECENT = 10                     # messages to keep verbatim
-
-
-def _message_text(m: AnyMessage) -> str:
-    """Flatten a message's content to a single string for token counting."""
-    c = m.content
-    if isinstance(c, str):
-        return c
-    if isinstance(c, list):
-        parts: list[str] = []
-        for block in c:
-            if isinstance(block, dict):
-                parts.append(block.get("text", "") or block.get("thinking", ""))
-        return "".join(parts)
-    return ""
-
-
-def _estimate_tokens(messages: list[AnyMessage], llm) -> int:
-    """Best-effort token count, falling back to a chars-per-token heuristic.
-
-    Uses the LLM's own tokenizer when available (most LangChain chat models
-    expose `get_num_tokens_from_messages`); otherwise approximates at 4
-    chars per token, which is roughly correct for English/code and biases
-    high (so we summarise sooner) for token-dense content.
-    """
-    try:
-        return cast(Any, llm).get_num_tokens_from_messages(messages)
-    except Exception:
-        return sum(len(_message_text(m)) for m in messages) // 4
-
-
-# ── System message builder ───────────────────────────────────────────────────
-
-def _make_system_message(text: str, cache: bool) -> SystemMessage:
-    """Build a SystemMessage, optionally with an Anthropic cache breakpoint."""
-    if cache:
-        return SystemMessage(content=[{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}])
-    return SystemMessage(text)
-
-
-def _system_text(msg: SystemMessage) -> str:
-    c = msg.content
-    if isinstance(c, str):
-        return c
-    if isinstance(c, list):
-        return "\n".join(
-            b.get("text", "") for b in c
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return ""
-
-
-def _build_llm_messages(
-    system_text: str,
-    cache: bool,
-    history: list[AnyMessage],
-) -> list[AnyMessage]:
-    """Build the message list for an LLM call with exactly one SystemMessage.
-
-    Bedrock/Anthropic reject "multiple non-consecutive system messages". The
-    summarizer adds its result to state as a SystemMessage via the
-    checkpointer's add_messages reducer, which appends it after the kept
-    user/assistant/tool turns. On the next turn that summary System ends up
-    after non-system messages — a non-consecutive system — so we fold any
-    embedded SystemMessages into the prompt text and prepend a single
-    SystemMessage at index 0.
-    """
-    extras: list[str] = []
-    rest: list[AnyMessage] = []
-    for m in history:
-        if isinstance(m, SystemMessage):
-            text = _system_text(m).strip()
-            if text:
-                extras.append(text)
-        else:
-            rest.append(m)
-    final_text = system_text if not extras else system_text + "\n\n" + "\n\n".join(extras)
-    return [_make_system_message(final_text, cache)] + rest
 
 
 # ── Memory loading ────────────────────────────────────────────────────────────
@@ -475,7 +230,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         Async so the summarization LLM call uses ``ainvoke`` and doesn't block
         the event loop.
         """
-        if _estimate_tokens(messages, llm) <= _SUMMARIZE_TOKEN_THRESHOLD:
+        if estimate_tokens(messages, llm) <= _SUMMARIZE_TOKEN_THRESHOLD:
             return None
 
         # Find a safe split point that never breaks an AIMessage→ToolMessage
@@ -519,7 +274,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             if mtype == "human":
                 safe_msgs.append(m)
             elif mtype == "ai":
-                text = _message_text(m)
+                text = message_text(m)
                 tool_calls = getattr(m, "tool_calls", [])
                 if tool_calls:
                     tc_desc = ", ".join(
@@ -583,10 +338,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             messages_for_llm, state_update_msgs = summarized
         else:
             messages_for_llm, state_update_msgs = raw_messages, []
-        messages_for_llm = _strip_historical_thinking(messages_for_llm)
-        messages_for_llm = _repair_orphan_tool_calls(messages_for_llm)
+        messages_for_llm = strip_historical_thinking(messages_for_llm)
+        messages_for_llm = repair_orphan_tool_calls(messages_for_llm)
         response = await llm_with_tools.ainvoke(
-            _build_llm_messages(system, use_cache, messages_for_llm),
+            build_llm_messages(system, use_cache, messages_for_llm),
             config=config,
         )
         return {"messages": state_update_msgs + [response]}
@@ -655,12 +410,12 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
                 # Strip historical thinking blocks (signatures don't survive
                 # checkpoint round-trips → Bedrock rejects with "thinking.
                 # signature: Field required"), and route through
-                # _build_llm_messages so any embedded SystemMessages are
+                # build_llm_messages so any embedded SystemMessages are
                 # collapsed into the single system prompt.
-                history = _strip_historical_thinking(list(state.get("messages", [])))
-                history = _repair_orphan_tool_calls(history)
+                history = strip_historical_thinking(list(state.get("messages", [])))
+                history = repair_orphan_tool_calls(history)
                 response = await role_llm.ainvoke(
-                    _build_llm_messages(prompt, use_cache, history),
+                    build_llm_messages(prompt, use_cache, history),
                     config=config,
                 )
                 return {"messages": [response]}
