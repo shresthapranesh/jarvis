@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import pathlib
 from collections.abc import AsyncGenerator
@@ -74,6 +75,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await _tg_app.start()
             state._telegram_bot = _tg_app.bot
 
+        _dc_client = None
+        _dc_task: asyncio.Task | None = None
+        _dc_token = os.environ.get("DISCORD_BOT_TOKEN")
+        if _dc_token:
+            from server.discord_bot import build_client
+            _dc_client = build_client()
+            _dc_task = asyncio.create_task(_dc_client.start(_dc_token))
+            state._discord_client = _dc_client
+
         yield
 
         if _tg_app is not None:
@@ -82,6 +92,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await _tg_app.stop()
             await _tg_app.shutdown()
             state._telegram_bot = None
+
+        if _dc_client is not None:
+            await _dc_client.close()
+            if _dc_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await _dc_task
+            state._discord_client = None
 
         state._async_checkpointer = None
         state._store = None

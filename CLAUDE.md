@@ -185,6 +185,16 @@ Optional — enabled by setting the `TELEGRAM_BOT_TOKEN` environment variable be
 - Streams the response by editing a placeholder message every ~1 second
 - Bot token env var: `TELEGRAM_BOT_TOKEN`; user IDs can be obtained from @userinfobot on Telegram
 
+## Discord Bot
+Optional — enabled by setting the `DISCORD_BOT_TOKEN` environment variable before starting the server. Implemented in `server/discord_bot.py`:
+- Uses `discord.py` v2 (async); the bot's **Message Content Intent** must be enabled in the Discord developer portal
+- Allowlist: `uv run python main.py config set discord.allowed_users "123456789012345678,234567890123456789"` — **rejects all users by default when empty**
+- Trigger rule: replies in DMs always; in guild channels only when @mentioned or when the message is a reply to the bot
+- Each Discord channel (DM or guild) gets its own LangGraph thread (`discord_{channel_id}`) for persistent memory
+- Streams the response by editing a single message every ~1 second; Discord's 2000-char hard limit is enforced via `_MAX_MSG_LEN = 1900`
+- Voice messages and audio attachments are transcribed via `transcribe_bytes`; image attachments flow through the same vision path as the web UI
+- Bot token env var: `DISCORD_BOT_TOKEN`; user IDs can be obtained from Discord by enabling Developer Mode → right-click user → Copy User ID
+
 ## Environment
 - Python 3.13, managed with `uv`
 - No test suite currently

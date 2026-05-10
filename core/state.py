@@ -30,6 +30,7 @@ _store: AsyncSqliteStore | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 _http_client: httpx.AsyncClient | None = None
 _telegram_bot: object | None = None  # telegram.Bot when set; lazy-typed to avoid forcing import
+_discord_client: object | None = None  # discord.Client when set; lazy-typed to avoid forcing import
 
 
 def get_async_checkpointer() -> AsyncSqliteSaver:
