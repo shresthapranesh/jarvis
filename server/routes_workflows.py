@@ -30,7 +30,16 @@ from db.ops import (
 )
 from core.notifications import parse_notifications, send_notifications
 from core.schemas import WorkflowCreateRequest, WorkflowRunRequest, WorkflowUpdateRequest
-from core.state import TaskState, _background_tasks, _notify, _tasks, stream_task_events
+from core.state import (
+    TaskState,
+    _background_tasks,
+    _notify,
+    _tasks,
+    log_task_complete,
+    log_task_created,
+    log_task_received,
+    stream_task_events,
+)
 from workflow.engine import execute_workflow
 
 router = APIRouter()
@@ -77,6 +86,7 @@ async def _execute_workflow_bg(
             return
 
     state = _tasks[run_id]
+    final_status = "error"
 
     try:
         definition = json.loads(wf.definition or "{}")
@@ -96,6 +106,7 @@ async def _execute_workflow_bg(
                 node_results=json.dumps(node_records),
                 error=None,
             )
+        final_status = "done"
 
         await send_notifications(
             parse_notifications(wf.notifications),
@@ -107,6 +118,7 @@ async def _execute_workflow_bg(
     except asyncio.CancelledError:
         async with async_session() as session:
             await finish_workflow_run(session, run_id, "stopped", None, None, None)
+        final_status = "stopped"
         state.events.append({
             "event": "workflow_stopped",
             "data": json.dumps({"run_id": run_id}),
@@ -130,6 +142,7 @@ async def _execute_workflow_bg(
             raise
 
     finally:
+        log_task_complete(run_id, state, final_status)
         state.done = True
         _notify(state)
         loop = asyncio.get_running_loop()
@@ -214,6 +227,7 @@ async def trigger_workflow_run(
     if wf is None:
         return JSONResponse({"error": "not found"}, status_code=404)
 
+    log_task_received("workflow", workflow_id, "http")
     run = await create_workflow_run(session, workflow_id, json.dumps(request.inputs))
 
     # Register TaskState BEFORE returning — prevents SSE client race condition
@@ -222,6 +236,7 @@ async def trigger_workflow_run(
         label=wf.name,
         parent_id=workflow_id,
     )
+    log_task_created(run.id, _tasks[run.id], None)
 
     def _task_done(t: asyncio.Task, run_id: str) -> None:
         _background_tasks.pop(run_id, None)

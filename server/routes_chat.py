@@ -28,7 +28,18 @@ from core.config import get_config
 from core.log_callback import AgentLogger
 from core.safety import gate_input, gate_output
 from core.schemas import ConversationUpdate, ResumePayload, RunRequest, _invalid_model_response, _normalise_todos
-from core.state import TaskState, _background_tasks, _notify, _tasks, get_async_checkpointer, get_store, stream_task_events
+from core.state import (
+    TaskState,
+    _background_tasks,
+    _notify,
+    _tasks,
+    get_async_checkpointer,
+    get_store,
+    log_task_complete,
+    log_task_created,
+    log_task_received,
+    stream_task_events,
+)
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _build_message_content, _finalize_message, _process_chunk
 
 from db import async_session, get_session
@@ -81,12 +92,14 @@ async def _run_agent_task(
     accumulated: list[str] = []
     step_seq_ref = [0]
     coalescer = TokenCoalescer(state)
+    status = "error"
 
     try:
         # Input gate — judge the user's prompt before spinning up the agent.
         rejection = await gate_input(query, model)
         if rejection:
             await _finalize_message(task_id, rejection, "blocked")
+            status = "blocked"
             state.events.append({"event": "safety_input_blocked", "data": json.dumps({
                 "message": rejection, "conversation_id": conv_id,
             })})
@@ -144,6 +157,7 @@ async def _run_agent_task(
         if state.cancelled:
             # Cancelled mid-run — partial output is non-final; skip the gate.
             await _finalize_message(task_id, final_message, "stopped")
+            status = "stopped"
             state.events.append({"event": "stopped", "data": json.dumps({
                 "message": final_message,
                 "conversation_id": conv_id,
@@ -168,6 +182,7 @@ async def _run_agent_task(
         coalescer.flush_all()
         final_message = "".join(accumulated)
         await _finalize_message(task_id, final_message, "stopped")
+        status = "stopped"
         state.events.append({"event": "stopped", "data": json.dumps({
             "message": final_message,
             "conversation_id": conv_id,
@@ -205,6 +220,7 @@ async def _run_agent_task(
     finally:
         if state.resume_future and not state.resume_future.done():
             state.resume_future.cancel()
+        log_task_complete(task_id, state, status)
         state.done = True
         _notify(state)
         # Delay popping the task so the frontend UI can show the "done" or
@@ -224,6 +240,7 @@ async def run_agent(
         return _invalid_model_response(request.model)
     title = request.query[:60] if not request.conversation_id else None
     conv = await get_or_create_conversation(session, request.conversation_id, request.model, title)
+    log_task_received("chat", conv.id, "http")
 
     if request.attachments:
         display_parts: list[dict] = [{"type": "text", "text": request.query}]
@@ -265,6 +282,7 @@ async def run_agent(
         label=conv.title or request.query[:60],
         parent_id=conv.id,
     )
+    log_task_created(task_msg.id, _tasks[task_msg.id], request.model)
 
     def _task_done(t: asyncio.Task, task_id: str) -> None:
         _background_tasks.pop(task_id, None)

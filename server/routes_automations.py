@@ -40,7 +40,19 @@ from db.ops import (
 from core.notifications import parse_notifications, send_notifications
 from core.schemas import AutomationRequest, _invalid_model_response
 from core.scheduler import _register_scheduler_job, _remove_scheduler_job
-from core.state import TaskState, _background_tasks, _notify, _tasks, get_async_checkpointer, get_http_client, get_store, stream_task_events
+from core.state import (
+    TaskState,
+    _background_tasks,
+    _notify,
+    _tasks,
+    get_async_checkpointer,
+    get_http_client,
+    get_store,
+    log_task_complete,
+    log_task_created,
+    log_task_received,
+    stream_task_events,
+)
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_chunk
 
 router = APIRouter()
@@ -256,6 +268,7 @@ async def _execute_automation_bg(
             return
 
         if run_id is None:
+            log_task_received("automation", automation_id, triggered_by)
             run = await create_automation_run(session, automation_id, triggered_by)
             run_id = run.id
             # Scheduled path: caller didn't pre-register the TaskState; do it
@@ -265,11 +278,13 @@ async def _execute_automation_bg(
                 label=auto.name,
                 parent_id=automation_id,
             )
+            log_task_created(run_id, _tasks[run_id], auto.model)
             # Add to background_tasks so the stop endpoint can cancel it.
             if (t := asyncio.current_task()) is not None:
                 _background_tasks[run_id] = t
 
     state = _tasks[run_id]
+    final_status = "error"
 
     try:
         status = "done"
@@ -308,10 +323,12 @@ async def _execute_automation_bg(
         if state.cancelled:
             async with async_session() as session:
                 await finish_automation_run(session, run_id, "stopped", output, None)
+            final_status = "stopped"
             state.events.append({"event": "stopped", "data": json.dumps({"output": output, "run_id": run_id})})
         else:
             async with async_session() as session:
                 await finish_automation_run(session, run_id, status, output, None)
+            final_status = status
             state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
 
             await send_notifications(
@@ -324,6 +341,7 @@ async def _execute_automation_bg(
     except asyncio.CancelledError:
         async with async_session() as session:
             await finish_automation_run(session, run_id, "stopped", None, None)
+        final_status = "stopped"
         state.events.append({"event": "stopped", "data": json.dumps({"run_id": run_id})})
 
     except BaseException as exc:
@@ -341,6 +359,7 @@ async def _execute_automation_bg(
             raise
 
     finally:
+        log_task_complete(run_id, state, final_status)
         state.done = True
         _notify(state)
         loop = asyncio.get_running_loop()
@@ -460,12 +479,14 @@ async def trigger_automation(
     if auto is None:
         return JSONResponse({"error": "not found"}, status_code=404)
 
+    log_task_received("automation", automation_id, "http")
     run = await create_automation_run(session, automation_id, "manual")
     _tasks[run.id] = TaskState(
         kind="automation",
         label=auto.name,
         parent_id=automation_id,
     )
+    log_task_created(run.id, _tasks[run.id], auto.model)
 
     def _task_done(t: asyncio.Task, run_id: str) -> None:
         _background_tasks.pop(run_id, None)

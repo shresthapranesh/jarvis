@@ -9,6 +9,7 @@ the lifespan context manager in server.py sets the infrastructure globals
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 
 TaskKind = Literal["chat", "automation", "workflow"]
+
+_task_log = logging.getLogger("jarvis.tasks")
 
 
 # ── Infrastructure globals (set by lifespan, read everywhere) ────────────────
@@ -89,6 +92,28 @@ def _notify(state: TaskState) -> None:
         if not fut.done():
             fut.set_result(None)
     state._waiters.clear()
+
+
+def log_task_received(kind: TaskKind, parent_id: str, source: str) -> None:
+    """Log that a trigger has arrived and a task is about to be spun up."""
+    _task_log.info("task received: kind=%s parent=%s source=%s", kind, parent_id, source)
+
+
+def log_task_created(task_id: str, state: TaskState, model: str | None = None) -> None:
+    """Log that TaskState is registered and the background coroutine has been scheduled."""
+    _task_log.info(
+        "task created: kind=%s task=%s parent=%s model=%s",
+        state.kind, task_id, state.parent_id, model or "-",
+    )
+
+
+def log_task_complete(task_id: str, state: TaskState, status: str) -> None:
+    """Log task completion with status and duration since started_at."""
+    duration_ms = int((datetime.now(timezone.utc) - state.started_at).total_seconds() * 1000)
+    _task_log.info(
+        "task complete: kind=%s task=%s parent=%s status=%s duration_ms=%d",
+        state.kind, task_id, state.parent_id, status, duration_ms,
+    )
 
 
 async def stream_task_events(state: TaskState) -> AsyncIterator[dict]:

@@ -18,7 +18,14 @@ if TYPE_CHECKING:
 
 from core.safety import gate_input, gate_output
 from core.schemas import AttachmentIn
-from core.state import TaskState, _background_tasks, _tasks, stream_task_events
+from core.state import (
+    TaskState,
+    _background_tasks,
+    _tasks,
+    log_task_created,
+    log_task_received,
+    stream_task_events,
+)
 from db import async_session
 from db.ops import add_message, get_default_model, get_or_create_conversation, get_setting
 from server.routes_chat import _run_agent_task
@@ -80,6 +87,7 @@ async def _dispatch(
         return
 
     conv_id = f"discord_{channel.id}"
+    log_task_received("chat", conv_id, "discord")
 
     async with async_session() as session:
         conv = await get_or_create_conversation(session, conv_id, model, db_user_content[:60])
@@ -87,8 +95,9 @@ async def _dispatch(
         task_msg = await add_message(session, conv.id, "assistant", "", model=model, status="running")
 
     task_id = task_msg.id
-    task_state = TaskState()
+    task_state = TaskState(parent_id=conv_id)
     _tasks[task_id] = task_state
+    log_task_created(task_id, task_state, model)
 
     t = asyncio.create_task(_run_agent_task(task_id, user_content, model, conv_id, attachments=attachments))
     _background_tasks[task_id] = t
@@ -173,14 +182,16 @@ async def _handle_voice(
         return
 
     conv_id = f"discord_{message.channel.id}"
+    log_task_received("chat", conv_id, "discord")
     async with async_session() as session:
         conv = await get_or_create_conversation(session, conv_id, model, transcribed[:60])
         await add_message(session, conv.id, "user", f"[Voice] {transcribed}")
         task_msg = await add_message(session, conv.id, "assistant", "", model=model, status="running")
 
     task_id = task_msg.id
-    task_state = TaskState()
+    task_state = TaskState(parent_id=conv_id)
     _tasks[task_id] = task_state
+    log_task_created(task_id, task_state, model)
 
     t = asyncio.create_task(_run_agent_task(task_id, transcribed, model, conv_id))
     _background_tasks[task_id] = t
