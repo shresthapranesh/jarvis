@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3 as _sqlite3
 from pathlib import Path
 from typing import Annotated, NotRequired, TypedDict
@@ -131,8 +132,23 @@ to the artifact title is enough; the user can already see it.\
 
 # ── Summarization constants ───────────────────────────────────────────────────
 
-_SUMMARIZE_TOKEN_THRESHOLD = 100_000  # tokens; well under typical 200k context
-_KEEP_RECENT = 10                     # messages to keep verbatim
+def _summarize_threshold() -> int:
+    """Token count at which conversation history gets summarized.
+
+    Defaults to 100_000 (well under typical 200k contexts). Override with
+    JARVIS_SUMMARIZE_TOKEN_THRESHOLD for manual testing — set it low (e.g. 200)
+    to force-trigger the summarize path on a short conversation.
+    """
+    raw = os.environ.get("JARVIS_SUMMARIZE_TOKEN_THRESHOLD")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return 100_000
+
+
+_KEEP_RECENT = 10  # messages to keep verbatim
 
 
 # ── Memory loading ────────────────────────────────────────────────────────────
@@ -230,8 +246,19 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         Async so the summarization LLM call uses ``ainvoke`` and doesn't block
         the event loop.
         """
-        if estimate_tokens(messages, llm) <= _SUMMARIZE_TOKEN_THRESHOLD:
+        threshold = _summarize_threshold()
+        token_count = estimate_tokens(messages, llm)
+        if token_count <= threshold:
+            logger.debug(
+                "summarize check: %d tokens / %d msgs (under %d threshold) — skip",
+                token_count, len(messages), threshold,
+            )
             return None
+
+        logger.info(
+            "summarize triggered: %d tokens / %d msgs (over %d threshold)",
+            token_count, len(messages), threshold,
+        )
 
         # Find a safe split point that never breaks an AIMessage→ToolMessage
         # group.  Anthropic (and Bedrock) reject messages where a tool_use
@@ -262,7 +289,17 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
         to_summarize = messages[:split]
         if not to_summarize:
+            logger.warning(
+                "summarize triggered at %d tokens but no safe split found "
+                "(len=%d ideal=%d final_split=%d) — history kept intact, will keep growing",
+                token_count, len(messages), ideal, split,
+            )
             return None
+
+        logger.info(
+            "summarize: condensing %d msgs, keeping %d recent",
+            len(to_summarize), len(messages) - split,
+        )
 
         # Build a safe message list for the summarization LLM call.
         # Anthropic rejects raw tool-call exchanges (tool_use without
@@ -302,7 +339,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             ])
             summary_text = summary.content if isinstance(summary.content, str) else str(summary.content)
         except Exception as exc:
-            logger.warning("summarization failed (%s) — skipping", exc)
+            logger.warning(
+                "summarization LLM call failed (%s: %s) — skipping; history will keep growing",
+                type(exc).__name__, exc,
+            )
             return None
         logger.info("summarized %d messages into ~%d chars", len(to_summarize), len(summary_text))
         summary_msg = SystemMessage(f"[Prior conversation summary]\n{summary_text}")
