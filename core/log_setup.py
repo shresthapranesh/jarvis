@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _FORMAT = "%(asctime)s %(levelname)-5s %(name)-26s %(message)s"
-_DATE_FORMAT = "%H:%M:%S"
+_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # Third-party loggers that flood the file with low-signal noise. SQLite/DB
 # internals are explicitly silenced per the user's request.
