@@ -20,6 +20,7 @@ _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 _BACKFILL_CAP = 2000
 _SUBSCRIBER_QUEUE_MAX = 500
+_MAX_MESSAGE_CHARS = 8192
 
 # Third-party loggers that flood the file with low-signal noise. SQLite/DB
 # internals are explicitly silenced per the user's request.
@@ -85,11 +86,14 @@ class BroadcastHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
+            message = record.getMessage()
+            if len(message) > _MAX_MESSAGE_CHARS:
+                message = message[:_MAX_MESSAGE_CHARS] + "… [truncated]"
             payload = {
                 "ts": datetime.fromtimestamp(record.created).isoformat(timespec="seconds"),
                 "level": record.levelname,
                 "logger": record.name,
-                "message": record.getMessage(),
+                "message": message,
             }
         except Exception:
             return

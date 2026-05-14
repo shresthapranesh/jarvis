@@ -14,14 +14,25 @@ Records are produced by ``core.log_setup.BroadcastHandler``, which is
 attached to the root logger by ``setup_logging``. Each record carries
 ``{ts, level, logger, message}``.
 
-The endpoints reject any caller whose ``request.client.host`` is not a
-loopback address. There is no token auth — if the server ever binds to a
-non-localhost interface, this guard is what keeps logs from leaking.
+Access is gated by two checks:
+
+1. ``request.client.host`` must be a loopback IP. This rejects anyone
+   connecting from another machine when the server binds to a non-loopback
+   interface. **Caveat:** if the server is ever deployed behind a reverse
+   proxy (nginx, Caddy, Traefik), the TCP peer becomes the proxy itself
+   and this check admits the world. Re-evaluate before that deployment.
+2. If an ``Origin`` header is present (i.e. the request is a CORS fetch
+   from a webpage), it must be a loopback origin. The app's global
+   ``CORSMiddleware`` uses ``allow_origins=["*"]``, which by itself would
+   let any visited website ``fetch('http://localhost:8000/server-logs')``
+   from the user's browser and exfiltrate the buffer. This second check
+   blocks that vector without touching the global CORS config.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 from collections.abc import AsyncIterator
 
@@ -35,13 +46,35 @@ from core.log_setup import get_broadcast_handler
 router = APIRouter()
 
 
-_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+def _is_loopback_host(host: str) -> bool:
+    """True for 127.0.0.0/8, ::1, and ::ffff:127.0.0.1-style mappings."""
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    """True for an Origin header that points back at this machine."""
+    # Same-origin SSE/fetch from the UI uses http://localhost:5173 (vite dev)
+    # or http://localhost:8000 / http://127.0.0.1:8000 (prod). Anything else
+    # is a cross-origin fetch and must be refused — see module docstring.
+    return origin.startswith((
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://[::1]",
+    ))
 
 
 def _require_localhost(request: Request) -> JSONResponse | None:
     host = (request.client.host if request.client else "") or ""
-    if host not in _LOCAL_HOSTS:
+    if not _is_loopback_host(host):
         return JSONResponse({"error": "logs endpoint is localhost-only"}, status_code=403)
+    origin = request.headers.get("origin", "")
+    if origin and not _is_loopback_origin(origin):
+        return JSONResponse({"error": "cross-origin not allowed"}, status_code=403)
     return None
 
 
