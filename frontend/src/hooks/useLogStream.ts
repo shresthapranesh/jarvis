@@ -25,7 +25,7 @@ export function useLogStream(enabled: boolean) {
 
     async function consume() {
       try {
-        const res = await fetch('/logs/stream', {signal: controller.signal});
+        const res = await fetch('/server-logs/stream', {signal: controller.signal});
         if (!res.ok) throw new Error(`Stream error ${res.status}`);
 
         setState((s) => ({...s, connected: true, error: null}));
