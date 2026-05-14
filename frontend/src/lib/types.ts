@@ -76,6 +76,15 @@ export interface PersistedDocument {
   created_at: string;
 }
 
+export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
+
+export interface LogRecord {
+  ts: string;
+  level: LogLevel;
+  logger: string;
+  message: string;
+}
+
 export type TodoStatus = 'pending' | 'in_progress' | 'done';
 
 export interface TodoItem {

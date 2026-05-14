@@ -205,6 +205,28 @@ function RootLayout() {
             </svg>
             {!navCollapsed && <span>Memory</span>}
           </Link>
+          <Link
+            to="/logs"
+            className="nav-link"
+            activeProps={{className: 'nav-link active'}}
+            title="Logs"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M4 6h16" />
+              <path d="M4 12h16" />
+              <path d="M4 18h10" />
+            </svg>
+            {!navCollapsed && <span>Logs</span>}
+          </Link>
         </div>
         {!navCollapsed && <ConversationList />}
       </aside>

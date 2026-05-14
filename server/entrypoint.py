@@ -18,7 +18,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import get_config
-from core.log_setup import setup_logging
+from core.log_setup import get_broadcast_handler, setup_logging
 from core.safety import configure_judge_model
 
 from core import state
@@ -29,6 +29,7 @@ from .routes_automations import router as automations_router
 from .routes_chat import router as chat_router
 from .routes_documents import router as documents_router
 from .routes_live import router as live_router
+from .routes_logs import router as logs_router
 from .routes_media import router as media_router
 from .routes_memory import router as memory_router
 from .routes_tasks import router as tasks_router
@@ -44,6 +45,7 @@ _DIST = pathlib.Path(__file__).parent.parent / "static" / "dist"
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging(get_config().work_dir, console=bool(os.environ.get("JARVIS_LOG_CONSOLE")))
     state._main_loop = asyncio.get_running_loop()
+    get_broadcast_handler().attach_loop(state._main_loop)
     await init_db()
     _scheduler.start()
     async with async_session() as session:
@@ -127,6 +129,7 @@ app.include_router(workflows_router)
 app.include_router(artifacts_router)
 app.include_router(documents_router)
 app.include_router(tasks_router)
+app.include_router(logs_router)
 
 
 # ── SPA fallback — must be last ──────────────────────────────────────────────
