@@ -80,8 +80,12 @@ async def _dispatch(
     attachments: list[AttachmentIn] | None = None,
 ) -> None:
     """Create DB records, start the agent task, and kick off streaming."""
+    loading_task = asyncio.create_task(_loading_animation(channel))
     rejection = await gate_input(user_content, model)
     if rejection:
+        loading_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loading_task
         with contextlib.suppress(Exception):
             await channel.send(rejection[:_MAX_MSG_LEN])
         return
@@ -103,7 +107,7 @@ async def _dispatch(
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
-    asyncio.create_task(_stream_to_discord(channel, None, task_state, model))
+    asyncio.create_task(_stream_to_discord(channel, None, task_state, model, loading_task=loading_task))
 
 
 async def _loading_animation(channel: discord.abc.Messageable) -> None:
@@ -118,8 +122,10 @@ async def _stream_to_discord(
     placeholder: discord.Message | None,
     state: TaskState,
     model: str,
+    loading_task: asyncio.Task | None = None,
 ) -> None:
-    loading_task = asyncio.create_task(_loading_animation(channel))
+    if loading_task is None:
+        loading_task = asyncio.create_task(_loading_animation(channel))
     accumulated = ""
     last_edit = 0.0
     message: discord.Message | None = placeholder
@@ -175,8 +181,12 @@ async def _handle_voice(
             await placeholder.edit(content="(could not transcribe audio)")
         return
 
+    loading_task = asyncio.create_task(_loading_animation(message.channel))
     rejection = await gate_input(transcribed, model)
     if rejection:
+        loading_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await loading_task
         with contextlib.suppress(Exception):
             await placeholder.edit(content=rejection[:_MAX_MSG_LEN])
         return
@@ -197,7 +207,7 @@ async def _handle_voice(
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
-    asyncio.create_task(_stream_to_discord(message.channel, placeholder, task_state, model))
+    asyncio.create_task(_stream_to_discord(message.channel, placeholder, task_state, model, loading_task=loading_task))
 
 
 async def _handle_message(client: discord.Client, message: discord.Message) -> None:

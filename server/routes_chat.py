@@ -96,6 +96,12 @@ async def _run_agent_task(
 
     try:
         # Input gate — judge the user's prompt before spinning up the agent.
+        # Surface a step immediately so the activity sidebar shows feedback
+        # while the judge runs (a cold Bedrock connection can take ~60s).
+        state.events.append({"event": "step", "data": json.dumps({
+            "node": "safety", "source": "main", "data": "Reviewing input",
+        })})
+        _notify(state)
         rejection = await gate_input(query, model)
         if rejection:
             await _finalize_message(task_id, rejection, "blocked")
