@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Message, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Message, NotificationChannel, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -568,6 +568,94 @@ async def get_default_model(session: AsyncSession) -> str:
     from core.model_catalog import DEFAULT_MODEL as _CATALOG_DEFAULT
     value = await get_setting(session, "default.model")
     return value if value else _CATALOG_DEFAULT
+
+
+# ── Notification channels CRUD ────────────────────────────────────────────────
+
+async def create_notification_channel(
+    session: AsyncSession, name: str, type: str, target: str,
+) -> NotificationChannel:
+    ch = NotificationChannel(id=str(uuid4()), name=name, type=type, target=target)
+    session.add(ch)
+    await session.commit()
+    return ch
+
+
+async def get_notification_channel(
+    session: AsyncSession, channel_id: str,
+) -> NotificationChannel | None:
+    return await session.get(NotificationChannel, channel_id)
+
+
+async def list_notification_channels(session: AsyncSession) -> list[NotificationChannel]:
+    result = await session.execute(
+        select(NotificationChannel).order_by(NotificationChannel.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_notification_channels_by_ids(
+    session: AsyncSession, ids: set[str],
+) -> list[NotificationChannel]:
+    if not ids:
+        return []
+    result = await session.execute(
+        select(NotificationChannel).where(NotificationChannel.id.in_(ids))
+    )
+    return list(result.scalars().all())
+
+
+async def update_notification_channel(
+    session: AsyncSession, channel_id: str, **kwargs: Any,
+) -> NotificationChannel | None:
+    ch = await session.get(NotificationChannel, channel_id)
+    if ch is None:
+        return None
+    for key, value in kwargs.items():
+        if value is None:
+            continue
+        setattr(ch, key, value)
+    ch.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return ch
+
+
+async def delete_notification_channel(session: AsyncSession, channel_id: str) -> bool:
+    ch = await session.get(NotificationChannel, channel_id)
+    if ch is None:
+        return False
+    await session.delete(ch)
+    await session.commit()
+    return True
+
+
+async def list_references_to_channel(
+    session: AsyncSession, channel_id: str,
+) -> list[dict]:
+    """Return [{kind, id, name}] for automations/workflows whose notifications JSON
+    contains a ref to this channel. Used by the delete guard."""
+    refs: list[dict] = []
+    autos = await session.execute(select(Automation.id, Automation.name, Automation.notifications))
+    for aid, aname, raw in autos.all():
+        if _notifications_ref(raw, channel_id):
+            refs.append({"kind": "automation", "id": aid, "name": aname})
+    wfs = await session.execute(select(Workflow.id, Workflow.name, Workflow.notifications))
+    for wid, wname, raw in wfs.all():
+        if _notifications_ref(raw, channel_id):
+            refs.append({"kind": "workflow", "id": wid, "name": wname})
+    return refs
+
+
+def _notifications_ref(raw: str | None, channel_id: str) -> bool:
+    if not raw:
+        return False
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(parsed, list):
+        return False
+    return any(isinstance(e, dict) and e.get("id") == channel_id for e in parsed)
 
 
 # ── Artifact CRUD ─────────────────────────────────────────────────────────────

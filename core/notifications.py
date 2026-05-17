@@ -1,6 +1,10 @@
 """Outbound notifications for automation/workflow run completion.
 
-Configs are stored as a JSON array of `{"type": str, ...channel-specific keys}`.
+Notifications on a run reference centrally-defined channels by id:
+`[{"id": "<channel-uuid>", "on": "both"|"done"|"error"}, ...]`. The channel
+record (`NotificationChannel`) carries `type` and `target`. The dispatcher
+resolves refs → channel records → platform sender.
+
 Failures inside the dispatcher are caught and logged — they must never propagate,
 so a broken notification setup cannot fail an otherwise successful run.
 """
@@ -11,7 +15,10 @@ import json
 import logging
 from typing import TYPE_CHECKING, cast
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core import state
+from db.ops import get_notification_channels_by_ids
 
 if TYPE_CHECKING:
     import discord
@@ -24,6 +31,8 @@ _MAX_DISCORD_LEN = 1900   # Discord hard limit is 2000; leave headroom
 
 
 def parse_notifications(raw: str | None) -> list[dict]:
+    """Parse the notifications JSON column. Returns `[{id, on}, ...]`; legacy
+    entries (no `id` key) are silently dropped."""
     if not raw:
         return []
     try:
@@ -34,7 +43,7 @@ def parse_notifications(raw: str | None) -> list[dict]:
     if not isinstance(parsed, list):
         logger.warning("notifications config must be a list; got %s", type(parsed).__name__)
         return []
-    return [c for c in parsed if isinstance(c, dict)]
+    return [c for c in parsed if isinstance(c, dict) and isinstance(c.get("id"), str)]
 
 
 def _matches(on: str, status: str) -> bool:
@@ -43,42 +52,45 @@ def _matches(on: str, status: str) -> bool:
     return on == status
 
 
+def _build_text(status: str, title: str, body: str) -> str:
+    header = f"[{status.upper()}] {title}"
+    truncated = body if len(body) <= _MAX_TELEGRAM_LEN else body[:_MAX_TELEGRAM_LEN] + "…"
+    return f"{header}\n\n{truncated}"
+
+
 async def send_notifications(
-    configs: list[dict],
+    session: AsyncSession,
+    raw: str | None,
     *,
     status: str,
     title: str,
     body: str,
 ) -> None:
-    if not configs:
+    refs = parse_notifications(raw)
+    if not refs:
         return
 
-    header = f"[{status.upper()}] {title}"
-    truncated = body if len(body) <= _MAX_TELEGRAM_LEN else body[:_MAX_TELEGRAM_LEN] + "…"
-    text = f"{header}\n\n{truncated}"
+    channels = await get_notification_channels_by_ids(session, {r["id"] for r in refs})
+    by_id = {c.id: c for c in channels}
 
-    for cfg in configs:
-        ch_type = cfg.get("type")
-        on = cfg.get("on", "both")
-        if not _matches(on, status):
+    text = _build_text(status, title, body)
+
+    for ref in refs:
+        ch = by_id.get(ref["id"])
+        if ch is None:
+            logger.warning("notification refs missing channel %s; skipping", ref["id"])
+            continue
+        if not _matches(ref.get("on", "both"), status):
             continue
         try:
-            if ch_type == "telegram":
-                chat_id = cfg.get("chat_id")
-                if not chat_id:
-                    logger.warning("telegram notification missing chat_id; skipping")
-                    continue
-                await _send_telegram(str(chat_id), text)
-            elif ch_type == "discord":
-                channel_id = cfg.get("channel_id")
-                if not channel_id:
-                    logger.warning("discord notification missing channel_id; skipping")
-                    continue
-                await _send_discord(str(channel_id), text)
+            if ch.type == "telegram":
+                await _send_telegram(ch.target, text)
+            elif ch.type == "discord":
+                await _send_discord(ch.target, text)
             else:
-                logger.warning("unknown notification type %r; skipping", ch_type)
+                logger.warning("unknown channel type %r; skipping", ch.type)
         except Exception as exc:
-            logger.warning("notification dispatch failed (%s): %s", ch_type, exc)
+            logger.warning("notification dispatch failed (%s): %s", ch.type, exc)
 
 
 async def _send_telegram(chat_id: str, text: str) -> None:

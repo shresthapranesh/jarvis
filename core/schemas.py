@@ -105,6 +105,29 @@ class WorkflowRunRequest(BaseModel):
     inputs: dict[str, str] = {}
 
 
+# ── Notification channels ─────────────────────────────────────────────────────
+
+class NotificationChannelCreate(BaseModel):
+    name: str
+    type: Literal["telegram", "discord"]
+    target: str
+
+
+class NotificationChannelUpdate(BaseModel):
+    name: str | None = None
+    type: Literal["telegram", "discord"] | None = None
+    target: str | None = None
+
+
+class NotificationChannelOut(BaseModel):
+    id: str
+    name: str
+    type: str
+    target: str
+    created_at: str
+    updated_at: str
+
+
 def _invalid_model_response(model: str) -> JSONResponse:
     return JSONResponse(
         {"error": f"unknown model {model!r}; GET /models for the catalog"},

@@ -96,9 +96,27 @@ export type AutomationInputType = 'prompt' | 'code' | 'webhook';
 
 export type NotificationOn = 'done' | 'error' | 'both';
 
-export type NotificationConfig =
-  | {type: 'telegram'; chat_id: string; on: NotificationOn}
-  | {type: 'discord'; channel_id: string; on: NotificationOn};
+export interface NotificationConfig {
+  id: string;
+  on: NotificationOn;
+}
+
+export type NotificationChannelType = 'telegram' | 'discord';
+
+export interface NotificationChannel {
+  id: string;
+  name: string;
+  type: NotificationChannelType;
+  target: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationChannelReference {
+  kind: 'automation' | 'workflow';
+  id: string;
+  name: string;
+}
 
 export interface Automation {
   id: string;

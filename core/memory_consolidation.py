@@ -25,7 +25,7 @@ async def _migrate_legacy_key(store: AsyncSqliteStore) -> None:
     """Copy any data at the pre-fix `/AGENTS.md` key onto the canonical key.
 
     The agent's runtime reader and write_file tool always used "AGENTS.md";
-    consolidation + GET /memory used "/AGENTS.md" until the keys were
+    consolidation + GET /agent-memory used "/AGENTS.md" until the keys were
     unified. The legacy key is left in place as a backup for one release.
     """
     canonical = await store.aget(_MEMORY_NS, _MEMORY_KEY)

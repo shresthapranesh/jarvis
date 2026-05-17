@@ -28,7 +28,7 @@ from db.ops import (
     list_workflows,
     update_workflow,
 )
-from core.notifications import parse_notifications, send_notifications
+from core.notifications import send_notifications
 from core.schemas import WorkflowCreateRequest, WorkflowRunRequest, WorkflowUpdateRequest
 from core.state import (
     TaskState,
@@ -106,14 +106,13 @@ async def _execute_workflow_bg(
                 node_results=json.dumps(node_records),
                 error=None,
             )
+            await send_notifications(
+                session, wf.notifications,
+                status="done",
+                title=wf.name,
+                body=json.dumps(final_outputs, indent=2),
+            )
         final_status = "done"
-
-        await send_notifications(
-            parse_notifications(wf.notifications),
-            status="done",
-            title=wf.name,
-            body=json.dumps(final_outputs, indent=2),
-        )
 
     except asyncio.CancelledError:
         async with async_session() as session:
@@ -128,16 +127,16 @@ async def _execute_workflow_bg(
         err = str(exc)
         async with async_session() as session:
             await finish_workflow_run(session, run_id, "error", None, None, err)
+            await send_notifications(
+                session, wf.notifications,
+                status="error",
+                title=wf.name,
+                body=err,
+            )
         state.events.append({
             "event": "workflow_error",
             "data": json.dumps({"error": err, "run_id": run_id}),
         })
-        await send_notifications(
-            parse_notifications(wf.notifications),
-            status="error",
-            title=wf.name,
-            body=err,
-        )
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
 

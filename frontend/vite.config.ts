@@ -21,9 +21,10 @@ export default defineConfig({
       '/artifacts': 'http://localhost:8000',
       '/documents': 'http://localhost:8000',
       '/task-runs': 'http://localhost:8000',
-      '/memory': 'http://localhost:8000',
+      '/agent-memory': 'http://localhost:8000',
       '/consolidate-memory': 'http://localhost:8000',
       '/server-logs': 'http://localhost:8000',
+      '/notification-channels': 'http://localhost:8000',
     },
   },
   build: {

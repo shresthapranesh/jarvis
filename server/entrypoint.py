@@ -28,6 +28,7 @@ from db.ops import get_setting, list_enabled_scheduled_automations
 from .routes_artifacts import router as artifacts_router
 from .routes_automations import router as automations_router
 from .routes_chat import router as chat_router
+from .routes_config import router as config_router
 from .routes_documents import router as documents_router
 from .routes_live import router as live_router
 from .routes_logs import router as logs_router
@@ -137,6 +138,7 @@ app.include_router(artifacts_router)
 app.include_router(documents_router)
 app.include_router(tasks_router)
 app.include_router(logs_router)
+app.include_router(config_router)
 
 
 # ── SPA fallback — must be last ──────────────────────────────────────────────

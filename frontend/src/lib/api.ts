@@ -11,6 +11,9 @@ import type {
   Memory,
   MessagePage,
   ModelCatalog,
+  NotificationChannel,
+  NotificationChannelReference,
+  NotificationChannelType,
   PersistedDocument,
   RunningTask,
   TodoItem,
@@ -336,13 +339,13 @@ export function artifactDownloadUrl(id: string): string {
 // ── Memory ───────────────────────────────────────────────────────────────────
 
 export async function fetchMemory(): Promise<Memory> {
-  const res = await fetch('/memory');
+  const res = await fetch('/agent-memory');
   if (!res.ok) throw new Error(`Failed to fetch memory: ${res.status}`);
   return res.json();
 }
 
 export async function updateMemory(content: string): Promise<Memory> {
-  const res = await fetch('/memory', {
+  const res = await fetch('/agent-memory', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({content}),
@@ -389,6 +392,62 @@ export function formatNextRun(isoString: string): string {
   }
   return `in ${days}d`;
 }
+
+// ── Notification channels ────────────────────────────────────────────────────
+
+export async function fetchNotificationChannels(): Promise<NotificationChannel[]> {
+  const res = await fetch('/notification-channels');
+  if (!res.ok) throw new Error(`Failed to fetch channels: ${res.status}`);
+  return res.json();
+}
+
+export interface NotificationChannelInput {
+  name: string;
+  type: NotificationChannelType;
+  target: string;
+}
+
+export async function createNotificationChannel(
+  body: NotificationChannelInput,
+): Promise<NotificationChannel> {
+  const res = await fetch('/notification-channels', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Create channel failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateNotificationChannel(
+  id: string,
+  body: Partial<NotificationChannelInput>,
+): Promise<NotificationChannel> {
+  const res = await fetch(`/notification-channels/${id}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Update channel failed: ${res.status}`);
+  return res.json();
+}
+
+export type DeleteNotificationChannelResult =
+  | {ok: true}
+  | {ok: false; references: NotificationChannelReference[]};
+
+export async function deleteNotificationChannel(
+  id: string,
+): Promise<DeleteNotificationChannelResult> {
+  const res = await fetch(`/notification-channels/${id}`, {method: 'DELETE'});
+  if (res.status === 409) {
+    const body = (await res.json()) as {references?: NotificationChannelReference[]};
+    return {ok: false, references: body.references ?? []};
+  }
+  if (!res.ok) throw new Error(`Delete channel failed: ${res.status}`);
+  return {ok: true};
+}
+
 
 export function formatDuration(startIso: string, endIso: string | null): string | null {
   if (!endIso) return null;

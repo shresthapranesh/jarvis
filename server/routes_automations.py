@@ -37,7 +37,7 @@ from db.ops import (
     list_automations_with_stats,
     update_automation,
 )
-from core.notifications import parse_notifications, send_notifications
+from core.notifications import send_notifications
 from core.schemas import AutomationRequest, _invalid_model_response
 from core.scheduler import _register_scheduler_job, _remove_scheduler_job
 from core.state import (
@@ -328,15 +328,14 @@ async def _execute_automation_bg(
         else:
             async with async_session() as session:
                 await finish_automation_run(session, run_id, status, output, None)
+                await send_notifications(
+                    session, auto.notifications,
+                    status=notify_status,
+                    title=auto.name,
+                    body=output or "",
+                )
             final_status = status
             state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
-
-            await send_notifications(
-                parse_notifications(auto.notifications),
-                status=notify_status,
-                title=auto.name,
-                body=output or "",
-            )
 
     except asyncio.CancelledError:
         async with async_session() as session:
@@ -348,13 +347,13 @@ async def _execute_automation_bg(
         err_text = str(exc)
         async with async_session() as session:
             await finish_automation_run(session, run_id, "error", None, err_text)
+            await send_notifications(
+                session, auto.notifications,
+                status="error",
+                title=auto.name,
+                body=err_text,
+            )
         state.events.append({"event": "error", "data": json.dumps({"error": err_text})})
-        await send_notifications(
-            parse_notifications(auto.notifications),
-            status="error",
-            title=auto.name,
-            body=err_text,
-        )
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
 

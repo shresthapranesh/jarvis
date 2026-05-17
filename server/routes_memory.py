@@ -33,7 +33,7 @@ async def trigger_consolidation(model: str | None = None) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
-@router.get("/memory")
+@router.get("/agent-memory")
 async def get_memory() -> JSONResponse:
     """Return the current AGENTS.md memory content."""
     store = get_store()
@@ -51,7 +51,7 @@ async def get_memory() -> JSONResponse:
     })
 
 
-@router.put("/memory")
+@router.put("/agent-memory")
 async def update_memory(body: MemoryUpdate) -> JSONResponse:
     """Overwrite AGENTS.md with the supplied content."""
     store = get_store()

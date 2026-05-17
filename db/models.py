@@ -134,6 +134,20 @@ class ConfigSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+# ── Notification channels ─────────────────────────────────────────────────────
+
+class NotificationChannel(Base):
+    __tablename__ = "notification_channels"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)  # "telegram" | "discord"
+    target: Mapped[str] = mapped_column(String, nullable=False)  # chat_id or channel_id, opaque string
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 # ── Artifacts ──────────────────────────────────────────────────────────────────
 
 class Artifact(Base):
