@@ -2,12 +2,19 @@
 
 import asyncio
 
-import yfinance as yf
+
+def _yf():
+    try:
+        import yfinance as yf  # noqa: PLC0415
+    except ImportError as e:
+        raise RuntimeError("Finance tools not available in this build (yfinance excluded).") from e
+    return yf
 
 
 async def get_stock_data(ticker: str) -> str:
     """Get current stock price, info, and recent financials for a ticker symbol."""
     def _sync() -> str:
+        yf = _yf()
         stock = yf.Ticker(ticker)
         info = stock.info
 
@@ -38,6 +45,7 @@ async def get_stock_data(ticker: str) -> str:
 async def get_historical_prices(ticker: str, period: str = "1mo") -> str:
     """Get historical OHLCV price data for a ticker. Period examples: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y."""
     def _sync() -> str:
+        yf = _yf()
         stock = yf.Ticker(ticker)
         hist = stock.history(period=period)
         if hist.empty:
@@ -57,6 +65,7 @@ async def get_historical_prices(ticker: str, period: str = "1mo") -> str:
 async def get_earnings(ticker: str) -> str:
     """Get upcoming and recent earnings dates and EPS estimates for a ticker."""
     def _sync() -> str:
+        yf = _yf()
         stock = yf.Ticker(ticker)
         cal = stock.calendar
         earnings_dates = stock.earnings_dates
@@ -82,6 +91,7 @@ async def get_earnings(ticker: str) -> str:
 async def compare_stocks(tickers: list[str]) -> str:
     """Fetch key metrics for multiple tickers and return a side-by-side comparison."""
     def _sync() -> str:
+        yf = _yf()
         rows = []
         for ticker in tickers:
             info = yf.Ticker(ticker).info
@@ -110,6 +120,7 @@ async def compare_stocks(tickers: list[str]) -> str:
 async def get_ticker_news(ticker: str) -> str:
     """Get recent news headlines and URLs for a ticker from Yahoo Finance."""
     def _sync() -> str:
+        yf = _yf()
         stock = yf.Ticker(ticker)
         news = stock.news
         if not news:

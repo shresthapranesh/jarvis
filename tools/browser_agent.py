@@ -12,8 +12,19 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
-from browser_use import ActionResult, Agent as BrowserAgent, Browser, ChatGoogle, Controller
+try:
+    from browser_use import ActionResult, Agent as BrowserAgent, Browser, ChatGoogle, Controller
+    _BROWSER_USE_AVAILABLE = True
+except ImportError:
+    ActionResult = Any  # type: ignore[misc,assignment]
+    BrowserAgent = Any  # type: ignore[misc,assignment]
+    Browser = Any  # type: ignore[misc,assignment]
+    ChatGoogle = Any  # type: ignore[misc,assignment]
+    Controller = None  # type: ignore[assignment]
+    _BROWSER_USE_AVAILABLE = False
+
 from langchain_core.tools import tool
 from langgraph.config import get_config, get_stream_writer
 from langgraph.types import interrupt
@@ -26,11 +37,13 @@ MAX_BROWSER_STEPS = 30
 # ── Persistent browser session ───────────────────────────────────────────────
 
 _browser_lock = asyncio.Lock()
-_browser: Browser | None = None
+_browser: Any = None
 
 
-def _get_browser() -> Browser:
+def _get_browser():
     global _browser
+    if not _BROWSER_USE_AVAILABLE:
+        raise RuntimeError("Browser tool not available in this build (browser-use excluded).")
     if _browser is not None and not _browser.is_cdp_connected:
         logger.info("Browser CDP connection is dead — recreating")
         _browser = None
@@ -43,7 +56,7 @@ def _get_browser() -> Browser:
 
 @dataclass
 class _BrowserSession:
-    agent: BrowserAgent
+    agent: Any
     task: asyncio.Task
     question_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     answer_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -53,32 +66,35 @@ _sessions: dict[str, _BrowserSession] = {}
 
 # ── Controller ───────────────────────────────────────────────────────────────
 
-controller = Controller()
+controller = Controller() if _BROWSER_USE_AVAILABLE else None
 
 
-@controller.action(
-    description=(
-        "Ask the human user a question when you need information you cannot "
-        "obtain from the page — credentials, 2FA code, which option to pick, "
-        "confirmation before a destructive action, or any missing field you "
-        "have no way to infer. The user's answer is returned as a string."
-    ),
-)
-async def ask_human(question: str) -> ActionResult:
-    """Signal smart_browser to interrupt and wait for the user's reply.
+def _register_ask_human():
+    if controller is None:
+        return None
 
-    Puts the question on a queue and suspends until smart_browser delivers
-    the user's answer. No LangGraph interrupt() is called here — the
-    interrupt happens at the smart_browser tool level instead, so the
-    BrowserAgent task stays alive across the interrupt/resume cycle.
-    """
-    thread_id = get_config()["configurable"]["thread_id"]
-    session = _sessions.get(thread_id)
-    if session is None:
-        return ActionResult(extracted_content="Error: no active browser session.")
-    await session.question_queue.put(question)
-    answer = await session.answer_queue.get()
-    return ActionResult(extracted_content=f"The user responded: {answer}")
+    @controller.action(
+        description=(
+            "Ask the human user a question when you need information you cannot "
+            "obtain from the page — credentials, 2FA code, which option to pick, "
+            "confirmation before a destructive action, or any missing field you "
+            "have no way to infer. The user's answer is returned as a string."
+        ),
+    )
+    async def ask_human(question: str):
+        """Signal smart_browser to interrupt and wait for the user's reply."""
+        thread_id = get_config()["configurable"]["thread_id"]
+        session = _sessions.get(thread_id)
+        if session is None:
+            return ActionResult(extracted_content="Error: no active browser session.")
+        await session.question_queue.put(question)
+        answer = await session.answer_queue.get()
+        return ActionResult(extracted_content=f"The user responded: {answer}")
+
+    return ask_human
+
+
+_register_ask_human()
 
 
 # ── Tool ─────────────────────────────────────────────────────────────────────
@@ -96,6 +112,9 @@ async def smart_browser(objective: str) -> str:
 
     Returns a summary of what was accomplished or the information extracted.
     """
+    if not _BROWSER_USE_AVAILABLE:
+        return "Browser tool not available in this build (browser-use excluded)."
+
     thread_id = get_config()["configurable"]["thread_id"]
 
     if thread_id not in _sessions:

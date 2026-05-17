@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import pathlib
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -36,7 +37,13 @@ from .routes_tasks import router as tasks_router
 from .routes_workflows import router as workflows_router
 from core.scheduler import _register_scheduler_job, _scheduler, register_memory_consolidation_job
 
-_DIST = pathlib.Path(__file__).parent.parent / "static" / "dist"
+def _resource_root() -> pathlib.Path:
+    if getattr(sys, "frozen", False):
+        return pathlib.Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+_DIST = _resource_root() / "static" / "dist"
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────

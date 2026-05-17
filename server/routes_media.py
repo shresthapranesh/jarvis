@@ -117,7 +117,13 @@ async def tts_endpoint(req: TTSRequest) -> Response:
             voice.synthesize_wav(clean, wf)
         return buf.getvalue()
 
-    wav_bytes = await loop.run_in_executor(None, synthesize)
+    try:
+        wav_bytes = await loop.run_in_executor(None, synthesize)
+    except ImportError:
+        return JSONResponse(
+            {"error": "TTS not available in this build (piper-tts excluded)"},
+            status_code=503,
+        )
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
@@ -159,5 +165,11 @@ async def transcribe_endpoint(audio: UploadFile) -> JSONResponse:
             status_code=413,
         )
     suffix = pathlib.Path(audio.filename or "audio.webm").suffix or ".webm"
-    text = await transcribe_bytes(data, suffix)
+    try:
+        text = await transcribe_bytes(data, suffix)
+    except ImportError:
+        return JSONResponse(
+            {"error": "transcription not available in this build (whisper excluded)"},
+            status_code=503,
+        )
     return JSONResponse({"text": text})
