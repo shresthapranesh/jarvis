@@ -62,6 +62,11 @@ def get_telegram_bot():
     return _telegram_bot
 
 
+def get_discord_client():
+    """Return the process-wide discord.Client if the bot is enabled, else None."""
+    return _discord_client
+
+
 # ── Task registry ────────────────────────────────────────────────────────────
 
 @dataclass

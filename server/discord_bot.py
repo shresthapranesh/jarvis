@@ -56,12 +56,53 @@ def _is_reply_to_bot(message: discord.Message, bot_user: discord.ClientUser | No
 
 
 def _should_respond(message: discord.Message, bot_user: discord.ClientUser | None) -> bool:
-    """DMs always; guild messages only when @mentioned or replied-to."""
+    """DMs always; guild messages only when @mentioned, replied-to, or inside a bot-owned thread."""
     if message.guild is None:
+        return True
+    channel = message.channel
+    if (
+        isinstance(channel, discord.Thread)
+        and bot_user is not None
+        and channel.owner_id == bot_user.id
+    ):
         return True
     if bot_user is not None and bot_user in message.mentions:
         return True
     return _is_reply_to_bot(message, bot_user)
+
+
+async def _resolve_target_channel(
+    message: discord.Message, prompt: str,
+) -> "MessageableChannel":
+    """In a guild text channel, create a thread off the user's message and return it.
+    DMs and existing threads pass through unchanged."""
+    channel = message.channel
+    if message.guild is None or isinstance(channel, discord.Thread):
+        return channel
+    first_line = (prompt or "").strip().splitlines()[0] if prompt and prompt.strip() else ""
+    name = first_line[:90] or "Conversation"
+    try:
+        return await message.create_thread(name=name, auto_archive_duration=1440)
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        logger.debug("discord create_thread failed: %s", exc)
+        return channel
+
+
+async def _send_reply(
+    channel: "MessageableChannel",
+    content: str,
+    reply_to: discord.Message | None,
+) -> discord.Message:
+    """Send into `channel`, using Discord's native reply feature when `reply_to`
+    lives in the same channel. fail_if_not_exists=False so a deleted original doesn't error."""
+    if reply_to is not None and reply_to.channel.id == channel.id:
+        ref = discord.MessageReference(
+            message_id=reply_to.id,
+            channel_id=reply_to.channel.id,
+            fail_if_not_exists=False,
+        )
+        return await channel.send(content, reference=ref, mention_author=False)
+    return await channel.send(content)
 
 
 def _strip_bot_mention(content: str, bot_user: discord.ClientUser | None) -> str:
@@ -78,6 +119,7 @@ async def _dispatch(
     user_content: str,
     db_user_content: str,
     attachments: list[AttachmentIn] | None = None,
+    reply_to: discord.Message | None = None,
 ) -> None:
     """Create DB records, start the agent task, and kick off streaming."""
     loading_task = asyncio.create_task(_loading_animation(channel))
@@ -107,7 +149,7 @@ async def _dispatch(
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
-    asyncio.create_task(_stream_to_discord(channel, None, task_state, model, loading_task=loading_task))
+    asyncio.create_task(_stream_to_discord(channel, None, task_state, model, loading_task=loading_task, reply_to=reply_to))
 
 
 async def _loading_animation(channel: discord.abc.Messageable) -> None:
@@ -123,6 +165,7 @@ async def _stream_to_discord(
     state: TaskState,
     model: str,
     loading_task: asyncio.Task | None = None,
+    reply_to: discord.Message | None = None,
 ) -> None:
     if loading_task is None:
         loading_task = asyncio.create_task(_loading_animation(channel))
@@ -142,7 +185,9 @@ async def _stream_to_discord(
                     if accumulated and now - last_edit >= _EDIT_INTERVAL:
                         try:
                             if message is None:
-                                message = await channel.send(accumulated[:_MAX_MSG_LEN])
+                                message = await _send_reply(
+                                    channel, accumulated[:_MAX_MSG_LEN], reply_to,
+                                )
                             else:
                                 await message.edit(content=accumulated[:_MAX_MSG_LEN])
                             last_edit = now
@@ -159,7 +204,7 @@ async def _stream_to_discord(
     final = final[:_MAX_MSG_LEN]
     try:
         if message is None:
-            await channel.send(final)
+            await _send_reply(channel, final, reply_to)
         else:
             await message.edit(content=final)
     except Exception as exc:
@@ -171,27 +216,34 @@ async def _handle_voice(
 ) -> None:
     from server.routes_media import transcribe_bytes
 
-    placeholder = await message.channel.send("⏳ Transcribing...")
     buf = await attachment.read()
     ctype = (attachment.content_type or "").lower()
     suffix = ".ogg" if "ogg" in ctype else (".mp3" if "mp" in ctype else ".ogg")
     transcribed = await transcribe_bytes(bytes(buf), suffix=suffix)
     if not transcribed:
         with contextlib.suppress(Exception):
-            await placeholder.edit(content="(could not transcribe audio)")
+            await message.channel.send("(could not transcribe audio)")
         return
 
-    loading_task = asyncio.create_task(_loading_animation(message.channel))
+    target = await _resolve_target_channel(message, transcribed)
+    placeholder: discord.Message | None = None
+    with contextlib.suppress(Exception):
+        placeholder = await _send_reply(target, "⏳ Transcribing...", message)
+
+    loading_task = asyncio.create_task(_loading_animation(target))
     rejection = await gate_input(transcribed, model)
     if rejection:
         loading_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await loading_task
         with contextlib.suppress(Exception):
-            await placeholder.edit(content=rejection[:_MAX_MSG_LEN])
+            if placeholder is not None:
+                await placeholder.edit(content=rejection[:_MAX_MSG_LEN])
+            else:
+                await _send_reply(target, rejection[:_MAX_MSG_LEN], message)
         return
 
-    conv_id = f"discord_{message.channel.id}"
+    conv_id = f"discord_{target.id}"
     log_task_received("chat", conv_id, "discord")
     async with async_session() as session:
         conv = await get_or_create_conversation(session, conv_id, model, transcribed[:60])
@@ -207,7 +259,7 @@ async def _handle_voice(
     _background_tasks[task_id] = t
     t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
 
-    asyncio.create_task(_stream_to_discord(message.channel, placeholder, task_state, model, loading_task=loading_task))
+    asyncio.create_task(_stream_to_discord(target, placeholder, task_state, model, loading_task=loading_task, reply_to=message))
 
 
 async def _handle_message(client: discord.Client, message: discord.Message) -> None:
@@ -250,17 +302,20 @@ async def _handle_message(client: discord.Client, message: discord.Message) -> N
                 size=len(buf),
             ))
         query = text or "What's in this image?"
+        target = await _resolve_target_channel(message, query)
         await _dispatch(
-            message.channel, model,
+            target, model,
             user_content=query,
             db_user_content=f"[Image] {query}",
             attachments=attachments_in,
+            reply_to=message,
         )
         return
 
     if not text:
         return
-    await _dispatch(message.channel, model, text, text)
+    target = await _resolve_target_channel(message, text)
+    await _dispatch(target, model, text, text, reply_to=message)
 
 
 def build_client() -> discord.Client:

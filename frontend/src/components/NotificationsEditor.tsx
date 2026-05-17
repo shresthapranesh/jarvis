@@ -11,23 +11,50 @@ export function parseNotifications(raw: string | null | undefined): Notification
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (c): c is NotificationConfig =>
-        c && typeof c === 'object' && c.type === 'telegram' && typeof c.chat_id === 'string',
-    );
+    return parsed.filter((c): c is NotificationConfig => {
+      if (!c || typeof c !== 'object') return false;
+      if (c.type === 'telegram' && typeof c.chat_id === 'string') return true;
+      if (c.type === 'discord' && typeof c.channel_id === 'string') return true;
+      return false;
+    });
   } catch {
     return [];
   }
 }
 
 export function serializeNotifications(rows: NotificationConfig[]): string | null {
-  const cleaned = rows.filter((r) => r.chat_id.trim());
+  const cleaned = rows.filter((r) =>
+    r.type === 'telegram' ? r.chat_id.trim() : r.channel_id.trim(),
+  );
   return cleaned.length ? JSON.stringify(cleaned) : null;
 }
 
+function rowId(row: NotificationConfig): string {
+  return row.type === 'telegram' ? row.chat_id : row.channel_id;
+}
+
+function setRowId(row: NotificationConfig, id: string): NotificationConfig {
+  return row.type === 'telegram'
+    ? {type: 'telegram', chat_id: id, on: row.on}
+    : {type: 'discord', channel_id: id, on: row.on};
+}
+
+function setRowType(row: NotificationConfig, type: NotificationConfig['type']): NotificationConfig {
+  const id = rowId(row);
+  return type === 'telegram'
+    ? {type: 'telegram', chat_id: id, on: row.on}
+    : {type: 'discord', channel_id: id, on: row.on};
+}
+
+function setRowOn(row: NotificationConfig, on: NotificationOn): NotificationConfig {
+  return row.type === 'telegram'
+    ? {type: 'telegram', chat_id: row.chat_id, on}
+    : {type: 'discord', channel_id: row.channel_id, on};
+}
+
 export function NotificationsEditor({value, onChange, disabled}: Props) {
-  function update(idx: number, patch: Partial<NotificationConfig>) {
-    onChange(value.map((row, i) => (i === idx ? {...row, ...patch} : row)));
+  function replace(idx: number, next: NotificationConfig) {
+    onChange(value.map((row, i) => (i === idx ? next : row)));
   }
   function remove(idx: number) {
     onChange(value.filter((_, i) => i !== idx));
@@ -41,7 +68,7 @@ export function NotificationsEditor({value, onChange, disabled}: Props) {
       <label className="auto-form-label">Notifications</label>
       {value.length === 0 && (
         <div style={{fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: 6}}>
-          No notifications. Add one to get a Telegram message when this finishes.
+          No notifications. Add one to get a Telegram or Discord message when this finishes.
         </div>
       )}
       {value.map((row, idx) => (
@@ -57,24 +84,31 @@ export function NotificationsEditor({value, onChange, disabled}: Props) {
           <select
             className="auto-form-select"
             value={row.type}
-            onChange={(e) => update(idx, {type: e.target.value as NotificationConfig['type']})}
+            onChange={(e) =>
+              replace(idx, setRowType(row, e.target.value as NotificationConfig['type']))
+            }
             disabled={disabled}
             style={{flex: '0 0 110px'}}
           >
             <option value="telegram">Telegram</option>
+            <option value="discord">Discord</option>
           </select>
           <input
             className="auto-form-input"
-            value={row.chat_id}
-            onChange={(e) => update(idx, {chat_id: e.target.value})}
-            placeholder="chat id (e.g. 123456789)"
+            value={rowId(row)}
+            onChange={(e) => replace(idx, setRowId(row, e.target.value))}
+            placeholder={
+              row.type === 'telegram'
+                ? 'chat id (e.g. 123456789)'
+                : 'channel id (e.g. 1234567890123456789)'
+            }
             disabled={disabled}
             style={{flex: 1}}
           />
           <select
             className="auto-form-select"
             value={row.on}
-            onChange={(e) => update(idx, {on: e.target.value as NotificationOn})}
+            onChange={(e) => replace(idx, setRowOn(row, e.target.value as NotificationOn))}
             disabled={disabled}
             style={{flex: '0 0 110px'}}
           >
