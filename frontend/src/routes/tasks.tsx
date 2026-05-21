@@ -1,7 +1,9 @@
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 
-import {formatRelativeTime, listRunningTasks, stopRunningTask} from '../lib/api';
+import {formatRelativeTime} from '../lib/api';
+import {fetchRunningTasks} from '../relay/RunningTasksQuery';
+import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
 import type {RunningTask, TaskKind} from '../lib/types';
 
 export const Route = createFileRoute('/tasks')({
@@ -20,12 +22,12 @@ function TasksPage() {
 
   const {data: tasks = [], isLoading} = useQuery({
     queryKey: ['running-tasks'],
-    queryFn: listRunningTasks,
+    queryFn: fetchRunningTasks,
     refetchInterval: (query) => ((query.state.data as RunningTask[] | undefined)?.length ?? 0) > 0 ? 2000 : false,
   });
 
   const stopMutation = useMutation({
-    mutationFn: (id: string) => stopRunningTask(id),
+    mutationFn: (id: string) => commitStopRunningTask(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({queryKey: ['running-tasks']});
     },

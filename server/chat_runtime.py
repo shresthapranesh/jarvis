@@ -1,4 +1,9 @@
-"""Chat endpoints — /run, /stop, /resume, /stream, and conversation CRUD."""
+"""Chat runtime — agent task execution + task registration.
+
+Used by GraphQL ``startTask`` mutation, plus the Telegram and Discord bots
+(via ``_run_agent_task``). REST routes for chat were removed once the
+frontend migrated to GraphQL; the runtime helpers stayed.
+"""
 
 from __future__ import annotations
 
@@ -7,27 +12,20 @@ import base64
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
-from datetime import datetime
-from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sse_starlette.sse import EventSourceResponse
 
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from core.agents import build_agent, is_valid_model
+from core.agents import build_agent
 from core.config import get_config
 from core.log_callback import AgentLogger
 from core.safety import gate_input, gate_output
-from core.schemas import ConversationUpdate, ResumePayload, RunRequest, _invalid_model_response, _normalise_todos
 from core.state import (
     TaskState,
     _background_tasks,
@@ -38,48 +36,17 @@ from core.state import (
     log_task_complete,
     log_task_created,
     log_task_received,
-    stream_task_events,
 )
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _build_message_content, _finalize_message, _process_chunk
 
-from db import async_session, get_session
-from db.models import Message
+from db import async_session
 from db.ops import (
     add_message,
     create_document,
-    delete_conversation,
-    get_conversation_meta,
     get_or_create_conversation,
-    list_conversations,
-    list_messages_paginated,
-    update_conversation,
     update_message_status,
 )
 
-
-def _serialize_message(msg: Message) -> dict:
-    return {
-        "id": msg.id,
-        "role": msg.role,
-        "content": msg.content,
-        "model": msg.model,
-        "status": msg.status,
-        "created_at": msg.created_at.isoformat(),
-        "steps": [
-            {
-                "id": s.id,
-                "node": s.node,
-                "source": s.source,
-                "data": s.data,
-                "seq": s.seq,
-                "created_at": s.created_at.isoformat(),
-            }
-            for s in sorted(msg.steps, key=lambda x: x.seq)
-        ],
-    }
-
-
-router = APIRouter()
 
 # ── Agent task runner ────────────────────────────────────────────────────────
 
@@ -235,33 +202,38 @@ async def _run_agent_task(
         loop.call_later(5.0, lambda tid=task_id: _tasks.pop(tid, None))
 
 
-# ── Run endpoint ─────────────────────────────────────────────────────────────
+# ── Task registration (shared by GraphQL startTask) ──────────────────────────
 
-@router.post("/run")
-async def run_agent(
-    request: RunRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    if not is_valid_model(request.model):
-        return _invalid_model_response(request.model)
-    title = request.query[:60] if not request.conversation_id else None
-    conv = await get_or_create_conversation(session, request.conversation_id, request.model, title)
+async def register_chat_task(
+    session: AsyncSession,
+    query: str,
+    model: str,
+    conversation_id: str | None = None,
+    attachments: list | None = None,
+) -> tuple[str, str]:
+    """Set up DB rows, register TaskState, and kick off the background agent task.
+
+    Returns (task_id, conversation_id). Caller is responsible for validating
+    `model` (`is_valid_model`) before invoking — this helper assumes it's OK.
+    """
+    title = query[:60] if not conversation_id else None
+    conv = await get_or_create_conversation(session, conversation_id, model, title)
     log_task_received("chat", conv.id, "http")
 
-    if request.attachments:
-        display_parts: list[dict] = [{"type": "text", "text": request.query}]
-        for att in request.attachments:
+    if attachments:
+        display_parts: list[dict] = [{"type": "text", "text": query}]
+        for att in attachments:
             display_parts.append({"type": att.type, "name": att.name, "size": att.size, "mimeType": att.mime_type})
         display_content = json.dumps(display_parts)
     else:
-        display_content = request.query
+        display_content = query
 
     user_msg = await add_message(session, conv.id, "user", display_content)
 
-    if request.attachments:
+    if attachments:
         cfg = get_config()
         cfg.documents_dir.mkdir(parents=True, exist_ok=True)
-        for att in request.attachments:
+        for att in attachments:
             if att.type != "document":
                 continue
             try:
@@ -281,14 +253,14 @@ async def run_agent(
             except Exception as e:
                 logger.warning("Failed to persist document %s: %s", att.name, e)
 
-    task_msg = await add_message(session, conv.id, "assistant", "", model=request.model, status="running")
+    task_msg = await add_message(session, conv.id, "assistant", "", model=model, status="running")
 
     _tasks[task_msg.id] = TaskState(
         kind="chat",
-        label=conv.title or request.query[:60],
+        label=conv.title or query[:60],
         parent_id=conv.id,
     )
-    log_task_created(task_msg.id, _tasks[task_msg.id], request.model)
+    log_task_created(task_msg.id, _tasks[task_msg.id], model)
 
     def _task_done(t: asyncio.Task, task_id: str) -> None:
         _background_tasks.pop(task_id, None)
@@ -296,163 +268,9 @@ async def run_agent(
             logger.error("task %s raised unhandled %s", task_id, type(exc).__name__, exc_info=exc)
 
     t = asyncio.create_task(_run_agent_task(
-        task_msg.id, request.query, request.model, conv.id, request.attachments
+        task_msg.id, query, model, conv.id, attachments
     ))
     _background_tasks[task_msg.id] = t
     t.add_done_callback(lambda _t: _task_done(_t, task_msg.id))
 
-    return JSONResponse({"task_id": task_msg.id, "conversation_id": conv.id})
-
-
-# ── Stop endpoint ────────────────────────────────────────────────────────────
-
-@router.post("/stop/{task_id}")
-async def stop_task(
-    task_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    state = _tasks.get(task_id)
-    if state is None:
-        return JSONResponse({"error": "task not found or already finished"}, status_code=404)
-
-    if state.done:
-        return JSONResponse({"error": "task already finished"}, status_code=400)
-
-    state.cancelled = True
-    state._stop_event.set()
-
-    if state.resume_future and not state.resume_future.done():
-        state.resume_future.cancel()
-
-    bg_task = _background_tasks.get(task_id)
-    if bg_task and not bg_task.done():
-        bg_task.cancel()
-
-    return JSONResponse({"ok": True, "task_id": task_id})
-
-
-# ── Resume endpoint ──────────────────────────────────────────────────────────
-
-@router.post("/resume/{task_id}")
-async def resume_task(task_id: str, body: ResumePayload) -> JSONResponse:
-    state = _tasks.get(task_id)
-    if state is None:
-        return JSONResponse({"error": "task not found"}, status_code=404)
-    if state.resume_future is None or state.resume_future.done():
-        return JSONResponse({"error": "no pending interrupt for this task"}, status_code=404)
-
-    pending_id = state.pending_interrupt_id
-    state.resume_future.set_result(body.answer)
-    state.events.append({"event": "interrupt_resolved", "data": json.dumps({
-        "interrupt_id": pending_id,
-    })})
-    _notify(state)
-    return JSONResponse({"ok": True})
-
-
-# ── Stream endpoint ──────────────────────────────────────────────────────────
-
-@router.get("/stream/{task_id}")
-async def stream_task(
-    task_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> EventSourceResponse:
-    async def generate() -> AsyncIterator[dict]:
-        if task_id not in _tasks:
-            msg = await session.get(Message, task_id)
-            if msg is None:
-                yield {"event": "error", "data": json.dumps({"error": "task not found"})}
-                return
-            if msg.status == "done":
-                yield {"event": "done", "data": json.dumps({
-                    "message": msg.content,
-                    "conversation_id": msg.conversation_id,
-                })}
-                return
-            if msg.status == "running":
-                await update_message_status(session, task_id, "error")
-            yield {"event": "error", "data": json.dumps({"error": "task interrupted (server restarted)"})}
-            return
-
-        state = _tasks[task_id]
-        async for event in stream_task_events(state):
-            yield event
-
-    return EventSourceResponse(generate())
-
-
-# ── Conversation endpoints ───────────────────────────────────────────────────
-
-@router.get("/conversations")
-async def get_conversations(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    rows = await list_conversations(session)
-    return JSONResponse(rows)
-
-
-@router.get("/conversations/{conv_id}")
-async def get_conversation_detail(
-    conv_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    limit: int = 10,
-    before: str | None = None,
-) -> JSONResponse:
-    conv = await get_conversation_meta(session, conv_id)
-    if conv is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-
-    try:
-        before_dt = datetime.fromisoformat(before) if before else None
-    except ValueError:
-        return JSONResponse({"error": "invalid `before` timestamp"}, status_code=400)
-
-    limit = max(1, min(limit, 100))
-    msgs, has_more = await list_messages_paginated(session, conv_id, limit, before_dt)
-
-    return JSONResponse({
-        "id": conv.id,
-        "title": conv.title,
-        "model": conv.model,
-        "created_at": conv.created_at.isoformat(),
-        "messages": [_serialize_message(m) for m in msgs],
-        "has_more": has_more,
-    })
-
-
-@router.patch("/conversations/{conv_id}")
-async def patch_conversation(
-    conv_id: str,
-    body: ConversationUpdate,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    if body.model is not None and not is_valid_model(body.model):
-        return _invalid_model_response(body.model)
-    if body.title is None and body.model is None:
-        return JSONResponse({"error": "no fields to update"}, status_code=400)
-    conv = await update_conversation(session, conv_id, title=body.title, model=body.model)
-    if conv is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return JSONResponse({"ok": True})
-
-
-@router.delete("/conversations/{conv_id}")
-async def delete_conversation_endpoint(
-    conv_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    await delete_conversation(session, conv_id)
-    return JSONResponse({"ok": True})
-
-
-@router.get("/conversations/{conv_id}/todos")
-async def get_conversation_todos(conv_id: str) -> JSONResponse:
-    try:
-        cp = get_async_checkpointer()
-    except RuntimeError:
-        return JSONResponse({"todos": []})
-    snapshot = await cp.aget_tuple({"configurable": {"thread_id": conv_id}})
-    if snapshot is None:
-        return JSONResponse({"todos": []})
-    raw = (snapshot.checkpoint or {}).get("channel_values", {}).get("todos", [])
-    return JSONResponse({"todos": _normalise_todos(raw)})
+    return (task_msg.id, conv.id)

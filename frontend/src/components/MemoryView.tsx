@@ -2,7 +2,10 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {marked} from 'marked';
 import {useEffect, useState} from 'react';
 
-import {consolidateMemory, fetchMemory, formatRelativeTime, updateMemory} from '../lib/api';
+import {formatRelativeTime} from '../lib/api';
+import {fetchAgentMemory} from '../relay/AgentMemoryQuery';
+import {commitConsolidateMemory} from '../relay/ConsolidateMemoryMutation';
+import {commitUpdateMemory} from '../relay/UpdateMemoryMutation';
 import type {Memory} from '../lib/types';
 
 export function MemoryView() {
@@ -10,7 +13,7 @@ export function MemoryView() {
 
   const {data: memory, isLoading, error} = useQuery<Memory>({
     queryKey: ['memory'],
-    queryFn: fetchMemory,
+    queryFn: fetchAgentMemory,
   });
 
   const [editing, setEditing] = useState(false);
@@ -27,7 +30,7 @@ export function MemoryView() {
   }, [memory?.modified_at, memory?.exists]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveMutation = useMutation({
-    mutationFn: (content: string) => updateMemory(content),
+    mutationFn: (content: string) => commitUpdateMemory(content),
     onSuccess: async () => {
       await queryClient.invalidateQueries({queryKey: ['memory']});
       setEditing(false);
@@ -37,7 +40,7 @@ export function MemoryView() {
   });
 
   const consolidateMutation = useMutation({
-    mutationFn: () => consolidateMemory(),
+    mutationFn: () => commitConsolidateMemory(),
     onSuccess: async () => {
       await queryClient.invalidateQueries({queryKey: ['memory']});
       setActionError(null);

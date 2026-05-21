@@ -3,8 +3,9 @@ import {useQueryClient} from '@tanstack/react-query';
 
 import {useModels} from '../hooks/useModels';
 import {useWhisperSTT} from '../hooks/useWhisperSTT';
-import {patchConversation} from '../lib/api';
 import type {MediaAttachment, PersistedDocument} from '../lib/types';
+import {refreshConversationList} from '../relay/ConversationListQuery';
+import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 
 interface Props {
   onSubmit: (query: string, model: string, attachments: MediaAttachment[]) => void;
@@ -70,9 +71,9 @@ export function InputBox({
     setModel(newModel);
     if (conversationId && newModel) {
       try {
-        await patchConversation(conversationId, {model: newModel});
+        await commitUpdateConversation(conversationId, {model: newModel});
         await queryClient.invalidateQueries({queryKey: ['conversation', conversationId]});
-        await queryClient.invalidateQueries({queryKey: ['conversations']});
+        await refreshConversationList();
       } catch (err) {
         console.error('Failed to persist model change:', err);
       }

@@ -48,8 +48,8 @@ def _run_scheduled_automation(automation_id: str) -> None:
     FastAPI event loop so all TaskState waiters, SSE futures, and the shared
     AsyncSqliteSaver stay on a single loop.
     """
-    # Lazy import to break the scheduler <-> routes_automations cycle.
-    from server.routes_automations import _execute_automation_bg  # noqa: PLC0415
+    # Lazy import to break the scheduler <-> automation_runtime cycle.
+    from server.automation_runtime import _execute_automation_bg  # noqa: PLC0415
 
     if state._main_loop is None:
         return
@@ -93,3 +93,34 @@ def register_memory_consolidation_job(cron_expr: str = "0 */6 * * *") -> None:
         misfire_grace_time=300,
     )
     logger.info("memory consolidation scheduled: %s", cron_expr)
+
+
+def _cleanup_staged_uploads(max_age_seconds: int = 3600) -> None:
+    """Delete staged upload files (and their .meta.json sidecars) older than
+    `max_age_seconds`. Files that were claimed by a successful startTask are
+    deleted at claim time; this catches abandoned uploads."""
+    import time  # noqa: PLC0415
+    from core.config import get_config  # noqa: PLC0415
+
+    cfg = get_config()
+    if not cfg.staging_dir.exists():
+        return
+    cutoff = time.time() - max_age_seconds
+    for entry in cfg.staging_dir.iterdir():
+        try:
+            if entry.stat().st_mtime < cutoff:
+                entry.unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("staging cleanup: failed to unlink %s: %s", entry, e)
+
+
+def register_staging_cleanup_job(cron_expr: str = "0 * * * *") -> None:
+    """Register the staged-uploads cleanup cron job. Defaults to hourly."""
+    _scheduler.add_job(
+        func=_cleanup_staged_uploads,
+        trigger=CronTrigger.from_crontab(cron_expr),
+        id="staging_cleanup",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("staging cleanup scheduled: %s", cron_expr)

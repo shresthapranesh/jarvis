@@ -1,20 +1,32 @@
-import {useQuery, useQueryClient} from '@tanstack/react-query';
+import {useQueryClient} from '@tanstack/react-query';
 import {Link, useNavigate, useParams} from '@tanstack/react-router';
-import {useState} from 'react';
+import {useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
-import {
-  deleteConversation,
-  fetchConversations,
-  formatRelativeTime,
-  renameConversation,
-} from '../lib/api';
+import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
+import {formatRelativeTime} from '../lib/api';
+import {conversationListQuery, refreshConversationList} from '../relay/ConversationListQuery';
+import {commitDeleteConversation} from '../relay/DeleteConversationMutation';
+import {decodeGlobalId} from '../relay/globalId';
+import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 
 export function ConversationList() {
-  const {data: conversations = []} = useQuery({
-    queryKey: ['conversations'],
-    queryFn: fetchConversations,
-    refetchInterval: false,
-  });
+  const data = useLazyLoadQuery<ConversationListQuery>(
+    conversationListQuery,
+    {},
+    {fetchPolicy: 'store-and-network'},
+  );
+
+  const conversations = useMemo(
+    () =>
+      data.conversations.map((c) => ({
+        gid: c.id,
+        id: decodeGlobalId(c.id),
+        title: c.title,
+        createdAt: c.createdAt,
+      })),
+    [data.conversations],
+  );
 
   const params = useParams({strict: false}) as {id?: string};
   const activeId = params.id;
@@ -34,14 +46,14 @@ export function ConversationList() {
     const title = editValue.trim();
     setEditingId(null);
     if (!title) return;
-    await renameConversation(id, title);
-    await queryClient.invalidateQueries({queryKey: ['conversations']});
+    await commitUpdateConversation(id, {title});
+    await refreshConversationList();
     await queryClient.invalidateQueries({queryKey: ['conversation', id]});
   }
 
   async function handleDelete(id: string) {
-    await deleteConversation(id);
-    await queryClient.invalidateQueries({queryKey: ['conversations']});
+    await commitDeleteConversation(id);
+    await refreshConversationList();
     if (id === activeId) navigate({to: '/'});
   }
 
@@ -86,7 +98,7 @@ export function ConversationList() {
               ) : (
                 <Link to="/c/$id" params={{id: conv.id}} className="conv-link">
                   <span className="conv-title">{conv.title ?? 'Untitled'}</span>
-                  <span className="conv-meta">{formatRelativeTime(conv.created_at)}</span>
+                  <span className="conv-meta">{formatRelativeTime(conv.createdAt)}</span>
                 </Link>
               )}
               <div className="conv-actions">
@@ -145,7 +157,7 @@ export function ConversationList() {
                       title="Rename"
                       onClick={(e) => {
                         e.stopPropagation();
-                        startEdit(conv.id, conv.title);
+                        startEdit(conv.id, conv.title ?? null);
                       }}
                     >
                       <svg

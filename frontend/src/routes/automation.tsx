@@ -19,17 +19,14 @@ import {
   WebhookIcon,
   XIcon,
 } from '../components/icons';
-import {
-  createAutomation,
-  deleteAutomation,
-  formatNextRun,
-  formatRelativeTime,
-  listAutomations,
-  triggerAutomation,
-  updateAutomation,
-} from '../lib/api';
+import {formatNextRun, formatRelativeTime} from '../lib/api';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationInputType, CreateAutomationPayload} from '../lib/types';
+import {fetchAutomationList} from '../relay/AutomationListQuery';
+import {commitCreateAutomation} from '../relay/CreateAutomationMutation';
+import {commitDeleteAutomation} from '../relay/DeleteAutomationMutation';
+import {commitTriggerAutomation} from '../relay/TriggerAutomationMutation';
+import {commitUpdateAutomation} from '../relay/UpdateAutomationMutation';
 
 export const Route = createFileRoute('/automation')({component: AutomationPage});
 
@@ -194,10 +191,10 @@ function AutomationFormPanel({
   async function handleSave(payload: CreateAutomationPayload) {
     try {
       if (editing) {
-        await updateAutomation(editing.id, payload);
+        await commitUpdateAutomation(editing.id, payload);
         toast.push('Automation updated', 'success');
       } else {
-        await createAutomation(payload);
+        await commitCreateAutomation(payload);
         toast.push('Automation created', 'success');
       }
       await queryClient.invalidateQueries({queryKey: ['automations']});
@@ -245,7 +242,7 @@ function AutomationPage() {
 
   const {data: automations = [], isLoading, error} = useQuery({
     queryKey: ['automations'],
-    queryFn: listAutomations,
+    queryFn: fetchAutomationList,
     refetchInterval: 30_000,
     staleTime: 15_000,
   });
@@ -261,7 +258,7 @@ function AutomationPage() {
 
   const toggleMutation = useMutation({
     mutationFn: (auto: Automation) =>
-      updateAutomation(auto.id, {
+      commitUpdateAutomation(auto.id, {
         name: auto.name,
         description: auto.description,
         input_type: auto.input_type,
@@ -284,7 +281,7 @@ function AutomationPage() {
   });
 
   const triggerMutation = useMutation({
-    mutationFn: (auto: Automation) => triggerAutomation(auto.id),
+    mutationFn: (auto: Automation) => commitTriggerAutomation(auto.id),
     onSuccess: (_d, auto) => {
       setOpenedAuto(auto);
       toast.push(`Started "${auto.name}"`, 'info');
@@ -294,7 +291,7 @@ function AutomationPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (auto: Automation) => deleteAutomation(auto.id),
+    mutationFn: (auto: Automation) => commitDeleteAutomation(auto.id),
     onSuccess: (_d, auto) => {
       queryClient.invalidateQueries({queryKey: ['automations']});
       if (openedAuto?.id === auto.id) setOpenedAuto(null);

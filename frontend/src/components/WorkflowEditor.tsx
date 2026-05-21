@@ -14,7 +14,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import {useCallback, useEffect, useState} from 'react';
-import {listWorkflows} from '../lib/api';
+import {fetchWorkflowList} from '../relay/WorkflowListQuery';
 import {useModels} from '../hooks/useModels';
 import type {NodeStatus, Workflow, WorkflowNodeData, WorkflowNodeType, WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
 
@@ -253,7 +253,7 @@ function ConfigPanel({node, models, onUpdate, onDelete}: ConfigPanelProps) {
 
   useEffect(() => {
     if (!isMap) return;
-    listWorkflows().then(setSavedWorkflows).catch(() => {});
+    fetchWorkflowList().then(setSavedWorkflows).catch(() => {});
   }, [isMap]);
 
   function switchMapMode(mode: 'workflow' | 'inline') {
@@ -471,8 +471,8 @@ export function WorkflowEditor({
   saving,
   running,
 }: WorkflowEditorProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes as never[]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowRFNode>(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<WorkflowRFEdge>(initialEdges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const {screenToFlowPosition} = useReactFlow();
   const {data: catalog} = useModels();
@@ -480,7 +480,7 @@ export function WorkflowEditor({
 
   // Sync initialNodes/initialEdges when workflow loads (handles page reload)
   useEffect(() => {
-    setNodes(initialNodes as never[]);
+    setNodes(initialNodes);
     setEdges(initialEdges);
   }, [initialNodes.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -494,7 +494,7 @@ export function WorkflowEditor({
         return {
           ...n,
           data: {
-            ...(n.data as object),
+            ...n.data,
             _execStatus: st.status,
             ...(st.mapProgress ? {_mapProgress: st.mapProgress} : {}),
           },

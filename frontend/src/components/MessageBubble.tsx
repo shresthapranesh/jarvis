@@ -27,7 +27,7 @@ function SpinnerIcon() {
 }
 
 import {describeStep, getStepPreview} from '../lib/steps';
-import type {SafetyBlock} from '../hooks/useStream';
+import type {SafetyBlock} from '../hooks/useTaskEvents';
 import type {Message, Step} from '../lib/types';
 
 function SafetyBanner({block}: {block: SafetyBlock}) {

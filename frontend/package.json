@@ -4,28 +4,42 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite",
+    "build": "pnpm relay && vite build",
+    "dev": "concurrently -k -n vite,relay 'vite' 'relay-compiler --watch'",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "preview": "vite preview",
-    "typecheck": "tsc -b"
+    "relay": "relay-compiler",
+    "relay:watch": "relay-compiler --watch",
+    "schema": "cd .. && uv run python -m server.graphql.export_schema > frontend/schema.graphql",
+    "typecheck": "pnpm relay && tsc -b"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.96.2",
     "@tanstack/react-router": "^1.168.10",
     "@xyflow/react": "^12.10.2",
+    "graphql": "^16.14.0",
+    "graphql-ws": "^6.0.8",
     "marked": "^17.0.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-relay": "^20.1.1",
+    "relay-runtime": "^20.1.1"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.0",
     "@tanstack/router-plugin": "^1",
+    "@types/babel__core": "^7.20.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/react-relay": "^18.2.1",
+    "@types/relay-runtime": "^20.1.1",
     "@vitejs/plugin-react": "^6.0.1",
+    "babel-plugin-relay": "^20.1.1",
+    "concurrently": "^9.2.1",
     "esbuild": "^0.28.0",
     "oxfmt": "^0.43.0",
+    "relay-compiler": "^20.1.1",
     "typescript": "~6.0.2",
     "vite": "^8.0.3"
   }

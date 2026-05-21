@@ -1,15 +1,28 @@
-import {useQuery, useSuspenseInfiniteQuery, useQueryClient} from '@tanstack/react-query';
+import {useSuspenseInfiniteQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
+import type {ArtifactListQuery} from '../__generated__/ArtifactListQuery.graphql';
+import type {DocumentListQuery} from '../__generated__/DocumentListQuery.graphql';
+import type {TodoListQuery} from '../__generated__/TodoListQuery.graphql';
 import {ActivitySidebar} from '../components/ActivitySidebar';
 import {ArtifactPanel} from '../components/ArtifactPanel';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
-import {useStream} from '../hooks/useStream';
-import {deleteDocument, fetchConversationPage, listArtifacts, listDocuments, listTodos, refetchConversationFirstPage, startTask, stopTask} from '../lib/api';
-import type {MediaAttachment, Message, MessagePage, Step} from '../lib/types';
+import {useTaskEvents} from '../hooks/useTaskEvents';
+import {refetchConversationFirstPage} from '../lib/api';
+import type {MediaAttachment, Message, MessagePage, PersistedDocument, Step, TodoItem, TodoStatus} from '../lib/types';
+import {uploadStagedAttachment} from '../lib/uploads';
+import {artifactListQuery} from '../relay/ArtifactListQuery';
+import {fetchConversationPage} from '../relay/ConversationPageQuery';
+import {commitDeleteDocument} from '../relay/DeleteDocumentMutation';
+import {documentListQuery, refreshDocumentList} from '../relay/DocumentListQuery';
+import {decodeGlobalId} from '../relay/globalId';
+import {commitStartTask} from '../relay/StartTaskMutation';
+import {commitStopTask} from '../relay/StopTaskMutation';
+import {todoListQuery} from '../relay/TodoListQuery';
 
 const CONVERSATION_QUERY_OPTIONS = (id: string) => ({
   queryKey: ['conversation', id] as const,
@@ -55,7 +68,7 @@ function ConversationPage() {
   const streamTaskId = pendingTaskId ?? runningMsg?.id ?? null;
 
   const {streaming, text, thinkingText, steps, artifacts, todos: liveTodos, error, pendingInterrupt, safetyBlock} =
-    useStream(streamTaskId, id);
+    useTaskEvents(streamTaskId, id);
 
   const queryClient = useQueryClient();
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
@@ -83,23 +96,42 @@ function ConversationPage() {
 
   // Persisted artifacts — keeps the FAB available after reload / on past
   // conversations, even when the live-stream `artifacts` array is empty.
-  // useStream invalidates ['artifacts', id] on stream done, so this stays
-  // in sync without extra wiring.
-  const {data: persistedArtifacts = []} = useQuery({
-    queryKey: ['artifacts', id],
-    queryFn: () => listArtifacts(id),
-  });
-  const totalArtifactCount = Math.max(persistedArtifacts.length, artifacts.length);
+  // useTaskEvents calls refreshArtifactList on stream done, keeping this fresh.
+  const artifactListData = useLazyLoadQuery<ArtifactListQuery>(
+    artifactListQuery,
+    {conversationId: id},
+    {fetchPolicy: 'store-and-network'},
+  );
+  const totalArtifactCount = Math.max(artifactListData.artifacts.length, artifacts.length);
 
-  const {data: persistedDocuments = []} = useQuery({
-    queryKey: ['documents', id],
-    queryFn: () => listDocuments(id),
-  });
+  const documentListData = useLazyLoadQuery<DocumentListQuery>(
+    documentListQuery,
+    {conversationId: id},
+    {fetchPolicy: 'store-and-network'},
+  );
+  const persistedDocuments = useMemo<PersistedDocument[]>(
+    () =>
+      documentListData.documents.map((d) => ({
+        id: decodeGlobalId(d.id),
+        conversation_id: d.conversationId,
+        message_id: d.messageId ?? null,
+        filename: d.filename,
+        mime_type: d.mimeType,
+        size: d.size,
+        created_at: d.createdAt,
+      })),
+    [documentListData.documents],
+  );
 
-  const {data: persistedTodos = []} = useQuery({
-    queryKey: ['todos', id],
-    queryFn: () => listTodos(id),
-  });
+  const todoListData = useLazyLoadQuery<TodoListQuery>(
+    todoListQuery,
+    {conversationId: id},
+    {fetchPolicy: 'store-and-network'},
+  );
+  const persistedTodos = useMemo<TodoItem[]>(
+    () => todoListData.todos.map((t) => ({text: t.text, status: t.status as TodoStatus})),
+    [todoListData.todos],
+  );
 
   const todos = liveTodos ?? persistedTodos;
 
@@ -107,8 +139,8 @@ function ConversationPage() {
 
   async function handleDeletePersistedDocument(docId: string) {
     try {
-      await deleteDocument(docId);
-      await queryClient.invalidateQueries({queryKey: ['documents', id]});
+      await commitDeleteDocument(docId);
+      await refreshDocumentList(id);
     } catch (err) {
       console.error('Failed to delete document:', err);
     }
@@ -182,17 +214,24 @@ function ConversationPage() {
     });
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
-      const {task_id} = await startTask(query, model, attachments, id);
+      const uploads = attachments.length
+        ? await Promise.all(
+            attachments.map(async (a) => ({uploadId: (await uploadStagedAttachment(a)).uploadId})),
+          )
+        : null;
+      const {taskId} = await commitStartTask({
+        input: {query, model, conversationId: id, attachmentUploads: uploads},
+      });
       // Subscribe to the live stream immediately — the paginated cache may
       // take a moment to surface the new running message via refetch.
-      setPendingTaskId(task_id);
+      setPendingTaskId(taskId);
       // Only the most-recent page changed (new user msg + new running assistant
       // msg). Trim cached pages to page 0 then refetch — keeps the user's
       // scrolled-up history out of an unnecessary refetch.
       await refetchConversationFirstPage(queryClient, id);
       void queryClient.invalidateQueries({queryKey: ['running-tasks']});
       if (attachments.some((a) => a.type === 'document')) {
-        void queryClient.invalidateQueries({queryKey: ['documents', id]});
+        void refreshDocumentList(id);
       }
     } finally {
       setPendingUser(null);
@@ -202,7 +241,9 @@ function ConversationPage() {
   async function handleStop() {
     if (runningMsg) {
       try {
-        await stopTask(runningMsg.id);
+        // runningMsg.id is the raw message UUID (== taskId for assistant messages)
+        // when fetched via fetchConversationPage (which decodes GlobalIDs).
+        await commitStopTask(runningMsg.id);
       } catch (err) {
         console.error('Failed to stop task:', err);
       }

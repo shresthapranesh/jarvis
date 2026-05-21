@@ -1,6 +1,6 @@
 import {useRef, useState} from 'react';
 
-import {resumeTask} from '../lib/api';
+import {commitResumeTask} from '../relay/ResumeTaskMutation';
 
 interface Props {
   taskId: string;
@@ -18,7 +18,7 @@ export function InterruptPrompt({taskId, question}: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      await resumeTask(taskId, answer);
+      await commitResumeTask(taskId, answer);
       // The SSE interrupt_resolved event will clear this prompt — no local state needed.
     } catch (e) {
       setError((e as Error).message);

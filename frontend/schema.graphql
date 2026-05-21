@@ -1,0 +1,442 @@
+type Artifact implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  title: String!
+  filename: String!
+  kind: String!
+  conversationId: String
+  messageId: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  content: String!
+}
+
+type ArtifactEvent {
+  artifactId: String!
+  title: String!
+  action: String!
+  preview: String
+}
+
+type Automation implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  name: String!
+  description: String
+  inputType: String!
+  promptText: String
+  model: String
+  codeText: String
+  webhookUrl: String
+  webhookMethod: String
+  webhookHeaders: String
+  webhookBody: String
+  schedule: String
+  enabled: Boolean!
+  notifications: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  nextRunAt: String
+  lastRunStatus: String
+  lastRunAt: String
+  successCount7d: Int
+  totalCount7d: Int
+}
+
+type AutomationDoneEvent {
+  output: String
+  runId: String!
+}
+
+union AutomationEvent = TokenEvent | AutomationDoneEvent | AutomationStoppedEvent | AutomationSafetyInputBlockedEvent | AutomationSafetyOutputBlockedEvent | ErrorEvent
+
+input AutomationInput {
+  name: String!
+  inputType: String!
+  description: String = null
+  promptText: String = null
+  model: String = null
+  codeText: String = null
+  webhookUrl: String = null
+  webhookMethod: String = null
+  webhookHeaders: String = null
+  webhookBody: String = null
+  schedule: String = null
+  enabled: Boolean! = true
+  notifications: String = null
+}
+
+type AutomationRun implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  automationId: String!
+  status: String!
+  triggeredBy: String!
+  output: String
+  error: String
+  startedAt: DateTime!
+  finishedAt: DateTime
+}
+
+type AutomationSafetyInputBlockedEvent {
+  message: String!
+  runId: String!
+}
+
+type AutomationSafetyOutputBlockedEvent {
+  severity: String!
+  reason: String!
+  redactedOutput: String!
+  runId: String!
+}
+
+type AutomationStoppedEvent {
+  output: String
+  runId: String!
+}
+
+type BrowserStepEvent {
+  thought: String!
+  actions: String!
+  source: String!
+}
+
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | SafetyInputBlockedEvent | SafetyOutputBlockedEvent | DoneEvent | StoppedEvent | ErrorEvent
+
+type Conversation implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  title: String
+  model: String!
+  createdAt: DateTime!
+  messageCount: Int!
+  messages(limit: Int! = 10, before: DateTime = null): MessagePage!
+}
+
+"""Date with time (isoformat)"""
+scalar DateTime
+
+type Document implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  conversationId: String!
+  messageId: String
+  filename: String!
+  mimeType: String!
+  size: Int!
+  createdAt: DateTime!
+}
+
+type DoneEvent {
+  message: String!
+  conversationId: String!
+}
+
+type ErrorEvent {
+  error: String!
+}
+
+type InterruptEvent {
+  interruptId: String!
+  question: String!
+}
+
+type InterruptResolvedEvent {
+  interruptId: String!
+}
+
+"""
+The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
+"""
+scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
+
+type Memory {
+  content: String!
+  exists: Boolean!
+  modifiedAt: String
+}
+
+type Message implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  role: String!
+  content: String!
+  model: String
+  status: String!
+  createdAt: DateTime!
+  steps: [Step!]!
+}
+
+type MessagePage {
+  messages: [Message!]!
+  hasMore: Boolean!
+}
+
+type ModelCatalog {
+  default: String!
+  available: [ModelSpec!]!
+}
+
+type ModelSpec {
+  id: String!
+  label: String!
+  provider: String!
+}
+
+type Mutation {
+  updateMemory(content: String!): Memory!
+  consolidateMemory(model: String = null): String!
+  startTask(input: StartTaskInput!): StartTaskPayload!
+  stopTask(taskId: String!): Boolean!
+  resumeTask(taskId: String!, answer: String!): Boolean!
+  updateConversation(id: ID!, title: String = null, model: String = null): Conversation!
+  deleteConversation(id: ID!): Boolean!
+  updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!
+  deleteArtifact(id: ID!): Boolean!
+  deleteDocument(id: ID!): Boolean!
+  createAutomation(input: AutomationInput!): Automation!
+  updateAutomation(id: ID!, input: AutomationInput!): Automation!
+  deleteAutomation(id: ID!): Boolean!
+  triggerAutomation(id: ID!): String!
+  stopAutomationRun(runId: String!): Boolean!
+  createWorkflow(input: WorkflowCreateInput!): Workflow!
+  updateWorkflow(id: ID!, input: WorkflowUpdateInput!): Workflow!
+  deleteWorkflow(id: ID!): Boolean!
+  runWorkflow(id: ID!, inputs: JSON = null): String!
+  stopWorkflowRun(runId: String!): Boolean!
+  createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!
+  updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!
+  deleteNotificationChannel(id: ID!): Boolean!
+  stopRunningTask(taskId: String!): StopRunningTaskPayload!
+}
+
+"""An object with a Globally Unique ID"""
+interface Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+}
+
+type NotificationChannel implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  name: String!
+  type: String!
+  target: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input NotificationChannelCreateInput {
+  name: String!
+  type: String!
+  target: String!
+}
+
+input NotificationChannelUpdateInput {
+  name: String = null
+  type: String = null
+  target: String = null
+}
+
+type Query {
+  models: ModelCatalog!
+  agentMemory: Memory!
+  conversations: [Conversation!]!
+  conversation(id: ID!): Conversation
+  todos(conversationId: String!): [TodoItem!]!
+  artifacts(conversationId: String = null): [Artifact!]!
+  artifact(id: ID!): Artifact
+  documents(conversationId: String!): [Document!]!
+  automations: [Automation!]!
+  automation(id: ID!): Automation
+  automationRuns(automationId: ID!): [AutomationRun!]!
+  workflows: [Workflow!]!
+  workflow(id: ID!): Workflow
+  workflowRuns(workflowId: ID!): [WorkflowRun!]!
+  workflowRun(id: ID!): WorkflowRun
+  notificationChannels: [NotificationChannel!]!
+  runningTasks: [RunningTask!]!
+}
+
+type RunningTask {
+  id: String!
+  kind: String!
+  label: String!
+  parentId: String
+  startedAt: DateTime!
+  hasInterrupt: Boolean!
+  cancelled: Boolean!
+  done: Boolean!
+}
+
+type SafetyInputBlockedEvent {
+  message: String!
+  conversationId: String!
+}
+
+type SafetyOutputBlockedEvent {
+  severity: String!
+  reason: String!
+  redactedMessage: String!
+  conversationId: String!
+}
+
+input StartTaskInput {
+  query: String!
+  model: String = null
+  conversationId: String = null
+  attachmentUploads: [UploadReferenceInput!] = null
+}
+
+type StartTaskPayload {
+  taskId: String!
+  conversationId: String!
+}
+
+type Step {
+  id: String!
+  node: String!
+  source: String!
+  data: String
+  seq: Int!
+  createdAt: DateTime!
+}
+
+type StepEvent {
+  node: String!
+  source: String!
+  subagent: String
+  data: String!
+}
+
+type StopRunningTaskPayload {
+  ok: Boolean!
+  taskId: String!
+  kind: String!
+}
+
+type StoppedEvent {
+  message: String!
+  conversationId: String!
+}
+
+type Subscription {
+  taskEvents(taskId: String!): ChatEvent!
+  automationRunEvents(runId: String!): AutomationEvent!
+  workflowRunEvents(runId: String!): WorkflowEvent!
+}
+
+type ThinkingTokenEvent {
+  text: String!
+  source: String!
+}
+
+type TodoItem {
+  text: String!
+  status: String!
+}
+
+type TodosUpdatedEvent {
+  todos: [TodoItem!]!
+  source: String!
+}
+
+type TokenEvent {
+  text: String!
+  source: String!
+}
+
+input UploadReferenceInput {
+  uploadId: String!
+}
+
+type Workflow implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  name: String!
+  description: String
+  definition: String!
+  notifications: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input WorkflowCreateInput {
+  name: String!
+  description: String = null
+  definition: String! = "{}"
+  notifications: String = null
+}
+
+type WorkflowDoneEvent {
+  outputs: JSON!
+  runId: String!
+}
+
+type WorkflowErrorEvent {
+  error: String!
+  runId: String!
+}
+
+union WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent
+
+type WorkflowMapItemDoneEvent {
+  nodeId: String!
+  index: Int!
+  result: JSON!
+}
+
+type WorkflowMapStartEvent {
+  nodeId: String!
+  total: Int!
+}
+
+type WorkflowNodeConditionEvent {
+  nodeId: String!
+  verdict: String!
+}
+
+type WorkflowNodeDoneEvent {
+  nodeId: String!
+  output: JSON!
+}
+
+type WorkflowNodeErrorEvent {
+  nodeId: String!
+  error: String!
+}
+
+type WorkflowNodeStartEvent {
+  nodeId: String!
+  nodeType: String!
+  label: String!
+}
+
+type WorkflowNodeTokenEvent {
+  nodeId: String!
+  text: String!
+}
+
+type WorkflowRun implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  workflowId: String!
+  status: String!
+  inputs: String
+  outputs: String
+  nodeResults: String
+  error: String
+  startedAt: DateTime!
+  finishedAt: DateTime
+}
+
+type WorkflowStoppedEvent {
+  runId: String!
+}
+
+input WorkflowUpdateInput {
+  name: String = null
+  description: String = null
+  definition: String = null
+  notifications: String = null
+}

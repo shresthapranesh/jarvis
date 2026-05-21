@@ -1,4 +1,4 @@
-import type {SafetyBlock} from '../hooks/useStream';
+import type {SafetyBlock} from '../hooks/useTaskEvents';
 import type {Message, Step, TodoItem} from '../lib/types';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
 import {TodoList} from './TodoList';

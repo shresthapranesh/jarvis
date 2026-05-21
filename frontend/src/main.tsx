@@ -1,8 +1,10 @@
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {RouterProvider, createRouter} from '@tanstack/react-router';
-import {StrictMode} from 'react';
+import {StrictMode, Suspense} from 'react';
 import ReactDOM from 'react-dom/client';
+import {RelayEnvironmentProvider} from 'react-relay';
 
+import {environment} from './relay/environment';
 import {routeTree} from './routeTree.gen';
 
 import './styles.css';
@@ -15,7 +17,7 @@ const queryClient = new QueryClient({
 
 const router = createRouter({
   routeTree,
-  context: {queryClient},
+  context: {queryClient, environment},
 });
 
 declare module '@tanstack/react-router' {
@@ -26,8 +28,12 @@ declare module '@tanstack/react-router' {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} context={{queryClient}} />
-    </QueryClientProvider>
+    <RelayEnvironmentProvider environment={environment}>
+      <QueryClientProvider client={queryClient}>
+        <Suspense fallback={null}>
+          <RouterProvider router={router} context={{queryClient, environment}} />
+        </Suspense>
+      </QueryClientProvider>
+    </RelayEnvironmentProvider>
   </StrictMode>,
 );

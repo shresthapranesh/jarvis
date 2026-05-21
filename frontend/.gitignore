@@ -3,3 +3,6 @@ node_modules
 
 ## tanstakc
 .tanstack
+
+## relay codegen output (schema.graphql IS checked in)
+src/__generated__

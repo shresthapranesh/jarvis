@@ -1,7 +1,7 @@
 import {useQuery} from '@tanstack/react-query';
 import {Link} from '@tanstack/react-router';
 
-import {fetchNotificationChannels} from '../lib/api';
+import {fetchNotificationChannels} from '../relay/NotificationChannelsQuery';
 import type {NotificationConfig, NotificationOn} from '../lib/types';
 
 interface Props {

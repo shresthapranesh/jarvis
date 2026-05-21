@@ -3,8 +3,9 @@ import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useState} from 'react';
 
 import {InputBox} from '../components/InputBox';
-import {startTask} from '../lib/api';
 import type {MediaAttachment, MessagePage} from '../lib/types';
+import {uploadStagedAttachment} from '../lib/uploads';
+import {commitStartTask} from '../relay/StartTaskMutation';
 
 export const Route = createFileRoute('/')({component: IndexPage});
 
@@ -18,7 +19,16 @@ function IndexPage() {
     setLoading(true);
     setError(null);
     try {
-      const {task_id, conversation_id} = await startTask(query, model, attachments);
+      const uploads = attachments.length
+        ? await Promise.all(
+            attachments.map(async (a) => ({uploadId: (await uploadStagedAttachment(a)).uploadId})),
+          )
+        : null;
+      const {taskId, conversationId} = await commitStartTask({
+        input: {query, model, attachmentUploads: uploads},
+      });
+      const task_id = taskId;
+      const conversation_id = conversationId;
 
       // Pre-seed the conversation cache so /c/$id can render the user message
       // and subscribe to the stream on first paint, without racing the loader

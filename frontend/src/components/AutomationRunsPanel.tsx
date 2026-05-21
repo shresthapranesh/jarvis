@@ -2,13 +2,10 @@ import {useQuery, useMutation, useQueryClient} from '@tanstack/react-query';
 import {marked} from 'marked';
 import {useEffect, useRef, useState} from 'react';
 
-import {useAutomationStream} from '../hooks/useAutomationStream';
-import {
-  formatDuration,
-  formatRelativeTime,
-  listAutomationRuns,
-  triggerAutomation,
-} from '../lib/api';
+import {useAutomationRunEvents} from '../hooks/useAutomationRunEvents';
+import {formatDuration, formatRelativeTime} from '../lib/api';
+import {fetchAutomationRuns} from '../relay/AutomationRunsQuery';
+import {commitTriggerAutomation} from '../relay/TriggerAutomationMutation';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationRun} from '../lib/types';
 import {
@@ -62,7 +59,7 @@ function LiveRunCard({
   automationId: string;
   onComplete: () => void;
 }) {
-  const {streaming, text, error} = useAutomationStream(runId, automationId);
+  const {streaming, text, error} = useAutomationRunEvents(runId, automationId);
   const elapsed = useElapsedSeconds(streaming);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -226,12 +223,12 @@ export function AutomationRunsPanel({automation, onClose, onEdit}: PanelProps) {
 
   const {data: runs = [], isLoading} = useQuery({
     queryKey: ['automation-runs', automation.id],
-    queryFn: () => listAutomationRuns(automation.id),
+    queryFn: () => fetchAutomationRuns(automation.id),
     staleTime: 10_000,
   });
 
   const triggerMutation = useMutation({
-    mutationFn: () => triggerAutomation(automation.id),
+    mutationFn: () => commitTriggerAutomation(automation.id),
     onSuccess: ({run_id}) => {
       setActiveRunId(run_id);
       toast.push(`Started "${automation.name}"`, 'info');

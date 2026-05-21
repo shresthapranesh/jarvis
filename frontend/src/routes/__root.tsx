@@ -1,14 +1,17 @@
 import {useQuery, type QueryClient} from '@tanstack/react-query';
 import {createRootRouteWithContext, Link, Outlet, useNavigate} from '@tanstack/react-router';
 import {useCallback, useEffect, useState} from 'react';
+import type {Environment} from 'relay-runtime';
 
 import {ConversationList} from '../components/ConversationList';
-import {checkHealth, listRunningTasks} from '../lib/api';
+import {checkHealth} from '../lib/api';
+import {fetchRunningTasks} from '../relay/RunningTasksQuery';
 import type {RunningTask} from '../lib/types';
 import {ToastProvider} from '../lib/toast';
 
 interface RouterContext {
   queryClient: QueryClient;
+  environment: Environment;
 }
 
 function RootLayout() {
@@ -23,7 +26,7 @@ function RootLayout() {
 
   const {data: runningTasks} = useQuery({
     queryKey: ['running-tasks'],
-    queryFn: listRunningTasks,
+    queryFn: fetchRunningTasks,
     refetchInterval: (query) => ((query.state.data as RunningTask[] | undefined)?.length ?? 0) > 0 ? 2000 : false,
   });
   const runningCount = runningTasks?.length ?? 0;

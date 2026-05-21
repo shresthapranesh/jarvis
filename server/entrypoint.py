@@ -25,18 +25,14 @@ from core.safety import configure_judge_model
 from core import state
 from db import async_session, init_db
 from db.ops import get_setting, list_enabled_scheduled_automations
+from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
-from .routes_automations import router as automations_router
-from .routes_chat import router as chat_router
-from .routes_config import router as config_router
 from .routes_documents import router as documents_router
 from .routes_live import router as live_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
-from .routes_memory import router as memory_router
-from .routes_tasks import router as tasks_router
-from .routes_workflows import router as workflows_router
-from core.scheduler import _register_scheduler_job, _scheduler, register_memory_consolidation_job
+from .routes_uploads import router as uploads_router
+from core.scheduler import _register_scheduler_job, _scheduler, register_memory_consolidation_job, register_staging_cleanup_job
 
 def _resource_root() -> pathlib.Path:
     if getattr(sys, "frozen", False):
@@ -70,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._store = store
         state._http_client = http
         register_memory_consolidation_job()
+        register_staging_cleanup_job()
 
         _tg_app = None
         _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -129,16 +126,12 @@ app.add_middleware(
 )
 
 app.include_router(media_router)
-app.include_router(chat_router)
-app.include_router(automations_router)
 app.include_router(live_router)
-app.include_router(memory_router)
-app.include_router(workflows_router)
 app.include_router(artifacts_router)
 app.include_router(documents_router)
-app.include_router(tasks_router)
 app.include_router(logs_router)
-app.include_router(config_router)
+app.include_router(uploads_router)
+app.include_router(graphql_router, prefix="/graphql")
 
 
 # ── SPA fallback — must be last ──────────────────────────────────────────────

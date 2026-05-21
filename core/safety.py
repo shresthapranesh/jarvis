@@ -7,7 +7,7 @@ Three layers, all driven by the same judge machinery here:
    worker tool lists in `core/agents.py`; ToolNode itself is unchanged.
 
 2. **Input gate** — see `gate_input`. Called from each entry point
-   (`server/routes_chat.py`, `server/routes_automations.py`,
+   (`server/chat_runtime.py`, `server/automation_runtime.py`,
    `server/telegram_bot.py`) before the agent's ReAct loop runs, so a
    malicious prompt never gets a chance to drive any tool calls.
 

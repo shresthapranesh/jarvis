@@ -1,7 +1,10 @@
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useState} from 'react';
-import {createWorkflow, deleteWorkflow, formatRelativeTime, listWorkflows} from '../lib/api';
+import {formatRelativeTime} from '../lib/api';
+import {commitCreateWorkflow} from '../relay/CreateWorkflowMutation';
+import {commitDeleteWorkflow} from '../relay/DeleteWorkflowMutation';
+import {fetchWorkflowList} from '../relay/WorkflowListQuery';
 
 export const Route = createFileRoute('/workflow/')({component: WorkflowListPage});
 
@@ -15,12 +18,12 @@ function WorkflowListPage() {
 
   const {data: workflows = [], isLoading} = useQuery({
     queryKey: ['workflows'],
-    queryFn: listWorkflows,
+    queryFn: fetchWorkflowList,
     staleTime: 10_000,
   });
 
   const deleteMutation = useMutation({
-    mutationFn: deleteWorkflow,
+    mutationFn: commitDeleteWorkflow,
     onSuccess: () => {
       setConfirmDeleteId(null);
       queryClient.invalidateQueries({queryKey: ['workflows']});
@@ -28,7 +31,7 @@ function WorkflowListPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: createWorkflow,
+    mutationFn: commitCreateWorkflow,
     onSuccess: (wf) => {
       queryClient.invalidateQueries({queryKey: ['workflows']});
       void navigate({to: '/workflow/$id', params: {id: wf.id}});

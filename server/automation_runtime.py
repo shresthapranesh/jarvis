@@ -1,4 +1,10 @@
-"""Automation endpoints — execution, CRUD, trigger, runs, and SSE streaming."""
+"""Automation runtime — execution helpers + run registration.
+
+Used by GraphQL ``triggerAutomation`` mutation, the scheduler (cron-fired runs
+go through ``_execute_automation_bg``), and the GraphQL ``Automation.nextRunAt``
+resolver (``_compute_next_run_at``). REST routes were removed once the
+frontend migrated to GraphQL; the runtime helpers stayed.
+"""
 
 from __future__ import annotations
 
@@ -11,35 +17,21 @@ import tempfile
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
-from collections.abc import AsyncIterator
-from typing import Annotated, Any
 
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sse_starlette.sse import EventSourceResponse
 
-from core.agents import DEFAULT_MODEL, build_agent, is_valid_model
+from core.agents import DEFAULT_MODEL, build_agent
 from core.log_callback import AgentLogger
 from core.safety import gate_input, gate_output
-from db import async_session, get_session
-from db.models import Automation, AutomationRun
+from db import async_session
+from db.models import Automation
 from db.ops import (
-    create_automation,
     create_automation_run,
-    delete_automation,
     finish_automation_run,
     get_automation,
-    get_automation_run,
-    list_automation_runs,
-    list_automations,
-    list_automations_with_stats,
-    update_automation,
 )
 from core.notifications import send_notifications
-from core.schemas import AutomationRequest, _invalid_model_response
-from core.scheduler import _register_scheduler_job, _remove_scheduler_job
 from core.state import (
     TaskState,
     _background_tasks,
@@ -51,24 +43,11 @@ from core.state import (
     log_task_complete,
     log_task_created,
     log_task_received,
-    stream_task_events,
 )
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_chunk
 
-router = APIRouter()
 
-
-def _validate_cron(schedule: str | None) -> JSONResponse | None:
-    if not schedule:
-        return None
-    try:
-        CronTrigger.from_crontab(schedule)
-    except Exception:
-        return JSONResponse({"error": "invalid cron expression"}, status_code=400)
-    return None
-
-
-# ── Serializers ──────────────────────────────────────────────────────────────
+# ── Schedule introspection ───────────────────────────────────────────────────
 
 def _compute_next_run_at(auto: Automation) -> str | None:
     if not (auto.schedule and auto.enabled):
@@ -79,47 +58,6 @@ def _compute_next_run_at(auto: Automation) -> str | None:
         return next_fire.isoformat() if next_fire else None
     except Exception:
         return None
-
-
-def _serialize_automation(
-    auto: Automation,
-    stats: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "id": auto.id,
-        "name": auto.name,
-        "description": auto.description,
-        "input_type": auto.input_type,
-        "prompt_text": auto.prompt_text,
-        "model": auto.model,
-        "code_text": auto.code_text,
-        "webhook_url": auto.webhook_url,
-        "webhook_method": auto.webhook_method,
-        "webhook_headers": auto.webhook_headers,
-        "webhook_body": auto.webhook_body,
-        "schedule": auto.schedule,
-        "enabled": auto.enabled,
-        "notifications": auto.notifications,
-        "created_at": auto.created_at.isoformat(),
-        "updated_at": auto.updated_at.isoformat(),
-        "next_run_at": _compute_next_run_at(auto),
-    }
-    if stats is not None:
-        payload.update(stats)
-    return payload
-
-
-def _serialize_run(run: AutomationRun) -> dict[str, Any]:
-    return {
-        "id": run.id,
-        "automation_id": run.automation_id,
-        "status": run.status,
-        "triggered_by": run.triggered_by,
-        "output": run.output,
-        "error": run.error,
-        "started_at": run.started_at.isoformat(),
-        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-    }
 
 
 # ── Execution engines ───────────────────────────────────────────────────────
@@ -365,118 +303,16 @@ async def _execute_automation_bg(
         loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
 
 
-# ── CRUD endpoints ───────────────────────────────────────────────────────────
+# ── Run registration (shared by GraphQL triggerAutomation) ───────────────────
 
-@router.get("/automations")
-async def get_automations(
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    rows = await list_automations_with_stats(session)
-    return JSONResponse([_serialize_automation(a, stats) for a, stats in rows])
-
-
-@router.post("/automations")
-async def create_automation_endpoint(
-    request: AutomationRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    if request.model is not None and not is_valid_model(request.model):
-        return _invalid_model_response(request.model)
-    if err := _validate_cron(request.schedule):
-        return err
-
-    auto = await create_automation(
-        session,
-        name=request.name,
-        description=request.description,
-        input_type=request.input_type,
-        prompt_text=request.prompt_text,
-        model=request.model,
-        code_text=request.code_text,
-        webhook_url=request.webhook_url,
-        webhook_method=request.webhook_method,
-        webhook_headers=request.webhook_headers,
-        webhook_body=request.webhook_body,
-        schedule=request.schedule,
-        enabled=request.enabled,
-        notifications=request.notifications,
-    )
-
-    if auto.enabled and auto.schedule:
-        _register_scheduler_job(auto)
-
-    return JSONResponse(_serialize_automation(auto), status_code=201)
-
-
-@router.get("/automations/{automation_id}")
-async def get_automation_endpoint(
-    automation_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
+async def register_automation_run(
+    session: AsyncSession, automation_id: str,
+) -> str | None:
+    """Register a TaskState + AutomationRun row + background task. Returns run_id,
+    or None if the automation doesn't exist."""
     auto = await get_automation(session, automation_id)
     if auto is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return JSONResponse(_serialize_automation(auto))
-
-
-@router.put("/automations/{automation_id}")
-async def update_automation_endpoint(
-    automation_id: str,
-    request: AutomationRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    if request.model is not None and not is_valid_model(request.model):
-        return _invalid_model_response(request.model)
-    if err := _validate_cron(request.schedule):
-        return err
-
-    auto = await update_automation(
-        session,
-        automation_id,
-        name=request.name,
-        description=request.description,
-        input_type=request.input_type,
-        prompt_text=request.prompt_text,
-        model=request.model,
-        code_text=request.code_text,
-        webhook_url=request.webhook_url,
-        webhook_method=request.webhook_method,
-        webhook_headers=request.webhook_headers,
-        webhook_body=request.webhook_body,
-        schedule=request.schedule,
-        enabled=request.enabled,
-        notifications=request.notifications,
-    )
-    if auto is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
-
-    _remove_scheduler_job(automation_id)
-    if auto.enabled and auto.schedule:
-        _register_scheduler_job(auto)
-
-    return JSONResponse(_serialize_automation(auto))
-
-
-@router.delete("/automations/{automation_id}")
-async def delete_automation_endpoint(
-    automation_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    _remove_scheduler_job(automation_id)
-    deleted = await delete_automation(session, automation_id)
-    if not deleted:
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return JSONResponse({"ok": True})
-
-
-@router.post("/automations/{automation_id}/trigger")
-async def trigger_automation(
-    automation_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    auto = await get_automation(session, automation_id)
-    if auto is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
+        return None
 
     log_task_received("automation", automation_id, "http")
     run = await create_automation_run(session, automation_id, "manual")
@@ -496,60 +332,4 @@ async def trigger_automation(
     _background_tasks[run.id] = t
     t.add_done_callback(lambda _t: _task_done(_t, run.id))
 
-    return JSONResponse({"run_id": run.id})
-
-
-@router.post("/automations/runs/{run_id}/stop")
-async def stop_automation_run(run_id: str) -> JSONResponse:
-    state = _tasks.get(run_id)
-    if state is None:
-        return JSONResponse({"error": "run not found or already finished"}, status_code=404)
-    if state.done:
-        return JSONResponse({"error": "run already finished"}, status_code=400)
-
-    state.cancelled = True
-    state._stop_event.set()
-
-    bg_task = _background_tasks.get(run_id)
-    if bg_task and not bg_task.done():
-        bg_task.cancel()
-
-    return JSONResponse({"ok": True, "run_id": run_id})
-
-
-@router.get("/automations/{automation_id}/runs")
-async def get_automation_runs(
-    automation_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> JSONResponse:
-    runs = await list_automation_runs(session, automation_id)
-    return JSONResponse([_serialize_run(r) for r in runs])
-
-
-# ── Automation SSE stream ────────────────────────────────────────────────────
-
-@router.get("/stream/automation/{run_id}")
-async def stream_automation_run(
-    run_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> EventSourceResponse:
-    async def generate() -> AsyncIterator[dict]:
-        if run_id not in _tasks:
-            run = await get_automation_run(session, run_id)
-            if run is None:
-                yield {"event": "error", "data": json.dumps({"error": "run not found"})}
-                return
-            if run.status == "done":
-                yield {"event": "done", "data": json.dumps({"output": run.output, "run_id": run_id})}
-                return
-            if run.status == "error":
-                yield {"event": "error", "data": json.dumps({"error": run.error})}
-                return
-            yield {"event": "error", "data": json.dumps({"error": "run interrupted (server restarted)"})}
-            return
-
-        state = _tasks[run_id]
-        async for event in stream_task_events(state):
-            yield event
-
-    return EventSourceResponse(generate())
+    return run.id

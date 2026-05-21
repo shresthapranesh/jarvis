@@ -2,13 +2,11 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute} from '@tanstack/react-router';
 import {useState} from 'react';
 
-import {
-  createNotificationChannel,
-  deleteNotificationChannel,
-  fetchNotificationChannels,
-  updateNotificationChannel,
-  type NotificationChannelInput,
-} from '../lib/api';
+import type {NotificationChannelInput} from '../lib/api';
+import {commitCreateNotificationChannel} from '../relay/CreateNotificationChannelMutation';
+import {commitDeleteNotificationChannel} from '../relay/DeleteNotificationChannelMutation';
+import {fetchNotificationChannels} from '../relay/NotificationChannelsQuery';
+import {commitUpdateNotificationChannel} from '../relay/UpdateNotificationChannelMutation';
 import {useToast} from '../lib/toast';
 import type {
   NotificationChannel,
@@ -106,26 +104,26 @@ function ChannelRow({channel, onChanged}: ChannelRowProps) {
 
   const updateMut = useMutation({
     mutationFn: () =>
-      updateNotificationChannel(channel.id, {name: name.trim(), type, target: target.trim()}),
+      commitUpdateNotificationChannel(channel.id, {name: name.trim(), type, target: target.trim()}),
     onSuccess: () => {
-      toast.show('Channel updated');
+      toast.push('Channel updated', 'success');
       setEditing(false);
       onChanged();
     },
-    onError: (e: Error) => toast.show(e.message),
+    onError: (e: Error) => toast.push(e.message, 'error'),
   });
 
   const deleteMut = useMutation({
-    mutationFn: () => deleteNotificationChannel(channel.id),
+    mutationFn: () => commitDeleteNotificationChannel(channel.id),
     onSuccess: (result) => {
       if (result.ok) {
-        toast.show('Channel deleted');
+        toast.push('Channel deleted', 'success');
         onChanged();
       } else {
-        setRefsInUse(result.references);
+        setRefsInUse(result.references ?? []);
       }
     },
-    onError: (e: Error) => toast.show(e.message),
+    onError: (e: Error) => toast.push(e.message, 'error'),
   });
 
   if (!editing) {
@@ -208,16 +206,16 @@ function DraftRow({draft, onChange, onCancel, onSaved}: DraftRowProps) {
   const toast = useToast();
   const createMut = useMutation({
     mutationFn: () =>
-      createNotificationChannel({
+      commitCreateNotificationChannel({
         name: draft.name.trim(),
         type: draft.type,
         target: draft.target.trim(),
       }),
     onSuccess: () => {
-      toast.show('Channel created');
+      toast.push('Channel created', 'success');
       onSaved();
     },
-    onError: (e: Error) => toast.show(e.message),
+    onError: (e: Error) => toast.push(e.message, 'error'),
   });
 
   return (

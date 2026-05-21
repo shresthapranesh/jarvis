@@ -1,4 +1,4 @@
-"""Media endpoints — health, model catalog, TTS, and transcription."""
+"""Media endpoints — health, TTS, and transcription."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from functools import lru_cache
 from fastapi import APIRouter, Response, UploadFile
 from fastapi.responses import JSONResponse
 
-from core.agents import AVAILABLE_MODELS, DEFAULT_MODEL
 from core.config import get_config
 from core.schemas import TTSRequest
 
@@ -79,20 +78,6 @@ def _get_piper_voice(path: str):
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-# ── Model catalog ────────────────────────────────────────────────────────────
-
-@router.get("/models")
-async def list_models() -> JSONResponse:
-    """Return the set of models the UI may offer."""
-    return JSONResponse({
-        "default": DEFAULT_MODEL,
-        "available": [
-            {"id": m.id, "label": m.label, "provider": m.provider}
-            for m in AVAILABLE_MODELS
-        ],
-    })
 
 
 # ── TTS ──────────────────────────────────────────────────────────────────────

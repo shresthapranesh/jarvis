@@ -75,8 +75,9 @@ function LivePage() {
   const whisperSTT = useWhisperSTT(handleFinalResult);
   const activeSTT = sttMode === 'whisper' ? whisperSTT : browserSTT;
   const {supported, listening, interimText, startListening} = activeSTT;
-  const cancelListening =
-    'cancelListening' in activeSTT ? activeSTT.cancelListening : activeSTT.stopListening;
+  const cancelListening = (
+    'cancelListening' in activeSTT ? activeSTT.cancelListening : activeSTT.stopListening
+  ) as () => void;
 
   // Auto-cycle: restart listening whenever the agent goes idle and call is active
   useEffect(() => {

@@ -25,7 +25,7 @@ from core.state import (
 )
 from db import async_session
 from db.ops import add_message, get_default_model, get_or_create_conversation, get_setting
-from server.routes_chat import _run_agent_task
+from server.chat_runtime import _run_agent_task
 
 logger = logging.getLogger(__name__)
 
