@@ -110,7 +110,7 @@ type Conversation implements Node {
   model: String!
   createdAt: DateTime!
   messageCount: Int!
-  messages(limit: Int! = 10, before: DateTime = null): MessagePage!
+  messages(last: Int! = 10, before: String = null): MessageConnection!
 }
 
 """Date with time (isoformat)"""
@@ -167,9 +167,14 @@ type Message implements Node {
   steps: [Step!]!
 }
 
-type MessagePage {
-  messages: [Message!]!
-  hasMore: Boolean!
+type MessageConnection {
+  edges: [MessageEdge!]!
+  pageInfo: PageInfo!
+}
+
+type MessageEdge {
+  node: Message!
+  cursor: String!
 }
 
 type ModelCatalog {
@@ -238,9 +243,28 @@ input NotificationChannelUpdateInput {
   target: String = null
 }
 
+"""Information to aid in pagination."""
+type PageInfo {
+  """When paginating forwards, are there more items?"""
+  hasNextPage: Boolean!
+
+  """When paginating backwards, are there more items?"""
+  hasPreviousPage: Boolean!
+
+  """When paginating backwards, the cursor to continue."""
+  startCursor: String
+
+  """When paginating forwards, the cursor to continue."""
+  endCursor: String
+}
+
 type Query {
   models: ModelCatalog!
   agentMemory: Memory!
+  node(
+    """The ID of the object."""
+    id: ID!
+  ): Node!
   conversations: [Conversation!]!
   conversation(id: ID!): Conversation
   todos(conversationId: String!): [TodoItem!]!

@@ -1,9 +1,12 @@
-import {useSuspenseInfiniteQuery, useQueryClient} from '@tanstack/react-query';
+import {useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {useLazyLoadQuery} from 'react-relay';
+import {useLazyLoadQuery, usePaginationFragment} from 'react-relay';
 
 import type {ArtifactListQuery} from '../__generated__/ArtifactListQuery.graphql';
+import type {ConversationPageFragment$key} from '../__generated__/ConversationPageFragment.graphql';
+import type {ConversationPageQuery as TConversationPageQuery} from '../__generated__/ConversationPageQuery.graphql';
+import type {ConversationPageRefetchQuery} from '../__generated__/ConversationPageRefetchQuery.graphql';
 import type {DocumentListQuery} from '../__generated__/DocumentListQuery.graphql';
 import type {TodoListQuery} from '../__generated__/TodoListQuery.graphql';
 import {ActivitySidebar} from '../components/ActivitySidebar';
@@ -12,35 +15,27 @@ import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {useTaskEvents} from '../hooks/useTaskEvents';
-import {refetchConversationFirstPage} from '../lib/api';
-import type {MediaAttachment, Message, MessagePage, PersistedDocument, Step, TodoItem, TodoStatus} from '../lib/types';
+import type {MediaAttachment, Message, PersistedDocument, Step, TodoItem, TodoStatus} from '../lib/types';
+import {mapMessage} from '../lib/types';
 import {uploadStagedAttachment} from '../lib/uploads';
 import {artifactListQuery} from '../relay/ArtifactListQuery';
-import {fetchConversationPage} from '../relay/ConversationPageQuery';
+import {conversationPageFragment} from '../relay/ConversationPageFragment';
+import {
+  CONVERSATION_PAGE_SIZE,
+  conversationPageQuery,
+  loadConversationPage,
+} from '../relay/ConversationPageQuery';
 import {commitDeleteDocument} from '../relay/DeleteDocumentMutation';
 import {documentListQuery, refreshDocumentList} from '../relay/DocumentListQuery';
-import {decodeGlobalId} from '../relay/globalId';
+import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
 import {commitStopTask} from '../relay/StopTaskMutation';
 import {todoListQuery} from '../relay/TodoListQuery';
 
-const CONVERSATION_QUERY_OPTIONS = (id: string) => ({
-  queryKey: ['conversation', id] as const,
-  queryFn: ({pageParam}: {pageParam: string | undefined}) =>
-    fetchConversationPage(id, pageParam),
-  initialPageParam: undefined as string | undefined,
-  // Cursor for the next (older) page = created_at of the oldest message in the
-  // most recently fetched page. Backend returns each page oldest-first, so the
-  // first message of the page is the oldest.
-  getNextPageParam: (last: MessagePage) =>
-    last.has_more ? last.messages[0]?.created_at : undefined,
-});
-
 export const Route = createFileRoute('/c/$id')({
   validateSearch: (search: Record<string, unknown>): {task?: string} =>
     typeof search.task === 'string' ? {task: search.task} : {},
-  loader: ({context, params}) =>
-    context.queryClient.ensureInfiniteQueryData(CONVERSATION_QUERY_OPTIONS(params.id)),
+  loader: ({params}) => loadConversationPage(params.id),
   component: ConversationPage,
 });
 
@@ -48,15 +43,24 @@ function ConversationPage() {
   const {id} = Route.useParams();
   const {task: searchTaskId} = Route.useSearch();
   const navigate = useNavigate();
-  const {data, hasNextPage, isFetchingNextPage, fetchNextPage} = useSuspenseInfiniteQuery(
-    CONVERSATION_QUERY_OPTIONS(id),
-  );
 
-  // Newest page is fetched first (pages[0]); older pages append at higher indices.
-  // For chronological display we want oldest first → reverse pages, then flatten.
+  const queryData = useLazyLoadQuery<TConversationPageQuery>(
+    conversationPageQuery,
+    {id: encodeGlobalId('Conversation', id), count: CONVERSATION_PAGE_SIZE, cursor: null},
+    {fetchPolicy: 'store-or-network'},
+  );
+  if (!queryData.conversation) throw new Error('Conversation not found');
+
+  const {data, loadPrevious, hasPrevious, isLoadingPrevious} = usePaginationFragment<
+    ConversationPageRefetchQuery,
+    ConversationPageFragment$key
+  >(conversationPageFragment, queryData.conversation);
+
+  // Connection edges arrive oldest-first within each page, and loadPrevious
+  // prepends older pages — so the flattened edge list is already chronological.
   const allMessages = useMemo<Message[]>(
-    () => data.pages.slice().reverse().flatMap((p) => p.messages),
-    [data.pages],
+    () => data.messages.edges.map((e) => mapMessage(e.node)),
+    [data.messages.edges],
   );
 
   const runningMsg = allMessages.find((m) => m.role === 'assistant' && m.status === 'running');
@@ -135,7 +139,7 @@ function ConversationPage() {
 
   const todos = liveTodos ?? persistedTodos;
 
-  const conversationModel = data.pages[0]?.model;
+  const conversationModel = data.model;
 
   async function handleDeletePersistedDocument(docId: string) {
     try {
@@ -164,38 +168,41 @@ function ConversationPage() {
     bottomRef.current?.scrollIntoView();
   }, [id]);
 
-  // Infinite-scroll-upward: when the top sentinel becomes visible, fetch the
-  // next (older) page. Capture scrollHeight before the fetch so we can adjust
-  // scrollTop afterwards — this keeps whatever row the user was looking at
-  // pinned in place instead of jumping up by the height of the inserted rows.
+  // Infinite-scroll-upward: when the top sentinel becomes visible, load the
+  // previous (older) page via Relay's pagination fragment. Capture scrollHeight
+  // before the fetch so we can adjust scrollTop afterwards — keeps whatever
+  // row the user was looking at pinned in place instead of jumping up by the
+  // height of the inserted rows.
   useEffect(() => {
     const sentinel = topRef.current;
     const container = containerRef.current;
-    if (!sentinel || !container || !hasNextPage) return;
+    if (!sentinel || !container || !hasPrevious) return;
 
     const obs = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        if (!entry?.isIntersecting || isFetchingNextPage) return;
+        if (!entry?.isIntersecting || isLoadingPrevious) return;
         const prevHeight = container.scrollHeight;
         const prevTop = container.scrollTop;
-        void fetchNextPage().then(() => {
-          // `scroll-behavior: smooth` is set on #messages; bypass it explicitly
-          // so the scrollTop adjustment is instant (otherwise the user sees
-          // the page animate after older messages are prepended).
-          requestAnimationFrame(() => {
-            container.scrollTo({
-              top: prevTop + (container.scrollHeight - prevHeight),
-              behavior: 'instant' as ScrollBehavior,
+        loadPrevious(CONVERSATION_PAGE_SIZE, {
+          onComplete: () => {
+            // `scroll-behavior: smooth` is set on #messages; bypass it explicitly
+            // so the scrollTop adjustment is instant (otherwise the user sees
+            // the page animate after older messages are prepended).
+            requestAnimationFrame(() => {
+              container.scrollTo({
+                top: prevTop + (container.scrollHeight - prevHeight),
+                behavior: 'instant' as ScrollBehavior,
+              });
             });
-          });
+          },
         });
       },
       {root: container, threshold: 0, rootMargin: '200px 0px 0px 0px'},
     );
     obs.observe(sentinel);
     return () => obs.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [hasPrevious, isLoadingPrevious, loadPrevious]);
 
   function handleShowSteps(s: Step[]) {
     setPanelSteps(s);
@@ -222,13 +229,12 @@ function ConversationPage() {
       const {taskId} = await commitStartTask({
         input: {query, model, conversationId: id, attachmentUploads: uploads},
       });
-      // Subscribe to the live stream immediately — the paginated cache may
-      // take a moment to surface the new running message via refetch.
+      // Subscribe to the live stream immediately — the connection won't surface
+      // the new running message until the refetch below completes.
       setPendingTaskId(taskId);
-      // Only the most-recent page changed (new user msg + new running assistant
-      // msg). Trim cached pages to page 0 then refetch — keeps the user's
-      // scrolled-up history out of an unnecessary refetch.
-      await refetchConversationFirstPage(queryClient, id);
+      // Refetch the newest page so the user msg + running assistant rows land
+      // in the Relay store; usePaginationFragment re-renders automatically.
+      await loadConversationPage(id);
       void queryClient.invalidateQueries({queryKey: ['running-tasks']});
       if (attachments.some((a) => a.type === 'document')) {
         void refreshDocumentList(id);
@@ -241,8 +247,8 @@ function ConversationPage() {
   async function handleStop() {
     if (runningMsg) {
       try {
-        // runningMsg.id is the raw message UUID (== taskId for assistant messages)
-        // when fetched via fetchConversationPage (which decodes GlobalIDs).
+        // runningMsg.id is the raw message UUID (== taskId for assistant
+        // messages) — mapMessage() decodes the Relay GlobalID for us.
         await commitStopTask(runningMsg.id);
       } catch (err) {
         console.error('Failed to stop task:', err);
@@ -273,7 +279,7 @@ function ConversationPage() {
         bottomRef={bottomRef}
         topRef={topRef}
         containerRef={containerRef}
-        isLoadingOlder={isFetchingNextPage}
+        isLoadingOlder={isLoadingPrevious}
         onShowSteps={handleShowSteps}
       />
       {panelOpen && (

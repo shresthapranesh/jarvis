@@ -3,10 +3,10 @@ import {useEffect, useRef, useState} from 'react';
 import {graphql, requestSubscription} from 'react-relay';
 
 import type {useTaskEventsSubscription} from '../__generated__/useTaskEventsSubscription.graphql';
-import {refetchConversationFirstPage} from '../lib/api';
 import type {ArtifactRef, Step, TodoItem, TodoStatus} from '../lib/types';
 import {refreshArtifactList} from '../relay/ArtifactListQuery';
 import {refreshConversationList} from '../relay/ConversationListQuery';
+import {loadConversationPage} from '../relay/ConversationPageQuery';
 import {refreshDocumentList} from '../relay/DocumentListQuery';
 import {environment} from '../relay/environment';
 import {refreshTodoList} from '../relay/TodoListQuery';
@@ -228,7 +228,7 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
               await refreshConversationList();
               await queryClient.invalidateQueries({queryKey: ['running-tasks']});
               if (conversationId) {
-                await refetchConversationFirstPage(queryClient, conversationId);
+                await loadConversationPage(conversationId);
                 await refreshArtifactList(conversationId);
                 await refreshDocumentList(conversationId);
                 await refreshTodoList(conversationId);
@@ -247,7 +247,7 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
               await refreshConversationList();
               await queryClient.invalidateQueries({queryKey: ['running-tasks']});
               if (conversationId) {
-                await refetchConversationFirstPage(queryClient, conversationId);
+                await loadConversationPage(conversationId);
               }
             })();
             break;

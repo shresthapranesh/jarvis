@@ -186,34 +186,37 @@ async def get_conversation_meta(session: AsyncSession, conv_id: str) -> Conversa
     return await session.get(Conversation, conv_id)
 
 
-async def list_messages_paginated(
+async def list_messages_connection(
     session: AsyncSession,
     conv_id: str,
-    limit: int = 10,
-    before: datetime | None = None,
+    last: int,
+    before_ts: datetime | None,
+    before_id: str | None,
 ) -> tuple[list[Message], bool]:
-    """Return up to `limit` messages older than `before` (or the most recent if None),
-    ordered oldest-first within the page, plus a `has_more` flag.
+    """Newest-N messages older than the (before_ts, before_id) cursor.
 
-    Uses a lookahead trick: fetch `limit + 1` rows ordered DESC; if we got the
-    extra row, more pages exist. Drop the extra and reverse to chronological order.
+    Composite cursor (created_at, id) makes the order stable when two messages
+    share a timestamp. Lookahead trick (last + 1) drives has_previous_page.
+    Returned rows are oldest-first within the page (Connection convention).
     """
     stmt = (
         select(Message)
         .where(Message.conversation_id == conv_id)
         .options(selectinload(Message.steps))
         .order_by(Message.created_at.desc(), Message.id.desc())
-        .limit(limit + 1)
+        .limit(last + 1)
     )
-    if before is not None:
-        stmt = stmt.where(Message.created_at < before)
-    result = await session.execute(stmt)
-    rows = list(result.scalars().all())
-    has_more = len(rows) > limit
-    if has_more:
-        rows = rows[:limit]
+    if before_ts is not None:
+        stmt = stmt.where(
+            (Message.created_at < before_ts)
+            | ((Message.created_at == before_ts) & (Message.id < before_id))
+        )
+    rows = list((await session.execute(stmt)).scalars().all())
+    has_previous = len(rows) > last
+    if has_previous:
+        rows = rows[:last]
     rows.reverse()
-    return rows, has_more
+    return rows, has_previous
 
 
 # ── Automation CRUD ────────────────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+import {decodeGlobalId} from '../relay/globalId';
+
 export interface ConversationSummary {
   id: string;
   title: string | null;
@@ -39,16 +41,25 @@ export interface Conversation {
   messages: Message[];
 }
 
-// One paginated page of messages. The first page (no `before` cursor) holds the
-// most-recent messages; subsequent pages step further back in time. `messages`
-// is oldest-first within the page so the frontend can prepend pages directly.
-export interface MessagePage {
+// Shape of a Relay-fetched Message node. Used by mapMessage() below to convert
+// camelCase + GlobalID to the snake_case Message interface the rest of the app
+// uses. Kept structural (not bound to a generated type) so it works for both
+// the pagination fragment and ad-hoc fetchQuery results.
+export interface RelayMessageNode {
   id: string;
-  title: string | null;
-  model: string;
-  created_at: string;
-  messages: Message[];
-  has_more: boolean;
+  role: string;
+  content: string;
+  model: string | null | undefined;
+  status: string;
+  createdAt: string;
+  steps: ReadonlyArray<{
+    id: string;
+    node: string;
+    source: string;
+    data: string | null | undefined;
+    seq: number;
+    createdAt: string;
+  }>;
 }
 
 export interface StreamingMessage {
@@ -316,6 +327,27 @@ export interface NodeStatus {
   verdict?: 'true' | 'false';
   tokens?: string;
   mapProgress?: {completed: number; total: number};
+}
+
+// Translate a Relay-shaped Message node to the snake_case Message interface
+// the rest of the app reads. Mirrors the per-Relay-file mapXxx() translators.
+export function mapMessage(m: RelayMessageNode): Message {
+  return {
+    id: decodeGlobalId(m.id),
+    role: m.role as 'user' | 'assistant',
+    content: m.content,
+    model: m.model ?? null,
+    status: m.status,
+    created_at: m.createdAt,
+    steps: m.steps.map((s) => ({
+      id: s.id,
+      node: s.node,
+      source: s.source,
+      data: s.data ?? null,
+      seq: s.seq,
+      created_at: s.createdAt,
+    })),
+  };
 }
 
 // Convert backend definition JSON → React Flow nodes/edges

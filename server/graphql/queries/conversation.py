@@ -17,6 +17,10 @@ from ..types.todo import TodoItem
 
 @strawberry.type
 class ConversationQuery:
+    # Required by Relay's @refetchable on Node-implementing fragments — Relay
+    # generates queries that call `node(id: $id)` to refetch a single record.
+    node: relay.Node = relay.node()
+
     @strawberry.field
     async def conversations(self, info: strawberry.Info) -> list[Conversation]:
         session = info.context["session"]

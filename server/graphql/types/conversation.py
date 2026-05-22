@@ -6,6 +6,7 @@ by global ID. Step is inlined under Message and doesn't need Node.
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -15,10 +16,21 @@ from sqlalchemy import func, select
 from strawberry import relay
 
 from db import models as db_models
-from db.ops import get_conversation_meta, list_messages_paginated
+from db.ops import get_conversation_meta, list_messages_connection
 
 if TYPE_CHECKING:
     pass
+
+
+def _encode_cursor(msg: db_models.Message) -> str:
+    raw = f"{msg.created_at.isoformat()}|{msg.id}"
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, str]:
+    raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+    ts, mid = raw.split("|", 1)
+    return datetime.fromisoformat(ts), mid
 
 
 @strawberry.type
@@ -87,10 +99,15 @@ class Message(relay.Node):
 
 
 @strawberry.type
-class MessagePage:
-    """Page of messages — mirrors the REST GET /conversations/{id} shape."""
-    messages: list[Message]
-    has_more: bool
+class MessageEdge:
+    node: Message
+    cursor: str
+
+
+@strawberry.type
+class MessageConnection:
+    edges: list[MessageEdge]
+    page_info: relay.PageInfo
 
 
 @strawberry.type
@@ -138,18 +155,30 @@ class Conversation(relay.Node):
     async def messages(
         self,
         info: strawberry.Info,
-        limit: int = 10,
-        before: datetime | None = None,
-    ) -> MessagePage:
-        """Page of messages, oldest-first within the page.
+        last: int = 10,
+        before: str | None = None,
+    ) -> MessageConnection:
+        """Backward-paginated message connection (Relay Cursor Connections spec).
 
-        Mirrors REST `GET /conversations/{id}?limit=&before=`: pass `before` as
-        the oldest message's `createdAt` from the previous page to walk back.
+        UI only scrolls newest→older, so forward args (first/after) are omitted.
+        Cursor is opaque: base64(`{created_at.isoformat()}|{id}`).
         """
         session = info.context["session"]
-        limit = max(1, min(limit, 100))
-        rows, has_more = await list_messages_paginated(session, self.id, limit, before)
-        return MessagePage(
-            messages=[Message.from_db(m) for m in rows],
-            has_more=has_more,
+        last = max(1, min(last, 100))
+        before_ts, before_id = _decode_cursor(before) if before else (None, None)
+        rows, has_previous = await list_messages_connection(
+            session, self.id, last, before_ts, before_id,
+        )
+        edges = [
+            MessageEdge(node=Message.from_db(m), cursor=_encode_cursor(m))
+            for m in rows
+        ]
+        return MessageConnection(
+            edges=edges,
+            page_info=relay.PageInfo(
+                has_next_page=False,
+                has_previous_page=has_previous,
+                start_cursor=edges[0].cursor if edges else None,
+                end_cursor=edges[-1].cursor if edges else None,
+            ),
         )

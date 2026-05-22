@@ -1,29 +1,4 @@
-import type {InfiniteData, QueryClient} from '@tanstack/react-query';
-
-import type {MessagePage, NotificationChannelType} from './types';
-
-// Refetch only the most-recent page of a conversation's infinite query, leaving
-// older cached pages intact. Default `invalidateQueries` on an infinite query
-// refetches every loaded page, which would re-download the user's whole
-// scrolled-up history on every new message — defeating pagination.
-export async function refetchConversationFirstPage(
-  queryClient: QueryClient,
-  conversationId: string,
-): Promise<void> {
-  const queryKey = ['conversation', conversationId];
-  queryClient.setQueryData<InfiniteData<MessagePage, string | undefined>>(
-    queryKey,
-    (old) => {
-      if (!old || old.pages.length === 0) return old;
-      return {
-        pages: old.pages.slice(0, 1),
-        pageParams: old.pageParams.slice(0, 1),
-      };
-    },
-  );
-  await queryClient.invalidateQueries({queryKey});
-  await queryClient.invalidateQueries({queryKey: ['running-tasks']});
-}
+import type {NotificationChannelType} from './types';
 
 export async function checkHealth(): Promise<{status: string}> {
   const res = await fetch('/health');
