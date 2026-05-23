@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import strawberry
 
-from core.state import _background_tasks, _tasks
+from core.state import _tasks, get_queue
 
 from ..types.task_run import StopRunningTaskPayload
 
@@ -19,14 +19,14 @@ class TaskRunMutation:
         if state.done:
             raise ValueError("task already finished")
 
+        # In-process fast path so the running handler observes immediately.
         state.cancelled = True
         state._stop_event.set()
-
         if state.resume_future and not state.resume_future.done():
             state.resume_future.cancel()
 
-        bg_task = _background_tasks.get(task_id)
-        if bg_task and not bg_task.done():
-            bg_task.cancel()
+        # Durable + cross-process path. job.id == task_id by convention for
+        # all three kinds (chat / automation / workflow).
+        await get_queue().cancel(task_id)
 
         return StopRunningTaskPayload(ok=True, task_id=task_id, kind=state.kind)

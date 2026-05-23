@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _reaper_task = asyncio.create_task(_run_lock_reaper(state._queue))
         _automation_worker_task = asyncio.create_task(_build_automation_worker(state._queue).run())
         _workflow_worker_task = asyncio.create_task(_build_workflow_worker(state._queue).run())
+        _chat_worker_task = asyncio.create_task(_build_chat_worker(state._queue).run())
         register_memory_consolidation_job()
         register_staging_cleanup_job()
 
@@ -120,9 +121,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Stop workers BEFORE the queue/checkpointer/etc. tear down so any
         # in-flight handler can still update its run via async_session.
-        for _t in (_automation_worker_task, _workflow_worker_task):
+        _workers = (_automation_worker_task, _workflow_worker_task, _chat_worker_task)
+        for _t in _workers:
             _t.cancel()
-        for _t in (_automation_worker_task, _workflow_worker_task):
+        for _t in _workers:
             with contextlib.suppress(asyncio.CancelledError):
                 await _t
 
@@ -173,6 +175,21 @@ def _build_workflow_worker(queue) -> Worker:
         kinds=["workflow"],
         handler=workflow_job_handler,
         worker_id=f"workflow-{os.getpid()}",
+        ttl_seconds=600,
+    )
+
+
+def _build_chat_worker(queue) -> Worker:
+    """Worker that consumes 'chat' jobs. Same TTL as automations — long
+    agent loops with tool calls. On restart, the LangGraph checkpointer
+    (thread_id == conv_id) lets the agent resume from the last node
+    boundary rather than restarting from the user's original prompt."""
+    from server.chat_runtime import chat_job_handler  # noqa: PLC0415
+    return Worker(
+        queue,
+        kinds=["chat"],
+        handler=chat_job_handler,
+        worker_id=f"chat-{os.getpid()}",
         ttl_seconds=600,
     )
 

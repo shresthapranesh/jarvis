@@ -17,15 +17,12 @@ from core.safety import gate_input, gate_output
 from core.schemas import AttachmentIn
 from core.state import (
     TaskState,
-    _background_tasks,
     _tasks,
-    log_task_created,
-    log_task_received,
     stream_task_events,
 )
 from db import async_session
 from db.ops import add_message, get_default_model, get_or_create_conversation, get_setting
-from server.chat_runtime import _run_agent_task
+from server.chat_runtime import enqueue_chat_task
 
 logger = logging.getLogger(__name__)
 
@@ -63,22 +60,15 @@ async def _dispatch(
         return
 
     conv_id = f"telegram_{chat_id}"
-    log_task_received("chat", conv_id, "telegram")
-
     async with async_session() as session:
-        conv = await get_or_create_conversation(session, conv_id, model, db_user_content[:60])
-        await add_message(session, conv.id, "user", db_user_content)
-        task_msg = await add_message(session, conv.id, "assistant", "", model=model, status="running")
+        await get_or_create_conversation(session, conv_id, model, db_user_content[:60])
+        await add_message(session, conv_id, "user", db_user_content)
+        task_id = await enqueue_chat_task(
+            session, user_content, model, conv_id,
+            attachments=attachments, source="telegram",
+        )
 
-    task_id = task_msg.id
-    task_state = TaskState(parent_id=conv_id)
-    _tasks[task_id] = task_state
-    log_task_created(task_id, task_state, model)
-
-    t = asyncio.create_task(_run_agent_task(task_id, user_content, model, conv_id, attachments=attachments))
-    _background_tasks[task_id] = t
-    t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
-
+    task_state = _tasks[task_id]
     asyncio.create_task(_stream_to_telegram(bot, chat_id, None, task_state, model, loading_task=loading_task))
 
 
@@ -137,21 +127,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     conv_id = f"telegram_{chat_id}"
-    log_task_received("chat", conv_id, "telegram")
     async with async_session() as session:
-        conv = await get_or_create_conversation(session, conv_id, model, text[:60])
-        await add_message(session, conv.id, "user", f"[Voice] {text}")
-        task_msg = await add_message(session, conv.id, "assistant", "", model=model, status="running")
+        await get_or_create_conversation(session, conv_id, model, text[:60])
+        await add_message(session, conv_id, "user", f"[Voice] {text}")
+        task_id = await enqueue_chat_task(
+            session, text, model, conv_id, source="telegram",
+        )
 
-    task_id = task_msg.id
-    task_state = TaskState(parent_id=conv_id)
-    _tasks[task_id] = task_state
-    log_task_created(task_id, task_state, model)
-
-    t = asyncio.create_task(_run_agent_task(task_id, text, model, conv_id))
-    _background_tasks[task_id] = t
-    t.add_done_callback(lambda _t: _background_tasks.pop(task_id, None))
-
+    task_state = _tasks[task_id]
     asyncio.create_task(_stream_to_telegram(context.bot, chat_id, placeholder_id, task_state, model, loading_task=loading_task))
 
 
