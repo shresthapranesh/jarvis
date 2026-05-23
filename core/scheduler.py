@@ -44,23 +44,24 @@ def _remove_scheduler_job(automation_id: str) -> None:
 
 
 def _run_scheduled_automation(automation_id: str) -> None:
-    """Called from BackgroundScheduler thread — submits the run onto the main
-    FastAPI event loop so all TaskState waiters, SSE futures, and the shared
-    AsyncSqliteSaver stay on a single loop.
-    """
-    # Lazy import to break the scheduler <-> automation_runtime cycle.
-    from server.automation_runtime import _execute_automation_bg  # noqa: PLC0415
-
-    if state._main_loop is None:
+    """Called from BackgroundScheduler thread — enqueues a queue job on the
+    main loop and returns immediately. The automation Worker consumes the job
+    on the same loop; we don't block the scheduler thread on the actual run."""
+    if state._main_loop is None or state._queue is None:
         return
-    future = asyncio.run_coroutine_threadsafe(
-        _execute_automation_bg(automation_id, triggered_by="schedule"),
-        state._main_loop,
-    )
+    queue = state._queue
+
+    async def _enqueue() -> None:
+        await queue.enqueue(
+            "automation",
+            {"automation_id": automation_id, "triggered_by": "schedule"},
+        )
+
+    future = asyncio.run_coroutine_threadsafe(_enqueue(), state._main_loop)
     try:
-        future.result()
+        future.result(timeout=10.0)
     except Exception:
-        pass
+        logger.exception("failed to enqueue scheduled automation %s", automation_id)
 
 
 def _run_memory_consolidation() -> None:

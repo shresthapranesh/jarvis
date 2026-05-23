@@ -21,7 +21,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import get_config
 from core.log_setup import get_broadcast_handler, setup_logging
-from core.queue import SqliteJobQueue
+from core.queue import SqliteJobQueue, Worker
 from core.safety import configure_judge_model
 
 from core import state
@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._http_client = http
         state._queue = _build_queue()
         _reaper_task = asyncio.create_task(_run_lock_reaper(state._queue))
+        _automation_worker_task = asyncio.create_task(_build_automation_worker(state._queue).run())
         register_memory_consolidation_job()
         register_staging_cleanup_job()
 
@@ -116,6 +117,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await _dc_task
             state._discord_client = None
 
+        # Stop the worker BEFORE the queue/checkpointer/etc. tear down so
+        # any in-flight handler can still update its run via async_session.
+        _automation_worker_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _automation_worker_task
+
         _reaper_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await _reaper_task
@@ -135,6 +142,23 @@ def _build_queue():
     if backend == "sqlite":
         return SqliteJobQueue()
     raise RuntimeError(f"unknown JARVIS_QUEUE backend: {backend!r}")
+
+
+def _build_automation_worker(queue) -> Worker:
+    """Worker that consumes 'automation' jobs. TTL is sized for long agent
+    runs (prompt-type automations can take many minutes); the Worker's
+    heartbeat refreshes the lock at TTL/3, so a healthy worker keeps the
+    job indefinitely. The window only bites if the worker hangs."""
+    # Lazy import to break the entrypoint <-> automation_runtime cycle —
+    # automation_runtime imports core.state, which imports core.queue.
+    from server.automation_runtime import automation_job_handler  # noqa: PLC0415
+    return Worker(
+        queue,
+        kinds=["automation"],
+        handler=automation_job_handler,
+        worker_id=f"automation-{os.getpid()}",
+        ttl_seconds=600,
+    )
 
 
 async def _run_lock_reaper(queue, interval_seconds: float = 60.0) -> None:

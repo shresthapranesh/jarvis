@@ -8,7 +8,7 @@ from strawberry import relay
 from apscheduler.triggers.cron import CronTrigger
 
 from core.agents import is_valid_model
-from core.state import _background_tasks, _tasks
+from core.state import _tasks, get_queue
 from core.scheduler import _register_scheduler_job, _remove_scheduler_job
 from db.ops import (
     create_automation as db_create_automation,
@@ -143,9 +143,12 @@ class AutomationMutation:
             raise ValueError("run not found or already finished")
         if state.done:
             raise ValueError("run already finished")
+        # In-process fast path so the running handler observes immediately
+        # (no waiting for the cancel watcher's next poll tick).
         state.cancelled = True
         state._stop_event.set()
-        bg_task = _background_tasks.get(run_id)
-        if bg_task and not bg_task.done():
-            bg_task.cancel()
+        # Durable + cross-process path: queue-side cancel transitions a
+        # not-yet-claimed pending job to 'cancelled' and sets cancel_requested
+        # for a running job. job.id == run_id by convention.
+        await get_queue().cancel(run_id)
         return True

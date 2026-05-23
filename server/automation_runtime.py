@@ -1,9 +1,9 @@
 """Automation runtime — execution helpers + run registration.
 
-Used by GraphQL ``triggerAutomation`` mutation, the scheduler (cron-fired runs
-go through ``_execute_automation_bg``), and the GraphQL ``Automation.nextRunAt``
-resolver (``_compute_next_run_at``). REST routes were removed once the
-frontend migrated to GraphQL; the runtime helpers stayed.
+Both manual triggers (``triggerAutomation``) and cron triggers
+(``_run_scheduled_automation`` in core.scheduler) enqueue a queue job; the
+``automation_job_handler`` defined here consumes those jobs. The GraphQL
+``Automation.nextRunAt`` resolver uses ``_compute_next_run_at``.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ from db.ops import (
 from core.notifications import send_notifications
 from core.state import (
     TaskState,
-    _background_tasks,
     _notify,
     _tasks,
     get_async_checkpointer,
@@ -288,36 +287,6 @@ async def _run_automation_inner(
         loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
 
 
-async def _execute_automation_bg(
-    automation_id: str,
-    run_id: str | None = None,
-    triggered_by: str = "manual",
-) -> None:
-    """Legacy asyncio.create_task entry point. Used by manual
-    register_automation_run and the cron scheduler until those switch to
-    enqueueing through the JobQueue."""
-    async with async_session() as session:
-        auto = await get_automation(session, automation_id)
-        if auto is None:
-            return
-
-        if run_id is None:
-            log_task_received("automation", automation_id, triggered_by)
-            run = await create_automation_run(session, automation_id, triggered_by)
-            run_id = run.id
-            _tasks[run_id] = TaskState(
-                kind="automation",
-                label=auto.name,
-                parent_id=automation_id,
-            )
-            log_task_created(run_id, _tasks[run_id], auto.model)
-            if (t := asyncio.current_task()) is not None:
-                _background_tasks[run_id] = t
-
-    state = _tasks[run_id]
-    await _run_automation_inner(auto, state, run_id)
-
-
 # ── Queue handler ────────────────────────────────────────────────────────────
 
 async def automation_job_handler(job: Job) -> None:
@@ -385,33 +354,53 @@ async def _watch_queue_cancel(
         await asyncio.sleep(1.0)
 
 
-# ── Run registration (shared by GraphQL triggerAutomation) ───────────────────
+# ── Manual trigger (shared by GraphQL triggerAutomation) ─────────────────────
 
 async def register_automation_run(
     session: AsyncSession, automation_id: str,
 ) -> str | None:
-    """Register a TaskState + AutomationRun row + background task. Returns run_id,
-    or None if the automation doesn't exist."""
+    """Create an AutomationRun + enqueue a queue job atomically, register the
+    TaskState in `_tasks` so SSE subscribers can connect immediately, and
+    return the run_id. Returns None if the automation doesn't exist.
+
+    The convention is ``job.id == AutomationRun.id``, which makes
+    ``stopAutomationRun(run_id)`` a trivial ``queue.cancel(run_id)`` call.
+    """
+    from uuid import uuid4
+    from core.state import get_queue
+
     auto = await get_automation(session, automation_id)
     if auto is None:
         return None
 
     log_task_received("automation", automation_id, "http")
-    run = await create_automation_run(session, automation_id, "manual")
-    _tasks[run.id] = TaskState(
+    run_id = str(uuid4())
+
+    # Insert AutomationRun + enqueue Job in one transaction so we can't end
+    # up with a job pointing at a row that doesn't exist (or vice-versa).
+    session.add(AutomationRun(
+        id=run_id,
+        automation_id=automation_id,
+        triggered_by="manual",
+        status="running",
+    ))
+    await get_queue().enqueue(
+        "automation",
+        {"automation_id": automation_id, "triggered_by": "manual"},
+        job_id=run_id,
+        session=session,
+    )
+
+    # Register the TaskState BEFORE committing. The queue's wake-on-commit
+    # listener fires after we commit; if the worker were to claim before
+    # `_tasks[run_id]` existed, the handler would create its own TaskState
+    # and we'd race here overwriting it.
+    _tasks[run_id] = TaskState(
         kind="automation",
         label=auto.name,
         parent_id=automation_id,
     )
-    log_task_created(run.id, _tasks[run.id], auto.model)
+    log_task_created(run_id, _tasks[run_id], auto.model)
 
-    def _task_done(t: asyncio.Task, run_id: str) -> None:
-        _background_tasks.pop(run_id, None)
-        if not t.cancelled() and (exc := t.exception()):
-            logger.error("automation run %s raised unhandled %s", run_id, type(exc).__name__, exc_info=exc)
-
-    t = asyncio.create_task(_execute_automation_bg(automation_id, run_id=run.id, triggered_by="manual"))
-    _background_tasks[run.id] = t
-    t.add_done_callback(lambda _t: _task_done(_t, run.id))
-
-    return run.id
+    await session.commit()
+    return run_id
