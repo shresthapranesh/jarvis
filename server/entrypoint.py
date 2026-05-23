@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import pathlib
 import sys
@@ -25,7 +26,7 @@ from core.safety import configure_judge_model
 
 from core import state
 from db import async_session, init_db
-from db.ops import get_setting, list_enabled_scheduled_automations
+from db.ops import cleanup_zombie_running_rows, get_setting, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
 from .routes_documents import router as documents_router
@@ -43,6 +44,8 @@ def _resource_root() -> pathlib.Path:
 
 _DIST = _resource_root() / "static" / "dist"
 
+logger = logging.getLogger(__name__)
+
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
@@ -54,6 +57,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
     _scheduler.start()
     async with async_session() as session:
+        sweep = await cleanup_zombie_running_rows(session)
+        if any(sweep.values()):
+            logger.info("startup zombie sweep: %s", sweep)
         configure_judge_model(await get_setting(session, "safety.judge_model"))
         automations = await list_enabled_scheduled_automations(session)
         for auto in automations:

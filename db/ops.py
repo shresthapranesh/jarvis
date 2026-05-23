@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Message, NotificationChannel, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Job, Message, NotificationChannel, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -781,3 +781,50 @@ async def append_node_result(
     existing.append(node_entry)
     run.node_results = json.dumps(existing)
     await session.commit()
+
+
+# ── Startup zombie sweep ───────────────────────────────────────────────────────
+
+async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
+    """Flip rows still marked 'running' from a prior process.
+
+    Called once at lifespan startup. The in-memory _tasks registry is empty on
+    a fresh boot, so any 'running' Message/AutomationRun/WorkflowRun in the DB
+    is a zombie from a previous instance that crashed or was killed. For Jobs,
+    a 'running' row means the worker that claimed it is gone — flip back to
+    'pending' (and clear the lock) so a fresh worker can re-claim immediately
+    instead of waiting for the reaper to notice the locked_until expiry.
+
+    Returns a {table_name: rowcount} dict for logging.
+    """
+    now = datetime.now(timezone.utc)
+    counts: dict[str, int] = {}
+
+    msg_res = await session.execute(
+        update(Message).where(Message.status == "running").values(status="error")
+    )
+    counts["messages"] = msg_res.rowcount or 0  # type: ignore[attr-defined]
+
+    auto_res = await session.execute(
+        update(AutomationRun)
+        .where(AutomationRun.status == "running")
+        .values(status="error", error="interrupted by server restart", finished_at=now)
+    )
+    counts["automation_runs"] = auto_res.rowcount or 0  # type: ignore[attr-defined]
+
+    wf_res = await session.execute(
+        update(WorkflowRun)
+        .where(WorkflowRun.status == "running")
+        .values(status="error", error="interrupted by server restart", finished_at=now)
+    )
+    counts["workflow_runs"] = wf_res.rowcount or 0  # type: ignore[attr-defined]
+
+    job_res = await session.execute(
+        update(Job)
+        .where(Job.status == "running")
+        .values(status="pending", locked_by=None, locked_until=None, updated_at=now)
+    )
+    counts["jobs"] = job_res.rowcount or 0  # type: ignore[attr-defined]
+
+    await session.commit()
+    return counts
