@@ -236,3 +236,39 @@ class WorkflowRun(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="runs")
+
+
+# ── Durable job queue ──────────────────────────────────────────────────────────
+
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON dict
+
+    # pending | running | done | error | cancelled
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    locked_by: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("ix_jobs_kind_status_run_at", "kind", "status", "run_at"),
+        Index("ix_jobs_locked_until", "locked_until"),
+    )

@@ -20,6 +20,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import get_config
 from core.log_setup import get_broadcast_handler, setup_logging
+from core.queue import SqliteJobQueue
 from core.safety import configure_judge_model
 
 from core import state
@@ -65,6 +66,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._async_checkpointer = cp
         state._store = store
         state._http_client = http
+        state._queue = _build_queue()
+        _reaper_task = asyncio.create_task(_run_lock_reaper(state._queue))
         register_memory_consolidation_job()
         register_staging_cleanup_job()
 
@@ -107,11 +110,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     await _dc_task
             state._discord_client = None
 
+        _reaper_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _reaper_task
+
         state._async_checkpointer = None
         state._store = None
         state._http_client = None
+        state._queue = None
     _scheduler.shutdown(wait=False)
     state._main_loop = None
+
+
+def _build_queue():
+    """Construct the JobQueue named by AppConfig.queue_backend.
+    Only "sqlite" is wired today; future backends (e.g. "redis://...") slot in here."""
+    backend = get_config().queue_backend
+    if backend == "sqlite":
+        return SqliteJobQueue()
+    raise RuntimeError(f"unknown JARVIS_QUEUE backend: {backend!r}")
+
+
+async def _run_lock_reaper(queue, interval_seconds: float = 60.0) -> None:
+    """Periodically flip rows whose lock has expired back to `pending`."""
+    import logging
+    log = logging.getLogger("jarvis.queue")
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            reaped = await queue.reap_expired_locks()
+            if reaped:
+                log.info("reaped %d expired job locks", reaped)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("lock reaper iteration failed")
 
 
 # ── App ──────────────────────────────────────────────────────────────────────

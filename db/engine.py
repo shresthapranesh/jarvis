@@ -25,6 +25,8 @@ def _migrate(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_steps_conversation_id ON steps (conversation_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_automation_runs_automation_id ON automation_runs (automation_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_locked_until ON jobs (locked_until)"))
     auto_cols = {c["name"] for c in inspector.get_columns("automations")}
     if "notifications" not in auto_cols:
         conn.execute(text("ALTER TABLE automations ADD COLUMN notifications TEXT"))
@@ -40,6 +42,7 @@ def _set_sqlite_pragmas(dbapi_conn: object, _record: object) -> None:
     cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
     cursor.close()
 
 

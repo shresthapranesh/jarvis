@@ -20,6 +20,8 @@ import httpx
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
+from core.queue import JobQueue
+
 
 TaskKind = Literal["chat", "automation", "workflow"]
 
@@ -34,6 +36,7 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 _http_client: httpx.AsyncClient | None = None
 _telegram_bot: object | None = None  # telegram.Bot when set; lazy-typed to avoid forcing import
 _discord_client: object | None = None  # discord.Client when set; lazy-typed to avoid forcing import
+_queue: JobQueue | None = None
 
 
 def get_async_checkpointer() -> AsyncSqliteSaver:
@@ -65,6 +68,13 @@ def get_telegram_bot():
 def get_discord_client():
     """Return the process-wide discord.Client if the bot is enabled, else None."""
     return _discord_client
+
+
+def get_queue() -> JobQueue:
+    """Return the process-wide JobQueue. Must be called after lifespan init."""
+    if _queue is None:
+        raise RuntimeError("job queue not initialized — server lifespan has not started")
+    return _queue
 
 
 # ── Task registry ────────────────────────────────────────────────────────────

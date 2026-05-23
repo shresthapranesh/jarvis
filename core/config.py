@@ -33,6 +33,7 @@ class AppConfig:
     staging_dir: Path
     piper_voice: str
     whisper_model: str
+    queue_backend: str  # "sqlite" today; future: "redis://…"
 
     @classmethod
     def from_env(cls, overrides: dict[str, Any]) -> AppConfig:
@@ -69,6 +70,8 @@ class AppConfig:
                 or os.environ.get("PIPER_VOICE", "voices/en_US-hfc_female-medium.onnx"),
             whisper_model=overrides.get("whisper_model")
                 or os.environ.get("WHISPER_MODEL", "base"),
+            queue_backend=overrides.get("queue_backend")
+                or os.environ.get("JARVIS_QUEUE", "sqlite"),
         )
 
 
