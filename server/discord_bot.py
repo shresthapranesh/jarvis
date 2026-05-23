@@ -36,6 +36,30 @@ _EDIT_INTERVAL = 1.0
 _MAX_MSG_LEN = 1900  # Discord hard limit is 2000; leave headroom.
 
 
+def _split_for_discord(text: str, limit: int = _MAX_MSG_LEN) -> list[str]:
+    """Split text into Discord-sendable chunks at clean boundaries.
+    Prefers paragraph > line > word breaks within the last quarter of the window
+    so chunk seams stay stable as more tokens stream in."""
+    if not text:
+        return [""]
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        window_start = limit - limit // 4
+        cut = remaining.rfind("\n\n", window_start, limit)
+        if cut == -1:
+            cut = remaining.rfind("\n", window_start, limit)
+        if cut == -1:
+            cut = remaining.rfind(" ", window_start, limit)
+        if cut == -1:
+            cut = limit
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
+
+
 async def _check_and_get_model(user_id: int) -> str | None:
     """Return the model for this user, or None if not on the allowlist."""
     async with async_session() as session:
@@ -171,7 +195,18 @@ async def _stream_to_discord(
         loading_task = asyncio.create_task(_loading_animation(channel))
     accumulated = ""
     last_edit = 0.0
-    message: discord.Message | None = placeholder
+    messages: list[discord.Message] = [placeholder] if placeholder is not None else []
+
+    async def render(text: str) -> None:
+        chunks = _split_for_discord(text)
+        for i, chunk in enumerate(chunks):
+            if i < len(messages):
+                if messages[i].content != chunk:
+                    await messages[i].edit(content=chunk)
+            else:
+                reply = reply_to if i == 0 else None
+                msg = await _send_reply(channel, chunk, reply)
+                messages.append(msg)
 
     try:
         async for event in stream_task_events(state):
@@ -184,12 +219,7 @@ async def _stream_to_discord(
                     now = time.monotonic()
                     if accumulated and now - last_edit >= _EDIT_INTERVAL:
                         try:
-                            if message is None:
-                                message = await _send_reply(
-                                    channel, accumulated[:_MAX_MSG_LEN], reply_to,
-                                )
-                            else:
-                                await message.edit(content=accumulated[:_MAX_MSG_LEN])
+                            await render(accumulated)
                             last_edit = now
                         except Exception as exc:
                             logger.debug("discord edit: %s", exc)
@@ -199,14 +229,10 @@ async def _stream_to_discord(
         with contextlib.suppress(asyncio.CancelledError):
             await loading_task
 
-    final = accumulated[:_MAX_MSG_LEN] if accumulated else "(no response)"
+    final = accumulated if accumulated else "(no response)"
     final, _output_verdict = await gate_output(final, model)
-    final = final[:_MAX_MSG_LEN]
     try:
-        if message is None:
-            await _send_reply(channel, final, reply_to)
-        else:
-            await message.edit(content=final)
+        await render(final)
     except Exception as exc:
         logger.debug("discord final edit: %s", exc)
 
