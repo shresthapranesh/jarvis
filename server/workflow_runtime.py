@@ -1,21 +1,26 @@
 """Workflow runtime — execution + run registration.
 
-Used by GraphQL ``runWorkflow`` mutation. REST routes were removed once the
-frontend migrated to GraphQL; the runtime helpers stayed.
+Used by GraphQL ``runWorkflow`` mutation. Both manual triggers and any
+future scheduled triggers flow through the durable JobQueue; the
+``workflow_job_handler`` defined here consumes those jobs.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.queue import Job, JobQueue
 from db import async_session
+from db.models import Workflow, WorkflowRun
 from db.ops import (
     create_workflow_run,
     finish_workflow_run,
@@ -24,7 +29,6 @@ from db.ops import (
 from core.notifications import send_notifications
 from core.state import (
     TaskState,
-    _background_tasks,
     _notify,
     _tasks,
     log_task_complete,
@@ -34,21 +38,18 @@ from core.state import (
 from workflow.engine import execute_workflow
 
 
-# ── Background executor ───────────────────────────────────────────────────────
+# ── Inner work loop ──────────────────────────────────────────────────────────
 
-async def _execute_workflow_bg(
-    workflow_id: str,
+async def _run_workflow_inner(
+    wf: Workflow,
+    state: TaskState,
     run_id: str,
     inputs: dict[str, Any],
 ) -> None:
-    async with async_session() as session:
-        wf = await get_workflow(session, workflow_id)
-        if wf is None:
-            return
-
-    state = _tasks[run_id]
+    """Execute the workflow graph, write events to `state`, persist outcome
+    to WorkflowRun, send notifications, set state.done and schedule _tasks
+    cleanup. Caller created the WorkflowRun row and registered `state`."""
     final_status = "error"
-
     try:
         definition = json.loads(wf.definition or "{}")
         final_outputs, node_records = await execute_workflow(
@@ -109,37 +110,113 @@ async def _execute_workflow_bg(
         loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
 
 
-# ── Run registration (shared by GraphQL runWorkflow) ─────────────────────────
+# ── Queue handler ────────────────────────────────────────────────────────────
+
+async def workflow_job_handler(job: Job) -> None:
+    """JobQueue handler — workflow jobs that have been claimed flow through
+    here. Convention: ``job.id == WorkflowRun.id``.
+
+    Payload: ``{"workflow_id": str, "inputs": dict}``.
+    """
+    payload = job.payload
+    workflow_id: str = payload["workflow_id"]
+    inputs: dict[str, Any] = payload.get("inputs") or {}
+    run_id = job.id
+
+    async with async_session() as session:
+        wf = await get_workflow(session, workflow_id)
+        if wf is None:
+            return
+
+        existing = await session.get(WorkflowRun, run_id)
+        if existing is None:
+            log_task_received("workflow", workflow_id, "queue")
+            await create_workflow_run(
+                session, workflow_id, json.dumps(inputs), run_id=run_id,
+            )
+        elif existing.status == "pending":
+            existing.status = "running"
+            await session.commit()
+
+    state = _tasks.get(run_id)
+    if state is None:
+        state = TaskState(
+            kind="workflow",
+            label=wf.name,
+            parent_id=workflow_id,
+        )
+        _tasks[run_id] = state
+        log_task_created(run_id, state, None)
+
+    from core.state import get_queue
+    queue = get_queue()
+    cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
+    try:
+        await _run_workflow_inner(wf, state, run_id, inputs)
+    finally:
+        cancel_watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cancel_watcher
+
+
+async def _watch_queue_cancel(
+    queue: JobQueue, job_id: str, state: TaskState,
+) -> None:
+    """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event."""
+    while not state.done and not state.cancelled:
+        if await queue.is_cancel_requested(job_id):
+            state.cancelled = True
+            state._stop_event.set()
+            return
+        await asyncio.sleep(1.0)
+
+
+# ── Manual trigger (shared by GraphQL runWorkflow) ───────────────────────────
 
 async def register_workflow_run(
     session: AsyncSession,
     workflow_id: str,
     inputs: dict[str, Any],
 ) -> str | None:
-    """Set up the DB row + TaskState + background task for a workflow run.
-    Returns run_id, or None if the workflow doesn't exist."""
+    """Create a WorkflowRun + enqueue a queue job atomically, register the
+    TaskState before commit so SSE subscribers see it, return the run_id.
+    Returns None if the workflow doesn't exist.
+
+    job.id == WorkflowRun.id, so stopWorkflowRun(run_id) is a one-line
+    queue.cancel(run_id) call.
+    """
+    from core.state import get_queue
+
     wf = await get_workflow(session, workflow_id)
     if wf is None:
         return None
 
     log_task_received("workflow", workflow_id, "http")
-    run = await create_workflow_run(session, workflow_id, json.dumps(inputs))
+    run_id = str(uuid4())
 
-    # Register TaskState BEFORE returning — prevents subscription race condition
-    _tasks[run.id] = TaskState(
+    session.add(WorkflowRun(
+        id=run_id,
+        workflow_id=workflow_id,
+        status="running",
+        inputs=json.dumps(inputs),
+        node_results="[]",
+    ))
+    await get_queue().enqueue(
+        "workflow",
+        {"workflow_id": workflow_id, "inputs": inputs},
+        job_id=run_id,
+        session=session,
+    )
+
+    # Register TaskState BEFORE commit; the queue's after_commit wake fires
+    # after we return from session.commit(), so the worker can't race the
+    # subscriber lookup.
+    _tasks[run_id] = TaskState(
         kind="workflow",
         label=wf.name,
         parent_id=workflow_id,
     )
-    log_task_created(run.id, _tasks[run.id], None)
+    log_task_created(run_id, _tasks[run_id], None)
 
-    def _task_done(t: asyncio.Task, run_id: str) -> None:
-        _background_tasks.pop(run_id, None)
-        if not t.cancelled() and (exc := t.exception()):
-            logger.error("workflow run %s raised unhandled %s", run_id, type(exc).__name__, exc_info=exc)
-
-    t = asyncio.create_task(_execute_workflow_bg(workflow_id, run.id, inputs))
-    _background_tasks[run.id] = t
-    t.add_done_callback(lambda _t: _task_done(_t, run.id))
-
-    return run.id
+    await session.commit()
+    return run_id

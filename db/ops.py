@@ -470,11 +470,16 @@ async def create_workflow_run(
     session: AsyncSession,
     workflow_id: str,
     inputs: str | None,
+    *,
+    run_id: str | None = None,
+    status: str = "running",
 ) -> WorkflowRun:
+    """Create a WorkflowRun. `run_id` lets the caller bind a specific UUID
+    (queue worker sets it to job.id so cancellation is a no-join lookup)."""
     run = WorkflowRun(
-        id=str(uuid4()),
+        id=run_id or str(uuid4()),
         workflow_id=workflow_id,
-        status="running",
+        status=status,
         inputs=inputs,
         node_results="[]",
     )

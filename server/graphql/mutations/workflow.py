@@ -8,7 +8,7 @@ import strawberry
 from strawberry import relay
 from strawberry.scalars import JSON
 
-from core.state import _background_tasks, _tasks
+from core.state import _tasks
 from db.ops import (
     create_workflow as db_create_workflow,
     delete_workflow as db_delete_workflow,
@@ -118,7 +118,6 @@ class WorkflowMutation:
             raise ValueError("run already finished")
         state.cancelled = True
         state._stop_event.set()
-        bg_task = _background_tasks.get(run_id)
-        if bg_task and not bg_task.done():
-            bg_task.cancel()
+        from core.state import get_queue
+        await get_queue().cancel(run_id)
         return True
