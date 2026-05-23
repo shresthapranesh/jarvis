@@ -56,14 +56,15 @@ class SqliteJobQueue(JobQueue):
         kind: str,
         payload: dict,
         *,
+        job_id: str | None = None,
         run_at: datetime | None = None,
         max_attempts: int = 3,
         session: AsyncSession | None = None,
     ) -> str:
-        job_id = str(uuid4())
+        jid = job_id or str(uuid4())
         run_at = run_at or _now()
         row = JobModel(
-            id=job_id,
+            id=jid,
             kind=kind,
             payload=json.dumps(payload),
             run_at=run_at,
@@ -81,13 +82,13 @@ class SqliteJobQueue(JobQueue):
                 lambda _s: self._signal_wake(),
                 once=True,
             )
-            return job_id
+            return jid
 
         async with async_session() as sess:
             sess.add(row)
             await sess.commit()
         self._signal_wake()
-        return job_id
+        return jid
 
     async def claim(
         self,

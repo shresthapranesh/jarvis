@@ -43,11 +43,17 @@ class JobQueue(abc.ABC):
         kind: str,
         payload: dict,
         *,
+        job_id: str | None = None,
         run_at: datetime | None = None,
         max_attempts: int = 3,
         session: AsyncSession | None = None,
     ) -> str:
         """Insert a new job and return its id.
+
+        If `job_id` is provided, it is used verbatim — useful when the caller
+        wants the job id to equal a domain-specific UUID (e.g. AutomationRun.id)
+        so cancellation and status lookups don't need a join. Must be unique;
+        passing an id that already exists raises an integrity error.
 
         If `session` is provided, the row is added to that session and the
         wake signal fires only after the caller commits. If the caller rolls

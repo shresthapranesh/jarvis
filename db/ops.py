@@ -361,13 +361,21 @@ async def list_enabled_scheduled_automations(session: AsyncSession) -> list[Auto
 # ── AutomationRun CRUD ─────────────────────────────────────────────────────────
 
 async def create_automation_run(
-    session: AsyncSession, automation_id: str, triggered_by: str
+    session: AsyncSession,
+    automation_id: str,
+    triggered_by: str,
+    *,
+    run_id: str | None = None,
+    status: str = "running",
 ) -> AutomationRun:
+    """Create an AutomationRun. `run_id` lets the caller bind a specific UUID
+    (used by the queue worker so job.id == AutomationRun.id); `status` defaults
+    to "running" for the legacy asyncio.create_task path."""
     run = AutomationRun(
-        id=str(uuid4()),
+        id=run_id or str(uuid4()),
         automation_id=automation_id,
         triggered_by=triggered_by,
-        status="running",
+        status=status,
     )
     session.add(run)
     await session.commit()

@@ -9,6 +9,7 @@ frontend migrated to GraphQL; the runtime helpers stayed.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -23,9 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.agents import DEFAULT_MODEL, build_agent
 from core.log_callback import AgentLogger
+from core.queue import Job, JobQueue
 from core.safety import gate_input, gate_output
 from db import async_session
-from db.models import Automation
+from db.models import Automation, AutomationRun
 from db.ops import (
     create_automation_run,
     finish_automation_run,
@@ -194,36 +196,19 @@ async def _execute_webhook_type(auto: Automation, state: TaskState) -> str:
 
 # ── Background execution dispatcher ─────────────────────────────────────────
 
-async def _execute_automation_bg(
-    automation_id: str,
-    run_id: str | None = None,
-    triggered_by: str = "manual",
+async def _run_automation_inner(
+    auto: Automation,
+    state: TaskState,
+    run_id: str,
 ) -> None:
-    """Core async execution for a single automation run."""
-    async with async_session() as session:
-        auto = await get_automation(session, automation_id)
-        if auto is None:
-            return
+    """Execute the work for a single automation run: dispatch by input_type,
+    write events to `state`, persist outcome to AutomationRun, send notifications,
+    set state.done and schedule _tasks cleanup.
 
-        if run_id is None:
-            log_task_received("automation", automation_id, triggered_by)
-            run = await create_automation_run(session, automation_id, triggered_by)
-            run_id = run.id
-            # Scheduled path: caller didn't pre-register the TaskState; do it
-            # here so the run shows up in /tasks and stays cancellable.
-            _tasks[run_id] = TaskState(
-                kind="automation",
-                label=auto.name,
-                parent_id=automation_id,
-            )
-            log_task_created(run_id, _tasks[run_id], auto.model)
-            # Add to background_tasks so the stop endpoint can cancel it.
-            if (t := asyncio.current_task()) is not None:
-                _background_tasks[run_id] = t
-
-    state = _tasks[run_id]
+    The caller is responsible for creating the AutomationRun row and registering
+    `state` in `_tasks` before invoking this.
+    """
     final_status = "error"
-
     try:
         status = "done"
         notify_status = "done"
@@ -301,6 +286,103 @@ async def _execute_automation_bg(
         _notify(state)
         loop = asyncio.get_running_loop()
         loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
+
+
+async def _execute_automation_bg(
+    automation_id: str,
+    run_id: str | None = None,
+    triggered_by: str = "manual",
+) -> None:
+    """Legacy asyncio.create_task entry point. Used by manual
+    register_automation_run and the cron scheduler until those switch to
+    enqueueing through the JobQueue."""
+    async with async_session() as session:
+        auto = await get_automation(session, automation_id)
+        if auto is None:
+            return
+
+        if run_id is None:
+            log_task_received("automation", automation_id, triggered_by)
+            run = await create_automation_run(session, automation_id, triggered_by)
+            run_id = run.id
+            _tasks[run_id] = TaskState(
+                kind="automation",
+                label=auto.name,
+                parent_id=automation_id,
+            )
+            log_task_created(run_id, _tasks[run_id], auto.model)
+            if (t := asyncio.current_task()) is not None:
+                _background_tasks[run_id] = t
+
+    state = _tasks[run_id]
+    await _run_automation_inner(auto, state, run_id)
+
+
+# ── Queue handler ────────────────────────────────────────────────────────────
+
+async def automation_job_handler(job: Job) -> None:
+    """JobQueue handler — automation jobs that have been claimed flow through
+    here. Convention: ``job.id == AutomationRun.id`` so cancellation and SSE
+    lookups don't need a join. The manual path pre-creates the AutomationRun
+    with status='pending'; the scheduled path leaves it for the worker.
+
+    Payload: ``{"automation_id": str, "triggered_by": "manual"|"schedule"}``.
+    """
+    payload = job.payload
+    automation_id: str = payload["automation_id"]
+    triggered_by: str = payload.get("triggered_by", "manual")
+    run_id = job.id
+
+    async with async_session() as session:
+        auto = await get_automation(session, automation_id)
+        if auto is None:
+            return
+
+        existing = await session.get(AutomationRun, run_id)
+        if existing is None:
+            log_task_received("automation", automation_id, triggered_by)
+            await create_automation_run(
+                session, automation_id, triggered_by, run_id=run_id,
+            )
+        elif existing.status == "pending":
+            existing.status = "running"
+            await session.commit()
+
+    state = _tasks.get(run_id)
+    if state is None:
+        state = TaskState(
+            kind="automation",
+            label=auto.name,
+            parent_id=automation_id,
+        )
+        _tasks[run_id] = state
+        log_task_created(run_id, state, auto.model)
+
+    # Import here to avoid a circular dependency at module load — state owns
+    # the queue accessor, and the queue is only set after the lifespan starts.
+    from core.state import get_queue
+    queue = get_queue()
+    cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
+    try:
+        await _run_automation_inner(auto, state, run_id)
+    finally:
+        cancel_watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cancel_watcher
+
+
+async def _watch_queue_cancel(
+    queue: JobQueue, job_id: str, state: TaskState,
+) -> None:
+    """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event
+    so the existing in-runtime observers (state.cancelled checks, the code-type
+    cancel watcher) see it without any other plumbing."""
+    while not state.done and not state.cancelled:
+        if await queue.is_cancel_requested(job_id):
+            state.cancelled = True
+            state._stop_event.set()
+            return
+        await asyncio.sleep(1.0)
 
 
 # ── Run registration (shared by GraphQL triggerAutomation) ───────────────────

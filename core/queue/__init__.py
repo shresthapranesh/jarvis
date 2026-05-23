@@ -12,5 +12,6 @@ durable and does not belong here.
 
 from .protocol import Job, JobQueue
 from .sqlite import SqliteJobQueue
+from .worker import Worker
 
-__all__ = ["Job", "JobQueue", "SqliteJobQueue"]
+__all__ = ["Job", "JobQueue", "SqliteJobQueue", "Worker"]
