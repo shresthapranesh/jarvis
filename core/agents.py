@@ -53,6 +53,63 @@ from tools.workflows import (
 logger = logging.getLogger(__name__)
 
 
+# ── Transient LLM error retry ────────────────────────────────────────────────
+# Upstream providers occasionally return 5xx / transient network errors mid-run
+# (e.g. Google's "500 Internal error encountered" on Gemma). One automatic retry
+# absorbs those without surfacing a hard failure to the user. We catch only the
+# specific transient subclasses — never the broad APIError/Exception — so real
+# 4xx-class problems (bad input, context overflow, auth) still fail fast.
+
+def _collect_transient_errors() -> tuple[type[BaseException], ...]:
+    classes: list[type[BaseException]] = []
+    try:
+        from google.genai.errors import ServerError as _GenaiServerError
+        classes.append(_GenaiServerError)
+    except ImportError:
+        pass
+    try:
+        from google.api_core.exceptions import (
+            InternalServerError as _GApiInternal,
+            ServiceUnavailable as _GApiUnavailable,
+            DeadlineExceeded as _GApiDeadline,
+            GatewayTimeout as _GApiGateway,
+        )
+        classes.extend([_GApiInternal, _GApiUnavailable, _GApiDeadline, _GApiGateway])
+    except ImportError:
+        pass
+    try:
+        from anthropic import (
+            APIConnectionError as _AnthroConn,
+            APITimeoutError as _AnthroTimeout,
+            InternalServerError as _AnthroInternal,
+            RateLimitError as _AnthroRate,
+        )
+        classes.extend([_AnthroConn, _AnthroTimeout, _AnthroInternal, _AnthroRate])
+    except ImportError:
+        pass
+    return tuple(classes)
+
+
+_TRANSIENT_LLM_ERRORS: tuple[type[BaseException], ...] = _collect_transient_errors()
+
+
+def _with_llm_retry(runnable):
+    """Wrap an LLM Runnable with one automatic retry on transient upstream errors.
+
+    stop_after_attempt=2 = original + 1 retry. We stay conservative because a
+    retry that fires after partial token streaming will re-emit those tokens to
+    the user; keeping it at one retry caps the visible blast radius while still
+    absorbing the common case (server returns 5xx before generating anything).
+    """
+    if not _TRANSIENT_LLM_ERRORS:
+        return runnable
+    return runnable.with_retry(
+        retry_if_exception_type=_TRANSIENT_LLM_ERRORS,
+        stop_after_attempt=2,
+        wait_exponential_jitter=True,
+    )
+
+
 # ── State schema ─────────────────────────────────────────────────────────────
 
 class AgentState(TypedDict):
@@ -230,7 +287,8 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # Without this, models hallucinate function-call syntax and fail validation
     # (Gemma's MALFORMED_FUNCTION_CALL, Claude's invalid_tool_calls, etc.).
     # The summarizer uses the raw `llm` since it doesn't tool-call.
-    llm_with_tools = llm.bind_tools(main_tools)
+    llm_with_tools = _with_llm_retry(llm.bind_tools(main_tools))
+    llm_for_summary = _with_llm_retry(llm)
 
     # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
 
@@ -330,7 +388,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
                 safe_msgs.append(m)
 
         try:
-            summary = await llm.ainvoke([
+            summary = await llm_for_summary.ainvoke([
                 SystemMessage(
                     "Summarize the following conversation history concisely. "
                     "Preserve all key facts, decisions, tool outputs, and results."
@@ -443,7 +501,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     def _make_role_factory(role: str):
         prompt = _ROLE_PROMPTS[role]
         tools = _ROLE_TOOLS[role]
-        role_llm = llm.bind_tools(tools)
+        role_llm = _with_llm_retry(llm.bind_tools(tools))
 
         def factory():
             async def role_model(state: AgentState, config: RunnableConfig) -> dict:
