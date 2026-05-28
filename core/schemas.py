@@ -39,6 +39,31 @@ def _normalise_todos(raw: object) -> list[TodoItem]:
     return out
 
 
+_TODO_RANK = {"pending": 0, "in_progress": 1, "done": 2}
+
+
+def reduce_todos(current: object, update: object) -> list[TodoItem]:
+    """Reducer for the `todos` state channel.
+
+    Plain LastValue rejects two writes in one super-step, so when the model
+    emits parallel todo tool calls (e.g. two `set_todo_status` in one turn)
+    LangGraph raises INVALID_CONCURRENT_GRAPH_UPDATE and the run dies. Each tool
+    returns the *full* intended list, so we merge index-by-index, keeping the
+    more-advanced status — neither concurrent change is lost.
+
+    A length change means the list was replaced (`write_todos`) or cleared, so
+    the incoming value wins outright; that also lets `todos: []` reset the plan.
+    """
+    cur = _normalise_todos(current)
+    upd = _normalise_todos(update)
+    if not cur or not upd or len(cur) != len(upd):
+        return upd
+    return [
+        u if _TODO_RANK[u["status"]] >= _TODO_RANK[c["status"]] else c
+        for c, u in zip(cur, upd)
+    ]
+
+
 class AttachmentIn(BaseModel):
     type: str       # image | audio | video | document
     name: str

@@ -32,7 +32,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     is_valid_model,
 )
 from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write_file
-from .schemas import TodoItem, _normalise_todos
+from .schemas import TodoItem, _normalise_todos, reduce_todos
 from tools.artifacts import list_artifacts as artifact_list, read_artifact
 from tools.files import list_files, read_file
 from tools.todos import set_todo_status, write_todos
@@ -114,7 +114,7 @@ def _with_llm_retry(runnable):
 
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
-    todos: NotRequired[list[TodoItem]]
+    todos: NotRequired[Annotated[list[TodoItem], reduce_todos]]
 
 
 # ── System prompt ────────────────────────────────────────────────────────────
