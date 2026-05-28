@@ -248,6 +248,10 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
               await queryClient.invalidateQueries({queryKey: ['running-tasks']});
               if (conversationId) {
                 await loadConversationPage(conversationId);
+                // Re-sync the plan: a crashed run resets todos to [] (or wrote a
+                // partial plan), and unlike DoneEvent this branch otherwise left
+                // the stale list pinned until a full reload.
+                await refreshTodoList(conversationId);
               }
             })();
             break;

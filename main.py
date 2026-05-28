@@ -24,6 +24,8 @@ model_app = typer.Typer(help="Manage models.")
 app.add_typer(model_app, name="model")
 memory_app = typer.Typer(help="Manage agent memory (AGENTS.md in the LangGraph store).")
 app.add_typer(memory_app, name="memory")
+maintenance_app = typer.Typer(help="Database maintenance tasks.")
+app.add_typer(maintenance_app, name="maintenance")
 
 
 @app.callback()
@@ -450,6 +452,90 @@ def memory_set(
     finally:
         con.close()
     rprint(f"[green]✓[/green] Wrote {len(content)} chars from {file} to memory in {_memory_db_path()}")
+
+
+# ── maintenance subcommands ─────────────────────────────────────────────────
+#
+# LangGraph's SqliteSaver writes a full state snapshot at every graph
+# super-step and never prunes, so checkpoints.db grows without bound (a long
+# conversation can accumulate hundreds of snapshots, each carrying the entire
+# message history). This app only ever reads the *latest* checkpoint per thread
+# — resume, the todos query, and conversation continuity all call aget_tuple
+# without a checkpoint_id, which returns the newest — and does no replay or
+# time-travel, so older per-thread checkpoints are dead weight.
+
+_KEEP_LATEST_PER_THREAD = """
+    {verb} FROM {table}
+    WHERE checkpoint_id <> (
+      SELECT MAX(c2.checkpoint_id) FROM checkpoints c2
+      WHERE c2.thread_id = {table}.thread_id
+        AND c2.checkpoint_ns = {table}.checkpoint_ns
+    )
+"""
+
+
+@maintenance_app.command("prune-checkpoints")
+def prune_checkpoints(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Report what would be removed without deleting anything.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Shrink checkpoints.db by keeping only the latest checkpoint per thread.
+
+    Stop the server first so nothing else holds the DB open. Resumable state
+    for every conversation is preserved; only superseded snapshots are dropped.
+    """
+    import sqlite3
+
+    db_path = _memory_db_path()  # checkpoints.db (shared with the memory store)
+    if not db_path.exists():
+        rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
+        raise typer.Exit(code=1)
+
+    size_before = db_path.stat().st_size
+    con = sqlite3.connect(db_path)
+    con.isolation_level = None  # explicit txn control; VACUUM can't run inside one
+    try:
+        total_cp = con.execute("SELECT count(*) FROM checkpoints").fetchone()[0]
+        threads = con.execute("SELECT count(DISTINCT thread_id) FROM checkpoints").fetchone()[0]
+        keep_cp = con.execute(
+            "SELECT count(*) FROM checkpoints WHERE checkpoint_id = ("
+            " SELECT MAX(c2.checkpoint_id) FROM checkpoints c2"
+            " WHERE c2.thread_id = checkpoints.thread_id"
+            " AND c2.checkpoint_ns = checkpoints.checkpoint_ns)"
+        ).fetchone()[0]
+        prunable = total_cp - keep_cp
+
+        rprint(f"[dim]DB:[/dim] {db_path}  [dim]({size_before / 1e6:.0f} MB)[/dim]")
+        rprint(
+            f"[dim]Threads:[/dim] {threads}   [dim]Checkpoints:[/dim] {total_cp} "
+            f"[dim](keep {keep_cp}, prune[/dim] [bold]{prunable}[/bold][dim])[/dim]"
+        )
+
+        if prunable <= 0:
+            rprint("[green]Nothing to prune.[/green]")
+            return
+        if dry_run:
+            rprint(f"[yellow]Dry run:[/yellow] would delete {prunable} checkpoints + their writes, then VACUUM.")
+            return
+        if not yes and not typer.confirm(f"Delete {prunable} superseded checkpoints from {db_path}?", default=False):
+            rprint("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(code=1)
+
+        con.execute("BEGIN")
+        con.execute(_KEEP_LATEST_PER_THREAD.format(verb="DELETE", table="writes"))
+        con.execute(_KEEP_LATEST_PER_THREAD.format(verb="DELETE", table="checkpoints"))
+        con.execute("COMMIT")
+        con.execute("VACUUM")
+    finally:
+        con.close()
+
+    size_after = db_path.stat().st_size
+    saved = (1 - size_after / size_before) * 100 if size_before else 0
+    rprint(
+        f"[green]✓[/green] Pruned {prunable} checkpoints. "
+        f"{size_before / 1e6:.0f} MB → {size_after / 1e6:.0f} MB "
+        f"([bold]{saved:.0f}%[/bold] smaller)."
+    )
 
 
 if __name__ == "__main__":
