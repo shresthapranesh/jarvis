@@ -47,7 +47,6 @@ from db.ops import (
     add_message,
     create_document,
     get_or_create_conversation,
-    update_message_status,
 )
 
 
@@ -92,7 +91,16 @@ async def _run_agent_task(
             "recursion_limit": 100,
             "callbacks": [AgentLogger()],
         }
-        stream_input: Any = {"messages": [{"role": "user", "content": content}]}
+        # Reset the per-conversation plan at the start of each new turn. Todos
+        # live in the checkpointer keyed by thread_id, so without this a plan
+        # written on an earlier turn lingers — often frozen at 0/N when that run
+        # errored before advancing it — and renders on every later message and
+        # in the activity sidebar. Passing todos=[] overwrites the LastValue
+        # channel (correctness on reload); the explicit event clears live
+        # subscribers immediately, since a channel write alone dispatches none.
+        stream_input: Any = {"messages": [{"role": "user", "content": content}], "todos": []}
+        state.events.append({"event": "todos_updated", "data": json.dumps({"todos": [], "source": "main"})})
+        _notify(state)
 
         while True:
             interrupted = False
@@ -184,10 +192,14 @@ async def _run_agent_task(
 
     except BaseException as exc:
         coalescer.flush_all()
+        # Persist whatever streamed before the crash; otherwise surface the cause
+        # so the user sees why the run stopped instead of an empty assistant
+        # bubble. The other terminal branches all call _finalize_message; this
+        # one previously only flipped status, leaving content="" on disk.
+        final_message = "".join(accumulated) or f"The run failed before completing: {exc}"
         state.events.append({"event": "error", "data": json.dumps({"error": str(exc)})})
         try:
-            async with async_session() as session:
-                await update_message_status(session, task_id, "error")
+            await _finalize_message(task_id, final_message, "error")
         except Exception:
             pass
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
