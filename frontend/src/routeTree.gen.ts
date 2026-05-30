@@ -16,6 +16,7 @@ import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as AutomationRouteImport } from './routes/automation'
+import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkflowIndexRouteImport } from './routes/workflow.index'
 import { Route as WorkflowIdRouteImport } from './routes/workflow.$id'
@@ -58,6 +59,11 @@ const AutomationRoute = AutomationRouteImport.update({
   path: '/automation',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArtifactsRoute = ArtifactsRouteImport.update({
+  id: '/artifacts',
+  path: '/artifacts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -91,6 +97,7 @@ const WorkflowIdRunsRunIdRoute = WorkflowIdRunsRunIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
@@ -120,6 +128,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
@@ -137,6 +146,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/artifacts'
     | '/automation'
     | '/live'
     | '/logs'
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/artifacts'
     | '/automation'
     | '/live'
     | '/logs'
@@ -165,6 +176,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/artifacts'
     | '/automation'
     | '/live'
     | '/logs'
@@ -181,6 +193,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ArtifactsRoute: typeof ArtifactsRoute
   AutomationRoute: typeof AutomationRoute
   LiveRoute: typeof LiveRoute
   LogsRoute: typeof LogsRoute
@@ -240,6 +253,13 @@ declare module '@tanstack/react-router' {
       path: '/automation'
       fullPath: '/automation'
       preLoaderRoute: typeof AutomationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/artifacts': {
+      id: '/artifacts'
+      path: '/artifacts'
+      fullPath: '/artifacts'
+      preLoaderRoute: typeof ArtifactsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -317,6 +337,7 @@ const WorkflowRouteWithChildren = WorkflowRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ArtifactsRoute: ArtifactsRoute,
   AutomationRoute: AutomationRoute,
   LiveRoute: LiveRoute,
   LogsRoute: LogsRoute,
