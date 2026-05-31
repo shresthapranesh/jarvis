@@ -1,39 +1,68 @@
 # Research Assistant — Claude Setup
 
 ## Project Overview
-Multi-agent AI research platform. Users submit queries via web UI or CLI; specialized AI agents collaborate in real-time to produce research, analysis, and reports. Results stream live via SSE. Also supports automations (scheduled/manual) and visual workflow graphs.
+Multi-agent AI research platform. Users submit queries via web UI or CLI; specialized AI agents collaborate in real-time to produce research, analysis, and reports. Results stream live over GraphQL subscriptions (WebSocket). Also supports automations (scheduled/manual), visual workflow graphs, persistent free-text agent memory, document/image uploads, and notification channels.
 
 ## Architecture
+
+The API is **GraphQL-first** (Strawberry + FastAPI). Queries/mutations go over HTTP POST `/graphql`; live event streams go over `graphql-ws` WebSocket subscriptions on the same path. A handful of REST endpoints remain only for things that don't fit GraphQL (raw binary download, file upload, audio TTS/transcription, the live-audio WebSocket, log tailing, health). The frontend uses **Relay** against that schema.
+
+Long-running work (chat / automation / workflow runs) is dispatched through a **durable SQLite-backed job queue** rather than bare `asyncio.create_task`: a mutation enqueues a `Job` row and pre-registers an in-memory `TaskState`; a background `Worker` claims the job and runs its handler. This survives restarts and gives a single cancellation path (`job.id == task_id`).
 
 ```
 jarvis/
 ├── main.py               # CLI entrypoint (typer): run, start, config *, model *
 ├── core/
 │   ├── agents.py         # build_agent(model) — LangGraph agent factory + subagents
+│   ├── messages.py       # LLM-message hygiene: strip_historical_thinking,
+│   │                     #   repair_orphan_tool_calls, build_llm_messages (+ estimate_tokens)
 │   ├── model_catalog.py  # AVAILABLE_MODELS, DEFAULT_MODEL, is_valid_model()
-│   ├── state.py          # TaskState, _tasks, _notify(), stream_task_events()
-│   ├── streaming.py      # TokenCoalescer, _process_chunk(), _finalize_message()
-│   ├── schemas.py        # Pydantic request/response models
-│   ├── scheduler.py      # APScheduler setup, _register_scheduler_job()
-│   ├── config.py         # App config (DATABASE_URL, etc.)
+│   ├── state.py          # TaskState, _tasks, _notify(), stream_task_events(),
+│   │                     #   get_queue(), get_store(), get_async_checkpointer()
+│   ├── queue/            # Durable job queue: protocol.py (Job, JobQueue ABC),
+│   │                     #   sqlite.py (SqliteJobQueue), worker.py (Worker)
+│   ├── streaming.py      # TokenCoalescer, STREAM_MODES, _process_chunk(), _finalize_message()
+│   ├── safety.py         # gate_input() / gate_output() content gates
+│   ├── memory_consolidation.py  # agent-memory store keys + consolidate_memory()
+│   ├── notifications.py  # notification-channel delivery
+│   ├── schemas.py        # Pydantic + Strawberry input models (AttachmentIn, etc.)
+│   ├── scheduler.py      # APScheduler setup, cron registration
+│   ├── config.py         # AppConfig (DATABASE_URL, work_dir, artifacts_dir, documents_dir, staging_dir)
 │   ├── document_extractor.py  # PDF/DOCX/XLSX text extraction
-│   └── logging_middleware.py
+│   └── log_setup.py / log_callback.py  # logging + AgentLogger
 ├── db/
-│   ├── models.py         # ORM: Conversation, Message, Step, Artifact, Document, Automation, AutomationRun, Workflow, WorkflowRun, ConfigSetting
+│   ├── models.py         # ORM: Conversation, Message, Step, Automation, AutomationRun,
+│   │                     #   ConfigSetting, NotificationChannel, Artifact, Document,
+│   │                     #   Workflow, WorkflowRun, Job
 │   ├── ops.py            # Async CRUD functions
 │   └── engine.py         # DB init, _migrate(), async_session, get_session
 ├── server/
-│   ├── entrypoint.py     # FastAPI app, lifespan, router wiring, Telegram bot lifecycle
+│   ├── entrypoint.py     # FastAPI app, lifespan (queue worker + bots), router wiring, SPA fallback
+│   ├── graphql/          # ── Strawberry GraphQL layer (the primary API) ──
+│   │   ├── schema.py     #   merge_types() composes Query / Mutation / Subscription from mixins
+│   │   ├── router.py     #   GraphQLRouter — graphql-transport-ws + graphql-ws subscription protocols
+│   │   ├── context.py    #   get_context() — injects the AsyncSession per request
+│   │   ├── export_schema.py  # dumps schema.graphql for the frontend Relay compiler
+│   │   ├── types/        #   GraphQL types (Relay Nodes): artifact, document, upload, conversation,
+│   │   │                 #     automation, workflow, memory, notification, task_run, model_catalog,
+│   │   │                 #     events, automation_events, workflow_events, todo
+│   │   ├── queries/      #   *Query mixins: artifact, automation, conversation, memory, models,
+│   │   │                 #     notification, task_run, workflow
+│   │   ├── mutations/    #   *Mutation mixins: artifact, automation, conversation (start/stop/resume_task),
+│   │   │                 #     memory, notification, task_run (stop_running_task), workflow
+│   │   └── subscriptions/#   chat (taskEvents), automation (automationRunEvents),
+│   │                     #     workflow (workflowRunEvents) — all wrap stream_task_events
+│   ├── chat_runtime.py        # register_chat_task / enqueue_chat_task + chat_job_handler + _run_agent_task
+│   ├── automation_runtime.py  # register_automation_run + automation_job_handler (prompt/code/webhook)
+│   ├── workflow_runtime.py    # register_workflow_run + workflow_job_handler
 │   ├── telegram_bot.py   # Optional Telegram bot (enabled by TELEGRAM_BOT_TOKEN env var)
-│   ├── routes_chat.py    # /run, /stop, /resume, /stream/{task_id}, /conversations, /conversations/{id}/todos
-│   ├── routes_automations.py  # /automations CRUD + /stream/automation/{run_id}
-│   ├── routes_workflows.py    # /workflows CRUD + /stream/workflow/{run_id}
-│   ├── routes_artifacts.py    # /artifacts CRUD + raw download
-│   ├── routes_documents.py    # /conversations/{id}/documents, /documents/{id}, /documents/{id}/raw
-│   ├── routes_live.py    # WebSocket / live endpoints
-│   ├── routes_media.py   # TTS, transcription, /models
-│   ├── routes_memory.py  # Memory endpoints
-│   └── routes_tasks.py   # Running-tasks list endpoints
+│   ├── discord_bot.py    # Optional Discord bot (enabled by DISCORD_BOT_TOKEN env var)
+│   ├── routes_artifacts.py    # REST: GET /artifacts/{id}/raw (binary .md download)
+│   ├── routes_documents.py    # REST: GET /documents/{id}/raw
+│   ├── routes_uploads.py      # REST: POST /uploads → staged file, returns opaque uploadId
+│   ├── routes_media.py        # REST: GET /health, POST /tts, POST /transcribe
+│   ├── routes_live.py         # WS: /ws/live (live audio session)
+│   └── routes_logs.py         # REST: GET /server-logs, GET /server-logs/stream
 ├── workflow/
 │   ├── engine.py         # BFS workflow executor — execute_workflow()
 │   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode + _emit()
@@ -50,19 +79,27 @@ jarvis/
 │   ├── code.py           # run_python
 │   ├── finance.py        # get_stock_data, get_historical_prices, compare_stocks, …
 │   └── datetime.py       # get_current_datetime
-└── frontend/             # React 19 + TanStack Router/Query + Vite + TypeScript
+└── frontend/             # React 19 + TanStack Router + Relay + Vite + TypeScript
+    ├── relay.config.json # Relay compiler config (schema → ./schema.graphql, artifacts → src/__generated__)
+    ├── schema.graphql    # SDL exported from the Python schema (regenerate via `pnpm schema`)
     └── src/
-        ├── routes/       # File-based routes: index.tsx, c.$id.tsx, automation.tsx, workflow/
-        ├── components/   # InputBox, MessageBubble, ConversationList, ActivitySidebar, …
-        ├── hooks/        # useStream.ts, useAutomationStream.ts, useWorkflowStream.ts
-        └── lib/          # api.ts, types.ts (parseDefinition, serializeDefinition)
+        ├── routes/       # File-based routes: index, c.$id, automation, workflow/*, artifacts,
+        │                 #   memory, live, logs, tasks, settings
+        ├── components/   # InputBox, MessageThread, MessageBubble, ConversationList, ActivitySidebar,
+        │                 #   ArtifactPanel, ArtifactsBrowser, MemoryView, NotificationsEditor,
+        │                 #   WorkflowEditor*, AutomationForm, AutomationRunsPanel, InterruptPrompt, …
+        ├── hooks/        # useTaskEvents, useAutomationRunEvents, useWorkflowRunEvents (live streams),
+        │                 #   useModels, useLiveSocket, useAudioTTS, useWhisperSTT, useSpeechRecognition, useLogStream
+        ├── relay/        # Per-operation query/mutation modules + environment.ts, globalId.ts
+        ├── __generated__/# Relay-compiler output (never edit by hand)
+        └── lib/          # api.ts (REST helpers), types.ts, toast.tsx, steps.ts, uploads.ts
 ```
 
 ## Development Commands
 
 **Backend:**
 ```bash
-uv run uvicorn server.entrypoint:app --reload   # start API server on :8000
+uv run uvicorn server.entrypoint:app --reload   # start API server on :8000 (GraphQL at /graphql)
 uv run python main.py run "<query>"             # CLI one-shot query
 uv add <package>                                # add dependency (updates pyproject.toml + uv.lock)
 ```
@@ -84,119 +121,159 @@ uv run python main.py model set-default <model-id>      # persist default to DB
 **Frontend** (always use `pnpm`, not npm):
 ```bash
 cd frontend
-pnpm dev       # dev server on :5173 (proxies API to :8000)
-pnpm build     # build to ../static/dist/ (served by FastAPI in prod)
+pnpm dev        # dev server on :5173 — runs vite AND relay-compiler --watch concurrently
+pnpm relay      # run the Relay compiler once (regenerates src/__generated__)
+pnpm schema     # regenerate schema.graphql from the Python schema (runs server.graphql.export_schema)
+pnpm typecheck  # pnpm relay && tsc -b
+pnpm build      # pnpm relay && vite build → ../static/dist/ (served by FastAPI in prod)
 ```
+
+> **Relay gotcha:** `tsc` and `vite build` both depend on the generated `src/__generated__/*` artifacts, so the Relay compiler must run first — that's why `build`/`typecheck` prepend `pnpm relay`. After changing any `graphql\`...\`` literal, run `pnpm relay`. After changing the **Python schema**, run `pnpm schema` first (to refresh `schema.graphql`) then `pnpm relay`. Or rely on `pnpm dev`'s watcher (note: it watches literals, not the Python schema — rerun `pnpm schema` manually when the backend schema changes).
 
 ## Key Patterns
 
-### Adding a new API endpoint
-1. Add async CRUD function(s) to `db/ops.py` if DB access needed
-2. Add endpoint to the relevant router in `server/routes_*.py` — return `JSONResponse`, use `Annotated[AsyncSession, Depends(get_session)]`
-3. Add proxy entry in `frontend/vite.config.ts` under `server.proxy`
-4. Add fetch function to `frontend/src/lib/api.ts`
-5. Add TypeScript types to `frontend/src/lib/types.ts`
+### Adding a new GraphQL field (query / mutation / subscription)
+1. Add async CRUD function(s) to `db/ops.py` if DB access is needed.
+2. Add/extend a Strawberry type in `server/graphql/types/`. DB-backed types are Relay Nodes: `id: relay.NodeID[str]`, a `from_db` classmethod, and `resolve_node` for `Node` lookups. Resolve expensive fields lazily (e.g. `Artifact.content` reads the `.md` file on demand) so list queries stay cheap.
+3. Add the resolver to the relevant `*Query` / `*Mutation` / `*Subscription` mixin under `queries/`·`mutations/`·`subscriptions/`. **Mixins are composed via `merge_types(...)` in `schema.py`** — a brand-new mixin class must be added to that tuple, or its fields won't appear.
+4. Resolvers read the DB session via `info.context["session"]` (see `context.py`).
+5. `cd frontend && pnpm schema && pnpm relay` to regenerate `schema.graphql` + Relay artifacts.
+6. Add a per-operation module under `frontend/src/relay/` (a `graphql\`...\`` literal + a refetch/commit helper) and consume it with `useLazyLoadQuery` / a commit function. Use `encodeGlobalId`/`decodeGlobalId` (`relay/globalId.ts`) to convert between Relay global IDs and raw DB IDs.
+
+### Adding a new REST endpoint (only when GraphQL doesn't fit)
+REST is reserved for binary download, file upload, audio, the live WS, log tailing, and health. To add one:
+1. Add the endpoint to the relevant `server/routes_*.py` — use `Annotated[AsyncSession, Depends(get_session)]`, return `Response`/`PlainTextResponse`/`JSONResponse`.
+2. Wire the router in `server/entrypoint.py` (`app.include_router(...)`).
+3. Add a proxy entry in `frontend/vite.config.ts` under `server.proxy` (set `ws: true` for WebSocket paths). Existing proxied prefixes: `/graphql`, `/uploads`, `/health`, `/ws/live`, `/tts`, `/transcribe`, `/artifacts`, `/server-logs`.
+4. Add a fetch helper to `frontend/src/lib/api.ts` and types to `frontend/src/lib/types.ts`.
 
 ### Adding a new DB model
-- Define in `db/models.py` using `DeclarativeBase`, `Mapped`, `mapped_column`
-- Always add `index=True` to ForeignKey columns used in WHERE/JOIN
-- `init_db()` calls `Base.metadata.create_all` — new tables auto-created on server start
-- For schema changes on existing tables, add `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE` to `_migrate()` in `db/engine.py`
-- Use `_now()` for UTC timestamps, `str(uuid4())` for IDs
-- **Do not call `session.refresh()` after commit** — `async_session` uses `expire_on_commit=False` and all defaults are Python-side, so the object is already fully populated
+- Define in `db/models.py` using `DeclarativeBase`, `Mapped`, `mapped_column`.
+- Always add `index=True` to ForeignKey columns used in WHERE/JOIN.
+- `init_db()` calls `Base.metadata.create_all` — new tables auto-created on server start.
+- For schema changes on existing tables, add `CREATE INDEX IF NOT EXISTS` / `ALTER TABLE` to `_migrate()` in `db/engine.py`.
+- Use `_now()` for UTC timestamps, `str(uuid4())` for IDs.
+- **Do not call `session.refresh()` after commit** — `async_session` uses `expire_on_commit=False` and all defaults are Python-side, so the object is already fully populated.
 
 ### Adding a new model to the catalog
-- Add a `ModelSpec` entry to `AVAILABLE_MODELS` in `core/model_catalog.py` — that's the only change needed
-- Frontend fetches `GET /models` and populates all dropdowns from the response automatically
+- Add a `ModelSpec` entry to `AVAILABLE_MODELS` in `core/model_catalog.py` — that's the only backend change needed.
+- The frontend reads the catalog via the GraphQL `models` query (`queries/models.py`) — dropdowns populate automatically.
 
 ### Adding a new frontend route
-- Create file in `frontend/src/routes/` using TanStack Router file-based naming
-- `routeTree.gen.ts` is auto-generated — never edit it manually, just run `pnpm dev`
-- Pattern: `export const Route = createFileRoute('/path')({ component: MyPage })`
+- Create a file in `frontend/src/routes/` using TanStack Router file-based naming.
+- `routeTree.gen.ts` is auto-generated — never edit it manually, just run `pnpm dev`.
+- Pattern: `export const Route = createFileRoute('/path')({ component: MyPage })`.
 
 ### Adding a new agent tool
-- Add function to appropriate file in `tools/`
-- Import and add to the relevant subagent's tool list in `core/agents.py`
+- Add a function to the appropriate file in `tools/`.
+- Import and add it to the relevant subagent's tool list in `core/agents.py`.
 
 ### Adding a new conversation-scoped resource
-Three exist today: artifacts (DB row + `.md` file under `artifacts_dir`), documents (DB row + raw bytes under `documents_dir`), todos (in the LangGraph checkpointer, not the SQL DB). To add a fourth that follows the same pattern:
-- Add the model to `db/models.py` with `conversation_id` FK + an `index=True`, and a relationship from `Conversation` with `cascade="all, delete-orphan"` so DB cascade fires.
-- For on-disk bytes: add a new `*_dir: Path` field to `AppConfig` in `core/config.py` (mirror `documents_dir`), and write to `{dir}/{id}{ext}` from the route handler that creates the row.
+DB-backed conversation resources today: artifacts (DB row + `.md` file under `artifacts_dir`), documents (DB row + raw bytes under `documents_dir`). Todos live in the LangGraph checkpointer, not the SQL DB. (Uploads are *staging-only* — see "Uploads & Documents" below — not a conversation-scoped table.) To add a DB-backed one:
+- Add the model to `db/models.py` with `conversation_id` FK + `index=True`, and a relationship from `Conversation` with `cascade="all, delete-orphan"`.
+- For on-disk bytes: add a new `*_dir: Path` field to `AppConfig` in `core/config.py` (mirror `documents_dir`), and write to `{dir}/{id}{ext}` from whatever creates the row.
 - Extend `delete_conversation` in `db/ops.py` to collect file paths *before* the cascade and `Path(p).unlink(missing_ok=True)` them after the commit. The function already calls `adelete_thread` on the async checkpointer for langgraph state cleanup.
 - Conversation deletion intentionally cascades messages → steps → artifacts → documents via SQLAlchemy ORM cascade. SQLite FK enforcement (`PRAGMA foreign_keys=ON`) is **not** set; cascades work because SQLAlchemy emits explicit DELETEs on its own.
 
 ### Adding a new workflow node type
-- Add a class extending `BaseNode` with a `node_type` class var and `execute()` method in `workflow/nodes.py`
-- Register it in `NODE_REGISTRY` at the bottom of that file
-- Use `_emit(task_state, "event_name", **data)` for SSE events — never append to `task_state.events` directly
+- Add a class extending `BaseNode` with a `node_type` class var and `execute()` method in `workflow/nodes.py`.
+- Register it in `NODE_REGISTRY` at the bottom of that file.
+- Use `_emit(task_state, "event_name", **data)` for stream events — never append to `task_state.events` directly.
 
-## SSE Streaming Pattern
-The SSE system is central to the app. Chat, automations, and workflows all use the same pattern:
-- Trigger endpoint (POST) → registers `_tasks[id] = TaskState()` **before** returning, then `asyncio.create_task(...)` for the background work
-- Background task puts events into `TaskState.events` and calls `_notify(state)` to wake waiting clients
-- Stream endpoint (GET) → calls `stream_task_events(state)` from `core/state.py`, which yields events via a cursor+waiter loop
-- **Critical:** `_tasks[id]` must be set synchronously before returning from the trigger — prevents SSE client race condition
-- **Do not use `_tasks.setdefault(run_id, TaskState())`** in background executors — the caller always pre-sets it; use `state = _tasks[run_id]` directly
+## Live Streaming + Job Queue Pattern
+Live streaming is central to the app, and all three run kinds (chat, automation, workflow) share one pattern built on the durable job queue (`core/queue/`) plus the in-memory `TaskState` registry (`core/state.py`). This replaced the old SSE `/stream/{id}` endpoints.
 
-### Chat SSE events
+Lifecycle:
+1. **Mutation triggers the run.** Chat: `startTask`/`resumeTask`/`stopTask` in `mutations/conversation.py`. Automations/workflows have their own run mutations. The mutation calls a `register_*` function in `server/*_runtime.py`.
+2. **`register_*` enqueues + pre-registers, atomically.** It inserts the work row (chat: an assistant `Message` placeholder whose id becomes the `task_id`), enqueues a `Job` via `get_queue().enqueue(...)`, and **sets `_tasks[task_id] = TaskState(...)` synchronously before `await session.commit()`** — so a subscriber that gets `task_id` back can't race the worker. Returns `task_id`.
+3. **A `Worker` (`core/queue/worker.py`, started in the lifespan) claims the job** and invokes its handler — `chat_job_handler` → `_run_agent_task`, `automation_job_handler` → `_run_automation_inner`, `workflow_job_handler` → `_run_workflow_inner` (→ `execute_workflow`). The handler reuses the pre-registered `TaskState` (`state = _tasks[task_id]`); on a post-restart resume where the trigger is gone, it re-creates one.
+4. **The handler appends to `TaskState.events` and calls `_notify(state)`** to wake waiters.
+5. **The client opens a subscription** — `taskEvents(taskId)` (chat), `automationRunEvents`, or `workflowRunEvents` — whose resolver yields via `stream_task_events(state)` (a cursor+waiter loop). If the task isn't in `_tasks`, the resolver falls back to the DB to emit a final `done`/`error` and closes. Frontend hooks: `useTaskEvents.ts`, `useAutomationRunEvents.ts`, `useWorkflowRunEvents.ts`.
+6. **Cancellation is unified.** `stopRunningTask` (`mutations/task_run.py`; chat also has a per-kind `stopTask`) flips in-process `TaskState` flags (`cancelled`, `_stop_event`, cancels `resume_future`) for an immediate stop **and** calls `get_queue().cancel(task_id)` for the durable/cross-process path. `job.id == task_id` for all three kinds.
+
+Conventions:
+- **Do not `_tasks.setdefault(...)`** in handlers — the trigger pre-sets it; use `state = _tasks[task_id]` (handlers only re-create it on the restart-resume path).
+- `running_tasks` query (`queries/task_run.py`) lists everything currently in `_tasks` for the Tasks page; finished tasks linger ~5s before being popped so the UI can show their terminal state.
+
+### Chat events
 `token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `safety_input_blocked`, `safety_output_blocked`, `done`, `stopped`, `error`
 
-Custom events (anything except `token`/`thinking_token`/`step`) are dispatched from tools via `adispatch_custom_event(name, {"type": name, ...})` (the `"type"` key is required — `core/streaming.py:_process_chunk` switches on it). Token/thinking/step events flow naturally from LangGraph stream modes.
+Custom events (anything except `token`/`thinking_token`/`step`) are dispatched from tools via `adispatch_custom_event(name, {"type": name, ...})` (the `"type"` key is required — `core/streaming.py:_process_chunk` switches on it). Token/thinking/step events flow naturally from LangGraph stream modes (`STREAM_MODES`).
 
-### Automation SSE events
+### Automation events
 `token`, `thinking_token`, `step`, `done`, `error`
 
-### Workflow SSE events
+### Workflow events
 `node_start`, `node_token`, `node_condition`, `node_done`, `node_error`, `map_start`, `map_item_done`, `workflow_done`, `workflow_error`
+
+## Safety Gates
+`core/safety.py` wraps each chat run: `gate_input(query, model)` judges the user's prompt before the agent spins up (a `step` event is surfaced immediately so the sidebar shows feedback during a cold ~60s Bedrock judge), and `gate_output(message, model)` judges the final answer. A blocked input/output emits `safety_input_blocked`/`safety_output_blocked` and persists the message with status `blocked`.
 
 ## Automation Feature
 Three input types:
 - **prompt** — runs through `build_agent()`, streams tokens live via `TokenCoalescer`
-- **code** — `asyncio.create_subprocess_exec` runs Python in subprocess, streams stdout
-- **webhook** — `httpx.AsyncClient.request` fires HTTP call (for n8n, Zapier, etc.)
+- **code** — `asyncio.create_subprocess_exec` runs Python in a subprocess, streams stdout
+- **webhook** — `httpx.AsyncClient.request` fires an HTTP call (for n8n, Zapier, etc.)
 
-Scheduler: APScheduler (`core/scheduler.py`). Cron jobs fire in a thread; use `_validate_cron(schedule)` helper in `routes_automations.py` to validate expressions before saving.
+Execution lives in `server/automation_runtime.py`; CRUD + listing are GraphQL (`queries/automation.py`, `mutations/automation.py`). Scheduler: APScheduler (`core/scheduler.py`); cron jobs fire in a thread — validate expressions before saving.
 
 ## Workflow Feature
 Visual graph executor (`workflow/engine.py`):
-- Definitions stored as JSON (`Workflow.definition`) with `nodes` + `edges` lists
-- `execute_workflow(run_id, definition, inputs, task_state)` runs BFS over the graph
-- Node types: `agent` (full LangGraph loop), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults)
-- Conditional nodes prune inactive branches via `pruned_edges`; pruned nodes never execute
+- Definitions stored as JSON (`Workflow.definition`) with `nodes` + `edges` lists.
+- `execute_workflow(run_id, definition, inputs, task_state)` runs BFS over the graph; `server/workflow_runtime.py` is the background trigger.
+- Node types: `agent` (full LangGraph loop), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults).
+- Conditional nodes prune inactive branches via `pruned_edges`; pruned nodes never execute.
+- CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`.
+
+## Memory Feature
+Persistent agent memory is a **single free-text blob stored in the LangGraph store** (not a SQL table). It lives under the `_MEMORY_NS`/`_MEMORY_KEY` keys defined in `core/memory_consolidation.py`, accessed via `get_store()` (`AsyncSqliteStore`). The GraphQL `agentMemory` query + `updateMemory` mutation expose it; `frontend/src/components/MemoryView.tsx` + the `/memory` route render and edit it. `consolidate_memory()` collapses/merges accumulated memory; `_migrate_legacy_key()` upgrades the old key on read.
+
+## Notifications
+`NotificationChannel` rows define delivery targets. GraphQL `notification` query/mutation + `frontend/src/components/NotificationsEditor.tsx` manage them; delivery logic in `core/notifications.py`.
+
+## Uploads & Documents
+- **Uploads** are *staging-only* (no DB table). `POST /uploads` (`routes_uploads.py`) stores the bytes + a `.meta.json` under `staging_dir` and returns an opaque `uploadId`; the client passes that back in `startTask` instead of inlining large files in the GraphQL body. A scheduler job GCs stale staged files. Cap: 100 MiB/file.
+- **Documents** are extracted-text sources persisted for a conversation. When a chat is started with attachments, `register_chat_task` (`chat_runtime.py`) decodes/writes the bytes under `documents_dir` and creates a `Document` row. Raw bytes: `GET /documents/{id}/raw`. Text extraction: `core/document_extractor.py` (PDF/DOCX/XLSX). Image attachments flow through the model's vision path instead.
 
 ## Database
-- SQLite at `~/.jarvis/database.db` (configurable via `DATABASE_URL` env var)
-- Async via `aiosqlite` + SQLAlchemy async
-- `async_session` uses `expire_on_commit=False` — no `session.refresh()` needed after commit
-- `update_*` functions must use ORM-level `setattr` (not raw SQL UPDATE) so `onupdate` callbacks fire
-- All ForeignKey columns carry `index=True`; new ones must too
-- Two SQLite files live under `~/.jarvis/`: `database.db` (app state — conversations, messages, artifacts, documents, etc.) and `checkpoints.db` (LangGraph thread state, keyed by `thread_id == conversation_id`). Conversation deletion cascades both: ORM deletes app-DB rows, then `delete_conversation` calls `adelete_thread(conv_id)` on the async checkpointer.
+- SQLite at `~/.jarvis/database.db` (configurable via `DATABASE_URL` env var).
+- Async via `aiosqlite` + SQLAlchemy async.
+- `async_session` uses `expire_on_commit=False` — no `session.refresh()` needed after commit.
+- `update_*` functions must use ORM-level `setattr` (not raw SQL UPDATE) so `onupdate` callbacks fire.
+- All ForeignKey columns carry `index=True`; new ones must too.
+- Tables: `Conversation, Message, Step, Automation, AutomationRun, ConfigSetting, NotificationChannel, Artifact, Document, Workflow, WorkflowRun, Job` (`Job` = the durable queue's backing table).
+- Two SQLite files live under `~/.jarvis/`: `database.db` (app state) and `checkpoints.db` (LangGraph thread state + the store, keyed by `thread_id == conversation_id`). Conversation deletion cascades both: ORM deletes app-DB rows, then `delete_conversation` calls `adelete_thread(conv_id)` on the async checkpointer.
 
 ## Default Model
-Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`). Can be overridden at runtime via `uv run python main.py model set-default <id>` — stored in the `config_settings` DB table under key `default.model`. `get_default_model(session)` in `db/ops.py` returns the DB value or falls back to the catalog default. Ollama and AWS Bedrock models also available — see `core/model_catalog.py`.
+Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`). Override at runtime via `uv run python main.py model set-default <id>` — stored in the `config_settings` table under key `default.model`. `get_default_model(session)` in `db/ops.py` returns the DB value or falls back to the catalog default. Ollama and AWS Bedrock models also available — see `core/model_catalog.py`.
 
-`Conversation.model` is **sticky per-conversation**: `/run` updates it whenever `request.model` differs from the stored value, and the InputBox calls `PATCH /conversations/{id}` on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model` (returned by `GET /conversations/{id}`), falling back to `catalog.default` only when no conversation exists yet.
+`Conversation.model` is **sticky per-conversation**: the chat `startTask` mutation updates it whenever the request's model differs from the stored value, and the InputBox commits a conversation-update mutation on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model`, falling back to the catalog default only when no conversation exists yet.
+
+## LLM-call node requirement
+Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks).
 
 ## Telegram Bot
-Optional — enabled by setting the `TELEGRAM_BOT_TOKEN` environment variable before starting the server. Implemented in `server/telegram_bot.py`:
-- Uses `python-telegram-bot` v22 (async, long-polling)
-- Allowlist: `uv run python main.py config set telegram.allowed_users "123456789,987654321"` — **rejects all users by default when empty**
-- Each Telegram chat gets its own LangGraph thread (`telegram_{chat_id}`) for persistent memory
-- Streams the response by editing a placeholder message every ~1 second
-- Bot token env var: `TELEGRAM_BOT_TOKEN`; user IDs can be obtained from @userinfobot on Telegram
+Optional — enabled by setting `TELEGRAM_BOT_TOKEN` before starting the server. Implemented in `server/telegram_bot.py`:
+- Uses `python-telegram-bot` v22 (async, long-polling). Bot lifecycle is wired into the FastAPI lifespan.
+- Allowlist: `uv run python main.py config set telegram.allowed_users "123456789,987654321"` — **rejects all users by default when empty**.
+- Each Telegram chat gets its own LangGraph thread (`telegram_{chat_id}`) for persistent memory.
+- Streams the response by editing a placeholder message every ~1 second. Do **not** send a placeholder before the agent has content — create the message on the first real token.
+- User IDs can be obtained from @userinfobot on Telegram.
 
 ## Discord Bot
-Optional — enabled by setting the `DISCORD_BOT_TOKEN` environment variable before starting the server. Implemented in `server/discord_bot.py`:
-- Uses `discord.py` v2 (async); the bot's **Message Content Intent** must be enabled in the Discord developer portal
-- Allowlist: `uv run python main.py config set discord.allowed_users "123456789012345678,234567890123456789"` — **rejects all users by default when empty**
-- Trigger rule: replies in DMs always; in guild channels only when @mentioned or when the message is a reply to the bot
-- Each Discord channel (DM or guild) gets its own LangGraph thread (`discord_{channel_id}`) for persistent memory
-- Streams the response by editing a single message every ~1 second; Discord's 2000-char hard limit is enforced via `_MAX_MSG_LEN = 1900`
-- Voice messages and audio attachments are transcribed via `transcribe_bytes`; image attachments flow through the same vision path as the web UI
-- Bot token env var: `DISCORD_BOT_TOKEN`; user IDs can be obtained from Discord by enabling Developer Mode → right-click user → Copy User ID
+Optional — enabled by setting `DISCORD_BOT_TOKEN` before starting the server. Implemented in `server/discord_bot.py`:
+- Uses `discord.py` v2 (async); the bot's **Message Content Intent** must be enabled in the Discord developer portal.
+- Allowlist: `uv run python main.py config set discord.allowed_users "123...,234..."` — **rejects all users by default when empty**.
+- Trigger rule: replies in DMs always; in guild channels only when @mentioned or when the message is a reply to the bot.
+- Each Discord channel (DM or guild) gets its own LangGraph thread (`discord_{channel_id}`) for persistent memory.
+- Streams the response by editing a single message every ~1 second; Discord's 2000-char hard limit is enforced via `_MAX_MSG_LEN = 1900`.
+- Voice/audio attachments are transcribed via `transcribe_bytes`; image attachments flow through the same vision path as the web UI.
+- User IDs: enable Developer Mode → right-click user → Copy User ID.
 
 ## Environment
-- Python 3.13, managed with `uv`
-- No test suite currently
-- No linter/formatter configured; use `uvx pyrefly check --summarize-errors` for type checking
-- Frontend: no UI library — pure CSS with dark theme CSS variables in `styles.css`
+- Python 3.13, managed with `uv`.
+- Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI), `langgraph-checkpoint-sqlite`, APScheduler, `browser-use`/Playwright, faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
+- Frontend stack: React 19, TanStack Router/Query, **Relay** (`babel-plugin-relay` run as a standalone Vite transform — see `vite.config.ts`), Vite, TypeScript.
+- No test suite currently.
+- No linter configured; use `uvx pyrefly check --summarize-errors` for Python type checking and `pnpm typecheck` for the frontend. Frontend formatting via `pnpm fmt` (oxfmt).
+- Frontend: no UI library — pure CSS with dark-theme CSS variables in `styles.css`.
