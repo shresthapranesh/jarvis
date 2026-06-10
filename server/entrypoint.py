@@ -149,6 +149,15 @@ def _build_queue():
     raise RuntimeError(f"unknown JARVIS_QUEUE backend: {backend!r}")
 
 
+# Per-kind concurrency caps. Handlers are I/O-bound (awaiting LLM tokens),
+# so these jobs interleave on the event loop — the caps exist to bound
+# SQLite writer contention (checkpointer + queue heartbeats all share one
+# file), not CPU. Keep them modest.
+_CHAT_CONCURRENCY = 5
+_AUTOMATION_CONCURRENCY = 3
+_WORKFLOW_CONCURRENCY = 3
+
+
 def _build_automation_worker(queue) -> Worker:
     """Worker that consumes 'automation' jobs. TTL is sized for long agent
     runs (prompt-type automations can take many minutes); the Worker's
@@ -163,12 +172,14 @@ def _build_automation_worker(queue) -> Worker:
         handler=automation_job_handler,
         worker_id=f"automation-{os.getpid()}",
         ttl_seconds=600,
+        max_concurrent=_AUTOMATION_CONCURRENCY,
     )
 
 
 def _build_workflow_worker(queue) -> Worker:
     """Worker that consumes 'workflow' jobs. Workflow nodes can include
-    long agent runs, so TTL is sized the same as automations."""
+    long agent runs, so TTL is sized the same as automations. Map nodes
+    already fan out sub-runs internally, so the cap stays low."""
     from server.workflow_runtime import workflow_job_handler  # noqa: PLC0415
     return Worker(
         queue,
@@ -176,6 +187,7 @@ def _build_workflow_worker(queue) -> Worker:
         handler=workflow_job_handler,
         worker_id=f"workflow-{os.getpid()}",
         ttl_seconds=600,
+        max_concurrent=_WORKFLOW_CONCURRENCY,
     )
 
 
@@ -191,6 +203,7 @@ def _build_chat_worker(queue) -> Worker:
         handler=chat_job_handler,
         worker_id=f"chat-{os.getpid()}",
         ttl_seconds=600,
+        max_concurrent=_CHAT_CONCURRENCY,
     )
 
 
