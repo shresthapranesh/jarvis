@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3 as _sqlite3
 from pathlib import Path
 from typing import Annotated, NotRequired, TypedDict
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage, SystemMessage
+from langchain_core.messages import AnyMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -20,8 +19,6 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from .config import get_config
 from .messages import (
     build_llm_messages,
-    estimate_tokens,
-    message_text,
     repair_orphan_tool_calls,
     strip_historical_thinking,
 )
@@ -34,6 +31,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
 )
 from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write_file
 from .schemas import TodoItem, _normalise_todos, reduce_todos
+from .summarization import maybe_summarize
 from tools.artifacts import list_artifacts as artifact_list, read_artifact
 from tools.files import list_files, read_file
 from tools.todos import set_todo_status, write_todos
@@ -224,27 +222,6 @@ _ROLE_PROMPTS = {
 }
 
 
-# ── Summarization constants ───────────────────────────────────────────────────
-
-def _summarize_threshold() -> int:
-    """Token count at which conversation history gets summarized.
-
-    Defaults to 100_000 (well under typical 200k contexts). Override with
-    JARVIS_SUMMARIZE_TOKEN_THRESHOLD for manual testing — set it low (e.g. 200)
-    to force-trigger the summarize path on a short conversation.
-    """
-    raw = os.environ.get("JARVIS_SUMMARIZE_TOKEN_THRESHOLD")
-    if raw:
-        try:
-            return int(raw)
-        except ValueError:
-            pass
-    return 100_000
-
-
-_KEEP_RECENT = 10  # messages to keep verbatim
-
-
 # ── Memory loading ────────────────────────────────────────────────────────────
 
 async def _load_memory_from_store(store) -> str | None:
@@ -372,125 +349,6 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
     # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
 
-    async def _maybe_summarize(messages: list[AnyMessage]) -> tuple[list[AnyMessage], list[AnyMessage]] | None:
-        """Trim conversation history when it grows past the threshold.
-
-        Returns (new_messages_for_this_turn, state_update_messages) on summarize,
-        or None if no trim is needed. The state_update_messages are
-        RemoveMessage entries plus the summary SystemMessage that get returned
-        from the model node so the checkpointer persists the trim and we don't
-        re-summarize the same history every turn.
-
-        Async so the summarization LLM call uses ``ainvoke`` and doesn't block
-        the event loop.
-        """
-        threshold = _summarize_threshold()
-        token_count = estimate_tokens(messages, llm)
-        if token_count <= threshold:
-            logger.debug(
-                "summarize check: %d tokens / %d msgs (under %d threshold) — skip",
-                token_count, len(messages), threshold,
-            )
-            return None
-
-        logger.info(
-            "summarize triggered: %d tokens / %d msgs (over %d threshold)",
-            token_count, len(messages), threshold,
-        )
-
-        # Find a safe split point that never breaks an AIMessage→ToolMessage
-        # group.  Anthropic (and Bedrock) reject messages where a tool_use
-        # block has no matching tool_result, or a tool_result references a
-        # tool_use_id that doesn't exist in the preceding assistant turn.
-        #
-        # Walk backward from the ideal split (len - _KEEP_RECENT) until we
-        # find a message that is NOT a ToolMessage and whose predecessor (if
-        # an AIMessage) has no pending tool_calls.  That gives us a clean
-        # boundary: everything before it is a complete exchange.
-        ideal = max(len(messages) - _KEEP_RECENT, 0)
-        split = ideal
-        while split > 0:
-            msg_at_split = messages[split]
-            # A ToolMessage at the split means its parent AIMessage is in
-            # to_summarize but the result would be in kept — not allowed.
-            if getattr(msg_at_split, "type", "") == "tool":
-                split -= 1
-                continue
-            # The message just before the split is in to_summarize.  If it's
-            # an AIMessage with tool_calls, the matching ToolMessages would be
-            # at split+ — also not allowed.
-            prev = messages[split - 1]
-            if isinstance(prev, AIMessage) and getattr(prev, "tool_calls", None):
-                split -= 1
-                continue
-            break
-
-        to_summarize = messages[:split]
-        if not to_summarize:
-            logger.warning(
-                "summarize triggered at %d tokens but no safe split found "
-                "(len=%d ideal=%d final_split=%d) — history kept intact, will keep growing",
-                token_count, len(messages), ideal, split,
-            )
-            return None
-
-        logger.info(
-            "summarize: condensing %d msgs, keeping %d recent",
-            len(to_summarize), len(messages) - split,
-        )
-
-        # Build a safe message list for the summarization LLM call.
-        # Anthropic rejects raw tool-call exchanges (tool_use without
-        # tool_result, etc.), so we convert the history into plain
-        # HumanMessage/AIMessage text that any model can digest.
-        safe_msgs: list[AnyMessage] = []
-        for m in to_summarize:
-            mtype = getattr(m, "type", "")
-            if mtype == "human":
-                safe_msgs.append(m)
-            elif mtype == "ai":
-                text = message_text(m)
-                tool_calls = getattr(m, "tool_calls", [])
-                if tool_calls:
-                    tc_desc = ", ".join(
-                        f"{tc.get('name', '?')}({', '.join(f'{k}=...' for k in (tc.get('args') or {}))})"
-                        for tc in tool_calls
-                    )
-                    text = f"{text}\n[Called tools: {tc_desc}]" if text else f"[Called tools: {tc_desc}]"
-                if text:
-                    safe_msgs.append(AIMessage(content=text))
-            elif mtype == "tool":
-                # Fold tool results into the preceding AI turn's context
-                tool_name = getattr(m, "name", "tool")
-                tool_content = str(getattr(m, "content", ""))[:500]
-                safe_msgs.append(HumanMessage(content=f"[Tool result from {tool_name}]: {tool_content}"))
-            elif isinstance(m, SystemMessage):
-                safe_msgs.append(m)
-
-        try:
-            summary = await llm_for_summary.ainvoke([
-                SystemMessage(
-                    "Summarize the following conversation history concisely. "
-                    "Preserve all key facts, decisions, tool outputs, and results."
-                ),
-                *safe_msgs,
-            ])
-            summary_text = summary.content if isinstance(summary.content, str) else str(summary.content)
-        except Exception as exc:
-            logger.warning(
-                "summarization LLM call failed (%s: %s) — skipping; history will keep growing",
-                type(exc).__name__, exc,
-            )
-            return None
-        logger.info("summarized %d messages into ~%d chars", len(to_summarize), len(summary_text))
-        summary_msg = SystemMessage(f"[Prior conversation summary]\n{summary_text}")
-        kept = messages[split:]
-        removals = [RemoveMessage(id=m.id) for m in to_summarize if hasattr(m, "id") and m.id]
-        # RemoveMessage isn't part of AnyMessage in the stubs but LangGraph's add_messages
-        # reducer handles it natively to evict messages from the checkpointer.
-        state_update: list = [*removals, summary_msg]
-        return [summary_msg] + kept, state_update
-
     async def model_request_node(state: AgentState, config: RunnableConfig) -> dict:
         """Call the LLM with the current system message (memory + todos injected fresh).
 
@@ -511,7 +369,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
             system = f"{system}\n\n## Current Tasks\n\n{todo_lines}"
         raw_messages = list(state.get("messages", []))
-        summarized = await _maybe_summarize(raw_messages)
+        summarized = await maybe_summarize(raw_messages, llm=llm, summarizer=llm_for_summary)
         if summarized is not None:
             messages_for_llm, state_update_msgs = summarized
         else:
