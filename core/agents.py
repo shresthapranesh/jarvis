@@ -37,7 +37,7 @@ from .schemas import TodoItem, _normalise_todos, reduce_todos
 from tools.artifacts import list_artifacts as artifact_list, read_artifact
 from tools.files import list_files, read_file
 from tools.todos import set_todo_status, write_todos
-from tools.workers import register_role_factory, spawn_workers
+from tools.workers import make_spawn_workers
 from tools.automations import (
     create_automation,
     delete_automation,
@@ -188,6 +188,42 @@ the full artifact body into your final reply — a one-line confirmation referri
 to the artifact title is enough; the user can already see it.\
 """
 
+# ── Worker-role prompts ───────────────────────────────────────────────────────
+# Each role gets a tuned prompt and (inside _build_agent) a tool subset. The
+# worker subgraph compiles with `name=role`, so LangGraph's namespace surfaces
+# the role to the streaming layer (which already labels by subagent name).
+
+_ROLE_PROMPTS = {
+    "general": (
+        "You are a focused worker agent. Complete the task given to you using "
+        "execute(code) — Python with full network/filesystem access. Each execute() "
+        "call runs in a fresh subprocess, so batch related work into one call. "
+        "Use read_file/write_file/list_files for filesystem access if needed. "
+        "When you have a complete answer, return it concisely as your final response."
+    ),
+    "researcher": (
+        "You are a research worker. Your job is to find and verify information. "
+        "Use execute(code) with httpx or playwright to fetch web pages and APIs; "
+        "use read_file when given local source material. Prefer primary sources. "
+        "Cite URLs in your final answer. If you cannot find something, say so "
+        "explicitly — do not guess. Return your findings concisely."
+    ),
+    "coder": (
+        "You are a code worker. Your job is to write or modify code precisely. "
+        "Read the existing code (read_file / list_files) before changing it. Make "
+        "minimal, focused edits. Use execute(code) to run, test, and verify. When "
+        "something fails, fix the underlying cause; do not paper over it. Return "
+        "a short summary of what you changed and any test output."
+    ),
+    "writer": (
+        "You are a writing worker. Your job is to produce final-quality prose. "
+        "Read source material via read_file before drafting. Match the requested "
+        "length, tone, and audience. You do NOT have execute() — no shell, no "
+        "code. Save drafts via write_file when asked. Return the final text."
+    ),
+}
+
+
 # ── Summarization constants ───────────────────────────────────────────────────
 
 def _summarize_threshold() -> int:
@@ -260,6 +296,51 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     safe_execute = make_safe_execute(model)
     safe_write_file = make_safe_write_file(model)
     safe_write_artifact = make_safe_write_artifact(model)
+
+    # ── Worker pool — role-typed, bound to THIS agent's model ────────────────
+    # spawn_workers is built per agent (not a process-global registry) so a
+    # conversation's workers always run on the same model as its main agent.
+
+    _ROLE_TOOLS: dict[str, list] = {
+        "general":    [safe_execute, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list],
+        "researcher": [safe_execute, read_file, read_artifact, artifact_list],
+        "coder":      [safe_execute, read_file, safe_write_file, list_files],
+        "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list],
+    }
+
+    def _make_role_factory(role: str):
+        prompt = _ROLE_PROMPTS[role]
+        tools = _ROLE_TOOLS[role]
+        role_llm = _with_llm_retry(llm.bind_tools(tools))
+
+        def factory():
+            async def role_model(state: AgentState, config: RunnableConfig) -> dict:
+                # Strip historical thinking blocks (signatures don't survive
+                # checkpoint round-trips → Bedrock rejects with "thinking.
+                # signature: Field required"), and route through
+                # build_llm_messages so any embedded SystemMessages are
+                # collapsed into the single system prompt.
+                history = strip_historical_thinking(list(state.get("messages", [])))
+                history = repair_orphan_tool_calls(history)
+                response = await role_llm.ainvoke(
+                    build_llm_messages(prompt, use_cache, history),
+                    config=config,
+                )
+                return {"messages": [response]}
+
+            g = StateGraph(AgentState)  # type: ignore[type-var]
+            g.add_node("agent", role_model)
+            g.add_node("tools", ToolNode(tools))
+            g.add_edge(START, "agent")
+            g.add_conditional_edges("agent", tools_condition)
+            g.add_edge("tools", "agent")
+            return g.compile(name=role)
+
+        return factory
+
+    spawn_workers = make_spawn_workers(
+        {role: _make_role_factory(role) for role in _ROLE_PROMPTS}
+    )
 
     main_tools = [
         safe_execute,
@@ -454,81 +535,6 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     graph.add_edge("tools", "model_request")
 
     compiled = graph.compile(checkpointer=checkpointer, store=store, name="main")
-
-    # ── Worker pool — role-typed ──────────────────────────────────────────────
-    # Each role gets a tuned prompt and a tool subset. The subgraph compiles
-    # with `name=role`, so LangGraph's namespace surfaces the role to the
-    # streaming layer (which already labels by subagent name).
-
-    _ROLE_PROMPTS = {
-        "general": (
-            "You are a focused worker agent. Complete the task given to you using "
-            "execute(code) — Python with full network/filesystem access. Each execute() "
-            "call runs in a fresh subprocess, so batch related work into one call. "
-            "Use read_file/write_file/list_files for filesystem access if needed. "
-            "When you have a complete answer, return it concisely as your final response."
-        ),
-        "researcher": (
-            "You are a research worker. Your job is to find and verify information. "
-            "Use execute(code) with httpx or playwright to fetch web pages and APIs; "
-            "use read_file when given local source material. Prefer primary sources. "
-            "Cite URLs in your final answer. If you cannot find something, say so "
-            "explicitly — do not guess. Return your findings concisely."
-        ),
-        "coder": (
-            "You are a code worker. Your job is to write or modify code precisely. "
-            "Read the existing code (read_file / list_files) before changing it. Make "
-            "minimal, focused edits. Use execute(code) to run, test, and verify. When "
-            "something fails, fix the underlying cause; do not paper over it. Return "
-            "a short summary of what you changed and any test output."
-        ),
-        "writer": (
-            "You are a writing worker. Your job is to produce final-quality prose. "
-            "Read source material via read_file before drafting. Match the requested "
-            "length, tone, and audience. You do NOT have execute() — no shell, no "
-            "code. Save drafts via write_file when asked. Return the final text."
-        ),
-    }
-
-    _ROLE_TOOLS: dict[str, list] = {
-        "general":    [safe_execute, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list],
-        "researcher": [safe_execute, read_file, read_artifact, artifact_list],
-        "coder":      [safe_execute, read_file, safe_write_file, list_files],
-        "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list],
-    }
-
-    def _make_role_factory(role: str):
-        prompt = _ROLE_PROMPTS[role]
-        tools = _ROLE_TOOLS[role]
-        role_llm = _with_llm_retry(llm.bind_tools(tools))
-
-        def factory():
-            async def role_model(state: AgentState, config: RunnableConfig) -> dict:
-                # Strip historical thinking blocks (signatures don't survive
-                # checkpoint round-trips → Bedrock rejects with "thinking.
-                # signature: Field required"), and route through
-                # build_llm_messages so any embedded SystemMessages are
-                # collapsed into the single system prompt.
-                history = strip_historical_thinking(list(state.get("messages", [])))
-                history = repair_orphan_tool_calls(history)
-                response = await role_llm.ainvoke(
-                    build_llm_messages(prompt, use_cache, history),
-                    config=config,
-                )
-                return {"messages": [response]}
-
-            g = StateGraph(AgentState)  # type: ignore[type-var]
-            g.add_node("agent", role_model)
-            g.add_node("tools", ToolNode(tools))
-            g.add_edge(START, "agent")
-            g.add_conditional_edges("agent", tools_condition)
-            g.add_edge("tools", "agent")
-            return g.compile(name=role)
-
-        return factory
-
-    for role in _ROLE_PROMPTS:
-        register_role_factory(role, _make_role_factory(role))
 
     return compiled
 
