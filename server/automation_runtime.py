@@ -38,6 +38,7 @@ from core.state import (
     TaskState,
     _notify,
     _tasks,
+    emit_event,
     get_async_checkpointer,
     get_http_client,
     get_store,
@@ -119,11 +120,7 @@ async def _execute_code_type(auto: Automation, state: TaskState) -> str:
             async for line in proc.stdout:  # type: ignore[union-attr]
                 text = line.decode(errors="replace")
                 output_lines.append(text)
-                state.events.append({
-                    "event": "token",
-                    "data": json.dumps({"text": text, "source": "main"}),
-                })
-                _notify(state)
+                emit_event(state, "token", text=text, source="main")
             await proc.wait()  # type: ignore[union-attr]
 
         async def watch_cancel() -> None:
@@ -187,9 +184,7 @@ async def _execute_webhook_type(auto: Automation, state: TaskState) -> str:
         content=(auto.webhook_body or "").encode(),
     )
     result = f"HTTP {resp.status_code}\n{resp.text}"
-    event = {"event": "token", "data": json.dumps({"text": result, "source": "main"})}
-    state.events.append(event)
-    _notify(state)
+    emit_event(state, "token", text=result, source="main")
     return result
 
 
@@ -219,9 +214,7 @@ async def _run_automation_inner(
                 output = rejection
                 status = "blocked"
                 notify_status = "blocked"
-                state.events.append({"event": "safety_input_blocked", "data": json.dumps({
-                    "message": rejection, "run_id": run_id,
-                })})
+                emit_event(state, "safety_input_blocked", message=rejection, run_id=run_id)
             else:
                 raw_output = await _execute_prompt_type(auto, state, get_async_checkpointer(), run_id)
                 gated, output_verdict = await gate_output(raw_output, model)
@@ -229,12 +222,13 @@ async def _run_automation_inner(
                 if output_verdict:
                     status = "blocked"
                     notify_status = "blocked"
-                    state.events.append({"event": "safety_output_blocked", "data": json.dumps({
-                        "severity": output_verdict.severity,
-                        "reason": output_verdict.reason,
-                        "redacted_output": gated,
-                        "run_id": run_id,
-                    })})
+                    emit_event(
+                        state, "safety_output_blocked",
+                        severity=output_verdict.severity,
+                        reason=output_verdict.reason,
+                        redacted_output=gated,
+                        run_id=run_id,
+                    )
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":
@@ -246,7 +240,7 @@ async def _run_automation_inner(
             async with async_session() as session:
                 await finish_automation_run(session, run_id, "stopped", output, None)
             final_status = "stopped"
-            state.events.append({"event": "stopped", "data": json.dumps({"output": output, "run_id": run_id})})
+            emit_event(state, "stopped", output=output, run_id=run_id)
         else:
             async with async_session() as session:
                 await finish_automation_run(session, run_id, status, output, None)
@@ -257,13 +251,13 @@ async def _run_automation_inner(
                     body=output or "",
                 )
             final_status = status
-            state.events.append({"event": "done", "data": json.dumps({"output": output, "run_id": run_id})})
+            emit_event(state, "done", output=output, run_id=run_id)
 
     except asyncio.CancelledError:
         async with async_session() as session:
             await finish_automation_run(session, run_id, "stopped", None, None)
         final_status = "stopped"
-        state.events.append({"event": "stopped", "data": json.dumps({"run_id": run_id})})
+        emit_event(state, "stopped", run_id=run_id)
 
     except BaseException as exc:
         err_text = str(exc)
@@ -275,7 +269,7 @@ async def _run_automation_inner(
                 title=auto.name,
                 body=err_text,
             )
-        state.events.append({"event": "error", "data": json.dumps({"error": err_text})})
+        emit_event(state, "error", error=err_text)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
 

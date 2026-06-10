@@ -16,8 +16,8 @@ from typing import Any
 from uuid import uuid4
 
 from core.agents import build_agent
-from core.model_catalog import AVAILABLE_MODELS, DEFAULT_MODEL
-from core.state import TaskState, _notify
+from core.model_catalog import DEFAULT_MODEL, get_model_spec
+from core.state import TaskState, emit_event as _emit
 from core.streaming import STREAM_MODES
 
 
@@ -83,15 +83,10 @@ def _interpolate(template: str, inputs: dict[str, Any]) -> str:
 
 def _get_model_spec(model_id: str):
     """Return ModelSpec for model_id, falling back to DEFAULT_MODEL."""
-    spec = next((m for m in AVAILABLE_MODELS if m.id == model_id), None)
-    if spec is None:
-        spec = next(m for m in AVAILABLE_MODELS if m.id == DEFAULT_MODEL)
-    return spec
-
-
-def _emit(task_state: TaskState, event: str, **data: Any) -> None:
-    task_state.events.append({"event": event, "data": json.dumps(data)})
-    _notify(task_state)
+    try:
+        return get_model_spec(model_id)
+    except ValueError:
+        return get_model_spec(DEFAULT_MODEL)
 
 
 def _extract_tokens(content: Any) -> str:

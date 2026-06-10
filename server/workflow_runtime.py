@@ -31,6 +31,7 @@ from core.state import (
     TaskState,
     _notify,
     _tasks,
+    emit_event,
     log_task_complete,
     log_task_created,
     log_task_received,
@@ -80,10 +81,7 @@ async def _run_workflow_inner(
         async with async_session() as session:
             await finish_workflow_run(session, run_id, "stopped", None, None, None)
         final_status = "stopped"
-        state.events.append({
-            "event": "workflow_stopped",
-            "data": json.dumps({"run_id": run_id}),
-        })
+        emit_event(state, "workflow_stopped", run_id=run_id)
 
     except BaseException as exc:
         err = str(exc)
@@ -95,10 +93,7 @@ async def _run_workflow_inner(
                 title=wf.name,
                 body=err,
             )
-        state.events.append({
-            "event": "workflow_error",
-            "data": json.dumps({"error": err, "run_id": run_id}),
-        })
+        emit_event(state, "workflow_error", error=err, run_id=run_id)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
 

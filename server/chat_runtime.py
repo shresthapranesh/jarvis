@@ -34,6 +34,7 @@ from core.state import (
     TaskState,
     _notify,
     _tasks,
+    emit_event,
     get_async_checkpointer,
     get_store,
     log_task_complete,
@@ -67,20 +68,13 @@ async def _run_agent_task(
         # Input gate — judge the user's prompt before spinning up the agent.
         # Surface a step immediately so the activity sidebar shows feedback
         # while the judge runs (a cold Bedrock connection can take ~60s).
-        state.events.append({"event": "step", "data": json.dumps({
-            "node": "safety", "source": "main", "data": "Reviewing input",
-        })})
-        _notify(state)
+        emit_event(state, "step", node="safety", source="main", data="Reviewing input")
         rejection = await gate_input(query, model)
         if rejection:
             await _finalize_message(task_id, rejection, "blocked")
             status = "blocked"
-            state.events.append({"event": "safety_input_blocked", "data": json.dumps({
-                "message": rejection, "conversation_id": conv_id,
-            })})
-            state.events.append({"event": "done", "data": json.dumps({
-                "message": rejection, "conversation_id": conv_id,
-            })})
+            emit_event(state, "safety_input_blocked", message=rejection, conversation_id=conv_id)
+            emit_event(state, "done", message=rejection, conversation_id=conv_id)
             return
 
         content = await _build_message_content(query, attachments, model)
@@ -99,8 +93,7 @@ async def _run_agent_task(
         # channel (correctness on reload); the explicit event clears live
         # subscribers immediately, since a channel write alone dispatches none.
         stream_input: Any = {"messages": [{"role": "user", "content": content}], "todos": []}
-        state.events.append({"event": "todos_updated", "data": json.dumps({"todos": [], "source": "main"})})
-        _notify(state)
+        emit_event(state, "todos_updated", todos=[], source="main")
 
         while True:
             interrupted = False
@@ -142,35 +135,27 @@ async def _run_agent_task(
             # Cancelled mid-run — partial output is non-final; skip the gate.
             await _finalize_message(task_id, final_message, "stopped")
             status = "stopped"
-            state.events.append({"event": "stopped", "data": json.dumps({
-                "message": final_message,
-                "conversation_id": conv_id,
-            })})
+            emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
         else:
             persisted, output_verdict = await gate_output(final_message, model)
             status = "blocked" if output_verdict else "done"
             await _finalize_message(task_id, persisted, status)
             if output_verdict:
-                state.events.append({"event": "safety_output_blocked", "data": json.dumps({
-                    "severity": output_verdict.severity,
-                    "reason": output_verdict.reason,
-                    "redacted_message": persisted,
-                    "conversation_id": conv_id,
-                })})
-            state.events.append({"event": "done", "data": json.dumps({
-                "message": persisted,
-                "conversation_id": conv_id,
-            })})
+                emit_event(
+                    state, "safety_output_blocked",
+                    severity=output_verdict.severity,
+                    reason=output_verdict.reason,
+                    redacted_message=persisted,
+                    conversation_id=conv_id,
+                )
+            emit_event(state, "done", message=persisted, conversation_id=conv_id)
 
     except asyncio.CancelledError:
         coalescer.flush_all()
         final_message = "".join(accumulated)
         await _finalize_message(task_id, final_message, "stopped")
         status = "stopped"
-        state.events.append({"event": "stopped", "data": json.dumps({
-            "message": final_message,
-            "conversation_id": conv_id,
-        })})
+        emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
 
     except GraphRecursionError:
         coalescer.flush_all()
@@ -179,16 +164,14 @@ async def _run_agent_task(
         status = "blocked" if output_verdict else "done"
         await _finalize_message(task_id, persisted, status)
         if output_verdict:
-            state.events.append({"event": "safety_output_blocked", "data": json.dumps({
-                "severity": output_verdict.severity,
-                "reason": output_verdict.reason,
-                "redacted_message": persisted,
-                "conversation_id": conv_id,
-            })})
-        state.events.append({"event": "done", "data": json.dumps({
-            "message": persisted,
-            "conversation_id": conv_id,
-        })})
+            emit_event(
+                state, "safety_output_blocked",
+                severity=output_verdict.severity,
+                reason=output_verdict.reason,
+                redacted_message=persisted,
+                conversation_id=conv_id,
+            )
+        emit_event(state, "done", message=persisted, conversation_id=conv_id)
 
     except BaseException as exc:
         coalescer.flush_all()
@@ -197,7 +180,7 @@ async def _run_agent_task(
         # bubble. The other terminal branches all call _finalize_message; this
         # one previously only flipped status, leaving content="" on disk.
         final_message = "".join(accumulated) or f"The run failed before completing: {exc}"
-        state.events.append({"event": "error", "data": json.dumps({"error": str(exc)})})
+        emit_event(state, "error", error=str(exc))
         try:
             await _finalize_message(task_id, final_message, "error")
         except Exception:

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
-from core.model_catalog import AVAILABLE_MODELS
+from core.model_catalog import get_model_spec
 from db import async_session
 from db.ops import get_default_model, get_recent_messages
 
@@ -102,10 +102,7 @@ async def consolidate_memory(
     )
 
     # 5. Call LLM (single-shot, no agent loop)
-    spec = next((m for m in AVAILABLE_MODELS if m.id == model_id), None)
-    if spec is None:
-        raise ValueError(f"Unknown model '{model_id}'")
-    llm = spec.build_llm()
+    llm = get_model_spec(model_id).build_llm()
     response = await llm.ainvoke([
         SystemMessage(content=_SYSTEM_PROMPT),
         HumanMessage(content=human_content),
