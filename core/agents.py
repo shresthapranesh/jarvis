@@ -33,6 +33,7 @@ from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write
 from .schemas import TodoItem, _normalise_todos, reduce_todos
 from .summarization import maybe_summarize
 from tools.artifacts import list_artifacts as artifact_list, read_artifact
+from tools.documents import read_document, search_documents
 from tools.files import list_files, read_file
 from tools.todos import set_todo_status, write_todos
 from tools.workers import make_spawn_workers
@@ -175,6 +176,14 @@ start with the steps you intend to take. As you work, call \
 update live, so it doubles as your status report. Skip the todo list entirely \
 for one-shot questions — keep it for genuinely multi-step work.
 
+## Attached documents
+Small attached documents appear inline in the message. Large ones are indexed \
+instead — the message carries a stub with a document_id. For those, call \
+`search_documents(query)` to find the passages you need (phrase the query as \
+the content you're looking for), and `read_document(document_id, offset)` to \
+read sequentially. Never answer questions about an indexed document from \
+memory — search it first.
+
 ## Artifacts (deliverables)
 When the user asks for a finished document — a report, draft, brief, resume, \
 plan, summary write-up, etc. — call `write_artifact(title, content)` instead \
@@ -279,10 +288,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # conversation's workers always run on the same model as its main agent.
 
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [safe_execute, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list],
-        "researcher": [safe_execute, read_file, read_artifact, artifact_list],
+        "general":    [safe_execute, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
+        "researcher": [safe_execute, read_file, read_artifact, artifact_list, search_documents, read_document],
         "coder":      [safe_execute, read_file, safe_write_file, list_files],
-        "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list],
+        "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
     }
 
     def _make_role_factory(role: str):
@@ -329,6 +338,8 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         artifact_list,
         write_todos,
         set_todo_status,
+        search_documents,
+        read_document,
         spawn_workers,
         list_automations,
         create_automation,

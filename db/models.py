@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -196,6 +196,37 @@ class Document(Base):
     conversation: Mapped["Conversation"] = relationship(
         "Conversation", back_populates="documents"
     )
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        "DocumentChunk", back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class DocumentChunk(Base):
+    """One indexed slice of a large attached document.
+
+    Only documents above the inline threshold get chunked (see
+    core/doc_index.py); small documents are stuffed straight into the
+    message and never appear here. `embedding` holds the float32 vector
+    bytes from the configured embedding model; `conversation_id` is
+    denormalized so semantic search can scope to a conversation without
+    a join.
+    """
+
+    __tablename__ = "document_chunks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.id"), nullable=False, index=True
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id"), nullable=False, index=True
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    document: Mapped["Document"] = relationship("Document", back_populates="chunks")
 
 
 # ── Workflow models ────────────────────────────────────────────────────────────

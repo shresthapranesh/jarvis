@@ -20,6 +20,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import get_config
+from core.doc_index import configure_embedding_model
 from core.log_setup import get_broadcast_handler, setup_logging
 from core.queue import SqliteJobQueue, Worker
 from core.safety import configure_judge_model
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if any(sweep.values()):
             logger.info("startup zombie sweep: %s", sweep)
         configure_judge_model(await get_setting(session, "safety.judge_model"))
+        configure_embedding_model(await get_setting(session, "embedding.model"))
         automations = await list_enabled_scheduled_automations(session)
         for auto in automations:
             _register_scheduler_job(auto)

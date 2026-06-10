@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import Sequence
 from typing import Any, TypeAlias
@@ -17,9 +18,12 @@ from db.ops import add_step, update_message_content, update_message_status
 
 from langgraph.types import StreamMode
 
-from .document_extractor import extract_text as extract_document_text
+from .doc_index import INLINE_THRESHOLD, embeddings_available, index_document
+from .document_extractor import extract_raw_text, format_inline
 from .schemas import AttachmentIn
 from .state import TaskState, emit_event
+
+logger = logging.getLogger(__name__)
 
 # LangGraph's astream(subgraphs=True) yields (namespace, mode, data) tuples,
 # but the type stubs don't expose this shape. We define it here so callers
@@ -95,6 +99,41 @@ def _extract_step_data(node_name: str, node_data: dict) -> str:
 
 # ── Multimodal content builder ───────────────────────────────────────────────
 
+def _extract_for_message(mime_type: str, data: str, name: str) -> tuple[str | None, str | None]:
+    """Executor target: (raw_text, None) on success, (None, error) on failure."""
+    try:
+        return extract_raw_text(mime_type, data, name), None
+    except Exception as exc:
+        return None, str(exc)
+
+
+async def _document_part(att: AttachmentIn, raw: str | None, error: str | None) -> dict:
+    """Build the message part for one document attachment.
+
+    Small documents (or any document when indexing isn't possible) are
+    inlined as before. Large documents with a persisted Document row are
+    chunk-indexed and replaced by a short stub pointing the agent at the
+    search_documents / read_document tools — keeping a big PDF out of the
+    per-turn token bill and out of the summarizer's reach.
+    """
+    if error is not None:
+        return {"type": "text", "text": f"[Document: {att.name}]\n[Extraction failed: {error}]\n[End of document]"}
+    assert raw is not None
+    if att.document_id and len(raw) > INLINE_THRESHOLD and embeddings_available():
+        try:
+            n_chunks = await index_document(att.document_id, raw)
+            return {"type": "text", "text": (
+                f"[Document attached: {att.name} — {len(raw):,} characters, "
+                f"indexed as {n_chunks} searchable chunks "
+                f"(document_id={att.document_id!r}). Too large to include inline: "
+                f'use search_documents("...") to find relevant passages, or '
+                f"read_document({att.document_id!r}, offset=0) to read it sequentially.]"
+            )}
+        except Exception as exc:
+            logger.warning("indexing %s failed (%s) — inlining instead", att.name, exc)
+    return {"type": "text", "text": format_inline(att.name, raw)}
+
+
 async def _build_message_content(
     query: str,
     attachments: list[AttachmentIn] | None,
@@ -104,11 +143,11 @@ async def _build_message_content(
         return query
 
     loop = asyncio.get_running_loop()
-    doc_futures: dict[int, asyncio.Future[str]] = {}
+    doc_futures: dict[int, asyncio.Future[tuple[str | None, str | None]]] = {}
     for idx, att in enumerate(attachments):
         if att.type == "document":
             doc_futures[idx] = loop.run_in_executor(
-                None, extract_document_text, att.mime_type, att.data, att.name,
+                None, _extract_for_message, att.mime_type, att.data, att.name,
             )
     if doc_futures:
         await asyncio.gather(*doc_futures.values())
@@ -122,7 +161,8 @@ async def _build_message_content(
     for idx, att in enumerate(attachments):
         data_url = f"data:{att.mime_type};base64,{att.data}"
         if att.type == "document":
-            parts.append({"type": "text", "text": doc_futures[idx].result()})
+            raw, error = doc_futures[idx].result()
+            parts.append(await _document_part(att, raw, error))
         elif att.type == "image":
             parts.append({"type": "image_url", "image_url": {"url": data_url}})
         elif is_google:

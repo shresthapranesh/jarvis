@@ -362,7 +362,7 @@ async def register_chat_task(
                 ext = os.path.splitext(att.name)[1] or ".bin"
                 doc_path = cfg.documents_dir / f"{doc_id}{ext}"
                 doc_path.write_bytes(base64.b64decode(att.data))
-                await create_document(
+                doc = await create_document(
                     session,
                     conversation_id=conv.id,
                     message_id=user_msg.id,
@@ -371,6 +371,10 @@ async def register_chat_task(
                     size=att.size,
                     path=str(doc_path),
                 )
+                # Mark the attachment before enqueue_chat_task serializes it
+                # into the job payload — the chat handler uses this id to
+                # chunk-index large documents instead of inlining them.
+                att.document_id = doc.id
             except Exception as e:
                 logger.warning("Failed to persist document %s: %s", att.name, e)
 

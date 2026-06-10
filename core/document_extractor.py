@@ -6,39 +6,49 @@ import re
 MAX_CHARS = 80_000
 
 
+def extract_raw_text(mime_type: str, base64_data: str, filename: str) -> str:
+    """Extract the full, untruncated document text. Raises on failure.
+
+    Used by the chunk indexer (core/doc_index.py), which needs the whole
+    document; `extract_text` below is the inline-friendly wrapper.
+    """
+    raw = base64.b64decode(base64_data)
+    mt = mime_type.lower()
+    fn = filename.lower()
+
+    if mt == "application/pdf" or fn.endswith(".pdf"):
+        return _extract_pdf(raw)
+    if mt in (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    ) or fn.endswith((".docx", ".doc")):
+        return _extract_docx(raw)
+    if mt in (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    ) or fn.endswith((".xlsx", ".xls")):
+        return _extract_xlsx(raw)
+    if mt.startswith("text/") or fn.endswith((".txt", ".md", ".csv", ".tsv")):
+        return raw.decode("utf-8", errors="replace")
+    if mt in ("application/rtf", "text/rtf") or fn.endswith(".rtf"):
+        return _extract_rtf(raw)
+    return raw.decode("utf-8", errors="replace")
+
+
+def format_inline(filename: str, text: str) -> str:
+    """Wrap extracted text in the inline document framing, capped at MAX_CHARS."""
+    header = f"[Document: {filename}]\n"
+    footer = "\n[End of document]"
+    if len(text) > MAX_CHARS:
+        body = text[:MAX_CHARS] + f"\n... [truncated — {len(text) - MAX_CHARS} chars omitted]"
+    else:
+        body = text
+    return header + body + footer
+
+
 def extract_text(mime_type: str, base64_data: str, filename: str) -> str:
     try:
-        raw = base64.b64decode(base64_data)
-        mt = mime_type.lower()
-        fn = filename.lower()
-
-        if mt == "application/pdf" or fn.endswith(".pdf"):
-            text = _extract_pdf(raw)
-        elif mt in (
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/msword",
-        ) or fn.endswith((".docx", ".doc")):
-            text = _extract_docx(raw)
-        elif mt in (
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-excel",
-        ) or fn.endswith((".xlsx", ".xls")):
-            text = _extract_xlsx(raw)
-        elif mt.startswith("text/") or fn.endswith((".txt", ".md", ".csv", ".tsv")):
-            text = raw.decode("utf-8", errors="replace")
-        elif mt in ("application/rtf", "text/rtf") or fn.endswith(".rtf"):
-            text = _extract_rtf(raw)
-        else:
-            text = raw.decode("utf-8", errors="replace")
-
-        header = f"[Document: {filename}]\n"
-        footer = "\n[End of document]"
-        if len(text) > MAX_CHARS:
-            body = text[:MAX_CHARS] + f"\n... [truncated — {len(text) - MAX_CHARS} chars omitted]"
-        else:
-            body = text
-        return header + body + footer
-
+        return format_inline(filename, extract_raw_text(mime_type, base64_data, filename))
     except Exception as e:
         return f"[Document: {filename}]\n[Extraction failed: {e}]\n[End of document]"
 
