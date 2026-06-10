@@ -13,7 +13,7 @@ from core.agents import is_valid_model
 from core.config import get_config
 from core.model_catalog import DEFAULT_MODEL
 from core.schemas import AttachmentIn
-from core.state import _background_tasks, _notify, _tasks
+from core.state import _tasks, emit_event
 from db.ops import delete_conversation, update_conversation
 
 from ..types.conversation import Conversation
@@ -114,10 +114,6 @@ class ConversationMutation:
 
         if state.resume_future and not state.resume_future.done():
             state.resume_future.cancel()
-
-        bg_task = _background_tasks.get(task_id)
-        if bg_task and not bg_task.done():
-            bg_task.cancel()
         return True
 
     @strawberry.mutation
@@ -130,10 +126,7 @@ class ConversationMutation:
 
         pending_id = state.pending_interrupt_id
         state.resume_future.set_result(answer)
-        state.events.append({"event": "interrupt_resolved", "data": json.dumps({
-            "interrupt_id": pending_id,
-        })})
-        _notify(state)
+        emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
         return True
 
     @strawberry.mutation

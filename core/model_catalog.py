@@ -1,7 +1,7 @@
 """Model catalog — single source of truth for available LLM models.
 
-The backend rejects /run and /automations requests whose `model` is not in
-this catalog. The frontend fetches it via GET /models and populates all
+The backend rejects mutations whose `model` is not in this catalog. The
+frontend reads it via the GraphQL `models` query and populates all
 selectors from the response — adding or removing a model requires a single
 edit here, never any TSX.
 """
@@ -55,6 +55,14 @@ AVAILABLE_MODELS: tuple[ModelSpec, ...] = (
 DEFAULT_MODEL: str = AVAILABLE_MODELS[0].id
 
 _AVAILABLE_IDS: frozenset[str] = frozenset(m.id for m in AVAILABLE_MODELS)
+
+
+def get_model_spec(model_id: str) -> ModelSpec:
+    """Return the catalog entry for `model_id`. Raises ValueError if absent."""
+    spec = next((m for m in AVAILABLE_MODELS if m.id == model_id), None)
+    if spec is None:
+        raise ValueError(f"Unknown model '{model_id}'")
+    return spec
 
 
 def is_valid_model(model: str) -> bool:

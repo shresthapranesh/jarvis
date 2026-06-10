@@ -16,7 +16,7 @@ Three layers, all driven by the same judge machinery here:
    so leaked credentials or harmful instructions in the answer get
    redacted.
 
-Custom SSE events emitted via `get_stream_writer()` (same pattern as
+Custom stream events emitted via `get_stream_writer()` (same pattern as
 `tools/browser_agent.py`):
   - `safety_review_start`   — review begins
   - `safety_review_passed`  — judge allowed the content through
@@ -40,7 +40,7 @@ from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
-from .model_catalog import AVAILABLE_MODELS
+from .model_catalog import get_model_spec
 
 from tools.artifacts import write_artifact as _write_artifact_tool
 from tools.execute import execute as _execute_tool
@@ -121,10 +121,7 @@ def _get_judge(model_id: str):
     cached = _judge_cache.get(resolved)
     if cached is not None:
         return cached
-    spec = next((m for m in AVAILABLE_MODELS if m.id == resolved), None)
-    if spec is None:
-        raise ValueError(f"Unknown safety judge model '{resolved}'")
-    llm = spec.build_llm()
+    llm = get_model_spec(resolved).build_llm()
     judge = llm.with_structured_output(SafetyVerdict)
     _judge_cache[resolved] = judge
     return judge

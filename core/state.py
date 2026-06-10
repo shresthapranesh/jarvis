@@ -9,6 +9,7 @@ the lifespan context manager in server.py sets the infrastructure globals
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 from collections.abc import AsyncIterator
@@ -98,15 +99,25 @@ class TaskState:
 
 
 _tasks: dict[str, TaskState] = {}
-_background_tasks: dict[str, asyncio.Task] = {}
 
 
 def _notify(state: TaskState) -> None:
-    """Wake all SSE/WebSocket waiters that are blocked on this task."""
+    """Wake all subscription waiters that are blocked on this task."""
     for fut in state._waiters:
         if not fut.done():
             fut.set_result(None)
     state._waiters.clear()
+
+
+def emit_event(state: TaskState, event: str, **payload) -> None:
+    """Append an event to the task's stream and wake all subscribers.
+
+    The canonical way to surface an event: every `{"event": ..., "data":
+    json.dumps(...)}` append should go through here so a forgotten
+    `_notify` can't leave subscribers hanging until the next event.
+    """
+    state.events.append({"event": event, "data": json.dumps(payload)})
+    _notify(state)
 
 
 def log_task_received(kind: TaskKind, parent_id: str, source: str) -> None:
@@ -132,7 +143,8 @@ def log_task_complete(task_id: str, state: TaskState, status: str) -> None:
 
 
 async def stream_task_events(state: TaskState) -> AsyncIterator[dict]:
-    """Yield events from a TaskState as they arrive. Used by all SSE endpoints."""
+    """Yield events from a TaskState as they arrive. Used by all GraphQL
+    subscription resolvers (taskEvents / automationRunEvents / workflowRunEvents)."""
     cursor = 0
     loop = asyncio.get_running_loop()
     while True:

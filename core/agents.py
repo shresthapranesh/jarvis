@@ -29,6 +29,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     AVAILABLE_MODELS,
     DEFAULT_MODEL,
     ModelSpec,
+    get_model_spec,
     is_valid_model,
 )
 from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write_file
@@ -250,9 +251,7 @@ def _get_sync_checkpointer() -> SqliteSaver:
 # ── Agent builder ─────────────────────────────────────────────────────────────
 
 def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> CompiledStateGraph:
-    spec = next((m for m in AVAILABLE_MODELS if m.id == model), None)
-    if spec is None:
-        raise ValueError(f"Unknown model '{model}'")
+    spec = get_model_spec(model)
     llm = spec.build_llm()
     use_cache = spec.provider in ("bedrock", "anthropic")
 

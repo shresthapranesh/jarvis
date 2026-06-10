@@ -19,7 +19,7 @@ from langgraph.types import StreamMode
 
 from .document_extractor import extract_text as extract_document_text
 from .schemas import AttachmentIn
-from .state import TaskState, _notify
+from .state import TaskState, emit_event
 
 # LangGraph's astream(subgraphs=True) yields (namespace, mode, data) tuples,
 # but the type stubs don't expose this shape. We define it here so callers
@@ -135,10 +135,10 @@ async def _build_message_content(
 # ── Token coalescer ──────────────────────────────────────────────────────────
 
 class TokenCoalescer:
-    """Batches streaming-token SSE events per source to cut wake-up frequency.
+    """Batches streaming-token events per source to cut wake-up frequency.
 
     A verbose writer subagent can emit thousands of single-character tokens;
-    each one previously appended its own SSE event and woke every waiter.
+    each one previously appended its own event and woke every waiter.
     This buffers tokens and flushes when EITHER threshold hits first:
       - buffered text for that source reaches `max_chars` characters, or
       - the oldest buffered token is `max_delay_sec` old.
@@ -223,10 +223,7 @@ class TokenCoalescer:
         times.pop(source, None)
         if not text_chunks:
             return
-        self.state.events.append({"event": event_name, "data": json.dumps({
-            "text": "".join(text_chunks), "source": source,
-        })})
-        _notify(self.state)
+        emit_event(self.state, event_name, text="".join(text_chunks), source=source)
 
 
 # ── Shared chunk processor ───────────────────────────────────────────────────
@@ -306,45 +303,39 @@ async def _process_chunk(
         event_type = data.get("type")
         if event_type == "browser_step":
             coalescer.flush_all()
-            state.events.append({"event": "browser_step", "data": json.dumps({
-                "thought": data.get("thought"),
-                "actions": data.get("actions"),
-                "source": source,
-            })})
-            _notify(state)
+            emit_event(
+                state, "browser_step",
+                thought=data.get("thought"),
+                actions=data.get("actions"),
+                source=source,
+            )
         elif event_type == "worker_done":
             coalescer.flush_all()
             idx = data.get("idx", "?")
             task = data.get("task", "")
             result = data.get("result", "")
             text = f"\n**[Worker {idx}]** {task}\n{result}\n"
-            state.events.append({"event": "token", "data": json.dumps({"text": text, "source": "worker"})})
-            _notify(state)
+            emit_event(state, "token", text=text, source="worker")
         elif event_type == "artifact":
             coalescer.flush_all()
             payload = {k: v for k, v in data.items() if k != "type"}
-            state.events.append({"event": "artifact", "data": json.dumps(payload)})
-            _notify(state)
+            emit_event(state, "artifact", **payload)
         elif event_type == "todos_updated":
             coalescer.flush_all()
-            state.events.append({"event": "todos_updated", "data": json.dumps({
-                "todos": data.get("todos", []),
-                "source": source,
-            })})
-            _notify(state)
+            emit_event(state, "todos_updated", todos=data.get("todos", []), source=source)
         elif event_type in ("safety_review_start", "safety_review_passed", "safety_review_blocked"):
             # Surface the judge's activity as a step so the UI sidebar shows it
             # alongside the model and tool nodes. Payload mirrors what
             # `_extract_step_data` would produce for a real node.
             coalescer.flush_all()
             payload = {k: v for k, v in data.items() if k != "type"}
-            state.events.append({"event": "step", "data": json.dumps({
-                "node": event_type,
-                "source": source,
-                "subagent": subagent,
-                "data": json.dumps(payload),
-            })})
-            _notify(state)
+            emit_event(
+                state, "step",
+                node=event_type,
+                source=source,
+                subagent=subagent,
+                data=json.dumps(payload),
+            )
         return False
 
     if mode == "updates":
@@ -359,11 +350,11 @@ async def _process_chunk(
                     question = str(value)
                 interrupt_id = getattr(intr, "id", None) or getattr(intr, "interrupt_id", None) or task_id
                 state.pending_interrupt_id = str(interrupt_id) if interrupt_id is not None else None
-                state.events.append({"event": "interrupt", "data": json.dumps({
-                    "interrupt_id": str(interrupt_id) if interrupt_id is not None else None,
-                    "question": question,
-                })})
-                _notify(state)
+                emit_event(
+                    state, "interrupt",
+                    interrupt_id=str(interrupt_id) if interrupt_id is not None else None,
+                    question=question,
+                )
             return True
 
         if isinstance(data, dict):
@@ -378,10 +369,7 @@ async def _process_chunk(
                 coalescer.flush_all()
 
                 def _emit_step(node_name: str, src: str, step_data: str) -> None:
-                    state.events.append({"event": "step", "data": json.dumps({
-                        "node": node_name, "source": src, "subagent": subagent, "data": step_data,
-                    })})
-                    _notify(state)
+                    emit_event(state, "step", node=node_name, source=src, subagent=subagent, data=step_data)
 
                 if persist_steps and task_id and conv_id and step_seq_ref is not None:
                     async with async_session() as session:

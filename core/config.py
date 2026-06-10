@@ -27,7 +27,6 @@ class AppConfig:
     database_url: str
     checkpoints_db: str
     memory_file: str
-    conversation_history_dir: str
     artifacts_dir: Path
     documents_dir: Path
     staging_dir: Path
@@ -58,11 +57,10 @@ class AppConfig:
                 or os.environ.get("DATABASE_URL", f"sqlite+aiosqlite:///{work_dir / 'database.db'}"),
             checkpoints_db=overrides.get("checkpoints_db")
                 or os.environ.get("CHECKPOINTS_DB", str(work_dir / "checkpoints.db")),
-            # Kept as relative strings — LocalShellBackend resolves these relative to root_dir="."
+            # Kept as a relative string — the CLI fallback in core/agents.py
+            # resolves it against the current working directory.
             memory_file=overrides.get("memory_file")
                 or os.environ.get("MEMORY_FILE", "memory/AGENTS.md"),
-            conversation_history_dir=overrides.get("conversation_history_dir")
-                or os.environ.get("CONVERSATION_HISTORY_DIR", "conversation_history"),
             artifacts_dir=artifacts_dir,
             documents_dir=documents_dir,
             staging_dir=staging_dir,
