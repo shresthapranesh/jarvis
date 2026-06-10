@@ -22,6 +22,7 @@ jarvis/
 │   ├── queue/            # Durable job queue: protocol.py (Job, JobQueue ABC),
 │   │                     #   sqlite.py (SqliteJobQueue), worker.py (Worker)
 │   ├── streaming.py      # TokenCoalescer, STREAM_MODES, _process_chunk(), _finalize_message()
+│   ├── summarization.py  # maybe_summarize() — history trimming for the agent loop
 │   ├── safety.py         # gate_input() / gate_output() content gates
 │   ├── memory_consolidation.py  # agent-memory store keys + consolidate_memory()
 │   ├── notifications.py  # notification-channel delivery

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any, TypeAlias
 
 from db import async_session
@@ -134,6 +134,45 @@ async def _build_message_content(
 
 # ── Token coalescer ──────────────────────────────────────────────────────────
 
+class _Bucket:
+    """Per-event-type token buffer, keyed by source. Flushes through
+    `emit_event` when either the size or the age threshold is hit."""
+
+    def __init__(self, state: TaskState, event_name: str, max_chars: int, max_delay: float):
+        self.state = state
+        self.event_name = event_name
+        self.max_chars = max_chars
+        self.max_delay = max_delay
+        self._chunks: dict[str, list[str]] = {}
+        self._lengths: dict[str, int] = {}
+        self._first_enqueued: dict[str, float] = {}
+
+    def add(self, text: str, source: str) -> None:
+        if source not in self._chunks:
+            self._chunks[source] = []
+            self._lengths[source] = 0
+            self._first_enqueued[source] = time.monotonic()
+        self._chunks[source].append(text)
+        self._lengths[source] += len(text)
+        if (
+            self._lengths[source] >= self.max_chars
+            or time.monotonic() - self._first_enqueued[source] >= self.max_delay
+        ):
+            self.flush(source)
+
+    def flush(self, source: str) -> None:
+        text_chunks = self._chunks.pop(source, None)
+        self._lengths.pop(source, None)
+        self._first_enqueued.pop(source, None)
+        if not text_chunks:
+            return
+        emit_event(self.state, self.event_name, text="".join(text_chunks), source=source)
+
+    def flush_all(self) -> None:
+        for source in list(self._chunks.keys()):
+            self.flush(source)
+
+
 class TokenCoalescer:
     """Batches streaming-token events per source to cut wake-up frequency.
 
@@ -153,77 +192,26 @@ class TokenCoalescer:
     correctness.
 
     Thinking/reasoning tokens from models with reasoning enabled are tracked
-    separately and emitted as `thinking_token` events (same payload shape as
-    `token`). They are never appended to `accumulated`.
+    in a separate bucket and emitted as `thinking_token` events (same payload
+    shape as `token`). They are never appended to `accumulated`.
     """
 
     def __init__(self, state: TaskState, *, max_chars: int = 64, max_delay_sec: float = 0.05):
-        self.state = state
-        self.max_chars = max_chars
-        self.max_delay = max_delay_sec
-        self._chunks: dict[str, list[str]] = {}
-        self._lengths: dict[str, int] = {}
-        self._first_enqueued: dict[str, float] = {}
-        # Parallel buckets for thinking tokens — flushed as "thinking_token" events.
-        self._thinking_chunks: dict[str, list[str]] = {}
-        self._thinking_lengths: dict[str, int] = {}
-        self._thinking_first_enqueued: dict[str, float] = {}
+        self._tokens = _Bucket(state, "token", max_chars, max_delay_sec)
+        self._thinking = _Bucket(state, "thinking_token", max_chars, max_delay_sec)
 
     def add_token(self, text: str, source: str) -> None:
-        if not text:
-            return
-        self._add_to_bucket(text, source, self._chunks, self._lengths, self._first_enqueued, self._flush_source)
+        if text:
+            self._tokens.add(text, source)
 
     def add_thinking(self, text: str, source: str) -> None:
-        """Buffer a reasoning/thinking token. Flushed as a `thinking_token` SSE event."""
-        if not text:
-            return
-        self._add_to_bucket(text, source, self._thinking_chunks, self._thinking_lengths, self._thinking_first_enqueued, self._flush_thinking)
+        """Buffer a reasoning/thinking token. Flushed as a `thinking_token` event."""
+        if text:
+            self._thinking.add(text, source)
 
     def flush_all(self) -> None:
-        for source in list(self._chunks.keys()):
-            self._flush_source(source)
-        for source in list(self._thinking_chunks.keys()):
-            self._flush_thinking(source)
-
-    def _flush_source(self, source: str) -> None:
-        self._flush_bucket(source, self._chunks, self._lengths, self._first_enqueued, "token")
-
-    def _flush_thinking(self, source: str) -> None:
-        self._flush_bucket(source, self._thinking_chunks, self._thinking_lengths, self._thinking_first_enqueued, "thinking_token")
-
-    def _add_to_bucket(
-        self,
-        text: str,
-        source: str,
-        chunks: dict[str, list[str]],
-        lengths: dict[str, int],
-        times: dict[str, float],
-        flush_fn: Callable[[str], None],
-    ) -> None:
-        if source not in chunks:
-            chunks[source] = []
-            lengths[source] = 0
-            times[source] = time.monotonic()
-        chunks[source].append(text)
-        lengths[source] += len(text)
-        if lengths[source] >= self.max_chars or time.monotonic() - times[source] >= self.max_delay:
-            flush_fn(source)
-
-    def _flush_bucket(
-        self,
-        source: str,
-        chunks: dict[str, list[str]],
-        lengths: dict[str, int],
-        times: dict[str, float],
-        event_name: str,
-    ) -> None:
-        text_chunks = chunks.pop(source, None)
-        lengths.pop(source, None)
-        times.pop(source, None)
-        if not text_chunks:
-            return
-        emit_event(self.state, event_name, text="".join(text_chunks), source=source)
+        self._tokens.flush_all()
+        self._thinking.flush_all()
 
 
 # ── Shared chunk processor ───────────────────────────────────────────────────
