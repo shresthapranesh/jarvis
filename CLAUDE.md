@@ -30,6 +30,7 @@ jarvis/
 │   ├── scheduler.py      # APScheduler setup, cron registration
 │   ├── config.py         # AppConfig (DATABASE_URL, work_dir, artifacts_dir, documents_dir, staging_dir)
 │   ├── document_extractor.py  # PDF/DOCX/XLSX text extraction
+│   ├── doc_index.py      # chunk-index large attachments + cosine search (Gemini embeddings)
 │   └── log_setup.py / log_callback.py  # logging + AgentLogger
 ├── db/
 │   ├── models.py         # ORM: Conversation, Message, Step, Automation, AutomationRun,
@@ -71,6 +72,7 @@ jarvis/
 │   ├── execute.py        # safe_execute (Python in subprocess)
 │   ├── files.py          # read_file, write_file, list_files
 │   ├── artifacts.py      # write_artifact, read_artifact, list_artifacts
+│   ├── documents.py      # search_documents, read_document (retrieval over indexed attachments)
 │   ├── todos.py          # write_todos, set_todo_status (per-conversation plan)
 │   ├── workers.py        # spawn_workers (parallel role-templated subagents)
 │   ├── automations.py    # CRUD as agent tools
@@ -235,6 +237,7 @@ Persistent agent memory is a **single free-text blob stored in the LangGraph sto
 ## Uploads & Documents
 - **Uploads** are *staging-only* (no DB table). `POST /uploads` (`routes_uploads.py`) stores the bytes + a `.meta.json` under `staging_dir` and returns an opaque `uploadId`; the client passes that back in `startTask` instead of inlining large files in the GraphQL body. A scheduler job GCs stale staged files. Cap: 100 MiB/file.
 - **Documents** are extracted-text sources persisted for a conversation. When a chat is started with attachments, `register_chat_task` (`chat_runtime.py`) decodes/writes the bytes under `documents_dir` and creates a `Document` row. Raw bytes: `GET /documents/{id}/raw`. Text extraction: `core/document_extractor.py` (PDF/DOCX/XLSX). Image attachments flow through the model's vision path instead.
+- **Large documents are indexed, not inlined.** Documents whose extracted text exceeds `INLINE_THRESHOLD` (12k chars, `core/doc_index.py`) are chunked + embedded into `DocumentChunk` rows and replaced in the message by a stub carrying the `document_id`; the agent retrieves passages via the `search_documents`/`read_document` tools (`tools/documents.py`, conversation-scoped). Embeddings use a Gemini model (default `models/gemini-embedding-002`, override via `config set embedding.model <id>`; needs `GOOGLE_API_KEY`). When embeddings are unavailable — or the document came from a source without a `Document` row (bots, CLI) — it falls back to inlining (capped at 80k chars), so nothing breaks on keyless/Ollama-only setups. Search is brute-force numpy cosine over the conversation's chunks; chunks cascade-delete with their Document.
 
 ## Database
 - SQLite at `~/.jarvis/database.db` (configurable via `DATABASE_URL` env var).

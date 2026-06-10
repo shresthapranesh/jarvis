@@ -70,6 +70,10 @@ class AttachmentIn(BaseModel):
     mime_type: str
     data: str       # raw base64 (no data URL prefix)
     size: int
+    # Set by register_chat_task when it persists a Document row; lets the
+    # chat handler chunk-index large documents instead of inlining them.
+    # None for sources that don't persist documents (bots, CLI) → inlined.
+    document_id: str | None = None
 
 
 class TTSRequest(BaseModel):
