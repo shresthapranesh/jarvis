@@ -159,8 +159,10 @@ REST is reserved for binary download, file upload, audio, the live WS, log taili
 - **Do not call `session.refresh()` after commit** — `async_session` uses `expire_on_commit=False` and all defaults are Python-side, so the object is already fully populated.
 
 ### Adding a new model to the catalog
-- Add a `ModelSpec` entry to `AVAILABLE_MODELS` in `core/model_catalog.py` — that's the only backend change needed.
-- The frontend reads the catalog via the GraphQL `models` query (`queries/models.py`) — dropdowns populate automatically.
+The catalog merges two layers in `core/model_catalog.py`: `BUILTIN_MODELS` (compiled-in seed) + a runtime cache of custom models. `build_llm()` switches only on `provider` (`KNOWN_PROVIDERS`: ollama, google_genai, bedrock, anthropic) — the id is `provider:model_name`, so any model from those backends needs **no code**, only a catalog entry.
+- **At runtime (no code change, preferred):** `uv run python main.py model add <provider:model_name> "<label>"` — persisted as JSON under the `config_settings` key `models.custom`. `model remove <id>` / `model list` manage them. Hydrated into the in-memory cache at server startup (lifespan), on every GraphQL `models` query, and per-invocation in the CLI (`_run_db`).
+- **As a built-in default:** add a `ModelSpec` entry to `BUILTIN_MODELS`. Note `BUILTIN_MODELS[0]` is the compile-time `DEFAULT_MODEL`, so don't prepend unless you mean to change the default.
+- All consumers go through `available_models()` / `get_model_spec()` / `is_valid_model()` (built-in ∪ custom, deduped). The frontend reads the catalog via the GraphQL `models` query (`queries/models.py`, async — re-hydrates from DB so runtime additions show without a restart) — dropdowns populate automatically.
 
 ### Adding a new frontend route
 - Create a file in `frontend/src/routes/` using TanStack Router file-based naming.

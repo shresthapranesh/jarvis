@@ -22,12 +22,13 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from core.config import get_config
 from core.doc_index import configure_embedding_model
 from core.log_setup import get_broadcast_handler, setup_logging
+from core.model_catalog import load_custom_models
 from core.queue import SqliteJobQueue, Worker
 from core.safety import configure_judge_model
 
 from core import state
 from db import async_session, init_db
-from db.ops import cleanup_zombie_running_rows, get_setting, list_enabled_scheduled_automations
+from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
 from .routes_documents import router as documents_router
@@ -63,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("startup zombie sweep: %s", sweep)
         configure_judge_model(await get_setting(session, "safety.judge_model"))
         configure_embedding_model(await get_setting(session, "embedding.model"))
+        load_custom_models(await get_custom_models(session))
         automations = await list_enabled_scheduled_automations(session)
         for auto in automations:
             _register_scheduler_job(auto)
