@@ -586,6 +586,45 @@ async def get_default_model(session: AsyncSession) -> str:
     return value if value else _CATALOG_DEFAULT
 
 
+# ── Custom (runtime-added) models ─────────────────────────────────────────────
+#
+# Persisted as a JSON list of {id, label, provider} under the config key
+# `models.custom`. Merged with the built-in catalog by core.model_catalog.
+
+_CUSTOM_MODELS_KEY = "models.custom"
+
+
+async def get_custom_models(session: AsyncSession) -> list[dict]:
+    """Return the runtime-added models as a list of {id, label, provider} dicts."""
+    raw = await get_setting(session, _CUSTOM_MODELS_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    return [m for m in data if isinstance(m, dict)] if isinstance(data, list) else []
+
+
+async def add_custom_model(
+    session: AsyncSession, model_id: str, label: str, provider: str,
+) -> None:
+    """Add (or replace, by id) a custom model in the catalog."""
+    models = [m for m in await get_custom_models(session) if m.get("id") != model_id]
+    models.append({"id": model_id, "label": label, "provider": provider})
+    await set_setting(session, _CUSTOM_MODELS_KEY, json.dumps(models))
+
+
+async def remove_custom_model(session: AsyncSession, model_id: str) -> bool:
+    """Remove a custom model by id. Returns False if it wasn't a custom model."""
+    models = await get_custom_models(session)
+    remaining = [m for m in models if m.get("id") != model_id]
+    if len(remaining) == len(models):
+        return False
+    await set_setting(session, _CUSTOM_MODELS_KEY, json.dumps(remaining))
+    return True
+
+
 # ── Notification channels CRUD ────────────────────────────────────────────────
 
 async def create_notification_channel(

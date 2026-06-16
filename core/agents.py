@@ -23,7 +23,6 @@ from .messages import (
     strip_historical_thinking,
 )
 from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
-    AVAILABLE_MODELS,
     DEFAULT_MODEL,
     ModelSpec,
     get_model_spec,

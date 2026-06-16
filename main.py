@@ -72,8 +72,11 @@ def run(
     from core.agents import build_agent
     from core.config import get_config
     from db.ops import get_default_model
+    # Always hits the DB (also hydrates the custom-model cache via _run_db) so a
+    # custom --model resolves through get_model_spec before build_agent.
+    default_model = _run_db(lambda s: get_default_model(s))
     if model == DEFAULT_MODEL:
-        model = _run_db(lambda s: get_default_model(s))
+        model = default_model
     _setup_logging(debug, get_config().work_dir)
 
     full_query = query
@@ -259,6 +262,11 @@ def _run_db(coro):
     async def _inner():
         await init_db()
         async with async_session() as session:
+            # Hydrate the runtime-added model cache so custom models resolve
+            # in CLI paths (build_agent / model list / validation).
+            from core.model_catalog import load_custom_models
+            from db.ops import get_custom_models
+            load_custom_models(await get_custom_models(session))
             return await coro(session)
     return asyncio.run(_inner())
 
@@ -319,19 +327,67 @@ def config_delete(
 
 @model_app.command("list")
 def model_list() -> None:
-    """List all available models."""
-    from core.model_catalog import AVAILABLE_MODELS
+    """List all available models (built-in + custom)."""
+    from core.model_catalog import BUILTIN_MODELS, available_models
     from db.ops import get_default_model
+    # _run_db hydrates the custom-model cache before this read.
     current_default = _run_db(lambda s: get_default_model(s))
+    builtin_ids = {m.id for m in BUILTIN_MODELS}
 
     table = Table(title="Available Models", show_header=True, header_style="bold cyan")
     table.add_column("ID", style="white")
     table.add_column("Label", style="green")
+    table.add_column("Source", style="magenta")
     table.add_column("", style="yellow")
-    for m in AVAILABLE_MODELS:
+    for m in available_models():
         marker = "◀ default" if m.id == current_default else ""
-        table.add_row(m.id, m.label, marker)
+        source = "built-in" if m.id in builtin_ids else "custom"
+        table.add_row(m.id, m.label, source, marker)
     console.print(table)
+
+
+@model_app.command("add")
+def model_add(
+    model_id: Annotated[str, typer.Argument(help="Model ID, e.g. google_genai:gemini-3.5-flash")],
+    label: Annotated[str, typer.Argument(help="Display label shown in selectors, e.g. 'Gemini 3.5 Flash'")],
+    provider: Annotated[
+        str | None,
+        typer.Option(help="Provider; inferred from the ID prefix (text before ':') when omitted."),
+    ] = None,
+) -> None:
+    """Add a model to the catalog at runtime — no code change needed.
+
+    The ID must be 'provider:model_name' where provider is one of the supported
+    backends. The model_name is passed verbatim to the provider's SDK.
+    """
+    from core.model_catalog import KNOWN_PROVIDERS, provider_from_id
+    from db.ops import add_custom_model
+    prov = provider or provider_from_id(model_id)
+    if not prov or ":" not in model_id:
+        rprint(f"[red]Invalid model ID:[/red] {model_id}\nExpected 'provider:model_name', e.g. google_genai:gemini-3.5-flash")
+        raise typer.Exit(code=1)
+    if prov not in KNOWN_PROVIDERS:
+        rprint(
+            f"[red]Unsupported provider:[/red] {prov}\n"
+            f"Must be one of: {', '.join(sorted(KNOWN_PROVIDERS))}"
+        )
+        raise typer.Exit(code=1)
+    _run_db(lambda s: add_custom_model(s, model_id, label, prov))
+    rprint(f"[green]✓[/green] Added model: {model_id} ({label}) [{prov}]")
+    rprint("[dim]Web UI picks it up on the next 'models' query; a running server validates it after that.[/dim]")
+
+
+@model_app.command("remove")
+def model_remove(
+    model_id: Annotated[str, typer.Argument(help="Custom model ID to remove")],
+) -> None:
+    """Remove a custom model. Built-in models cannot be removed."""
+    from db.ops import remove_custom_model
+    removed = _run_db(lambda s: remove_custom_model(s, model_id))
+    if removed:
+        rprint(f"[green]✓[/green] Removed model: {model_id}")
+    else:
+        rprint(f"[yellow]Not a custom model:[/yellow] {model_id} (built-ins can't be removed)")
 
 
 @model_app.command("set-default")
@@ -341,10 +397,16 @@ def model_set_default(
     """Set the default model used when no model is specified."""
     from core.model_catalog import is_valid_model
     from db.ops import set_setting
-    if not is_valid_model(model_id):
+    async def _work(s) -> bool:
+        # _run_db hydrates the custom-model cache before this runs, so
+        # is_valid_model also accepts runtime-added models.
+        if not is_valid_model(model_id):
+            return False
+        await set_setting(s, "default.model", model_id)
+        return True
+    if not _run_db(_work):
         rprint(f"[red]Unknown model:[/red] {model_id}\nRun 'model list' to see available IDs.")
         raise typer.Exit(code=1)
-    _run_db(lambda s: set_setting(s, "default.model", model_id))
     rprint(f"[green]✓[/green] Default model set to: {model_id}")
 
 

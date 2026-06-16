@@ -1,11 +1,21 @@
-"""Model catalog — single source of truth for available LLM models.
+"""Model catalog — source of truth for available LLM models.
 
-The backend rejects mutations whose `model` is not in this catalog. The
-frontend reads it via the GraphQL `models` query and populates all
-selectors from the response — adding or removing a model requires a single
-edit here, never any TSX.
+The catalog has two layers:
+
+* **Built-in models** (`BUILTIN_MODELS`) — compiled-in defaults / seed list.
+* **Custom models** — added at runtime via `main.py model add` (or the GraphQL
+  `models` query path), persisted in the DB (`config_settings`, key
+  `models.custom`) and hydrated into the in-memory `_custom_models` cache.
+  This lets new models be added without a code change or redeploy.
+
+`build_llm()` switches only on `provider`, never on a specific model id — the
+id is `provider:model_name`, so any model offered by a `KNOWN_PROVIDERS`
+backend works with zero new code. The backend rejects writes whose `model` is
+not in the catalog (`is_valid_model`); the frontend reads the catalog via the
+GraphQL `models` query and populates all selectors from the response.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 
@@ -38,11 +48,20 @@ class ModelSpec:
         raise ValueError(f"Unknown provider '{self.provider}' for model '{self.id}'")
 
 
-AVAILABLE_MODELS: tuple[ModelSpec, ...] = (
+# Providers `build_llm` knows how to instantiate. A custom model's id must use
+# one of these as its `provider:` prefix — there is no per-model code, only
+# per-provider, so any model from one of these backends is supported.
+KNOWN_PROVIDERS: frozenset[str] = frozenset(
+    {"ollama", "google_genai", "bedrock", "anthropic"}
+)
+
+
+BUILTIN_MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("google_genai:gemma-4-31b-it",           "Gemma 4 31B (Google)",      "google_genai"),
     ModelSpec("google_genai:gemma-4-26b-a4b-it",       "Gemma 4 26B (Google)",      "google_genai"),
     ModelSpec("google_genai:gemini-2.5-pro",           "Gemini 2.5 Pro (Google)",   "google_genai"),
     ModelSpec("google_genai:gemini-2.0-flash",         "Gemini 2.0 Flash (Google)", "google_genai"),
+    ModelSpec("google_genai:gemini-3.1-flash-lite",    "Gemini 3.1 Flash Lite (Google)", "google_genai"),
     ModelSpec("ollama:gemma4:26b",                     "Gemma 4 26B (Ollama)",  "ollama"),
     ModelSpec("ollama:llama3.3",                       "Llama 3.3 (Ollama)",    "ollama"),
     ModelSpec("ollama:qwen3:32b",                      "Qwen3 32B (Ollama)",    "ollama"),
@@ -52,21 +71,64 @@ AVAILABLE_MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("anthropic:claude-haiku-4-5-20251001",                         "Claude Haiku 4.5 (Anthropic)",       "anthropic"),
 )
 
-DEFAULT_MODEL: str = AVAILABLE_MODELS[0].id
+DEFAULT_MODEL: str = BUILTIN_MODELS[0].id
 
-_AVAILABLE_IDS: frozenset[str] = frozenset(m.id for m in AVAILABLE_MODELS)
+
+# In-memory cache of runtime-added models, hydrated from the DB. Populated at
+# server startup (lifespan), refreshed on each GraphQL `models` query, and
+# loaded per-invocation by the CLI (`_run_db`). See db/ops for persistence.
+_custom_models: tuple[ModelSpec, ...] = ()
+
+
+def provider_from_id(model_id: str) -> str:
+    """The provider encoded in a `provider:model_name` id (text before ':')."""
+    return model_id.partition(":")[0]
+
+
+def set_custom_models(specs: Iterable[ModelSpec]) -> None:
+    """Replace the in-memory custom-model cache."""
+    global _custom_models
+    _custom_models = tuple(specs)
+
+
+def load_custom_models(rows: Iterable[dict]) -> None:
+    """Hydrate the cache from raw config rows ({id, label, provider}).
+
+    `provider` is inferred from the id prefix when absent; rows missing a
+    usable id are skipped.
+    """
+    specs: list[ModelSpec] = []
+    for r in rows:
+        mid = r.get("id")
+        if not mid:
+            continue
+        provider = r.get("provider") or provider_from_id(mid)
+        specs.append(ModelSpec(mid, r.get("label") or mid, provider))
+    set_custom_models(specs)
+
+
+def available_models() -> tuple[ModelSpec, ...]:
+    """Built-in catalog plus runtime-added models, deduped by id (built-ins win)."""
+    seen: set[str] = set()
+    out: list[ModelSpec] = []
+    for m in (*BUILTIN_MODELS, *_custom_models):
+        if m.id in seen:
+            continue
+        seen.add(m.id)
+        out.append(m)
+    return tuple(out)
 
 
 def get_model_spec(model_id: str) -> ModelSpec:
     """Return the catalog entry for `model_id`. Raises ValueError if absent."""
-    spec = next((m for m in AVAILABLE_MODELS if m.id == model_id), None)
+    spec = next((m for m in available_models() if m.id == model_id), None)
     if spec is None:
         raise ValueError(f"Unknown model '{model_id}'")
     return spec
 
 
 def is_valid_model(model: str) -> bool:
-    """Whether `model` is in the catalog. Checked at write boundaries only —
-    read paths stay permissive so old DB rows with stale model strings still
-    run through `DEFAULT_MODEL` fallback in `build_agent`."""
-    return model in _AVAILABLE_IDS
+    """Whether `model` is in the catalog (built-in or custom). Checked at write
+    boundaries only — read paths stay permissive so old DB rows with stale model
+    strings still run through `DEFAULT_MODEL` fallback in `build_agent`."""
+    return any(m.id == model for m in available_models())
