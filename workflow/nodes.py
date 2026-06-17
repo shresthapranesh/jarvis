@@ -101,6 +101,87 @@ def _extract_tokens(content: Any) -> str:
     return ""
 
 
+def _block_text(content: Any) -> str:
+    """Collapse an LLM response's ``.content`` (str or list of blocks) to text.
+
+    Reasoning models return a list of typed blocks; single-turn callers
+    (router / evaluator) only want the text portion.
+    """
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    return str(content).strip()
+
+
+async def _run_agent_text(
+    node_id: str, model_id: str, prompt: str, task_state: TaskState
+) -> str:
+    """Run the full agent loop on ``prompt``, streaming main-agent tokens as
+    ``node_token`` events, and return the accumulated final text.
+
+    Shared by AgentNode and RefineNode. Each call uses a fresh checkpointer
+    thread so independent invocations never share history; history hygiene is
+    handled inside ``build_agent``'s model node.
+    """
+    from core.log_callback import AgentLogger
+    from core.state import get_async_checkpointer, get_store
+    from langchain_core.runnables import RunnableConfig
+
+    agent = build_agent(
+        model=model_id,
+        checkpointer=get_async_checkpointer(),
+        store=get_store(),
+    )
+    run_config: RunnableConfig = {
+        "configurable": {"thread_id": str(uuid4())},
+        "recursion_limit": 100,
+        "callbacks": [AgentLogger()],
+    }
+    final_text = ""
+    async for raw_chunk in agent.astream(
+        {"messages": [{"role": "user", "content": prompt}]},
+        config=run_config,
+        stream_mode=STREAM_MODES,
+        subgraphs=True,
+    ):
+        ns, mode, data = raw_chunk
+        if mode != "messages":
+            continue
+        token, _ = data
+        if getattr(token, "type", "") not in ("ai", "AIMessageChunk"):
+            continue
+        if not hasattr(token, "content"):
+            continue
+        # Only accumulate main-agent tokens (ns is None/empty), not subagent tokens
+        if ns:
+            continue
+        text = _extract_tokens(token.content)
+        if text:
+            final_text += text
+            _emit(task_state, "node_token", node_id=node_id, text=text)
+    return final_text
+
+
+def _match_category(response: str, categories: list[str]) -> str:
+    """Map a free-text routing response to one of ``categories``.
+
+    Robust across providers (no structured-output dependency): tries exact /
+    prefix match, then containment (longest name first so a longer category
+    isn't shadowed by a shorter substring), then falls back to the first
+    category.
+    """
+    text = response.strip().lower()
+    for c in categories:
+        if text == c.lower() or text.startswith(c.lower()):
+            return c
+    for c in sorted(categories, key=len, reverse=True):
+        if c.lower() in text:
+            return c
+    return categories[0]
+
+
 # ── AgentNode ─────────────────────────────────────────────────────────────────
 
 class AgentNode(BaseNode):
@@ -117,50 +198,11 @@ class AgentNode(BaseNode):
     node_type = "agent"
 
     async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
-        from core.state import get_async_checkpointer, get_store
-
         prompt = _interpolate(self.config.get("prompt_template", ""), inputs)
         model_id = self.config.get("model", DEFAULT_MODEL)
         output_key = self.config.get("output_key", "result")
 
-        agent = build_agent(
-            model=model_id,
-            checkpointer=get_async_checkpointer(),
-            store=get_store(),
-        )
-        from core.log_callback import AgentLogger
-        from langchain_core.runnables import RunnableConfig
-        thread_id = str(uuid4())
-        run_config: RunnableConfig = {
-            "configurable": {"thread_id": thread_id},
-            "recursion_limit": 100,
-            "callbacks": [AgentLogger()],
-        }
-        stream_input: Any = {"messages": [{"role": "user", "content": prompt}]}
-
-        final_text = ""
-        async for raw_chunk in agent.astream(
-            stream_input,
-            config=run_config,
-            stream_mode=STREAM_MODES,
-            subgraphs=True,
-        ):
-            ns, mode, data = raw_chunk
-            if mode != "messages":
-                continue
-            token, _ = data
-            if getattr(token, "type", "") not in ("ai", "AIMessageChunk"):
-                continue
-            if not hasattr(token, "content"):
-                continue
-            # Only accumulate main-agent tokens (ns is None/empty), not subagent tokens
-            if ns:
-                continue
-            text = _extract_tokens(token.content)
-            if text:
-                final_text += text
-                _emit(task_state, "node_token", node_id=self.node_id, text=text)
-
+        final_text = await _run_agent_text(self.node_id, model_id, prompt, task_state)
         return NodeOutput(data={output_key: final_text})
 
 
@@ -312,6 +354,150 @@ class StartNode(BaseNode):
         return NodeOutput(data={**defaults, **inputs})
 
 
+# ── RouterNode ──────────────────────────────────────────────────────────────
+
+class RouterNode(BaseNode):
+    """Multi-way classifier — routes execution to exactly one of several named
+    categories, pruning all the other branches.
+
+    Generalizes ConditionalNode (two-way true/false) to N labeled output ports.
+    Uses a single-turn LLM call with robust free-text matching rather than
+    structured output, so it stays reliable on Ollama/Gemma backends that
+    handle JSON/tool-call coercion poorly.
+
+    Config fields:
+        categories (list[str]): output port names; the LLM picks exactly one.
+                                Outgoing edges use these as their sourceHandle.
+        instruction (str):      classification prompt with ``{{var}}`` placeholders
+        model (str):            model id, defaults to DEFAULT_MODEL
+    """
+
+    node_type = "router"
+
+    def output_ports(self) -> list[str]:
+        return [str(c) for c in self.config.get("categories", [])]
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        categories = [str(c) for c in self.config.get("categories", [])]
+        if not categories:
+            raise ValueError("RouterNode requires a non-empty 'categories' list")
+
+        instruction = _interpolate(self.config.get("instruction", ""), inputs)
+        model_id = self.config.get("model", DEFAULT_MODEL)
+        llm = _get_model_spec(model_id).build_llm()
+
+        cat_list = ", ".join(categories)
+        response = await llm.ainvoke([
+            SystemMessage(content=(
+                "You are a routing classifier. Choose the single best-matching "
+                "category for the input. Answer with ONLY the category name, "
+                f"exactly as written, chosen from: {cat_list}. No explanation."
+            )),
+            HumanMessage(content=instruction),
+        ])
+        chosen = _match_category(_block_text(response.content), categories)
+
+        _emit(task_state, "node_condition", node_id=self.node_id, verdict=chosen)
+        return NodeOutput(data=inputs, next_handles=[chosen])
+
+
+# ── RefineNode ──────────────────────────────────────────────────────────────
+
+async def _evaluate_draft(
+    llm: Any, rubric: str, task: str, draft: str
+) -> tuple[bool, str]:
+    """Single-shot evaluator: judge ``draft`` against ``rubric``.
+
+    Returns ``(passed, critique)``. Robust free-text parse (PASS/FAIL as the
+    leading token) so it works without structured output.
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    response = await llm.ainvoke([
+        SystemMessage(content=(
+            "You are a strict reviewer. Judge whether the draft satisfies the "
+            "criteria. Respond with 'PASS' or 'FAIL' as the very first word. If "
+            "FAIL, follow it with specific, actionable critique of what to fix."
+        )),
+        HumanMessage(content=(
+            f"Criteria:\n{rubric or '(none given — judge overall quality and correctness)'}\n\n"
+            f"Original task:\n{task}\n\n"
+            f"Draft:\n{draft}"
+        )),
+    ])
+    text = _block_text(response.content)
+    low = text.lower()
+    passed = low.startswith("pass")
+    critique = text
+    for tok in ("pass", "fail"):
+        if low.startswith(tok):
+            critique = text[len(tok):].lstrip(" :.-\n")
+            break
+    return passed, critique
+
+
+class RefineNode(BaseNode):
+    """Evaluator-optimizer loop — generate, evaluate against a rubric, and
+    revise until a reviewer LLM accepts the draft or ``max_iterations`` is hit.
+
+    Self-contained (loops internally) so it needs no cycles in the DAG engine.
+    Generation runs the full agent loop (tools available); evaluation is a
+    cheap single-turn call. Streams generation tokens as ``node_token`` and
+    surfaces each round's verdict as a short ``node_token`` marker.
+
+    Config fields:
+        prompt_template (str):  generation task with ``{{var}}`` placeholders
+        rubric (str):           criteria the evaluator judges against
+        model (str):            model id for generation + evaluation
+        max_iterations (int):   max generate/evaluate rounds (default 3, clamped 1..5)
+        output_key (str):       output port name (default "result")
+    """
+
+    node_type = "refine"
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        base_prompt = _interpolate(self.config.get("prompt_template", ""), inputs)
+        rubric = _interpolate(self.config.get("rubric", ""), inputs)
+        model_id = self.config.get("model", DEFAULT_MODEL)
+        output_key = self.config.get("output_key", "result")
+        max_iters = max(1, min(5, int(self.config.get("max_iterations", 3))))
+
+        eval_llm = _get_model_spec(model_id).build_llm()
+
+        draft = ""
+        feedback: str | None = None
+        passed = False
+        attempt = 0
+        for attempt in range(1, max_iters + 1):
+            if feedback:
+                gen_prompt = (
+                    f"{base_prompt}\n\n"
+                    f"Your previous attempt:\n{draft}\n\n"
+                    f"A reviewer judged it insufficient:\n{feedback}\n\n"
+                    "Produce an improved version that fully addresses the critique."
+                )
+                _emit(task_state, "node_token", node_id=self.node_id,
+                      text=f"\n\n— revising (attempt {attempt}/{max_iters}) —\n\n")
+            else:
+                gen_prompt = base_prompt
+
+            draft = await _run_agent_text(self.node_id, model_id, gen_prompt, task_state)
+
+            passed, feedback = await _evaluate_draft(eval_llm, rubric, base_prompt, draft)
+            _emit(task_state, "node_token", node_id=self.node_id,
+                  text=f"\n\n— reviewer: {'PASS' if passed else 'FAIL'} —\n\n")
+            if passed:
+                break
+
+        return NodeOutput(data={
+            output_key: draft,
+            f"{output_key}_iterations": attempt,
+            f"{output_key}_passed": passed,
+        })
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 NODE_REGISTRY: dict[str, type[BaseNode]] = {
@@ -319,6 +505,8 @@ NODE_REGISTRY: dict[str, type[BaseNode]] = {
     "conditional": ConditionalNode,
     "map": MapNode,
     "start": StartNode,
+    "router": RouterNode,
+    "refine": RefineNode,
 }
 
 
