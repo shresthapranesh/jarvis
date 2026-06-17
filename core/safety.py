@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 from .model_catalog import get_model_spec
 
 from tools.artifacts import write_artifact as _write_artifact_tool
+from tools.code import run_cell as _run_cell_tool
 from tools.execute import execute as _execute_tool
 from tools.files import write_file as _write_file_tool
 
@@ -317,6 +318,33 @@ def make_safe_execute(judge_model: str, fail_mode: str = "open"):
         return await cast(Any, _execute_tool).coroutine(code=code)
 
     return safe_execute
+
+
+def make_safe_run_cell(judge_model: str, fail_mode: str = "open"):
+    """Build a wrapped `run_cell` tool that runs the judge first.
+
+    Identical screening to `make_safe_execute` (AST fast-path, then the LLM
+    judge). Note the kernel is stateful — a blocked cell never runs, but
+    earlier cells' in-process state persists. That's the same host-trust model
+    as execute(); the per-cell judge still gates every new payload.
+    """
+
+    @tool("run_cell", description=_run_cell_tool.description)
+    async def safe_run_cell(code: str) -> str:
+        _emit("safety_review_start", tool="run_cell", preview=_truncate(code, 200))
+        ast_reason = _ast_quickcheck(code)
+        if ast_reason is None:
+            _emit("safety_review_passed", tool="run_cell", via="ast")
+            return await cast(Any, _run_cell_tool).coroutine(code=code)
+        verdict = await _review("run_cell", f"code:\n{code}", judge_model, fail_mode)
+        if verdict.block:
+            _emit("safety_review_blocked", tool="run_cell", severity=verdict.severity, reason=verdict.reason)
+            logger.info("run_cell blocked by safety judge: %s (ast: %s)", verdict.reason, ast_reason)
+            return _blocked_message("run_cell", verdict)
+        _emit("safety_review_passed", tool="run_cell", via="llm")
+        return await cast(Any, _run_cell_tool).coroutine(code=code)
+
+    return safe_run_cell
 
 
 def make_safe_write_artifact(judge_model: str, fail_mode: str = "open"):

@@ -1,4 +1,4 @@
-from tools.code import run_python
+from tools.code import run_cell
 from tools.datetime import get_current_datetime
 from tools.files import list_files, read_file, write_file
 from tools.finance import (
@@ -12,7 +12,7 @@ from tools.web import extract_links, fetch_page, web_search
 
 TOOLS = [
     get_current_datetime,
-    run_python,
+    run_cell,
     web_search,
     fetch_page,
     extract_links,

@@ -36,7 +36,7 @@ from .routes_live import router as live_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
 from .routes_uploads import router as uploads_router
-from core.scheduler import _register_scheduler_job, _scheduler, register_memory_consolidation_job, register_staging_cleanup_job
+from core.scheduler import _register_scheduler_job, _scheduler, register_kernel_reaper_job, register_memory_consolidation_job, register_staging_cleanup_job
 
 def _resource_root() -> pathlib.Path:
     if getattr(sys, "frozen", False):
@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _chat_worker_task = asyncio.create_task(_build_chat_worker(state._queue).run())
         register_memory_consolidation_job()
         register_staging_cleanup_job()
+        register_kernel_reaper_job()
 
         _tg_app = None
         _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -135,6 +136,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _reaper_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await _reaper_task
+
+        # Tear down any live run_cell kernels (workers are already stopped).
+        from core.kernels import get_kernel_registry
+        with contextlib.suppress(Exception):
+            await get_kernel_registry().shutdown_all()
 
         state._async_checkpointer = None
         state._store = None
