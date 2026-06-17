@@ -1,9 +1,9 @@
 """Workflow execution engine.
 
-Traverses a workflow graph, executes nodes in dependency order, and
-streams SSE events through a TaskState. Supports conditional branching
-via ConditionalNode's ``next_handles`` — inactive branches are pruned
-and their nodes never execute.
+Traverses a workflow graph in dependency order, running each ready frontier
+of mutually-independent nodes concurrently, and streams SSE events through a
+TaskState. Supports conditional branching via ConditionalNode's
+``next_handles`` — inactive branches are pruned and their nodes never execute.
 
 Graph definition format (stored as JSON in ``Workflow.definition``):
 
@@ -60,7 +60,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.state import TaskState
-from workflow.nodes import build_node, _emit, _interpolate
+from workflow.nodes import NodeOutput, build_node, _emit, _interpolate
 
 
 # ── Graph helpers ─────────────────────────────────────────────────────────────
@@ -180,15 +180,15 @@ async def execute_workflow(
     # Per-node result records accumulated for DB persistence (returned separately)
     node_records: list[dict] = []
 
-    while queue:
-        if task_state.cancelled:
-            raise asyncio.CancelledError()
+    async def _run_node(node_id: str) -> tuple[str, NodeOutput | None, dict]:
+        """Execute one node and emit its lifecycle events.
 
-        node_id = queue.popleft()
-
-        if node_id in executed:
-            continue
-
+        Returns ``(node_id, result, record)``; ``result`` is None when the node
+        raised — the caller skips state updates for it but keeps the error
+        record so independent branches keep running. Reads ``completed`` /
+        ``pruned_edges`` but never mutates shared state, so a whole frontier can
+        run concurrently under ``asyncio.gather``.
+        """
         node_def = nodes_by_id[node_id]
         node_type = node_def.get("type", "")
         label = node_def.get("label", node_id)
@@ -226,38 +226,69 @@ async def execute_workflow(
             record["status"] = "error"
             record["error"] = error_msg
             record["finished_at"] = _now_iso()
-            node_records.append(record)
-
             _emit(task_state, "node_error", node_id=node_id, error=error_msg)
-            # Continue executing other independent branches
-            executed.add(node_id)
-            continue
-
-        executed.add(node_id)
-        completed[node_id] = result.data
+            return node_id, None, record
 
         record["status"] = "done"
         record["outputs"] = result.data
         record["finished_at"] = _now_iso()
         if result.next_handles is not None:
             record["verdict"] = result.next_handles[0]  # "true" or "false"
-        node_records.append(record)
-
         _emit(task_state, "node_done", node_id=node_id, output=result.data)
+        return node_id, result, record
 
-        # Handle conditional pruning
-        if result.next_handles is not None:
-            for edge in edges:
-                if edge["source"] != node_id:
-                    continue
-                if edge.get("sourceHandle") not in result.next_handles:
-                    pruned_edges.add(edge["id"])
+    # Level-synchronized BFS: each iteration drains the entire ready frontier
+    # and runs those nodes concurrently. They are independent by construction —
+    # a node only becomes ready once all its active predecessors have completed,
+    # so no two nodes in one frontier can depend on each other. The barrier
+    # between levels keeps `completed`/`pruned_edges` consistent before the next
+    # frontier's readiness (and any conditional pruning) is computed.
+    while queue:
+        if task_state.cancelled:
+            raise asyncio.CancelledError()
 
-        # Enqueue newly unblocked downstream nodes
-        for candidate_id in successors.get(node_id, []):
-            if candidate_id not in executed and candidate_id not in queue:
-                if _is_ready(candidate_id, edges, completed, pruned_edges):
-                    queue.append(candidate_id)
+        # Drain the current frontier, skipping already-run / duplicate ids.
+        frontier: list[str] = []
+        batch_seen: set[str] = set()
+        while queue:
+            nid = queue.popleft()
+            if nid in executed or nid in batch_seen:
+                continue
+            frontier.append(nid)
+            batch_seen.add(nid)
+
+        if not frontier:
+            break
+
+        batch = await asyncio.gather(*(_run_node(nid) for nid in frontier))
+
+        if task_state.cancelled:
+            raise asyncio.CancelledError()
+
+        # Apply results in frontier order so node_records and final outputs are
+        # deterministic regardless of which node's coroutine finished first.
+        for node_id, result, record in batch:
+            executed.add(node_id)
+            node_records.append(record)
+            if result is None:
+                continue  # errored — its branch stalls; others continue
+            completed[node_id] = result.data
+            # Handle conditional pruning
+            if result.next_handles is not None:
+                for edge in edges:
+                    if edge["source"] != node_id:
+                        continue
+                    if edge.get("sourceHandle") not in result.next_handles:
+                        pruned_edges.add(edge["id"])
+
+        # With the whole level applied, enqueue every newly-unblocked successor.
+        for node_id, result, _ in batch:
+            if result is None:
+                continue
+            for candidate_id in successors.get(node_id, []):
+                if candidate_id not in executed and candidate_id not in queue:
+                    if _is_ready(candidate_id, edges, completed, pruned_edges):
+                        queue.append(candidate_id)
 
     # Collect outputs from terminal nodes (no active outgoing edges)
     final_outputs: dict[str, Any] = {}
