@@ -31,6 +31,7 @@ jarvis/
 │   ├── config.py         # AppConfig (DATABASE_URL, work_dir, artifacts_dir, documents_dir, staging_dir)
 │   ├── document_extractor.py  # PDF/DOCX/XLSX text extraction
 │   ├── doc_index.py      # chunk-index large attachments + cosine search (Gemini embeddings)
+│   ├── kernels.py        # per-session IPython kernels (stateful run_cell) + idle reaper
 │   └── log_setup.py / log_callback.py  # logging + AgentLogger
 ├── db/
 │   ├── models.py         # ORM: Conversation, Message, Step, Automation, AutomationRun,
@@ -69,7 +70,7 @@ jarvis/
 │   ├── engine.py         # BFS workflow executor — execute_workflow()
 │   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode + _emit()
 ├── tools/
-│   ├── execute.py        # safe_execute (Python in subprocess)
+│   ├── execute.py        # execute — stateless Python in a fresh subprocess (wrapped by safe_execute)
 │   ├── files.py          # read_file, write_file, list_files
 │   ├── artifacts.py      # write_artifact, read_artifact, list_artifacts
 │   ├── documents.py      # search_documents, read_document (retrieval over indexed attachments)
@@ -79,7 +80,7 @@ jarvis/
 │   ├── workflows.py      # CRUD as agent tools
 │   ├── browser_agent.py  # Headless browser sub-agent
 │   ├── web.py            # web_search, fetch_page, extract_links
-│   ├── code.py           # run_python
+│   ├── code.py           # run_cell — stateful notebook session (per-conversation IPython kernel, core/kernels.py)
 │   ├── finance.py        # get_stock_data, get_historical_prices, compare_stocks, …
 │   └── datetime.py       # get_current_datetime
 └── frontend/             # React 19 + TanStack Router + Relay + Vite + TypeScript

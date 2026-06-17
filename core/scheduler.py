@@ -125,3 +125,31 @@ def register_staging_cleanup_job(cron_expr: str = "0 * * * *") -> None:
         misfire_grace_time=300,
     )
     logger.info("staging cleanup scheduled: %s", cron_expr)
+
+
+def _run_kernel_reaper() -> None:
+    """Called from BackgroundScheduler thread — reaps idle run_cell kernels on the main loop."""
+    from core.kernels import get_kernel_registry  # noqa: PLC0415
+
+    if state._main_loop is None:
+        return
+    future = asyncio.run_coroutine_threadsafe(
+        get_kernel_registry().reap_idle(),
+        state._main_loop,
+    )
+    try:
+        future.result(timeout=120)
+    except Exception:
+        logger.exception("kernel reaper failed")
+
+
+def register_kernel_reaper_job(cron_expr: str = "*/10 * * * *") -> None:
+    """Register the idle-kernel reaper cron job. Defaults to every 10 minutes."""
+    _scheduler.add_job(
+        func=_run_kernel_reaper,
+        trigger=CronTrigger.from_crontab(cron_expr),
+        id="kernel_reaper",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+    logger.info("kernel reaper scheduled: %s", cron_expr)

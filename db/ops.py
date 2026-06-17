@@ -181,6 +181,12 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
     except Exception as e:
         logger.warning("Failed to delete checkpoint thread %s: %s", conv_id, e)
 
+    try:
+        from core.kernels import get_kernel_registry
+        await get_kernel_registry().shutdown(conv_id)
+    except Exception as e:
+        logger.warning("Failed to shut down kernel for %s: %s", conv_id, e)
+
 
 async def get_conversation_meta(session: AsyncSession, conv_id: str) -> Conversation | None:
     return await session.get(Conversation, conv_id)

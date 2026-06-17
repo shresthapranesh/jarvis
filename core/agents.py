@@ -28,7 +28,12 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     get_model_spec,
     is_valid_model,
 )
-from .safety import make_safe_execute, make_safe_write_artifact, make_safe_write_file
+from .safety import (
+    make_safe_execute,
+    make_safe_run_cell,
+    make_safe_write_artifact,
+    make_safe_write_file,
+)
 from .schemas import TodoItem, _normalise_todos, reduce_todos
 from .summarization import maybe_summarize
 from tools.artifacts import list_artifacts as artifact_list, read_artifact
@@ -129,10 +134,18 @@ with full access to the network, filesystem, and all installed packages.
 - Do NOT paste code in your response — call execute() directly.
 - The user sees a live activity feed of your tool calls; they do not need a running commentary.
 
-## execute() is stateless
-Every execute() call runs in a **fresh subprocess**. Variables, imports, open files, and \
-in-memory data do NOT persist between calls. Batch related work into one call rather \
-than splitting it across many. Re-import packages and re-fetch data each time.
+## Two ways to run Python: execute() vs run_cell()
+- **execute(code) is stateless.** Every call runs in a **fresh subprocess** — variables, \
+imports, open files, and in-memory data do NOT persist between calls. Batch related work \
+into one call; re-import and re-fetch each time. Use it for one-shot, self-contained \
+snippets that want a clean slate.
+- **run_cell(code) is a stateful notebook session.** Calls share one long-lived kernel \
+for this conversation, so variables/imports/loaded data **persist** across calls, like \
+Jupyter cells. The value of the last expression is echoed (no print needed). Use it when \
+building up state iteratively — load a dataset once then explore it over several steps, \
+define helpers and reuse them, keep a client/connection open, or inspect a previous \
+cell's variables while debugging. Note that it also carries over earlier mistakes; reach \
+for execute() when you need a guaranteed clean slate.
 
 ## How to work
 1. Call execute() to get data or run computation.
@@ -279,6 +292,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # Safety wrappers — judge runs on the same model as the agent for now.
     # Override at the call site once a config knob is wired up.
     safe_execute = make_safe_execute(model)
+    safe_run_cell = make_safe_run_cell(model)
     safe_write_file = make_safe_write_file(model)
     safe_write_artifact = make_safe_write_artifact(model)
 
@@ -287,9 +301,9 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # conversation's workers always run on the same model as its main agent.
 
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [safe_execute, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
+        "general":    [safe_execute, safe_run_cell, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
         "researcher": [safe_execute, read_file, read_artifact, artifact_list, search_documents, read_document],
-        "coder":      [safe_execute, read_file, safe_write_file, list_files],
+        "coder":      [safe_execute, safe_run_cell, read_file, safe_write_file, list_files],
         "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
     }
 
@@ -329,6 +343,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
     main_tools = [
         safe_execute,
+        safe_run_cell,
         read_file,
         safe_write_file,
         list_files,
