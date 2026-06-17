@@ -43,6 +43,25 @@ function RootLayout() {
     localStorage.setItem('nav-collapsed', String(next));
   }, [navCollapsed]);
 
+  // Theme is resolved before first paint by the inline script in index.html;
+  // seed state from the attribute it set, then persist the user's choice.
+  const [theme, setTheme] = useState<'light' | 'dark'>(
+    () => (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') ?? 'dark',
+  );
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {
+        localStorage.setItem('theme', next);
+      } catch {
+        /* localStorage unavailable — keep the in-memory choice */
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
@@ -74,6 +93,43 @@ function RootLayout() {
         <div className="left-panel-header">
           <div className={`status-dot ${healthy ? 'ok' : 'err'}`} />
           {!navCollapsed && <span className="brand">Assistant</span>}
+          {!navCollapsed && (
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            >
+              {theme === 'dark' ? (
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                </svg>
+              ) : (
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+              )}
+            </button>
+          )}
           <button
             className={`nav-toggle${navCollapsed ? ' nav-toggle--collapsed' : ''}`}
             onClick={toggleNav}
