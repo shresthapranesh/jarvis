@@ -13,11 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Annotated, Any
+from pathlib import Path
 
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
-from langgraph.config import get_config as _get_lg_config, get_stream_writer
+from langchain_core.tools import tool
 
 from core.config import get_config
 from db import async_session
@@ -27,45 +25,12 @@ from db.ops import (
     list_artifacts as db_list_artifacts,
     update_artifact,
 )
+from tools.context import current_ctx
 
 logger = logging.getLogger(__name__)
 
 
-def _conversation_id_from_config(config: RunnableConfig | None) -> str | None:
-    """Read the DB conversation id injected by the entry point.
-
-    Distinct from `thread_id` (the LangGraph checkpointer thread): only some
-    entry points (chat, telegram) correspond to a real Conversation row.
-    CLI/automation/workflow/live runs leave this unset and the tool returns
-    a generic "no artifacts" response — which is correct for those contexts.
-    """
-    try:
-        lg_config = _get_lg_config()
-        conv_id = (lg_config.get("configurable") or {}).get("conversation_id")
-        if conv_id:
-            return str(conv_id)
-    except Exception:
-        pass
-    if not config:
-        return None
-    configurable = config.get("configurable") or {}
-    conv_id = configurable.get("conversation_id")
-    return str(conv_id) if conv_id else None
-
-
-def _emit(event_type: str, **fields: Any) -> None:
-    """Emit a custom SSE event so the frontend can react in real time."""
-    try:
-        writer = get_stream_writer()
-    except Exception:
-        return
-    try:
-        writer({"type": event_type, **fields})
-    except Exception as exc:
-        logger.debug("artifact event emit failed: %s", exc)
-
-
-def _artifact_path(artifact_id: str) -> Any:
+def _artifact_path(artifact_id: str) -> Path:
     cfg = get_config()
     cfg.artifacts_dir.mkdir(parents=True, exist_ok=True)
     return cfg.artifacts_dir / f"{artifact_id}.md"
@@ -76,7 +41,6 @@ async def write_artifact(
     title: str,
     content: str,
     artifact_id: str | None = None,
-    config: Annotated[RunnableConfig | None, InjectedToolArg] = None,
 ) -> str:
     """Save a markdown deliverable (report, draft, document, resume, etc.).
 
@@ -92,7 +56,8 @@ async def write_artifact(
 
     Returns the artifact id and title as a JSON string the agent can refer to.
     """
-    conversation_id = _conversation_id_from_config(config)
+    ctx = current_ctx()
+    conversation_id = ctx.conversation_id
 
     async with async_session() as session:
         if artifact_id:
@@ -117,7 +82,7 @@ async def write_artifact(
     path = _artifact_path(art.id)
     path.write_text(content, encoding="utf-8")
 
-    _emit(
+    ctx.emit(
         "artifact",
         action=action,
         id=art.id,
@@ -142,10 +107,7 @@ async def read_artifact(artifact_id: str) -> str:
 
 
 @tool
-async def list_artifacts(
-    all_conversations: bool = False,
-    config: Annotated[RunnableConfig | None, InjectedToolArg] = None,
-) -> str:
+async def list_artifacts(all_conversations: bool = False) -> str:
     """List saved artifacts, newest first.
 
     By default lists only the current conversation's artifacts. Pass
@@ -153,7 +115,7 @@ async def list_artifacts(
     use this to find a deliverable produced in earlier work, then fetch it
     with read_artifact(id). Each row includes its conversation_id for context.
     """
-    conversation_id = None if all_conversations else _conversation_id_from_config(config)
+    conversation_id = None if all_conversations else current_ctx().conversation_id
     async with async_session() as session:
         rows = await db_list_artifacts(session, conversation_id=conversation_id)
     if not rows:

@@ -1,14 +1,14 @@
 """Stateful code-execution tool — `run_cell`, a persistent notebook session.
 
-Companion to `execute` (`tools/execute.py`), which is stateless: every
-`execute` call runs in a fresh subprocess. `run_cell` instead sends code to a
-long-lived IPython kernel scoped to the conversation (see `core/kernels.py`),
-so variables, imports, and loaded data persist across calls like cells in a
-Jupyter notebook.
+The agent's sole code surface: code is sent to a long-lived IPython kernel
+(see `core/kernels.py`), so variables, imports, and loaded data persist across
+calls like cells in a Jupyter notebook.
 
-Scoped by conversation_id when present (chat / Telegram / Discord), falling
-back to the LangGraph thread_id otherwise (CLI / automation / workflow) so the
-session still works there. The kernel is started lazily on the first cell.
+Kernel scope comes from `ToolContext.code_session_key`: conversation_id when
+present (chat / Telegram / Discord), else the LangGraph thread_id (CLI /
+automation / workflow), unless an explicit `kernel_key` overrides it — which is
+how parallel workers each get their own isolated kernel (see `tools/workers.py`).
+The kernel is started lazily on the first cell.
 """
 
 from __future__ import annotations
@@ -17,21 +17,11 @@ import logging
 import time
 
 from langchain_core.tools import tool
-from langgraph.config import get_config as _get_lg_config
 
 from core.kernels import DEFAULT_CELL_TIMEOUT, get_kernel_registry
+from tools.context import current_ctx
 
 logger = logging.getLogger(__name__)
-
-
-def _session_key() -> str | None:
-    """Session key for the current run: conversation_id, else thread_id."""
-    try:
-        configurable = _get_lg_config().get("configurable") or {}
-    except Exception:
-        return None
-    key = configurable.get("conversation_id") or configurable.get("thread_id")
-    return str(key) if key else None
 
 
 @tool
@@ -45,11 +35,11 @@ async def run_cell(code: str) -> str:
     Use run_cell when you're building up state iteratively: load a dataset
     once then explore it over several steps, define helpers and reuse them,
     keep an open client/connection between calls, or debug by inspecting
-    variables from a previous cell.
+    variables from a previous cell. This is your default tool for all
+    computational work — fetching data, running code, testing, analysis.
 
-    Use execute() instead for a one-shot, fully self-contained snippet that
-    needs a clean slate — run_cell carries over everything you defined before,
-    including earlier mistakes.
+    Need a clean slate? Don't re-fetch — just rebind the variables you care
+    about, or run `%reset -f` in a cell to clear the namespace.
 
     Output: like a notebook, the value of the last expression is echoed (no
     print needed), alongside anything you print and any traceback. Rich
@@ -58,9 +48,9 @@ async def run_cell(code: str) -> str:
     Timeout: 60s per cell. On timeout the kernel is interrupted but your
     session state (variables, imports) is preserved, so you can continue.
     """
-    key = _session_key()
+    key = current_ctx().code_session_key
     if not key:
-        return "No session context — run_cell is unavailable here; use execute() instead."
+        return "No session context — code execution is unavailable here."
     start = time.monotonic()
     logger.info("→ run_cell [%s] (%d chars)", key, len(code))
     result = await get_kernel_registry().run_cell(key, code, timeout=DEFAULT_CELL_TIMEOUT)
