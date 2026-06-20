@@ -143,15 +143,30 @@ async def read_artifact(artifact_id: str) -> str:
 
 @tool
 async def list_artifacts(
+    all_conversations: bool = False,
     config: Annotated[RunnableConfig | None, InjectedToolArg] = None,
 ) -> str:
-    """List artifacts saved in the current conversation, newest first."""
-    conversation_id = _conversation_id_from_config(config)
+    """List saved artifacts, newest first.
+
+    By default lists only the current conversation's artifacts. Pass
+    all_conversations=True to list every artifact across all conversations —
+    use this to find a deliverable produced in earlier work, then fetch it
+    with read_artifact(id). Each row includes its conversation_id for context.
+    """
+    conversation_id = None if all_conversations else _conversation_id_from_config(config)
     async with async_session() as session:
         rows = await db_list_artifacts(session, conversation_id=conversation_id)
     if not rows:
-        return "No artifacts in this conversation."
+        return (
+            "No artifacts found." if all_conversations
+            else "No artifacts in this conversation."
+        )
     return json.dumps([
-        {"id": a.id, "title": a.title, "updated_at": a.updated_at.isoformat()}
+        {
+            "id": a.id,
+            "title": a.title,
+            "conversation_id": a.conversation_id,
+            "updated_at": a.updated_at.isoformat(),
+        }
         for a in rows
     ])
