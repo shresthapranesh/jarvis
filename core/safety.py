@@ -2,9 +2,10 @@
 
 Three layers, all driven by the same judge machinery here:
 
-1. **Per-call wrappers** around `execute` and `write_file` — see
-   `make_safe_execute` / `make_safe_write_file`. Wired into the main and
-   worker tool lists in `core/agents.py`; ToolNode itself is unchanged.
+1. **Per-call wrappers** around `run_cell`, `write_file`, and `write_artifact`
+   — see `make_safe_run_cell` / `make_safe_write_file` / `make_safe_write_artifact`.
+   Wired into the main and worker tool lists in `core/agents.py`; ToolNode
+   itself is unchanged.
 
 2. **Input gate** — see `gate_input`. Called from each entry point
    (`server/chat_runtime.py`, `server/automation_runtime.py`,
@@ -21,8 +22,8 @@ Custom stream events emitted via `get_stream_writer()` (same pattern as
   - `safety_review_start`   — review begins
   - `safety_review_passed`  — judge allowed the content through
   - `safety_review_blocked` — judge blocked it
-The `tool` field on each event distinguishes layer (`"execute"`,
-`"write_file"`, `"input"`, `"output"`).
+The `tool` field on each event distinguishes layer (`"run_cell"`,
+`"write_file"`, `"write_artifact"`, `"input"`, `"output"`).
 """
 
 from __future__ import annotations
@@ -31,20 +32,16 @@ import ast as _ast
 import hashlib
 import logging
 from collections import OrderedDict
-from typing import Annotated, Any, Literal, cast
+from typing import Any, Literal, cast
 
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import tool
 from langgraph.config import get_stream_writer
-from langgraph.prebuilt import InjectedStore
-from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
 from .model_catalog import get_model_spec
 
 from tools.artifacts import write_artifact as _write_artifact_tool
 from tools.code import run_cell as _run_cell_tool
-from tools.execute import execute as _execute_tool
 from tools.files import write_file as _write_file_tool
 
 logger = logging.getLogger(__name__)
@@ -134,7 +131,7 @@ def _truncate(text: str, limit: int = 4000) -> str:
     return text[:limit] + f"\n... [truncated {len(text) - limit} chars]"
 
 
-# ── AST fast-path for execute() ──────────────────────────────────────────────
+# ── AST fast-path for run_cell() ──────────────────────────────────────────────
 
 # Modules whose presence forces an LLM judge call. Anything not on this list
 # (math, statistics, json, re, hashlib, datetime, itertools, functools,
@@ -223,7 +220,7 @@ async def _judge_text(
     """Run the judge with arbitrary system+user prompts.
 
     Shared plumbing for the per-call review and the input/output gates.
-    `layer` is just for logging — "execute"/"write_file"/"input"/"output".
+    `layer` is just for logging — "run_cell"/"write_file"/"input"/"output".
     Fail-open by default on judge errors. Identical (layer, model, payload)
     triples reuse a cached verdict to skip the LLM call entirely.
     """
@@ -294,39 +291,12 @@ def _blocked_message(tool_name: str, verdict: SafetyVerdict) -> str:
     )
 
 
-def make_safe_execute(judge_model: str, fail_mode: str = "open"):
-    """Build a wrapped `execute` tool that runs the judge first.
-
-    Keeps the original tool name and docstring so the agent's system prompt
-    (which references `execute`) stays accurate and the LLM sees the same
-    schema it always has.
-    """
-
-    @tool("execute", description=_execute_tool.description)
-    async def safe_execute(code: str) -> str:
-        _emit("safety_review_start", tool="execute", preview=_truncate(code, 200))
-        ast_reason = _ast_quickcheck(code)
-        if ast_reason is None:
-            _emit("safety_review_passed", tool="execute", via="ast")
-            return await cast(Any, _execute_tool).coroutine(code=code)
-        verdict = await _review("execute", f"code:\n{code}", judge_model, fail_mode)
-        if verdict.block:
-            _emit("safety_review_blocked", tool="execute", severity=verdict.severity, reason=verdict.reason)
-            logger.info("execute blocked by safety judge: %s (ast: %s)", verdict.reason, ast_reason)
-            return _blocked_message("execute", verdict)
-        _emit("safety_review_passed", tool="execute", via="llm")
-        return await cast(Any, _execute_tool).coroutine(code=code)
-
-    return safe_execute
-
-
 def make_safe_run_cell(judge_model: str, fail_mode: str = "open"):
     """Build a wrapped `run_cell` tool that runs the judge first.
 
-    Identical screening to `make_safe_execute` (AST fast-path, then the LLM
-    judge). Note the kernel is stateful — a blocked cell never runs, but
-    earlier cells' in-process state persists. That's the same host-trust model
-    as execute(); the per-cell judge still gates every new payload.
+    Screens each cell with the AST fast-path, then the LLM judge. The kernel is
+    stateful — a blocked cell never runs, but earlier cells' in-process state
+    persists; the per-cell judge still gates every new payload.
     """
 
     @tool("run_cell", description=_run_cell_tool.description)
@@ -361,7 +331,6 @@ def make_safe_write_artifact(judge_model: str, fail_mode: str = "open"):
         title: str,
         content: str,
         artifact_id: str | None = None,
-        config: Annotated[RunnableConfig | None, InjectedToolArg] = None,
     ) -> str:
         payload = f"title: {title}\n\ncontent:\n{content}"
         _emit("safety_review_start", tool="write_artifact", preview=_truncate(title, 200))
@@ -377,8 +346,10 @@ def make_safe_write_artifact(judge_model: str, fail_mode: str = "open"):
             logger.info("write_artifact blocked by safety judge: %s (%s)", verdict.reason, title)
             return _blocked_message("write_artifact", verdict)
         _emit("safety_review_passed", tool="write_artifact", title=title)
+        # The real tool reads conversation context ambiently via current_ctx();
+        # no config injection to forward here.
         return await cast(Any, _write_artifact_tool).coroutine(
-            title=title, content=content, artifact_id=artifact_id, config=config,
+            title=title, content=content, artifact_id=artifact_id,
         )
 
     return safe_write_artifact
@@ -387,16 +358,13 @@ def make_safe_write_artifact(judge_model: str, fail_mode: str = "open"):
 def make_safe_write_file(judge_model: str, fail_mode: str = "open"):
     """Build a wrapped `write_file` tool that runs the judge first.
 
-    Preserves the InjectedStore parameter so ToolNode still injects the store
-    into the wrapper, which forwards it to the original tool.
+    The real tool reaches the memory store ambiently via current_ctx() (which
+    wires it from the running graph's store), so the wrapper no longer needs to
+    inject or forward a store.
     """
 
     @tool("write_file", description=_write_file_tool.description)
-    async def safe_write_file(
-        filepath: str,
-        content: str,
-        store: Annotated[BaseStore, InjectedStore()],
-    ) -> str:
+    async def safe_write_file(filepath: str, content: str) -> str:
         payload = f"filepath: {filepath}\n\ncontent:\n{content}"
         _emit("safety_review_start", tool="write_file", preview=_truncate(filepath, 200))
         verdict = await _review("write_file", payload, judge_model, fail_mode)
@@ -412,7 +380,7 @@ def make_safe_write_file(judge_model: str, fail_mode: str = "open"):
             return _blocked_message("write_file", verdict)
         _emit("safety_review_passed", tool="write_file", filepath=filepath)
         return await cast(Any, _write_file_tool).coroutine(
-            filepath=filepath, content=content, store=store,
+            filepath=filepath, content=content,
         )
 
     return safe_write_file

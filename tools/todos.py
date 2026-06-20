@@ -1,12 +1,20 @@
-"""Todo list tools — let the agent track its own task list with per-item status."""
+"""Todo list tools — let the agent track its own task list with per-item status.
+
+Event emission goes through the framework-agnostic ``ToolContext`` (``ctx.emit``).
+The remaining LangGraph types here — ``Command`` / ``InjectedState`` /
+``InjectedToolCallId`` — are the genuine state-mutation mechanism (a tool
+writing the shared ``todos`` reducer); they are the residual coupling a future
+framework swap must re-map (see ``tools/context.py``).
+"""
 
 from typing import Annotated, Any, Literal
 
-from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
+
+from tools.context import current_ctx
 
 
 def _normalise(raw: Any) -> list[dict]:
@@ -46,7 +54,7 @@ async def write_todos(
       ])
     """
     items: list[dict] = [{"text": t, "status": "pending"} for t in todos]
-    await adispatch_custom_event("todos_updated", {"type": "todos_updated", "todos": items})
+    current_ctx().emit("todos_updated", todos=items)
     ack = f"Updated todo list ({len(items)} item{'s' if len(items) != 1 else ''})."
     return Command(update={
         "todos": items,
@@ -75,7 +83,7 @@ async def set_todo_status(
             )],
         })
     todos[index] = {"text": todos[index]["text"], "status": status}
-    await adispatch_custom_event("todos_updated", {"type": "todos_updated", "todos": todos})
+    current_ctx().emit("todos_updated", todos=todos)
     ack = f"Set todo {index} to {status!r}."
     return Command(update={
         "todos": todos,

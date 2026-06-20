@@ -1,8 +1,7 @@
 """Stateful per-session IPython kernels — a Jupyter-notebook-like coding session.
 
-Backs the `run_cell` tool (`tools/code.py`). Unlike `execute` (a fresh
-subprocess per call — `tools/execute.py` wrapped by `core/safety.py`), each
-session gets ONE long-lived IPython kernel, so variables, imports, and
+Backs the `run_cell` tool (`tools/code.py`) — the agent's sole code surface.
+Each session gets ONE long-lived IPython kernel, so variables, imports, and
 in-memory data persist across cells the way a notebook does.
 
 A "session" is keyed by conversation_id (or, for CLI/automation/workflow runs
@@ -11,7 +10,7 @@ that have no conversation, the LangGraph thread_id). One kernel per key.
 Lifecycle:
   - lazily started on the first cell for a key
   - serialized per session (one cell at a time) via an ``asyncio.Lock`` —
-    concurrent ``execute`` requests on a single kernel would interleave
+    concurrent cells on a single kernel would interleave
   - idle-reaped by a scheduler job (``core/scheduler.register_kernel_reaper_job``)
   - LRU-evicted once more than ``MAX_KERNELS`` are live
   - shut down on conversation delete (``db/ops.delete_conversation``) and on
@@ -42,7 +41,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # if these need per-deployment overrides.
 MAX_KERNELS = 12               # hard cap on concurrent live kernels (LRU-evict beyond)
 IDLE_TIMEOUT_SECONDS = 30 * 60  # reap a kernel untouched for this long
-DEFAULT_CELL_TIMEOUT = 60      # per-cell wall-clock limit (mirrors execute())
+DEFAULT_CELL_TIMEOUT = 60      # per-cell wall-clock limit
 STARTUP_TIMEOUT = 60           # kernel boot budget
 INTERRUPT_DRAIN_TIMEOUT = 5    # after interrupting, how long to wait for the kernel to settle
 MAX_OUTPUT_CHARS = 30_000      # cap a single cell's captured output

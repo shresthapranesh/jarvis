@@ -11,23 +11,17 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Annotated
 
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import tool
 
 from core.doc_index import embeddings_available, read_chunks, search_chunks
-from tools.artifacts import _conversation_id_from_config
+from tools.context import current_ctx
 
 logger = logging.getLogger(__name__)
 
 
 @tool
-async def search_documents(
-    query: str,
-    k: int = 6,
-    config: Annotated[RunnableConfig | None, InjectedToolArg] = None,
-) -> str:
+async def search_documents(query: str, k: int = 6) -> str:
     """Semantically search the indexed documents attached to this conversation.
 
     Use this when a message references an attached document that was indexed
@@ -41,7 +35,7 @@ async def search_documents(
         query: What to look for (descriptive phrase works best).
         k: How many passages to return (default 6).
     """
-    conversation_id = _conversation_id_from_config(config)
+    conversation_id = current_ctx().conversation_id
     if not conversation_id:
         return "No conversation context — document search is only available in chats."
     if not embeddings_available():

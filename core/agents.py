@@ -29,7 +29,6 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     is_valid_model,
 )
 from .safety import (
-    make_safe_execute,
     make_safe_run_cell,
     make_safe_write_artifact,
     make_safe_write_file,
@@ -135,14 +134,15 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding
 _ROLE_PROMPTS = {
     "general": (
         "You are a focused worker agent. Complete the task given to you using "
-        "execute(code) — Python with full network/filesystem access. Each execute() "
-        "call runs in a fresh subprocess, so batch related work into one call. "
-        "Use read_file/write_file/list_files for filesystem access if needed. "
-        "When you have a complete answer, return it concisely as your final response."
+        "run_cell(code) — a stateful Python/IPython session with full "
+        "network/filesystem access, where variables and imports persist across "
+        "calls like notebook cells. Use read_file/write_file/list_files for "
+        "filesystem access if needed. When you have a complete answer, return it "
+        "concisely as your final response."
     ),
     "researcher": (
         "You are a research worker. Your job is to find and verify information. "
-        "Use execute(code) with httpx or playwright to fetch web pages and APIs; "
+        "Use run_cell(code) with httpx or playwright to fetch web pages and APIs; "
         "use read_file when given local source material. Prefer primary sources. "
         "Cite URLs in your final answer. If you cannot find something, say so "
         "explicitly — do not guess. Return your findings concisely."
@@ -150,15 +150,15 @@ _ROLE_PROMPTS = {
     "coder": (
         "You are a code worker. Your job is to write or modify code precisely. "
         "Read the existing code (read_file / list_files) before changing it. Make "
-        "minimal, focused edits. Use execute(code) to run, test, and verify. When "
+        "minimal, focused edits. Use run_cell(code) to run, test, and verify. When "
         "something fails, fix the underlying cause; do not paper over it. Return "
         "a short summary of what you changed and any test output."
     ),
     "writer": (
         "You are a writing worker. Your job is to produce final-quality prose. "
         "Read source material via read_file before drafting. Match the requested "
-        "length, tone, and audience. You do NOT have execute() — no shell, no "
-        "code. Save drafts via write_file when asked. Return the final text."
+        "length, tone, and audience. You do NOT run code — no shell, no run_cell. "
+        "Save drafts via write_file when asked. Return the final text."
     ),
 }
 
@@ -211,7 +211,6 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
     # Safety wrappers — judge runs on the same model as the agent for now.
     # Override at the call site once a config knob is wired up.
-    safe_execute = make_safe_execute(model)
     safe_run_cell = make_safe_run_cell(model)
     safe_write_file = make_safe_write_file(model)
     safe_write_artifact = make_safe_write_artifact(model)
@@ -221,9 +220,9 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # conversation's workers always run on the same model as its main agent.
 
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [safe_execute, safe_run_cell, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
-        "researcher": [safe_execute, read_file, read_artifact, artifact_list, search_documents, read_document],
-        "coder":      [safe_execute, safe_run_cell, read_file, safe_write_file, list_files],
+        "general":    [safe_run_cell, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
+        "researcher": [safe_run_cell, read_file, read_artifact, artifact_list, search_documents, read_document],
+        "coder":      [safe_run_cell, read_file, safe_write_file, list_files],
         "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
     }
 
@@ -263,7 +262,6 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
     main_tools = [
         safe_run_cell,
-        safe_execute,
         read_file,
         safe_write_file,
         list_files,

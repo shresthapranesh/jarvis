@@ -8,27 +8,25 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-from typing import Annotated
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedStore
-from langgraph.store.base import BaseStore
+
+from tools.context import current_ctx
 
 _MEMORY_PREFIX = "memory/"
 
 
 @tool
-async def write_file(
-    filepath: str,
-    content: str,
-    store: Annotated[BaseStore, InjectedStore()],
-) -> str:
+async def write_file(filepath: str, content: str) -> str:
     """Write text content to a file, creating parent directories as needed.
 
     Paths starting with memory/ are saved to the persistent memory store.
     All other paths are written to the filesystem.
     """
     if filepath.startswith(_MEMORY_PREFIX):
+        store = current_ctx().store
+        if store is None:
+            return "Memory store unavailable in this context."
         key = filepath[len(_MEMORY_PREFIX):]
         await store.aput(("memory",), key, {"content": content})
         return f"Saved to memory store: {key}"
@@ -42,16 +40,16 @@ async def write_file(
 
 
 @tool
-async def read_file(
-    filepath: str,
-    store: Annotated[BaseStore, InjectedStore()],
-) -> str:
+async def read_file(filepath: str) -> str:
     """Read text content from a file.
 
     Paths starting with memory/ are read from the persistent memory store.
     All other paths are read from the filesystem.
     """
     if filepath.startswith(_MEMORY_PREFIX):
+        store = current_ctx().store
+        if store is None:
+            return "Memory store unavailable in this context."
         key = filepath[len(_MEMORY_PREFIX):]
         item = await store.aget(("memory",), key)
         if item is None:
