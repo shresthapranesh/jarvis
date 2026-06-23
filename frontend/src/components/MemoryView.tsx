@@ -1,70 +1,132 @@
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {marked} from 'marked';
-import {useEffect, useState} from 'react';
+import {useState} from 'react';
 
-import {formatRelativeTime} from '../lib/api';
 import {fetchAgentMemory} from '../relay/AgentMemoryQuery';
+import {commitAddMemory} from '../relay/AddMemoryMutation';
 import {commitConsolidateMemory} from '../relay/ConsolidateMemoryMutation';
-import {commitUpdateMemory} from '../relay/UpdateMemoryMutation';
-import type {Memory} from '../lib/types';
+import {commitDeleteMemory} from '../relay/DeleteMemoryMutation';
+import {fetchMemories} from '../relay/MemoriesQuery';
+import {commitUpdateMemoryItem} from '../relay/UpdateMemoryItemMutation';
+import type {Memory, MemoryItem, MemoryKind} from '../lib/types';
 
 export function MemoryView() {
   const queryClient = useQueryClient();
 
-  const {data: memory, isLoading, error} = useQuery<Memory>({
+  const {data: items, isLoading, error} = useQuery<MemoryItem[]>({
+    queryKey: ['memories'],
+    queryFn: fetchMemories,
+  });
+  const {data: blob} = useQuery<Memory>({
     queryKey: ['memory'],
     queryFn: fetchAgentMemory,
   });
 
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
-  const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [newText, setNewText] = useState('');
+  const [newKind, setNewKind] = useState<MemoryKind>('fact');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
 
-  useEffect(() => {
-    if (memory) {
-      setDraft(memory.content);
-      setEditing(false);
-      setActionError(null);
-    }
-  }, [memory?.modified_at, memory?.exists]); // eslint-disable-line react-hooks/exhaustive-deps
+  const invalidateItems = () => queryClient.invalidateQueries({queryKey: ['memories']});
 
-  const saveMutation = useMutation({
-    mutationFn: (content: string) => commitUpdateMemory(content),
+  const addMutation = useMutation({
+    mutationFn: () => commitAddMemory(newText.trim(), newKind),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({queryKey: ['memory']});
-      setEditing(false);
+      await invalidateItems();
+      setNewText('');
       setActionError(null);
     },
-    onError: (err: Error) => setActionError(err.message),
+    onError: (e: Error) => setActionError(e.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({id, text}: {id: string; text: string}) => commitUpdateMemoryItem(id, text),
+    onSuccess: async () => {
+      await invalidateItems();
+      setEditingId(null);
+      setActionError(null);
+    },
+    onError: (e: Error) => setActionError(e.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => commitDeleteMemory(id),
+    onSuccess: async () => {
+      await invalidateItems();
+      setActionError(null);
+    },
+    onError: (e: Error) => setActionError(e.message),
   });
 
   const consolidateMutation = useMutation({
     mutationFn: () => commitConsolidateMemory(),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({queryKey: ['memory']});
+      await Promise.all([
+        queryClient.invalidateQueries({queryKey: ['memories']}),
+        queryClient.invalidateQueries({queryKey: ['memory']}),
+      ]);
       setActionError(null);
     },
-    onError: (err: Error) => setActionError(err.message),
+    onError: (e: Error) => setActionError(e.message),
   });
 
-  function copy() {
-    if (!memory) return;
-    navigator.clipboard.writeText(memory.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
+  const all = items ?? [];
+  const core = all.filter((m) => m.kind === 'core');
+  const facts = all.filter((m) => m.kind === 'fact');
+  const showBlobFallback =
+    all.length === 0 && !!blob?.exists && blob.content.trim().length > 0;
 
-  function startEditing() {
-    setDraft(memory?.content ?? '');
-    setEditing(true);
+  function startEdit(m: MemoryItem) {
+    setEditingId(m.id);
+    setEditText(m.text);
     setActionError(null);
   }
 
-  function cancelEditing() {
-    setDraft(memory?.content ?? '');
-    setEditing(false);
-    setActionError(null);
+  function renderItem(m: MemoryItem) {
+    if (editingId === m.id) {
+      return (
+        <li key={m.id} className="memory-item">
+          <textarea
+            className="memory-item-textarea"
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            spellCheck={false}
+            rows={2}
+          />
+          <div className="memory-item-actions">
+            <button
+              className="artifact-btn primary"
+              onClick={() => updateMutation.mutate({id: m.id, text: editText.trim()})}
+              disabled={updateMutation.isPending || !editText.trim()}
+            >
+              Save
+            </button>
+            <button className="artifact-btn" onClick={() => setEditingId(null)}>
+              Cancel
+            </button>
+          </div>
+        </li>
+      );
+    }
+    return (
+      <li key={m.id} className="memory-item">
+        <span className="memory-item-text">{m.text}</span>
+        <div className="memory-item-actions">
+          <button className="artifact-btn" onClick={() => startEdit(m)}>
+            Edit
+          </button>
+          <button
+            className="artifact-btn"
+            onClick={() => {
+              if (window.confirm('Delete this memory?')) deleteMutation.mutate(m.id);
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </li>
+    );
   }
 
   return (
@@ -73,92 +135,102 @@ export function MemoryView() {
         <div>
           <h1>Memory</h1>
           <p className="memory-subtitle">
-            The agent's persistent <code>AGENTS.md</code> — injected into every system
-            prompt. Edited here, written by the agent via{' '}
-            <code>write_file("memory/AGENTS.md", …)</code>, or rewritten by the
-            scheduled consolidation job.
+            The agent's long-term memory — discrete items embedded for retrieval.{' '}
+            <strong>Core</strong> items are injected into every system prompt;{' '}
+            <strong>fact</strong> items are surfaced by relevance each turn. The agent can
+            also write them via <code>remember(…)</code>, or the scheduled consolidation
+            job extracts them from recent conversations.
           </p>
         </div>
-        {memory?.modified_at && (
-          <span className="memory-meta">
-            Last updated {formatRelativeTime(memory.modified_at)}
-          </span>
-        )}
+        <button
+          className="artifact-btn"
+          onClick={() => consolidateMutation.mutate()}
+          disabled={consolidateMutation.isPending}
+          title="Run the LLM that extracts new memory items from recent conversations"
+        >
+          {consolidateMutation.isPending ? 'Consolidating…' : 'Consolidate now'}
+        </button>
       </header>
+
+      {actionError && <div className="memory-error">{actionError}</div>}
+
+      <div className="memory-add">
+        <textarea
+          className="memory-item-textarea"
+          value={newText}
+          onChange={(e) => setNewText(e.target.value)}
+          spellCheck={false}
+          rows={2}
+          placeholder="Add a memory — one self-contained fact…"
+        />
+        <div className="memory-add-actions">
+          <select
+            className="memory-kind-select"
+            value={newKind}
+            onChange={(e) => setNewKind(e.target.value as MemoryKind)}
+          >
+            <option value="fact">fact</option>
+            <option value="core">core</option>
+          </select>
+          <button
+            className="artifact-btn primary"
+            onClick={() => addMutation.mutate()}
+            disabled={addMutation.isPending || !newText.trim()}
+          >
+            {addMutation.isPending ? 'Adding…' : 'Add'}
+          </button>
+        </div>
+      </div>
 
       {isLoading ? (
         <div className="memory-empty">Loading…</div>
       ) : error ? (
-        <div className="memory-empty">Failed to load memory: {(error as Error).message}</div>
+        <div className="memory-empty">
+          Failed to load memory: {(error as Error).message}
+        </div>
+      ) : showBlobFallback ? (
+        <div className="memory-section">
+          <h2 className="memory-section-title">Legacy memory</h2>
+          <p className="memory-subtitle">
+            No discrete items yet (no embedding model configured). Showing the legacy{' '}
+            <code>AGENTS.md</code> blob. It will be split into items on the next
+            consolidation once embeddings are available.
+          </p>
+          <div
+            className="artifact-detail-content agent-bubble"
+            dangerouslySetInnerHTML={{__html: marked.parse(blob!.content) as string}}
+          />
+        </div>
+      ) : all.length === 0 ? (
+        <div className="memory-empty">
+          <p>No memories yet.</p>
+          <p>
+            Add one above, ask the agent to <code>remember</code> something, or run
+            consolidation after some conversation history accumulates.
+          </p>
+        </div>
       ) : (
         <>
-          <div className="artifact-detail-toolbar">
-            {editing ? (
-              <>
-                <button
-                  className="artifact-btn primary"
-                  onClick={() => saveMutation.mutate(draft)}
-                  disabled={saveMutation.isPending}
-                >
-                  {saveMutation.isPending ? 'Saving…' : 'Save'}
-                </button>
-                <button className="artifact-btn" onClick={cancelEditing}>
-                  Cancel
-                </button>
-              </>
+          <div className="memory-section">
+            <h2 className="memory-section-title">
+              Core <span className="memory-count">{core.length}</span>
+            </h2>
+            {core.length === 0 ? (
+              <p className="memory-subtitle">No core memories.</p>
             ) : (
-              <>
-                <button className="artifact-btn" onClick={startEditing}>
-                  Edit
-                </button>
-                <button
-                  className="artifact-btn"
-                  onClick={copy}
-                  disabled={!memory?.exists}
-                >
-                  {copied ? 'Copied!' : 'Copy'}
-                </button>
-                <button
-                  className="artifact-btn"
-                  onClick={() => consolidateMutation.mutate()}
-                  disabled={consolidateMutation.isPending}
-                  title="Run the LLM that rewrites memory from recent conversations"
-                >
-                  {consolidateMutation.isPending ? 'Consolidating…' : 'Consolidate now'}
-                </button>
-              </>
+              <ul className="memory-list">{core.map(renderItem)}</ul>
             )}
           </div>
-
-          {actionError && <div className="memory-error">{actionError}</div>}
-
-          {editing ? (
-            <div className="artifact-editor">
-              <textarea
-                className="artifact-content-textarea"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                spellCheck={false}
-                placeholder="# Memory&#10;&#10;Write whatever the agent should remember about you…"
-              />
-            </div>
-          ) : memory && memory.exists ? (
-            <div
-              className="artifact-detail-content agent-bubble"
-              dangerouslySetInnerHTML={{__html: marked.parse(memory.content) as string}}
-            />
-          ) : (
-            <div className="memory-empty">
-              <p>No memory yet.</p>
-              <p>
-                The agent will create one after enough conversation history accumulates,
-                or you can write one now.
-              </p>
-              <button className="artifact-btn primary" onClick={startEditing}>
-                Write memory
-              </button>
-            </div>
-          )}
+          <div className="memory-section">
+            <h2 className="memory-section-title">
+              Facts <span className="memory-count">{facts.length}</span>
+            </h2>
+            {facts.length === 0 ? (
+              <p className="memory-subtitle">No fact memories.</p>
+            ) : (
+              <ul className="memory-list">{facts.map(renderItem)}</ul>
+            )}
+          </div>
         </>
       )}
     </div>

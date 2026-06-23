@@ -302,6 +302,15 @@ export interface Memory {
   modified_at: string | null;
 }
 
+export type MemoryKind = 'core' | 'fact';
+
+export interface MemoryItem {
+  id: string;
+  kind: MemoryKind;
+  text: string;
+  updated_at: string;
+}
+
 // ── Running tasks (global registry) ──────────────────────────────────────────
 
 export type TaskKind = 'chat' | 'automation' | 'workflow';
