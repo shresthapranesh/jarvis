@@ -200,11 +200,25 @@ def estimate_tokens(messages: list[AnyMessage], llm) -> int:
         return sum(len(message_text(m)) for m in messages) // 4
 
 
-def _make_system_message(text: str, cache: bool) -> SystemMessage:
-    """Build a SystemMessage, optionally with an Anthropic cache breakpoint."""
+def _make_system_message(static_text: str, volatile_text: str, cache: bool) -> SystemMessage:
+    """Build a SystemMessage with the static prompt as the cacheable prefix.
+
+    When ``cache`` is on (Bedrock/Anthropic), the static text carries the single
+    ``cache_control`` breakpoint and any volatile text (memory, todos, folded
+    summaries) goes in a *separate* block after it — so churn in the volatile
+    suffix never invalidates the cached static prefix (system prompt + tool
+    schemas). When ``cache`` is off, both are concatenated into one plain
+    string (some non-Anthropic providers dislike multi-block system content).
+    """
     if cache:
-        return SystemMessage(content=[{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}])
-    return SystemMessage(text)
+        blocks: list[dict[str, Any] | str] = [
+            {"type": "text", "text": static_text, "cache_control": {"type": "ephemeral"}}
+        ]
+        if volatile_text.strip():
+            blocks.append({"type": "text", "text": volatile_text})
+        return SystemMessage(content=blocks)
+    full = static_text if not volatile_text.strip() else f"{static_text}\n\n{volatile_text}"
+    return SystemMessage(full)
 
 
 def _system_text(msg: SystemMessage) -> str:
@@ -223,6 +237,8 @@ def build_llm_messages(
     system_text: str,
     cache: bool,
     history: list[AnyMessage],
+    *,
+    volatile_suffix: str = "",
 ) -> list[AnyMessage]:
     """Build the message list for an LLM call with exactly one SystemMessage.
 
@@ -233,6 +249,11 @@ def build_llm_messages(
     after non-system messages — a non-consecutive system — so we fold any
     embedded SystemMessages into the prompt text and prepend a single
     SystemMessage at index 0.
+
+    ``system_text`` is the *static* (cacheable) prefix. ``volatile_suffix``
+    (memory, todos, …) plus any folded summarizer SystemMessages form the
+    volatile region, which is placed after the cache breakpoint so it can
+    change every turn without busting the cached prefix.
     """
     extras: list[str] = []
     rest: list[AnyMessage] = []
@@ -243,5 +264,6 @@ def build_llm_messages(
                 extras.append(text)
         else:
             rest.append(m)
-    final_text = system_text if not extras else system_text + "\n\n" + "\n\n".join(extras)
-    return [_make_system_message(final_text, cache)] + rest
+    volatile_parts = [p for p in [volatile_suffix.strip(), *extras] if p]
+    volatile_text = "\n\n".join(volatile_parts)
+    return [_make_system_message(system_text, volatile_text, cache)] + rest
