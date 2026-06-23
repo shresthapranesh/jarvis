@@ -1,0 +1,59 @@
+# jarvis — whole-app container.
+#
+# The agent executes arbitrary Python (run_cell), so the container is the
+# security boundary. The web/GraphQL surface has NO authentication, so the port
+# is published to 127.0.0.1 ONLY. Do not change it to 0.0.0.0 / a public bind
+# without putting auth (or a trusted authenticating proxy) in front. See
+# docs/DEPLOY.md.
+
+services:
+  jarvis:
+    build:
+      context: .
+      args:
+        INSTALL_BROWSERS: "true"   # set "false" for a slimmer image (no browser tools)
+    image: jarvis:latest
+    container_name: jarvis
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+    # Loopback-only. The endpoint is unauthenticated — never expose it directly.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    env_file:
+      - .env
+
+    volumes:
+      - jarvis-data:/data        # SQLite DBs, artifacts, documents, model cache
+
+    # Lets in-container code reach host services (e.g. Ollama) at
+    # host.docker.internal — works on Docker Desktop and Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # ── Hardening ──
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 4g
+    cpus: 2.0
+    pids_limit: 512
+
+    # Optional stricter mode — read-only root FS. Needs writable scratch + a
+    # bigger /dev/shm for Chromium. Uncomment to enable:
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    # shm_size: "1gb"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  jarvis-data:

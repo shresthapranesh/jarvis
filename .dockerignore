@@ -1,0 +1,43 @@
+# VCS / tooling
+.git
+.gitignore
+.github/
+.claude/
+
+# Python caches & local virtualenv (a macOS .venv must NOT leak into a Linux image)
+.venv/
+**/__pycache__/
+**/*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyrefly/
+
+# Rebuilt inside the image
+frontend/node_modules/
+frontend/.vite/
+static/dist/
+
+# Local data & secrets — never bake these in
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+.jarvis/
+data/
+logs/
+*.log
+
+# Build outputs
+build/
+dist/
+*.spec
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
