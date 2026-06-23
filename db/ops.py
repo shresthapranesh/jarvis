@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Job, Message, NotificationChannel, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -824,6 +824,60 @@ async def delete_document(session: AsyncSession, document_id: str) -> Document |
     await session.delete(doc)
     await session.commit()
     return doc
+
+
+# ── Memory CRUD ───────────────────────────────────────────────────────────────
+
+async def list_memories(session: AsyncSession, kind: str | None = None) -> list[Memory]:
+    q = select(Memory).order_by(Memory.updated_at.desc())
+    if kind is not None:
+        q = q.where(Memory.kind == kind)
+    result = await session.execute(q)
+    return list(result.scalars().all())
+
+
+async def create_memory(
+    session: AsyncSession, *, text: str, kind: str, embedding: bytes | None
+) -> Memory:
+    mem = Memory(id=str(uuid4()), text=text, kind=kind, embedding=embedding)
+    session.add(mem)
+    await session.commit()
+    return mem
+
+
+async def update_memory_item(
+    session: AsyncSession,
+    memory_id: str,
+    *,
+    text: str | None = None,
+    kind: str | None = None,
+    embedding: bytes | None = None,
+) -> Memory | None:
+    mem = await session.get(Memory, memory_id)
+    if mem is None:
+        return None
+    if text is not None:
+        mem.text = text
+    if kind is not None:
+        mem.kind = kind
+    if embedding is not None:
+        mem.embedding = embedding
+    mem.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return mem
+
+
+async def delete_memory(session: AsyncSession, memory_id: str) -> bool:
+    mem = await session.get(Memory, memory_id)
+    if mem is None:
+        return False
+    await session.delete(mem)
+    await session.commit()
+    return True
+
+
+async def count_memories(session: AsyncSession) -> int:
+    return (await session.execute(select(func.count()).select_from(Memory))).scalar_one()
 
 
 async def append_node_result(

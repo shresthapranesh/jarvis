@@ -156,6 +156,13 @@ type Memory {
   modifiedAt: String
 }
 
+type MemoryItem {
+  id: String!
+  kind: String!
+  text: String!
+  updatedAt: String!
+}
+
 type Message implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
@@ -191,6 +198,9 @@ type ModelSpec {
 type Mutation {
   updateMemory(content: String!): Memory!
   consolidateMemory(model: String = null): String!
+  addMemory(text: String!, kind: String! = "fact"): MemoryItem!
+  updateMemoryItem(id: String!, text: String!, kind: String = null): MemoryItem!
+  deleteMemory(id: String!): Boolean!
   startTask(input: StartTaskInput!): StartTaskPayload!
   stopTask(taskId: String!): Boolean!
   resumeTask(taskId: String!, answer: String!): Boolean!
@@ -261,6 +271,7 @@ type PageInfo {
 type Query {
   models: ModelCatalog!
   agentMemory: Memory!
+  memories(kind: String = null): [MemoryItem!]!
   node(
     """The ID of the object."""
     id: ID!

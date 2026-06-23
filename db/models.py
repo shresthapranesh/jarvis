@@ -303,3 +303,26 @@ class Job(Base):
         Index("ix_jobs_kind_status_run_at", "kind", "status", "run_at"),
         Index("ix_jobs_locked_until", "locked_until"),
     )
+
+
+class Memory(Base):
+    """One discrete agent-memory item.
+
+    Replaces the single free-text `AGENTS.md` blob (still kept as a keyless
+    fallback). `kind='core'` items are durable identity/preferences that load
+    on every turn; `kind='fact'` items are vector-retrieved per turn by
+    relevance. Global, not conversation-scoped. `embedding` holds the float32
+    vector bytes (same layout as DocumentChunk.embedding); null when no
+    embedder was available at write time. See core/memory_store.py.
+    """
+
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="fact", index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )

@@ -7,7 +7,7 @@ import sqlite3 as _sqlite3
 from pathlib import Path
 from typing import Annotated, NotRequired, TypedDict
 
-from langchain_core.messages import AnyMessage
+from langchain_core.messages import AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -19,6 +19,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from .config import get_config
 from .messages import (
     build_llm_messages,
+    message_text,
     repair_orphan_tool_calls,
     strip_historical_thinking,
 )
@@ -30,10 +31,13 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
 )
 from .schemas import TodoItem, _normalise_todos, reduce_todos
 from .summarization import maybe_summarize
+from core.doc_index import embeddings_available
+from core.memory_store import load_core, search_memory
 from tools.artifacts import list_artifacts as artifact_list, read_artifact, write_artifact
 from tools.code import run_cell
 from tools.documents import read_document, search_documents
 from tools.files import list_files, read_file, write_file
+from tools.memory import remember, search_memory as search_memory_tool
 from tools.todos import set_todo_status, write_todos
 from tools.workers import make_spawn_workers
 from tools.automations import (
@@ -185,6 +189,41 @@ def _load_memory_from_disk() -> str | None:
     return None
 
 
+def _latest_user_text(messages: list[AnyMessage]) -> str:
+    """Flattened text of the most recent HumanMessage — the retrieval query."""
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            return message_text(m).strip()
+    return ""
+
+
+async def _memory_volatile_parts(store, messages: list[AnyMessage]) -> list[str]:
+    """Build the memory section(s) for the system message's volatile suffix.
+
+    With an embedder: always-on `core` items + the top-k `fact` items retrieved
+    for the latest user turn. Without one: today's single AGENTS.md blob.
+    """
+    if not embeddings_available():
+        blob = await _load_memory_from_store(store) if store is not None else _load_memory_from_disk()
+        return [f"## Agent Memory\n\n{blob}"] if blob else []
+
+    parts: list[str] = []
+    core = await load_core()
+    if core:
+        parts.append(f"## Agent Memory\n\n{core}")
+    query = _latest_user_text(messages)
+    if query:
+        try:
+            hits = await search_memory(query, k=6)
+        except Exception as exc:
+            logger.warning("memory retrieval failed: %s", exc)
+            hits = []
+        if hits:
+            lines = "\n".join(f"- {h['text']}" for h in hits)
+            parts.append(f"## Relevant Memories\n\n{lines}")
+    return parts
+
+
 # ── Checkpointer ─────────────────────────────────────────────────────────────
 
 _sync_checkpointer: SqliteSaver | None = None
@@ -273,6 +312,12 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         delete_workflow,
     ]
 
+    # Long-term memory tools are only meaningful with an embedder (the discrete
+    # Memory store); keyless setups fall back to the AGENTS.md blob, so don't
+    # advertise tools that would only ever report themselves unavailable.
+    if embeddings_available():
+        main_tools += [remember, search_memory_tool]
+
     # Bind tools so the LLM knows their schemas and emits structured tool_calls.
     # Without this, models hallucinate function-call syntax and fail validation
     # (Gemma's MALFORMED_FUNCTION_CALL, Claude's invalid_tool_calls, etc.).
@@ -289,24 +334,18 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         costs 2 graph steps (model + tools) instead of 3. With recursion_limit=100
         the agent gets ~50 useful round-trips, which is plenty for code-first work.
         """
-        if store is not None:
-            memory = await _load_memory_from_store(store)
-        else:
-            memory = _load_memory_from_disk()
         # Memory + todos change across turns, so they go in build_llm_messages'
         # volatile suffix (after the cache breakpoint) rather than concatenated
         # into the static prompt — otherwise every todo flip / memory edit busts
         # the cached prefix (system prompt + tool schemas). See core/messages.py.
-        volatile_parts: list[str] = []
-        if memory:
-            volatile_parts.append(f"## Agent Memory\n\n{memory}")
+        raw_messages = list(state.get("messages", []))
+        volatile_parts: list[str] = await _memory_volatile_parts(store, raw_messages)
         todos = _normalise_todos(state.get("todos"))
         if todos:
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
             volatile_parts.append(f"## Current Tasks\n\n{todo_lines}")
         volatile = "\n\n".join(volatile_parts)
-        raw_messages = list(state.get("messages", []))
         summarized = await maybe_summarize(raw_messages, llm=llm, summarizer=llm_for_summary)
         if summarized is not None:
             messages_for_llm, state_update_msgs = summarized
