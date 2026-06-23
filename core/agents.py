@@ -28,16 +28,12 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     get_model_spec,
     is_valid_model,
 )
-from .safety import (
-    make_safe_run_cell,
-    make_safe_write_artifact,
-    make_safe_write_file,
-)
 from .schemas import TodoItem, _normalise_todos, reduce_todos
 from .summarization import maybe_summarize
-from tools.artifacts import list_artifacts as artifact_list, read_artifact
+from tools.artifacts import list_artifacts as artifact_list, read_artifact, write_artifact
+from tools.code import run_cell
 from tools.documents import read_document, search_documents
-from tools.files import list_files, read_file
+from tools.files import list_files, read_file, write_file
 from tools.todos import set_todo_status, write_todos
 from tools.workers import make_spawn_workers
 from tools.automations import (
@@ -209,21 +205,15 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     llm = spec.build_llm()
     use_cache = spec.provider in ("bedrock", "anthropic")
 
-    # Safety wrappers — judge runs on the same model as the agent for now.
-    # Override at the call site once a config knob is wired up.
-    safe_run_cell = make_safe_run_cell(model)
-    safe_write_file = make_safe_write_file(model)
-    safe_write_artifact = make_safe_write_artifact(model)
-
     # ── Worker pool — role-typed, bound to THIS agent's model ────────────────
     # spawn_workers is built per agent (not a process-global registry) so a
     # conversation's workers always run on the same model as its main agent.
 
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [safe_run_cell, read_file, safe_write_file, list_files, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
-        "researcher": [safe_run_cell, read_file, read_artifact, artifact_list, search_documents, read_document],
-        "coder":      [safe_run_cell, read_file, safe_write_file, list_files],
-        "writer":     [read_file, safe_write_file, safe_write_artifact, read_artifact, artifact_list, search_documents, read_document],
+        "general":    [run_cell, read_file, write_file, list_files, write_artifact, read_artifact, artifact_list, search_documents, read_document],
+        "researcher": [run_cell, read_file, read_artifact, artifact_list, search_documents, read_document],
+        "coder":      [run_cell, read_file, write_file, list_files],
+        "writer":     [read_file, write_file, write_artifact, read_artifact, artifact_list, search_documents, read_document],
     }
 
     def _make_role_factory(role: str):
@@ -261,11 +251,11 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     )
 
     main_tools = [
-        safe_run_cell,
+        run_cell,
         read_file,
-        safe_write_file,
+        write_file,
         list_files,
-        safe_write_artifact,
+        write_artifact,
         read_artifact,
         artifact_list,
         write_todos,
