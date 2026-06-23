@@ -293,14 +293,19 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             memory = await _load_memory_from_store(store)
         else:
             memory = _load_memory_from_disk()
-        system = _SYSTEM_PROMPT
+        # Memory + todos change across turns, so they go in build_llm_messages'
+        # volatile suffix (after the cache breakpoint) rather than concatenated
+        # into the static prompt — otherwise every todo flip / memory edit busts
+        # the cached prefix (system prompt + tool schemas). See core/messages.py.
+        volatile_parts: list[str] = []
         if memory:
-            system = f"{system}\n\n## Agent Memory\n\n{memory}"
+            volatile_parts.append(f"## Agent Memory\n\n{memory}")
         todos = _normalise_todos(state.get("todos"))
         if todos:
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
-            system = f"{system}\n\n## Current Tasks\n\n{todo_lines}"
+            volatile_parts.append(f"## Current Tasks\n\n{todo_lines}")
+        volatile = "\n\n".join(volatile_parts)
         raw_messages = list(state.get("messages", []))
         summarized = await maybe_summarize(raw_messages, llm=llm, summarizer=llm_for_summary)
         if summarized is not None:
@@ -310,7 +315,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         messages_for_llm = strip_historical_thinking(messages_for_llm)
         messages_for_llm = repair_orphan_tool_calls(messages_for_llm)
         response = await llm_with_tools.ainvoke(
-            build_llm_messages(system, use_cache, messages_for_llm),
+            build_llm_messages(_SYSTEM_PROMPT, use_cache, messages_for_llm, volatile_suffix=volatile),
             config=config,
         )
         return {"messages": state_update_msgs + [response]}
