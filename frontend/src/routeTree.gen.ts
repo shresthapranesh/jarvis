@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkflowRouteImport } from './routes/workflow'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as LogsRouteImport } from './routes/logs'
@@ -32,6 +33,11 @@ const WorkflowRoute = WorkflowRouteImport.update({
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SkillsRoute = SkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -103,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/settings': typeof SettingsRoute
+  '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
@@ -119,6 +126,7 @@ export interface FileRoutesByTo {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/settings': typeof SettingsRoute
+  '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/c/$id': typeof CIdRoute
   '/workflow': typeof WorkflowIndexRoute
@@ -134,6 +142,7 @@ export interface FileRoutesById {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/settings': typeof SettingsRoute
+  '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
@@ -152,6 +161,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/memory'
     | '/settings'
+    | '/skills'
     | '/tasks'
     | '/workflow'
     | '/c/$id'
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/memory'
     | '/settings'
+    | '/skills'
     | '/tasks'
     | '/c/$id'
     | '/workflow'
@@ -182,6 +193,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/memory'
     | '/settings'
+    | '/skills'
     | '/tasks'
     | '/workflow'
     | '/c/$id'
@@ -199,6 +211,7 @@ export interface RootRouteChildren {
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
   SettingsRoute: typeof SettingsRoute
+  SkillsRoute: typeof SkillsRoute
   TasksRoute: typeof TasksRoute
   WorkflowRoute: typeof WorkflowRouteWithChildren
   CIdRoute: typeof CIdRoute
@@ -218,6 +231,13 @@ declare module '@tanstack/react-router' {
       path: '/tasks'
       fullPath: '/tasks'
       preLoaderRoute: typeof TasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/skills': {
+      id: '/skills'
+      path: '/skills'
+      fullPath: '/skills'
+      preLoaderRoute: typeof SkillsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -343,6 +363,7 @@ const rootRouteChildren: RootRouteChildren = {
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
   SettingsRoute: SettingsRoute,
+  SkillsRoute: SkillsRoute,
   TasksRoute: TasksRoute,
   WorkflowRoute: WorkflowRouteWithChildren,
   CIdRoute: CIdRoute,

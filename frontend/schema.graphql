@@ -222,6 +222,9 @@ type Mutation {
   createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!
   updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!
   deleteNotificationChannel(id: ID!): Boolean!
+  createSkill(input: SkillCreateInput!): Skill!
+  updateSkill(id: ID!, input: SkillUpdateInput!): Skill!
+  deleteSkill(id: ID!): Boolean!
   stopRunningTask(taskId: String!): StopRunningTaskPayload!
 }
 
@@ -290,6 +293,7 @@ type Query {
   workflowRuns(workflowId: ID!): [WorkflowRun!]!
   workflowRun(id: ID!): WorkflowRun
   notificationChannels: [NotificationChannel!]!
+  skills: [Skill!]!
   runningTasks: [RunningTask!]!
 }
 
@@ -314,6 +318,31 @@ type SafetyOutputBlockedEvent {
   reason: String!
   redactedMessage: String!
   conversationId: String!
+}
+
+type Skill implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  name: String!
+  description: String!
+  body: String!
+  enabled: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input SkillCreateInput {
+  name: String!
+  description: String!
+  body: String!
+  enabled: Boolean! = true
+}
+
+input SkillUpdateInput {
+  name: String = null
+  description: String = null
+  body: String = null
+  enabled: Boolean = null
 }
 
 input StartTaskInput {
