@@ -24,7 +24,9 @@ jarvis/
 │   ├── streaming.py      # TokenCoalescer, STREAM_MODES, _process_chunk(), _finalize_message()
 │   ├── summarization.py  # maybe_summarize() — history trimming for the agent loop
 │   ├── safety.py         # gate_input() / gate_output() content gates
-│   ├── memory_consolidation.py  # agent-memory store keys + consolidate_memory()
+│   ├── memory_consolidation.py  # AGENTS.md blob store keys + consolidate_memory() (keyless fallback)
+│   ├── memory_store.py   # discrete vector memory — load_core/search_memory/upsert_memory (Memory rows)
+│   ├── skill_store.py    # skill description embedding + intent retrieval — skill_catalog()/search_skills()
 │   ├── notifications.py  # notification-channel delivery
 │   ├── schemas.py        # Pydantic + Strawberry input models (AttachmentIn, etc.)
 │   ├── scheduler.py      # APScheduler setup, cron registration
@@ -69,20 +71,25 @@ jarvis/
 ├── workflow/
 │   ├── engine.py         # BFS workflow executor — execute_workflow()
 │   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode + _emit()
-├── tools/
-│   ├── execute.py        # execute — stateless Python in a fresh subprocess (wrapped by safe_execute)
-│   ├── files.py          # read_file, write_file, list_files
-│   ├── artifacts.py      # write_artifact, read_artifact, list_artifacts
-│   ├── documents.py      # search_documents, read_document (retrieval over indexed attachments)
-│   ├── todos.py          # write_todos, set_todo_status (per-conversation plan)
-│   ├── workers.py        # spawn_workers (parallel role-templated subagents)
-│   ├── automations.py    # CRUD as agent tools
-│   ├── workflows.py      # CRUD as agent tools
-│   ├── browser_agent.py  # Headless browser sub-agent
-│   ├── web.py            # web_search, fetch_page, extract_links
-│   ├── code.py           # run_cell — stateful notebook session (per-conversation IPython kernel, core/kernels.py)
-│   ├── finance.py        # get_stock_data, get_historical_prices, compare_stocks, …
-│   └── datetime.py       # get_current_datetime
+├── tools/                # The main agent is CODE-FIRST: it binds only the [bound] tools
+│   │                     #   below; web/finance/datetime/browser work is done by writing
+│   │                     #   Python in run_cell, NOT via dedicated tools. [unbound] files
+│   │                     #   exist but are not wired into the agent (see core/agents.py main_tools).
+│   ├── code.py           # [bound] run_cell — stateful notebook session (per-conversation IPython kernel, core/kernels.py)
+│   ├── files.py          # [bound] read_file, write_file, list_files
+│   ├── artifacts.py      # [bound] write_artifact, read_artifact, list_artifacts
+│   ├── todos.py          # [bound] write_todos, set_todo_status (per-conversation plan)
+│   ├── documents.py      # [bound] search_documents, read_document (retrieval over indexed attachments)
+│   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
+│   ├── automations.py    # [bound] CRUD as agent tools
+│   ├── workflows.py      # [bound] CRUD as agent tools
+│   ├── skills.py         # [bound] use_skill + list/create/update/delete_skill (agent-authored skills)
+│   ├── memory.py         # [bound iff embedder] remember, search_memory (discrete vector memory)
+│   ├── context.py        # current_ctx() — per-call ToolContext (code_session_key, conversation_id)
+│   ├── web.py            # [unbound] web_search (ddgs), fetch_page, extract_links, playwright_browse
+│   ├── finance.py        # [unbound] get_stock_data, get_historical_prices, compare_stocks, …
+│   ├── browser_agent.py  # [unbound] headless browser sub-agent
+│   └── datetime.py       # [unbound] get_current_datetime
 └── frontend/             # React 19 + TanStack Router + Relay + Vite + TypeScript
     ├── relay.config.json # Relay compiler config (schema → ./schema.graphql, artifacts → src/__generated__)
     ├── schema.graphql    # SDL exported from the Python schema (regenerate via `pnpm schema`)
@@ -232,7 +239,17 @@ Visual graph executor (`workflow/engine.py`):
 - CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`.
 
 ## Memory Feature
-Persistent agent memory is a **single free-text blob stored in the LangGraph store** (not a SQL table). It lives under the `_MEMORY_NS`/`_MEMORY_KEY` keys defined in `core/memory_consolidation.py`, accessed via `get_store()` (`AsyncSqliteStore`). The GraphQL `agentMemory` query + `updateMemory` mutation expose it; `frontend/src/components/MemoryView.tsx` + the `/memory` route render and edit it. `consolidate_memory()` collapses/merges accumulated memory; `_migrate_legacy_key()` upgrades the old key on read.
+Agent memory has **two layers**, selected by whether an embedder is configured (`embeddings_available()`):
+- **With an embedder (default): discrete vector memory.** Atomic items live in the `Memory` SQL table (`kind` = `core` | `fact`), embedded on write. `core/memory_store.py` exposes `upsert_memory`, `load_core` (always-on `core` items), and `search_memory` (top-k cosine over `fact` items). The agent reads/writes via the `remember` / `search_memory` tools (`tools/memory.py`, bound only when embeddings are available). Each turn `core/agents.py` (`_memory_volatile_parts`) injects the `core` items + the items retrieved for the current user turn into the system prompt's **volatile suffix** (after the cache breakpoint).
+- **Without an embedder (keyless/Ollama): a single free-text blob.** Falls back to one `AGENTS.md` blob in the LangGraph store under the `_MEMORY_NS`/`_MEMORY_KEY` keys (`core/memory_consolidation.py`), accessed via `get_store()`. `consolidate_memory()` collapses/merges it; `_migrate_legacy_key()` upgrades the old key on read.
+
+GraphQL `agentMemory` query + `updateMemory` (blob) / `updateMemoryItem` (discrete) mutations expose both; `frontend/src/components/MemoryView.tsx` + the `/memory` route render and edit them.
+
+## Skills Feature
+A **skill** is a named, reusable procedure the agent can author and later reload: a `description` (the routing key, embedded for intent retrieval) plus a `body` (the full instructions, loaded on demand). Stored in the `Skill` SQL table.
+- **Agent tools** (`tools/skills.py`, all bound): `use_skill(name)` loads a body to follow; `list_skills` / `create_skill` / `update_skill` / `delete_skill` curate them.
+- **Surfacing** (`core/skill_store.py`): each description is embedded; `skill_catalog(query)` returns enabled skills ranked by intent match, which `core/agents.py` (`_skills_volatile_parts`) injects as a `## Available Skills` list — **name + description only** — in the volatile suffix. The body stays out of context until `use_skill` pulls it.
+- **GraphQL + UI**: `skills` query + `createSkill`/`updateSkill`/`deleteSkill` mutations (`server/graphql/queries|mutations/skill.py`, type in `types/skill.py`); `frontend/src/components/SkillsView.tsx` + the `/skills` route manage them.
 
 ## Notifications
 `NotificationChannel` rows define delivery targets. GraphQL `notification` query/mutation + `frontend/src/components/NotificationsEditor.tsx` manage them; delivery logic in `core/notifications.py`.
@@ -248,7 +265,7 @@ Persistent agent memory is a **single free-text blob stored in the LangGraph sto
 - `async_session` uses `expire_on_commit=False` — no `session.refresh()` needed after commit.
 - `update_*` functions must use ORM-level `setattr` (not raw SQL UPDATE) so `onupdate` callbacks fire.
 - All ForeignKey columns carry `index=True`; new ones must too.
-- Tables: `Conversation, Message, Step, Automation, AutomationRun, ConfigSetting, NotificationChannel, Artifact, Document, Workflow, WorkflowRun, Job` (`Job` = the durable queue's backing table).
+- Tables: `Conversation, Message, Step, Automation, AutomationRun, ConfigSetting, NotificationChannel, Artifact, Document, DocumentChunk, Workflow, WorkflowRun, Job, Memory, Skill` (`Job` = the durable queue's backing table; `DocumentChunk` = embedded passages for large-doc retrieval; `Memory` = discrete vector memory items; `Skill` = reusable agent procedures).
 - Two SQLite files live under `~/.jarvis/`: `database.db` (app state) and `checkpoints.db` (LangGraph thread state + the store, keyed by `thread_id == conversation_id`). Conversation deletion cascades both: ORM deletes app-DB rows, then `delete_conversation` calls `adelete_thread(conv_id)` on the async checkpointer.
 
 ## Default Model
