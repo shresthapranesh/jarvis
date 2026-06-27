@@ -15,32 +15,32 @@
     "typecheck": "pnpm relay && tsc -b"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.96.2",
-    "@tanstack/react-router": "^1.168.10",
-    "@xyflow/react": "^12.10.2",
-    "graphql": "^16.14.0",
+    "@tanstack/react-query": "^5.101.1",
+    "@tanstack/react-router": "^1.170.16",
+    "@xyflow/react": "^12.11.1",
+    "graphql": "^17.0.1",
     "graphql-ws": "^6.0.8",
-    "marked": "^17.0.6",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "react-relay": "^20.1.1",
-    "relay-runtime": "^20.1.1"
+    "marked": "^18.0.5",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-relay": "^21.0.1",
+    "relay-runtime": "^21.0.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.0",
-    "@tanstack/router-plugin": "^1",
+    "@babel/core": "^8.0.1",
+    "@tanstack/router-plugin": "^1.168.18",
     "@types/babel__core": "^7.20.5",
-    "@types/react": "^19.2.14",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/react-relay": "^18.2.1",
     "@types/relay-runtime": "^20.1.1",
-    "@vitejs/plugin-react": "^6.0.1",
-    "babel-plugin-relay": "^20.1.1",
-    "concurrently": "^9.2.1",
-    "esbuild": "^0.28.0",
-    "oxfmt": "^0.43.0",
-    "relay-compiler": "^20.1.1",
-    "typescript": "~6.0.2",
-    "vite": "^8.0.3"
+    "@vitejs/plugin-react": "^6.0.3",
+    "babel-plugin-relay": "^21.0.1",
+    "concurrently": "^10.0.3",
+    "esbuild": "^0.28.1",
+    "oxfmt": "^0.56.0",
+    "relay-compiler": "^21.0.1",
+    "typescript": "~6.0.3",
+    "vite": "^8.1.0"
   }
 }
