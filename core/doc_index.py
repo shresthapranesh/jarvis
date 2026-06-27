@@ -8,7 +8,7 @@ the agent to use the `search_documents` / `read_document` tools
 bill — and out of the summarizer's jaws — while making all of it queryable.
 
 Embeddings come from a Gemini embedding model (default
-`models/gemini-embedding-002`, override with
+`models/gemini-embedding-001`, override with
 `config set embedding.model <id>`; requires GOOGLE_API_KEY). When no
 embedder is available the caller falls back to inlining, so Ollama-only /
 keyless setups keep today's behavior. Search is brute-force cosine over a
@@ -31,7 +31,7 @@ from db.models import Document, DocumentChunk
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-002"
+DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
 
 # Documents at/below this many extracted chars are inlined into the message
 # (retrieval can miss; stuffing can't — only pay its cost when we must).
