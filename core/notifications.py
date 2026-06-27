@@ -53,7 +53,7 @@ def _matches(on: str, status: str) -> bool:
 
 
 def _build_text(status: str, title: str, body: str) -> str:
-    header = f"[{status.upper()}] {title}"
+    header = title if status == "done" else f"[{status.upper()}] {title}"
     truncated = body if len(body) <= _MAX_TELEGRAM_LEN else body[:_MAX_TELEGRAM_LEN] + "…"
     return f"{header}\n\n{truncated}"
 
