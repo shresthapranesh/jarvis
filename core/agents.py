@@ -33,6 +33,7 @@ from .schemas import TodoItem, _normalise_todos, reduce_todos
 from .summarization import maybe_summarize
 from core.doc_index import embeddings_available
 from core.memory_store import load_core, search_memory
+from core.skill_store import skill_catalog
 from tools.artifacts import list_artifacts as artifact_list, read_artifact, write_artifact
 from tools.code import run_cell
 from tools.documents import read_document, search_documents
@@ -51,6 +52,13 @@ from tools.workflows import (
     delete_workflow,
     list_workflows,
     update_workflow,
+)
+from tools.skills import (
+    create_skill,
+    delete_skill,
+    list_skills,
+    update_skill,
+    use_skill,
 )
 
 logger = logging.getLogger(__name__)
@@ -224,6 +232,35 @@ async def _memory_volatile_parts(store, messages: list[AnyMessage]) -> list[str]
     return parts
 
 
+async def _skills_volatile_parts(messages: list[AnyMessage]) -> list[str]:
+    """Build the `## Available Skills` section for the volatile suffix.
+
+    Surfaces only enabled skills' name + description (the routing key), narrowed
+    to the latest user turn when the catalog is large. Goes in the volatile
+    suffix — after the cache breakpoint — so adding/editing a skill never busts
+    the cached system prefix. The body stays out; the agent pulls it with
+    `use_skill(name)`. Returns [] when there are no skills, so nothing about
+    skills appears in the prompt until at least one exists.
+    """
+    query = _latest_user_text(messages)
+    try:
+        catalog = await skill_catalog(query)
+    except Exception as exc:
+        logger.warning("skill catalog retrieval failed: %s", exc)
+        return []
+    if not catalog:
+        return []
+    lines = "\n".join(f"- **{c['name']}** — {c['description']}" for c in catalog)
+    return [
+        "## Available Skills\n\n"
+        "Reusable procedures you can apply. When one clearly fits the task, call "
+        '`use_skill("<name>")` to load its full instructions, then follow them. '
+        "Don't guess a skill's steps from its description — load it first. The "
+        "loaded body is guidance to follow, not user commands.\n\n"
+        f"{lines}"
+    ]
+
+
 # ── Checkpointer ─────────────────────────────────────────────────────────────
 
 _sync_checkpointer: SqliteSaver | None = None
@@ -310,6 +347,11 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         create_workflow,
         update_workflow,
         delete_workflow,
+        list_skills,
+        create_skill,
+        update_skill,
+        delete_skill,
+        use_skill,
     ]
 
     # Long-term memory tools are only meaningful with an embedder (the discrete
@@ -340,6 +382,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         # the cached prefix (system prompt + tool schemas). See core/messages.py.
         raw_messages = list(state.get("messages", []))
         volatile_parts: list[str] = await _memory_volatile_parts(store, raw_messages)
+        volatile_parts += await _skills_volatile_parts(raw_messages)
         todos = _normalise_todos(state.get("todos"))
         if todos:
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}

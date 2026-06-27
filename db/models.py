@@ -326,3 +326,30 @@ class Memory(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
+
+
+class Skill(Base):
+    """A reusable, named capability the agent can invoke on demand.
+
+    A skill is `name` + `description` + `body`: the *description* is the routing
+    key — embedded for intent retrieval (same float32 layout as Memory.embedding)
+    and surfaced cheaply each turn — while the *body* is the full procedure,
+    loaded only when the skill is actually used (progressive disclosure). Global,
+    not conversation-scoped: skills are reusable like NotificationChannel /
+    Automation. `embedding` is null when no embedder was available at write time,
+    in which case retrieval falls back to every enabled skill. See
+    core/skill_store.py.
+    """
+
+    __tablename__ = "skills"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )

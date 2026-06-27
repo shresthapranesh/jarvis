@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Skill, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -878,6 +878,88 @@ async def delete_memory(session: AsyncSession, memory_id: str) -> bool:
 
 async def count_memories(session: AsyncSession) -> int:
     return (await session.execute(select(func.count()).select_from(Memory))).scalar_one()
+
+
+# ── Skills CRUD ───────────────────────────────────────────────────────────────
+# Pure persistence; the description-embedding lives one layer up in
+# core/skill_store.py so both the GraphQL mutations and the agent tools share it.
+
+async def create_skill(
+    session: AsyncSession,
+    *,
+    name: str,
+    description: str,
+    body: str,
+    embedding: bytes | None,
+    enabled: bool = True,
+) -> Skill:
+    skill = Skill(
+        id=str(uuid4()),
+        name=name,
+        description=description,
+        body=body,
+        embedding=embedding,
+        enabled=enabled,
+    )
+    session.add(skill)
+    await session.commit()
+    return skill
+
+
+async def get_skill(session: AsyncSession, skill_id: str) -> Skill | None:
+    return await session.get(Skill, skill_id)
+
+
+async def get_skill_by_name(session: AsyncSession, name: str) -> Skill | None:
+    result = await session.execute(select(Skill).where(Skill.name == name))
+    return result.scalar_one_or_none()
+
+
+async def list_skills(
+    session: AsyncSession, *, enabled_only: bool = False,
+) -> list[Skill]:
+    q = select(Skill).order_by(Skill.name.asc())
+    if enabled_only:
+        q = q.where(Skill.enabled.is_(True))
+    result = await session.execute(q)
+    return list(result.scalars().all())
+
+
+async def update_skill(
+    session: AsyncSession,
+    skill_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    body: str | None = None,
+    enabled: bool | None = None,
+    embedding: bytes | None = None,
+) -> Skill | None:
+    skill = await session.get(Skill, skill_id)
+    if skill is None:
+        return None
+    if name is not None:
+        skill.name = name
+    if description is not None:
+        skill.description = description
+    if body is not None:
+        skill.body = body
+    if enabled is not None:
+        skill.enabled = enabled
+    if embedding is not None:
+        skill.embedding = embedding
+    skill.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return skill
+
+
+async def delete_skill(session: AsyncSession, skill_id: str) -> bool:
+    skill = await session.get(Skill, skill_id)
+    if skill is None:
+        return False
+    await session.delete(skill)
+    await session.commit()
+    return True
 
 
 async def append_node_result(

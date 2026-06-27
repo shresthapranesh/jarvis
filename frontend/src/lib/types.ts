@@ -311,6 +311,18 @@ export interface MemoryItem {
   updated_at: string;
 }
 
+// ── Skills ────────────────────────────────────────────────────────────────────
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Running tasks (global registry) ──────────────────────────────────────────
 
 export type TaskKind = 'chat' | 'automation' | 'workflow';
