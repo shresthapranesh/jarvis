@@ -215,7 +215,19 @@ async def _memory_volatile_parts(store, messages: list[AnyMessage]) -> list[str]
         blob = await _load_memory_from_store(store) if store is not None else _load_memory_from_disk()
         return [f"## Agent Memory\n\n{blob}"] if blob else []
 
-    parts: list[str] = []
+    # Lead with a short how-to so the agent knows it can WRITE memory, not just
+    # read the items injected below. Gated on embeddings_available() (same
+    # condition as the remember/search_memory tool binding in _build_agent) so
+    # we never advertise tools that aren't bound on keyless setups.
+    parts: list[str] = [
+        "## Memory\n\n"
+        "You have long-term memory that persists across conversations. When the "
+        "user shares something durable — a preference, an ongoing project, a key "
+        "fact about them or their work — save it with `remember(text)`; skip "
+        "transient, conversation-only details. The most relevant memories are "
+        "injected below automatically; call `search_memory(query)` to dig for "
+        "something specific that hasn't surfaced."
+    ]
     core = await load_core()
     if core:
         parts.append(f"## Agent Memory\n\n{core}")
