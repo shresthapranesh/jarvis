@@ -7,7 +7,6 @@ import contextlib
 import logging
 import os
 import pathlib
-import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -38,13 +37,7 @@ from .routes_media import router as media_router
 from .routes_uploads import router as uploads_router
 from core.scheduler import _register_scheduler_job, _scheduler, register_kernel_reaper_job, register_memory_consolidation_job, register_staging_cleanup_job
 
-def _resource_root() -> pathlib.Path:
-    if getattr(sys, "frozen", False):
-        return pathlib.Path(sys._MEIPASS)  # type: ignore[attr-defined]
-    return pathlib.Path(__file__).resolve().parent.parent
-
-
-_DIST = _resource_root() / "static" / "dist"
+_DIST = pathlib.Path(__file__).resolve().parent.parent / "static" / "dist"
 
 logger = logging.getLogger(__name__)
 
