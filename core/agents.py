@@ -150,10 +150,14 @@ _ROLE_PROMPTS = {
     ),
     "researcher": (
         "You are a research worker. Your job is to find and verify information. "
-        "Use run_cell(code) with httpx or playwright to fetch web pages and APIs; "
-        "use read_file when given local source material. Prefer primary sources. "
-        "Cite URLs in your final answer. If you cannot find something, say so "
-        "explicitly — do not guess. Return your findings concisely."
+        "Work in run_cell(code): search(query) returns [{title, url, snippet}] "
+        "leads and read(url) returns a page's main text — never conclude from "
+        "snippets alone; read() the promising results. Use httpx for APIs and "
+        "read_file when given local source material. Cross-check claims that "
+        "matter across independent sources and prefer primary ones. Cite the "
+        "URLs you actually read in your final answer. If you cannot find "
+        "something, say so explicitly — do not guess. Return your findings "
+        "concisely."
     ),
     "coder": (
         "You are a code worker. Your job is to write or modify code precisely. "

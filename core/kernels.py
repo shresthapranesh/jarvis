@@ -29,6 +29,7 @@ import logging
 import re
 import sys
 import time
+from pathlib import Path
 
 from jupyter_client.manager import AsyncKernelManager
 
@@ -36,6 +37,23 @@ logger = logging.getLogger(__name__)
 
 # Strip the ANSI color codes IPython wraps tracebacks in — the LLM reads plain text.
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+# Preloaded into every kernel right after startup (silent, no history entry) so
+# the agent can call search()/read() (tools/research.py) without importing.
+# The project root is pinned onto sys.path so the `tools` package resolves no
+# matter what cwd the server was started from. Failure is non-fatal: the agent
+# just sees a NameError and can import/fetch manually.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+_BOOTSTRAP_CODE = (
+    "try:\n"
+    "    import sys as _sys\n"
+    f"    _root = {_PROJECT_ROOT!r}\n"
+    "    if _root not in _sys.path:\n"
+    "        _sys.path.insert(0, _root)\n"
+    "    from tools.research import search, read\n"
+    "except Exception:\n"
+    "    pass\n"
+)
 
 # Tunables. Kept module-level (not config rows) for now; promote to AppConfig
 # if these need per-deployment overrides.
@@ -79,6 +97,10 @@ class KernelSession:
             kc.stop_channels()
             await km.shutdown_kernel(now=True)
             raise
+        # Queue the research-helper preload. silent=True → no execute_result,
+        # no history pollution; its iopub traffic carries a different parent
+        # msg_id, so _drain_until_idle for real cells ignores it.
+        kc.execute(_BOOTSTRAP_CODE, silent=True, store_history=False)
         self.km, self.kc = km, kc
         logger.info("kernel started for session %s", self.key)
 

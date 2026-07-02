@@ -37,6 +37,7 @@ dependencies = [
     "sqlalchemy[asyncio]~=2.0",
     "sse-starlette~=3.3",
     "strawberry-graphql[fastapi]>=0.315.5",
+    "trafilatura>=2.1.0",
     "typer~=0.24",
     "uvicorn~=0.44",
     "yfinance~=1.3",

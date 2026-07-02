@@ -86,6 +86,9 @@ jarvis/
 │   ├── skills.py         # [bound] use_skill + list/create/update/delete_skill (agent-authored skills)
 │   ├── memory.py         # [bound iff embedder] remember, search_memory (discrete vector memory)
 │   ├── context.py        # current_ctx() — per-call ToolContext (code_session_key, conversation_id)
+│   ├── research.py       # [kernel-preloaded] search() (Tavily/Brave, ddgs fallback) + read()
+│   │                     #   (trafilatura extraction, Playwright fallback) — plain sync helpers
+│   │                     #   injected into every run_cell kernel (core/kernels.py), not bound tools
 │   ├── web.py            # [unbound] web_search (ddgs), fetch_page, extract_links, playwright_browse
 │   ├── finance.py        # [unbound] get_stock_data, get_historical_prices, compare_stocks, …
 │   ├── browser_agent.py  # [unbound] headless browser sub-agent
