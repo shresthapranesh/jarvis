@@ -170,7 +170,7 @@ REST is reserved for binary download, file upload, audio, the live WS, log taili
 - **Do not call `session.refresh()` after commit** — `async_session` uses `expire_on_commit=False` and all defaults are Python-side, so the object is already fully populated.
 
 ### Adding a new model to the catalog
-The catalog merges two layers in `core/model_catalog.py`: `BUILTIN_MODELS` (compiled-in seed) + a runtime cache of custom models. `build_llm()` switches only on `provider` (`KNOWN_PROVIDERS`: ollama, google_genai, bedrock, anthropic) — the id is `provider:model_name`, so any model from those backends needs **no code**, only a catalog entry.
+The catalog merges two layers in `core/model_catalog.py`: `BUILTIN_MODELS` (compiled-in seed) + a runtime cache of custom models. `build_llm()` switches only on `provider` (`KNOWN_PROVIDERS`: ollama, google_genai, bedrock, anthropic, meta) — the id is `provider:model_name`, so any model from those backends needs **no code**, only a catalog entry.
 - **At runtime (no code change, preferred):** `uv run python main.py model add <provider:model_name> "<label>"` — persisted as JSON under the `config_settings` key `models.custom`. `model remove <id>` / `model list` manage them. Hydrated into the in-memory cache at server startup (lifespan), on every GraphQL `models` query, and per-invocation in the CLI (`_run_db`).
 - **As a built-in default:** add a `ModelSpec` entry to `BUILTIN_MODELS`. Note `BUILTIN_MODELS[0]` is the compile-time `DEFAULT_MODEL`, so don't prepend unless you mean to change the default.
 - All consumers go through `available_models()` / `get_model_spec()` / `is_valid_model()` (built-in ∪ custom, deduped). The frontend reads the catalog via the GraphQL `models` query (`queries/models.py`, async — re-hydrates from DB so runtime additions show without a restart) — dropdowns populate automatically.
@@ -299,7 +299,7 @@ Optional — enabled by setting `DISCORD_BOT_TOKEN` before starting the server. 
 
 ## Environment
 - Python 3.13, managed with `uv`.
-- Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI), `langgraph-checkpoint-sqlite`, APScheduler, `browser-use`/Playwright, faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
+- Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI, Meta), `langgraph-checkpoint-sqlite`, APScheduler, `browser-use`/Playwright, faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
 - Frontend stack: React 19, TanStack Router/Query, **Relay** (`babel-plugin-relay` run as a standalone Vite transform — see `vite.config.ts`), Vite, TypeScript.
 - No test suite currently.
 - No linter configured; use `uvx pyrefly check --summarize-errors` for Python type checking and `pnpm typecheck` for the frontend. Frontend formatting via `pnpm fmt` (oxfmt).
