@@ -45,6 +45,17 @@ class ModelSpec:
             from langchain_anthropic import ChatAnthropic
             return ChatAnthropic(model_name=model_name, timeout=None, stop=None)
 
+        if self.provider == "meta":
+            import os
+            from langchain_meta import ChatMetaModel
+            # The class's own env fallback is MODEL_API_KEY — too generic a
+            # name to document; we standardize on META_API_KEY and fail with
+            # a message that names it.
+            api_key = os.environ.get("META_API_KEY")
+            if not api_key:
+                raise ValueError(f"META_API_KEY is not set (required for '{self.id}')")
+            return ChatMetaModel(model=model_name, api_key=api_key)
+
         raise ValueError(f"Unknown provider '{self.provider}' for model '{self.id}'")
 
 
@@ -52,7 +63,7 @@ class ModelSpec:
 # one of these as its `provider:` prefix — there is no per-model code, only
 # per-provider, so any model from one of these backends is supported.
 KNOWN_PROVIDERS: frozenset[str] = frozenset(
-    {"ollama", "google_genai", "bedrock", "anthropic"}
+    {"ollama", "google_genai", "bedrock", "anthropic", "meta"}
 )
 
 
@@ -69,6 +80,7 @@ BUILTIN_MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("anthropic:claude-opus-4-7",                                   "Claude Opus 4.7 (Anthropic)",        "anthropic"),
     ModelSpec("anthropic:claude-sonnet-4-6",                                 "Claude Sonnet 4.6 (Anthropic)",      "anthropic"),
     ModelSpec("anthropic:claude-haiku-4-5-20251001",                         "Claude Haiku 4.5 (Anthropic)",       "anthropic"),
+    ModelSpec("meta:muse-spark-1.1",                                         "Muse Spark 1.1 (Meta)",              "meta"),
 )
 
 DEFAULT_MODEL: str = BUILTIN_MODELS[0].id
