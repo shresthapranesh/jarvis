@@ -6204,3 +6204,13 @@ body {
 .board-parent-status--running { background: var(--accent); }
 .board-parent-status--done { background: var(--ok); }
 .board-parent-status--blocked { background: var(--warning-text); }
+
+/* Task board — decompose */
+
+.board-split-busy {
+  animation: board-split-spin 1s linear infinite;
+}
+
+@keyframes board-split-spin {
+  to { transform: rotate(360deg); }
+}

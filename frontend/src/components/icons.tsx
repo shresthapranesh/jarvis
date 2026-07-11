@@ -157,6 +157,15 @@ export const ArchiveIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const SplitIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3v6" />
+    <path d="M12 9c0 3-6 3-6 7v5" />
+    <path d="M12 9c0 3 6 3 6 7v5" />
+    <circle cx="12" cy="3" r="0.5" fill="currentColor" />
+  </Icon>
+);
+
 export const KanbanIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect x="3" y="3" width="5" height="14" rx="1" />

@@ -137,6 +137,19 @@ class BoardTaskMutation:
         return BoardTask.from_db(task)
 
     @strawberry.mutation
+    async def decompose_board_task(
+        self,
+        info: strawberry.Info,
+        id: relay.GlobalID,
+    ) -> list[BoardTask]:
+        """Split a standalone waiting task into LLM-planned subtasks. The
+        subtasks become parents of the original, which runs last as the
+        synthesis step. Returns the created subtasks."""
+        from server.task_board_runtime import decompose_board_task
+        subtasks = await decompose_board_task(id.node_id)
+        return [BoardTask.from_db(t) for t in subtasks]
+
+    @strawberry.mutation
     async def answer_board_task(
         self,
         info: strawberry.Info,

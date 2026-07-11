@@ -6,13 +6,14 @@ import {useBoardTaskEvents} from '../hooks/useBoardTaskEvents';
 import {commitAnswerBoardTask} from '../relay/AnswerBoardTaskMutation';
 import {fetchBoardTasks} from '../relay/BoardTasksQuery';
 import {commitCreateBoardTask} from '../relay/CreateBoardTaskMutation';
+import {commitDecomposeBoardTask} from '../relay/DecomposeBoardTaskMutation';
 import {commitDeleteBoardTask} from '../relay/DeleteBoardTaskMutation';
 import {commitSetBoardTaskStatus} from '../relay/SetBoardTaskStatusMutation';
 import {commitStopBoardTask} from '../relay/StopBoardTaskMutation';
 import {commitUpdateBoardTask} from '../relay/UpdateBoardTaskMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
-import {ArchiveIcon, EditIcon, PauseIcon, PlayIcon, PlusIcon, StopIcon, TrashIcon} from './icons';
+import {ArchiveIcon, EditIcon, PauseIcon, PlayIcon, PlusIcon, SplitIcon, StopIcon, TrashIcon} from './icons';
 import type {BoardTask, BoardTaskStatus} from '../lib/types';
 
 const COLUMNS: Array<{key: BoardTaskStatus; label: string}> = [
@@ -28,10 +29,11 @@ interface Draft {
   body: string;
   priority: number;
   start: boolean;
+  decompose: boolean;
   parentIds: string[];
 }
 
-const EMPTY_DRAFT: Draft = {title: '', body: '', priority: 0, start: true, parentIds: []};
+const EMPTY_DRAFT: Draft = {title: '', body: '', priority: 0, start: true, decompose: false, parentIds: []};
 
 type Editor = {mode: 'add'} | {mode: 'edit'; task: BoardTask};
 
@@ -117,6 +119,7 @@ export function TaskBoard() {
       body: t.body ?? '',
       priority: t.priority,
       start: true,
+      decompose: false,
       parentIds: [...t.parent_ids],
     });
     setActionError(null);
@@ -124,18 +127,34 @@ export function TaskBoard() {
   }
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      commitCreateBoardTask({
+    mutationFn: async () => {
+      const decompose = draft.decompose && draft.parentIds.length === 0;
+      const task = await commitCreateBoardTask({
         title: draft.title.trim(),
         body: draft.body.trim() || undefined,
         priority: draft.priority,
         parentIds: draft.parentIds,
-        start: draft.start,
-      }),
+        // A task about to be decomposed is parked; its subtasks start instead.
+        start: decompose ? false : draft.start,
+      });
+      if (decompose) await commitDecomposeBoardTask(task.id);
+      return task;
+    },
     onSuccess: async () => {
       await invalidate();
       closeEditor();
     },
+    onError: async (e: Error) => {
+      // Create may have succeeded with only the decompose step failing —
+      // refresh so the parked task is visible next to the error.
+      await invalidate();
+      setActionError(e.message);
+    },
+  });
+
+  const decomposeMutation = useMutation({
+    mutationFn: (id: string) => commitDecomposeBoardTask(id),
+    onSuccess: () => invalidate(),
     onError: (e: Error) => setActionError(e.message),
   });
 
@@ -237,6 +256,16 @@ export function TaskBoard() {
               onClick={() => moveMutation.mutate({id: t.id, status: 'ready'})}
             >
               <PlayIcon size={13} />
+            </button>
+          )}
+          {(t.status === 'todo' || t.status === 'ready') && t.parent_ids.length === 0 && (
+            <button
+              className="icon-btn"
+              title="Split into subtasks with a planner LLM"
+              disabled={decomposeMutation.isPending && decomposeMutation.variables === t.id}
+              onClick={() => decomposeMutation.mutate(t.id)}
+            >
+              <SplitIcon size={13} className={decomposeMutation.isPending && decomposeMutation.variables === t.id ? 'board-split-busy' : undefined} />
             </button>
           )}
           {t.status === 'done' && (
@@ -356,15 +385,32 @@ export function TaskBoard() {
         error={actionError}
         footerExtra={
           editor?.mode === 'add' ? (
-            <label className="switch switch--labeled">
-              <input
-                type="checkbox"
-                checked={draft.start}
-                onChange={(e) => setDraft({...draft, start: e.target.checked})}
-              />
-              <span className="switch-track" aria-hidden="true" />
-              Start immediately
-            </label>
+            <>
+              <label className="switch switch--labeled">
+                <input
+                  type="checkbox"
+                  checked={draft.start}
+                  disabled={draft.decompose}
+                  onChange={(e) => setDraft({...draft, start: e.target.checked})}
+                />
+                <span className="switch-track" aria-hidden="true" />
+                Start immediately
+              </label>
+              {draft.parentIds.length === 0 && (
+                <label
+                  className="switch switch--labeled"
+                  title="A planner LLM splits this into parallel subtasks; the task itself runs last with their results"
+                >
+                  <input
+                    type="checkbox"
+                    checked={draft.decompose}
+                    onChange={(e) => setDraft({...draft, decompose: e.target.checked})}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                  Auto-split into subtasks
+                </label>
+              )}
+            </>
           ) : undefined
         }
         onSubmit={submitEditor}

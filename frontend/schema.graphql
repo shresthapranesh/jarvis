@@ -265,6 +265,7 @@ type Mutation {
   createBoardTask(input: BoardTaskInput!): BoardTask!
   updateBoardTask(id: ID!, input: BoardTaskUpdateInput!): BoardTask!
   setBoardTaskStatus(id: ID!, status: String!): BoardTask!
+  decomposeBoardTask(id: ID!): [BoardTask!]!
   answerBoardTask(id: ID!, answer: String!): BoardTask!
   deleteBoardTask(id: ID!): Boolean!
   stopBoardTask(id: ID!): Boolean!

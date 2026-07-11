@@ -358,6 +358,141 @@ async def _run_board_task_inner(
         loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
 
 
+# ── Auto-decompose ───────────────────────────────────────────────────────────
+#
+# A planner LLM breaks one standalone task into 2–MAX_SUBTASKS subtasks with
+# dependencies among themselves; every subtask becomes a PARENT of the original
+# task, which is parked in todo — so the original runs last as the synthesis
+# step, receiving each subtask's summary as handoff context.
+
+MAX_SUBTASKS = 8
+
+_DECOMPOSE_SYSTEM = (
+    "You are a planner for a multi-agent task board. Respond ONLY with a JSON "
+    "object — no prose, no code fences."
+)
+
+_DECOMPOSE_PROMPT = """\
+Break the following task into 2-{max} smaller subtasks that together accomplish it.
+
+# Task: {title}
+{body}
+
+Rules:
+- Each subtask needs a short imperative "title" and a self-contained "body" an \
+agent can execute without seeing the other subtasks (dependency results are \
+handed to it automatically).
+- "depends_on" lists the 0-based indexes of other subtasks whose output this \
+one needs; it may only reference EARLIER subtasks (smaller index). Prefer no \
+dependencies so subtasks run in parallel.
+- Do NOT add a final "combine the results" subtask — the original task runs \
+last automatically with every subtask's summary as context.
+
+JSON shape: {{"subtasks": [{{"title": "...", "body": "...", "depends_on": []}}]}}"""
+
+
+def _parse_decomposition(raw: object) -> list[dict]:
+    """LLM content → validated subtask specs. Raises ValueError on garbage."""
+    if isinstance(raw, list):  # reasoning models return a list of blocks
+        raw = " ".join(
+            b.get("text", "") for b in raw
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    text = str(raw).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("decomposer returned no JSON object")
+    try:
+        data = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"decomposer returned invalid JSON: {exc}")
+    subtasks = data.get("subtasks")
+    if not isinstance(subtasks, list) or not (2 <= len(subtasks) <= MAX_SUBTASKS):
+        raise ValueError(
+            f"decomposer must return 2-{MAX_SUBTASKS} subtasks "
+            f"(got {len(subtasks) if isinstance(subtasks, list) else 'none'})"
+        )
+    specs: list[dict] = []
+    for i, s in enumerate(subtasks):
+        title = str(s.get("title") or "").strip()
+        body = str(s.get("body") or "").strip()
+        if not title or not body:
+            raise ValueError(f"subtask {i} is missing a title or body")
+        deps = s.get("depends_on") or []
+        if not isinstance(deps, list) or any(
+            not isinstance(d, int) or d < 0 or d >= i for d in deps
+        ):
+            raise ValueError(
+                f"subtask {i} has invalid depends_on (must be earlier indexes)"
+            )
+        specs.append({"title": title, "body": body, "depends_on": sorted(set(deps))})
+    return specs
+
+
+async def decompose_board_task(task_id: str) -> list[BoardTask]:
+    """Split a standalone waiting task into subtasks (see module note above).
+    Returns the created subtasks. Raises ValueError on bad state or a
+    decomposer output that can't be parsed — the task is left untouched then."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from core.model_catalog import get_model_spec
+    from db.models import BoardTaskLink
+    from db.ops import create_board_task
+
+    async with async_session() as session:
+        task = await get_board_task(session, task_id)
+        if task is None:
+            raise ValueError("task not found")
+        if task.status not in ("todo", "ready", "blocked"):
+            raise ValueError("only waiting (todo/ready/blocked) tasks can be decomposed")
+        if await get_board_task_parents(session, task_id):
+            raise ValueError("task already has dependencies — decompose only standalone tasks")
+
+    model = task.model or DEFAULT_MODEL
+    llm = get_model_spec(model).build_llm()
+    response = await llm.ainvoke([
+        SystemMessage(content=_DECOMPOSE_SYSTEM),
+        HumanMessage(content=_DECOMPOSE_PROMPT.format(
+            max=MAX_SUBTASKS, title=task.title, body=task.body or "",
+        )),
+    ])
+    specs = _parse_decomposition(response.content)
+
+    created: list[BoardTask] = []
+    async with async_session() as session:
+        # Park the original FIRST — it must not get dispatched by an interval
+        # tick while its gating subtasks are still being created below.
+        original = await session.get(BoardTask, task_id)
+        if original is None:
+            raise ValueError("task not found")
+        original.status = "todo"
+        original.blocked_reason = None
+        original.blocked_kind = None
+        original.finished_at = None
+        original.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+        for spec in specs:
+            sub = await create_board_task(
+                session,
+                title=spec["title"],
+                body=spec["body"],
+                status="ready",  # forced to todo by create when it has parents
+                priority=task.priority,
+                created_by="agent",
+                model=task.model,
+                parent_ids=[created[d].id for d in spec["depends_on"]],
+            )
+            created.append(sub)
+        # Every subtask gates the original: it runs last as the synthesis step.
+        for sub in created:
+            session.add(BoardTaskLink(id=str(uuid4()), parent_id=sub.id, child_id=task_id))
+        await session.commit()
+
+    logger.info("board decompose: task %s split into %d subtasks", task_id, len(created))
+    await dispatch_board_tasks()
+    return created
+
+
 # ── Queue handler ────────────────────────────────────────────────────────────
 
 async def board_task_job_handler(job: Job) -> None:

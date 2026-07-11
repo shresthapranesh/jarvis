@@ -28,6 +28,7 @@ async def create_task(
     model: str | None = None,
     skill: str | None = None,
     start: bool = True,
+    decompose: bool = False,
 ) -> str:
     """Create a durable task on the shared task board.
 
@@ -49,9 +50,15 @@ async def create_task(
                capacity; if False it is parked in the todo column until a
                human (or update) readies it. Ignored when depends_on is set —
                dependent tasks always wait for their parents.
+        decompose: Have a planner LLM split the task into parallel subtasks;
+                   the task itself then runs last as the synthesis step,
+                   receiving every subtask's summary. Use for big multi-part
+                   goals. Cannot be combined with depends_on.
     """
     parent_ids = [p.strip() for p in (depends_on or "").split(",") if p.strip()]
-    status = "ready" if start else "todo"
+    if decompose and parent_ids:
+        return "Error: decompose cannot be combined with depends_on."
+    status = "todo" if decompose else ("ready" if start else "todo")
     try:
         async with async_session() as session:
             task = await _create(
@@ -67,9 +74,24 @@ async def create_task(
             )
     except ValueError as exc:
         return f"Error: {exc}"
+    # Lazy imports: tools must not import server modules at load time
+    # (core.agents imports this file; server imports core.agents).
+    if decompose:
+        from server.task_board_runtime import decompose_board_task
+        try:
+            subtasks = await decompose_board_task(task.id)
+        except ValueError as exc:
+            return (
+                f"Created board task '{task.title}' (id={task.id}, status=todo) "
+                f"but decomposition failed: {exc}. The task is parked in todo."
+            )
+        sub_lines = "\n".join(f"  - {s.title} (id={s.id})" for s in subtasks)
+        return (
+            f"Created board task '{task.title}' (id={task.id}) and split it into "
+            f"{len(subtasks)} subtasks that run first:\n{sub_lines}\n"
+            "The original task runs last with their results."
+        )
     if task.status == "ready":
-        # Lazy import: tools must not import server modules at load time
-        # (core.agents imports this file; server imports core.agents).
         from server.task_board_runtime import dispatch_board_tasks
         await dispatch_board_tasks()
     return (
