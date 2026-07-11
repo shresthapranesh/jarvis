@@ -84,8 +84,8 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
       setError('Name is required');
       return;
     }
-    if (form.input_type === 'prompt' && !form.prompt_text?.trim()) {
-      setError('Prompt text is required');
+    if ((form.input_type === 'prompt' || form.input_type === 'monitor') && !form.prompt_text?.trim()) {
+      setError(form.input_type === 'monitor' ? 'Describe what to monitor' : 'Prompt text is required');
       return;
     }
     if (form.input_type === 'code' && !form.code_text?.trim()) {
@@ -153,23 +153,35 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           disabled={saving}
         >
           <option value="prompt">Prompt</option>
+          <option value="monitor">Monitor</option>
           <option value="code">Code</option>
           <option value="webhook">Webhook</option>
         </select>
       </div>
 
-      {form.input_type === 'prompt' && (
+      {(form.input_type === 'prompt' || form.input_type === 'monitor') && (
         <>
           <div className="auto-form-group">
-            <label className="auto-form-label">Prompt</label>
+            <label className="auto-form-label">
+              {form.input_type === 'monitor' ? 'What to monitor' : 'Prompt'}
+            </label>
             <textarea
               className="auto-form-textarea"
               rows={5}
               value={form.prompt_text ?? ''}
               onChange={(e) => set('prompt_text', e.target.value)}
-              placeholder="Research the latest news about..."
+              placeholder={
+                form.input_type === 'monitor'
+                  ? 'The latest stable release of X; alert me when a new version ships...'
+                  : 'Research the latest news about...'
+              }
               disabled={saving}
             />
+            {form.input_type === 'monitor' && (
+              <div className="auto-form-hint">
+                Runs remember previous checks and only notify when something changed.
+              </div>
+            )}
           </div>
           <div className="auto-form-group">
             <label className="auto-form-label">Model</label>
@@ -188,18 +200,20 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
               ))}
             </select>
           </div>
-          <div className="auto-form-check-row">
-            <input
-              id="auto-stateful"
-              type="checkbox"
-              checked={form.stateful ?? false}
-              onChange={(e) => set('stateful', e.target.checked)}
-              disabled={saving}
-            />
-            <label htmlFor="auto-stateful" className="auto-form-check-label">
-              Stateful — runs share one conversation, so the agent remembers previous runs
-            </label>
-          </div>
+          {form.input_type === 'prompt' && (
+            <div className="auto-form-check-row">
+              <input
+                id="auto-stateful"
+                type="checkbox"
+                checked={form.stateful ?? false}
+                onChange={(e) => set('stateful', e.target.checked)}
+                disabled={saving}
+              />
+              <label htmlFor="auto-stateful" className="auto-form-check-label">
+                Stateful — runs share one conversation, so the agent remembers previous runs
+              </label>
+            </div>
+          )}
         </>
       )}
 

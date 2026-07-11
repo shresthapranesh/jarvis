@@ -16,7 +16,7 @@ class Automation(relay.Node):
     id: relay.NodeID[str]
     name: str
     description: str | None
-    input_type: str  # "prompt" | "code" | "webhook"
+    input_type: str  # "prompt" | "code" | "webhook" | "monitor"
     prompt_text: str | None
     model: str | None
     code_text: str | None
@@ -63,7 +63,11 @@ class Automation(relay.Node):
             schedule=row.schedule,
             enabled=row.enabled,
             stateful=row.stateful,
-            conversation_id=automation_conversation_id(row.id) if row.stateful else None,
+            conversation_id=(
+                automation_conversation_id(row.id)
+                if (row.stateful or row.input_type == "monitor")
+                else None
+            ),
             notifications=row.notifications,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -95,7 +99,7 @@ class Automation(relay.Node):
 class AutomationRun(relay.Node):
     id: relay.NodeID[str]
     automation_id: str
-    status: str  # "running" | "done" | "error" | "stopped" | "blocked" | "skipped"
+    status: str  # "running" | "done" | "error" | "stopped" | "blocked" | "skipped" | "no_change"
     triggered_by: str  # "schedule" | "manual"
     output: str | None
     error: str | None

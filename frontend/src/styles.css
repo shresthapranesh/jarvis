@@ -2017,6 +2017,12 @@ body {
   border-color: var(--accent);
 }
 
+.auto-form-hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
 .auto-form-check-row {
   display: flex;
   align-items: center;
@@ -3705,6 +3711,11 @@ body {
   background: var(--webhook-bg);
   border-color: rgba(196, 181, 253, 0.25);
 }
+.auto-card-icon--monitor {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.25);
+}
 
 .auto-card-main {
   display: flex;
@@ -3780,6 +3791,10 @@ body {
   background: var(--webhook-bg);
   color: var(--webhook-text);
 }
+.auto-card-badge--monitor {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+}
 .auto-card-badge--schedule {
   background: var(--surface2);
   color: var(--text-dim);
@@ -3840,6 +3855,18 @@ body {
   background: var(--accent);
   box-shadow: 0 0 6px rgba(85, 195, 176, 0.55);
   animation: rail-pulse 1.6s ease-in-out infinite;
+}
+.run-status-dot--no_change {
+  background: transparent;
+  border: 1.5px solid #4ade80;
+}
+.run-status-dot--skipped,
+.run-status-dot--stopped {
+  background: var(--text-dim);
+}
+.run-status-dot--blocked {
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.45);
 }
 
 /* ── Card actions (always visible, brighter on hover) ── */
@@ -4034,6 +4061,11 @@ body {
   color: var(--webhook-text);
   background: var(--webhook-bg);
   border-color: rgba(196, 181, 253, 0.25);
+}
+.runs-panel-type--monitor {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.25);
 }
 
 .runs-panel-name {

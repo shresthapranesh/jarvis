@@ -1,6 +1,9 @@
 """Agent tools for managing automations via the Jarvis database."""
 from __future__ import annotations
 
+from apscheduler.triggers.cron import CronTrigger
+
+from core.scheduler import _register_scheduler_job, _remove_scheduler_job
 from db.engine import async_session
 from db.ops import (
     create_automation as _create,
@@ -8,6 +11,21 @@ from db.ops import (
     list_automations as _list,
     update_automation as _update,
 )
+
+_INPUT_TYPES = ("prompt", "code", "webhook", "monitor")
+
+
+def _invalid_input(input_type: str | None, schedule: str | None) -> str | None:
+    """Validate the bits that would otherwise fail silently at run/registration
+    time; returns an agent-facing error string or None."""
+    if input_type is not None and input_type not in _INPUT_TYPES:
+        return f"Error: unknown input_type '{input_type}'; must be one of {', '.join(_INPUT_TYPES)}."
+    if schedule:
+        try:
+            CronTrigger.from_crontab(schedule)
+        except Exception:
+            return f"Error: invalid cron expression '{schedule}'."
+    return None
 
 
 async def list_automations() -> str:
@@ -36,15 +54,22 @@ async def create_automation(
     webhook_body: str | None = None,
     schedule: str | None = None,
     enabled: bool = True,
+    stateful: bool = False,
 ) -> str:
     """Create a new automation.
 
     Args:
         name: Human-readable name.
-        input_type: "prompt" (LLM agent run), "code" (Python subprocess), or "webhook" (HTTP call).
+        input_type: "prompt" (LLM agent run), "code" (Python subprocess),
+                    "webhook" (HTTP call), or "monitor" (watch something and
+                    notify only when it changes — a prompt run that keeps one
+                    shared conversation across runs and stays silent when the
+                    agent reports NO_CHANGE).
         description: Optional short description.
         prompt_text: (prompt) The query/instruction the agent will run.
-        model: (prompt) Model ID, e.g. "google_genai:gemini-2.5-pro". None = use default.
+                     (monitor) The target to watch, e.g. "the latest release of X"
+                     or "NVDA closing price; alert when it drops below 150".
+        model: (prompt/monitor) Model ID, e.g. "google_genai:gemini-2.5-pro". None = use default.
         code_text: (code) Python source code to execute.
         webhook_url: (webhook) Target URL.
         webhook_method: (webhook) HTTP method. Defaults to "POST".
@@ -53,7 +78,12 @@ async def create_automation(
         schedule: Cron expression for recurring runs, e.g. "0 9 * * *" = daily 9am.
                   None = manual trigger only.
         enabled: Whether the automation is active. Default True.
+        stateful: (prompt) Share one conversation across runs so the agent
+                  remembers previous runs. Monitors are always stateful.
     """
+    error = _invalid_input(input_type, schedule)
+    if error:
+        return error
     async with async_session() as session:
         auto = await _create(
             session,
@@ -69,7 +99,10 @@ async def create_automation(
             webhook_body=webhook_body,
             schedule=schedule,
             enabled=enabled,
+            stateful=stateful,
         )
+    if auto.enabled and auto.schedule:
+        _register_scheduler_job(auto)
     return (
         f"Created automation '{auto.name}' "
         f"(id={auto.id}, type={auto.input_type}, schedule={auto.schedule or 'manual'})."
@@ -82,15 +115,22 @@ async def update_automation(automation_id: str, **fields) -> str:
     Pass the automation id and any subset of the same keyword arguments
     accepted by create_automation (e.g. name, schedule, enabled, prompt_text).
     """
+    error = _invalid_input(fields.get("input_type"), fields.get("schedule"))
+    if error:
+        return error
     async with async_session() as session:
         auto = await _update(session, automation_id, **fields)
     if auto is None:
         return f"Automation '{automation_id}' not found."
+    _remove_scheduler_job(automation_id)
+    if auto.enabled and auto.schedule:
+        _register_scheduler_job(auto)
     return f"Updated automation '{auto.name}' (id={auto.id})."
 
 
 async def delete_automation(automation_id: str) -> str:
     """Delete an automation by its id."""
+    _remove_scheduler_job(automation_id)
     async with async_session() as session:
         deleted = await _delete(session, automation_id)
     return (

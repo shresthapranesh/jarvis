@@ -80,7 +80,8 @@ class Automation(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # "prompt" | "code" | "webhook"
+    # "prompt" | "code" | "webhook" | "monitor" (prompt run that is always
+    # stateful and only notifies when the observed target changed)
     input_type: Mapped[str] = mapped_column(String, nullable=False)
 
     # prompt fields
@@ -119,7 +120,7 @@ class AutomationRun(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(ForeignKey("automations.id"), nullable=False, index=True)
 
-    status: Mapped[str] = mapped_column(String, default="running")  # running | done | error | stopped | blocked | skipped
+    status: Mapped[str] = mapped_column(String, default="running")  # running | done | error | stopped | blocked | skipped | no_change
     triggered_by: Mapped[str] = mapped_column(String, nullable=False)  # schedule | manual
 
     output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

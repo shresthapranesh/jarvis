@@ -74,8 +74,12 @@ async def _execute_prompt_type(
     coalescer = TokenCoalescer(state)
     agent = build_agent(auto.model or DEFAULT_MODEL, checkpointer=checkpointer, store=get_store())
 
+    user_content = auto.prompt_text or ""
+    if auto.input_type == "monitor":
+        user_content = _MONITOR_WRAPPER.format(target=user_content)
+
     async for raw_chunk in agent.astream(
-        {"messages": [{"role": "user", "content": auto.prompt_text or ""}]},
+        {"messages": [{"role": "user", "content": user_content}]},
         config={
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 100,
@@ -191,9 +195,43 @@ async def _execute_webhook_type(auto: Automation, state: TaskState) -> str:
     return result
 
 
+# ── Monitor input type ───────────────────────────────────────────────────────
+#
+# A monitor is a prompt run that is always stateful (the shared thread holds
+# the previous observations) and whose notifications are delta-gated: when the
+# agent reports the sentinel, the run finishes with status "no_change" and no
+# notification is sent — silence means "nothing new".
+
+_NO_CHANGE_SENTINEL = "NO_CHANGE"
+
+_MONITOR_WRAPPER = """\
+You are running as a scheduled monitor. Check the target described below and \
+compare what you observe against your previous observations earlier in this \
+conversation.
+
+- First check (no previous observations): reply with a concise baseline of the current state.
+- Nothing meaningful has changed since the last check: reply with exactly NO_CHANGE on the \
+first line. You may note minor details below it; nothing will be delivered.
+- Something meaningful changed: reply with a concise report of what changed and the new \
+state. Do NOT start the reply with NO_CHANGE.
+
+Target to monitor:
+{target}"""
+
+
+def _monitor_reported_no_change(output: str) -> bool:
+    stripped = (output or "").strip()
+    if not stripped:
+        return False
+    first_line = stripped.splitlines()[0].strip().strip("*_`\"'. ")
+    return first_line.upper() == _NO_CHANGE_SENTINEL
+
+
 # ── Background execution dispatcher ─────────────────────────────────────────
 
 def _is_stateful_prompt(auto: Automation) -> bool:
+    if auto.input_type == "monitor":
+        return True
     return auto.input_type == "prompt" and bool(auto.stateful)
 
 
@@ -266,7 +304,7 @@ async def _run_automation_inner(
                 )
                 await add_message(session, conv_id, "user", auto.prompt_text or "")
 
-        if auto.input_type == "prompt":
+        if auto.input_type in ("prompt", "monitor"):
             model = auto.model or DEFAULT_MODEL
             rejection = await gate_input(auto.prompt_text or "", model)
             if rejection:
@@ -304,16 +342,26 @@ async def _run_automation_inner(
             final_status = "stopped"
             emit_event(state, "stopped", output=output, run_id=run_id)
         else:
+            if (
+                auto.input_type == "monitor"
+                and status == "done"
+                and _monitor_reported_no_change(output)
+            ):
+                status = "no_change"
             async with async_session() as session:
                 await finish_automation_run(session, run_id, status, output, None)
-                await send_notifications(
-                    session, auto.notifications,
-                    status=notify_status,
-                    title=auto.name,
-                    body=output or "",
-                )
+                # Delta gate: an unchanged monitor stays silent.
+                if status != "no_change":
+                    await send_notifications(
+                        session, auto.notifications,
+                        status=notify_status,
+                        title=auto.name,
+                        body=output or "",
+                    )
             if conv_id:
-                await _persist_stateful_message(conv_id, "assistant", output or "", status)
+                # "no_change" is a run status, not a chat message status.
+                msg_status = "blocked" if status == "blocked" else "done"
+                await _persist_stateful_message(conv_id, "assistant", output or "", msg_status)
             final_status = status
             emit_event(state, "done", output=output, run_id=run_id)
 

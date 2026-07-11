@@ -305,7 +305,7 @@ async def list_automations_with_stats(
                 AutomationRun.automation_id,
                 func.count(AutomationRun.id).label("total_7d"),
                 func.sum(
-                    case((AutomationRun.status == "done", 1), else_=0)
+                    case((AutomationRun.status.in_(["done", "no_change"]), 1), else_=0)
                 ).label("success_7d"),
             )
             .where(AutomationRun.started_at >= since)

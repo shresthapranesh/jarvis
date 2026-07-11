@@ -15,6 +15,7 @@ import {
   CodeIcon,
   CursorClickIcon,
   EditIcon,
+  EyeIcon,
   PlayIcon,
   WebhookIcon,
   XIcon,
@@ -23,6 +24,7 @@ import {
 function TypeIcon({type, size = 16}: {type: Automation['input_type']; size?: number}) {
   if (type === 'prompt') return <BoltIcon size={size} />;
   if (type === 'code') return <CodeIcon size={size} />;
+  if (type === 'monitor') return <EyeIcon size={size} />;
   return <WebhookIcon size={size} />;
 }
 

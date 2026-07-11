@@ -103,7 +103,7 @@ export interface TodoItem {
   status: TodoStatus;
 }
 
-export type AutomationInputType = 'prompt' | 'code' | 'webhook';
+export type AutomationInputType = 'prompt' | 'code' | 'webhook' | 'monitor';
 
 export type NotificationOn = 'done' | 'error' | 'both';
 
@@ -156,7 +156,7 @@ export interface Automation {
   total_count_7d?: number;
 }
 
-export type AutomationRunStatus = 'running' | 'done' | 'error' | 'stopped' | 'blocked' | 'skipped';
+export type AutomationRunStatus = 'running' | 'done' | 'error' | 'stopped' | 'blocked' | 'skipped' | 'no_change';
 
 export interface AutomationRun {
   id: string;

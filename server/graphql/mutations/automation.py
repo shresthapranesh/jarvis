@@ -23,7 +23,7 @@ from server.automation_runtime import register_automation_run
 @strawberry.input
 class AutomationInput:
     name: str
-    input_type: str  # "prompt" | "code" | "webhook"
+    input_type: str  # "prompt" | "code" | "webhook" | "monitor"
     description: str | None = None
     prompt_text: str | None = None
     model: str | None = None

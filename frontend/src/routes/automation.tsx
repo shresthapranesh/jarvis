@@ -12,6 +12,7 @@ import {
   ClockIcon,
   CodeIcon,
   EditIcon,
+  EyeIcon,
   PlayIcon,
   PlusIcon,
   SearchIcon,
@@ -36,6 +37,7 @@ type GroupBy = 'none' | 'type' | 'schedule';
 function TypeIcon({type, size = 14}: {type: AutomationInputType; size?: number}) {
   if (type === 'prompt') return <BoltIcon size={size} />;
   if (type === 'code') return <CodeIcon size={size} />;
+  if (type === 'monitor') return <EyeIcon size={size} />;
   return <WebhookIcon size={size} />;
 }
 
@@ -43,7 +45,7 @@ function railVariant(auto: Automation): string {
   if (!auto.enabled) return 'off';
   if (auto.last_run_status === 'running') return 'run';
   if (auto.last_run_status === 'error') return 'err';
-  if (auto.last_run_status === 'done') return 'ok';
+  if (auto.last_run_status === 'done' || auto.last_run_status === 'no_change') return 'ok';
   return 'idle';
 }
 
@@ -350,7 +352,7 @@ function AutomationPage() {
       map.get(key)!.push(a);
     }
     const order =
-      groupBy === 'type' ? ['prompt', 'code', 'webhook'] : ['Scheduled', 'Ad-hoc'];
+      groupBy === 'type' ? ['prompt', 'monitor', 'code', 'webhook'] : ['Scheduled', 'Ad-hoc'];
     return order
       .filter((k) => map.has(k))
       .map((k) => ({label: k, items: map.get(k)!}));
@@ -424,7 +426,7 @@ function AutomationPage() {
               )}
             </div>
             <div className="auto-filter-pills">
-              {(['all', 'prompt', 'code', 'webhook'] as TypeFilter[]).map((t) => (
+              {(['all', 'prompt', 'monitor', 'code', 'webhook'] as TypeFilter[]).map((t) => (
                 <button
                   key={t}
                   className={`auto-filter-pill${typeFilter === t ? ' auto-filter-pill--on' : ''}`}
