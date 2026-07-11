@@ -8,7 +8,17 @@ import {commitConsolidateMemory} from '../relay/ConsolidateMemoryMutation';
 import {commitDeleteMemory} from '../relay/DeleteMemoryMutation';
 import {fetchMemories} from '../relay/MemoriesQuery';
 import {commitUpdateMemoryItem} from '../relay/UpdateMemoryItemMutation';
+import {ConfirmDialog} from './ConfirmDialog';
+import {FormModal} from './FormModal';
+import {EditIcon, PlusIcon, TrashIcon} from './icons';
 import type {Memory, MemoryItem, MemoryKind} from '../lib/types';
+
+const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
+  fact: {label: 'Fact', hint: 'surfaced by relevance each turn'},
+  core: {label: 'Core', hint: 'in every system prompt'},
+};
+
+type Editor = {mode: 'add'} | {mode: 'edit'; item: MemoryItem};
 
 export function MemoryView() {
   const queryClient = useQueryClient();
@@ -23,29 +33,46 @@ export function MemoryView() {
   });
 
   const [actionError, setActionError] = useState<string | null>(null);
-  const [newText, setNewText] = useState('');
-  const [newKind, setNewKind] = useState<MemoryKind>('fact');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editText, setEditText] = useState('');
+  const [editor, setEditor] = useState<Editor | null>(null);
+  const [text, setText] = useState('');
+  const [kind, setKind] = useState<MemoryKind>('fact');
+  const [deleteTarget, setDeleteTarget] = useState<MemoryItem | null>(null);
 
   const invalidateItems = () => queryClient.invalidateQueries({queryKey: ['memories']});
 
+  function closeEditor() {
+    setEditor(null);
+    setActionError(null);
+  }
+
+  function openAdd() {
+    setText('');
+    setKind('fact');
+    setActionError(null);
+    setEditor({mode: 'add'});
+  }
+
+  function openEdit(m: MemoryItem) {
+    setText(m.text);
+    setActionError(null);
+    setEditor({mode: 'edit', item: m});
+  }
+
   const addMutation = useMutation({
-    mutationFn: () => commitAddMemory(newText.trim(), newKind),
+    mutationFn: () => commitAddMemory(text.trim(), kind),
     onSuccess: async () => {
       await invalidateItems();
-      setNewText('');
-      setActionError(null);
+      closeEditor();
     },
     onError: (e: Error) => setActionError(e.message),
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({id, text}: {id: string; text: string}) => commitUpdateMemoryItem(id, text),
+    mutationFn: ({id, text: t}: {id: string; text: string}) =>
+      commitUpdateMemoryItem(id, t),
     onSuccess: async () => {
       await invalidateItems();
-      setEditingId(null);
-      setActionError(null);
+      closeEditor();
     },
     onError: (e: Error) => setActionError(e.message),
   });
@@ -54,9 +81,13 @@ export function MemoryView() {
     mutationFn: (id: string) => commitDeleteMemory(id),
     onSuccess: async () => {
       await invalidateItems();
+      setDeleteTarget(null);
       setActionError(null);
     },
-    onError: (e: Error) => setActionError(e.message),
+    onError: (e: Error) => {
+      setDeleteTarget(null);
+      setActionError(e.message);
+    },
   });
 
   const consolidateMutation = useMutation({
@@ -77,57 +108,56 @@ export function MemoryView() {
   const showBlobFallback =
     all.length === 0 && !!blob?.exists && blob.content.trim().length > 0;
 
-  function startEdit(m: MemoryItem) {
-    setEditingId(m.id);
-    setEditText(m.text);
-    setActionError(null);
+  function submitEditor() {
+    if (!editor) return;
+    if (editor.mode === 'add') addMutation.mutate();
+    else updateMutation.mutate({id: editor.item.id, text: text.trim()});
   }
 
   function renderItem(m: MemoryItem) {
-    if (editingId === m.id) {
-      return (
-        <li key={m.id} className="memory-item">
-          <textarea
-            className="memory-item-textarea"
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            spellCheck={false}
-            rows={2}
-          />
-          <div className="memory-item-actions">
-            <button
-              className="artifact-btn primary"
-              onClick={() => updateMutation.mutate({id: m.id, text: editText.trim()})}
-              disabled={updateMutation.isPending || !editText.trim()}
-            >
-              Save
-            </button>
-            <button className="artifact-btn" onClick={() => setEditingId(null)}>
-              Cancel
-            </button>
-          </div>
-        </li>
-      );
-    }
     return (
-      <li key={m.id} className="memory-item">
-        <span className="memory-item-text">{m.text}</span>
+      <li key={m.id} className={`memory-item memory-item--${m.kind}`}>
+        <div className="memory-item-main">
+          <span className="memory-item-text">{m.text}</span>
+          <span className="memory-item-meta">
+            Updated {new Date(m.updated_at).toLocaleDateString()}
+          </span>
+        </div>
         <div className="memory-item-actions">
-          <button className="artifact-btn" onClick={() => startEdit(m)}>
-            Edit
+          <button className="icon-btn" title="Edit memory" onClick={() => openEdit(m)}>
+            <EditIcon size={14} />
           </button>
           <button
-            className="artifact-btn"
-            onClick={() => {
-              if (window.confirm('Delete this memory?')) deleteMutation.mutate(m.id);
-            }}
+            className="icon-btn icon-btn--danger"
+            title="Delete memory"
+            onClick={() => setDeleteTarget(m)}
           >
-            Delete
+            <TrashIcon size={14} />
           </button>
         </div>
       </li>
     );
   }
+
+  function renderSection(title: string, kindKey: MemoryKind, list: MemoryItem[]) {
+    return (
+      <section className="memory-section">
+        <h2 className="memory-section-title">
+          <span className={`memory-kind-dot memory-kind-dot--${kindKey}`} />
+          {title} <span className="memory-count">{list.length}</span>
+          <span className="memory-section-hint">{KIND_INFO[kindKey].hint}</span>
+        </h2>
+        {list.length === 0 ? (
+          <p className="memory-section-empty">Nothing here yet.</p>
+        ) : (
+          <ul className="memory-list">{list.map(renderItem)}</ul>
+        )}
+      </section>
+    );
+  }
+
+  const editorOpen = editor !== null;
+  const editKind = editor?.mode === 'edit' ? editor.item.kind : kind;
 
   return (
     <div className="page memory-page">
@@ -142,45 +172,22 @@ export function MemoryView() {
             job extracts them from recent conversations.
           </p>
         </div>
-        <button
-          className="artifact-btn"
-          onClick={() => consolidateMutation.mutate()}
-          disabled={consolidateMutation.isPending}
-          title="Run the LLM that extracts new memory items from recent conversations"
-        >
-          {consolidateMutation.isPending ? 'Consolidating…' : 'Consolidate now'}
-        </button>
-      </header>
-
-      {actionError && <div className="memory-error">{actionError}</div>}
-
-      <div className="memory-add">
-        <textarea
-          className="memory-item-textarea"
-          value={newText}
-          onChange={(e) => setNewText(e.target.value)}
-          spellCheck={false}
-          rows={2}
-          placeholder="Add a memory — one self-contained fact…"
-        />
-        <div className="memory-add-actions">
-          <select
-            className="memory-kind-select"
-            value={newKind}
-            onChange={(e) => setNewKind(e.target.value as MemoryKind)}
-          >
-            <option value="fact">fact</option>
-            <option value="core">core</option>
-          </select>
+        <div className="memory-header-actions">
           <button
-            className="artifact-btn primary"
-            onClick={() => addMutation.mutate()}
-            disabled={addMutation.isPending || !newText.trim()}
+            className="artifact-btn"
+            onClick={() => consolidateMutation.mutate()}
+            disabled={consolidateMutation.isPending}
+            title="Run the LLM that extracts new memory items from recent conversations"
           >
-            {addMutation.isPending ? 'Adding…' : 'Add'}
+            {consolidateMutation.isPending ? 'Consolidating…' : 'Consolidate'}
+          </button>
+          <button className="artifact-btn primary" onClick={openAdd}>
+            <PlusIcon size={14} /> Add memory
           </button>
         </div>
-      </div>
+      </header>
+
+      {actionError && !editorOpen && <div className="memory-error">{actionError}</div>}
 
       {isLoading ? (
         <div className="memory-empty">Loading…</div>
@@ -205,34 +212,91 @@ export function MemoryView() {
         <div className="memory-empty">
           <p>No memories yet.</p>
           <p>
-            Add one above, ask the agent to <code>remember</code> something, or run
+            Add one, ask the agent to <code>remember</code> something, or run
             consolidation after some conversation history accumulates.
           </p>
+          <button className="artifact-btn primary" onClick={openAdd}>
+            <PlusIcon size={14} /> Add memory
+          </button>
         </div>
       ) : (
         <>
-          <div className="memory-section">
-            <h2 className="memory-section-title">
-              Core <span className="memory-count">{core.length}</span>
-            </h2>
-            {core.length === 0 ? (
-              <p className="memory-subtitle">No core memories.</p>
-            ) : (
-              <ul className="memory-list">{core.map(renderItem)}</ul>
-            )}
-          </div>
-          <div className="memory-section">
-            <h2 className="memory-section-title">
-              Facts <span className="memory-count">{facts.length}</span>
-            </h2>
-            {facts.length === 0 ? (
-              <p className="memory-subtitle">No fact memories.</p>
-            ) : (
-              <ul className="memory-list">{facts.map(renderItem)}</ul>
-            )}
-          </div>
+          {renderSection('Core', 'core', core)}
+          {renderSection('Facts', 'fact', facts)}
         </>
       )}
+
+      <FormModal
+        open={editorOpen}
+        title={editor?.mode === 'edit' ? 'Edit memory' : 'Add memory'}
+        subtitle="One self-contained fact per item — it's embedded as a whole for retrieval."
+        submitLabel={editor?.mode === 'edit' ? 'Save changes' : 'Add memory'}
+        submitDisabled={!text.trim()}
+        pending={addMutation.isPending || updateMutation.isPending}
+        error={actionError}
+        onSubmit={submitEditor}
+        onClose={closeEditor}
+      >
+        <div className="auto-form-group">
+          <span className="auto-form-label">Memory</span>
+          <textarea
+            className="auto-form-textarea"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            spellCheck={false}
+            rows={4}
+            autoFocus
+            placeholder="e.g. Prefers responses in Spanish when discussing travel."
+          />
+        </div>
+        <div className="auto-form-group">
+          <span className="auto-form-label">Kind</span>
+          {editor?.mode === 'edit' ? (
+            <span className="memory-kind-static">
+              <span className={`memory-kind-dot memory-kind-dot--${editKind}`} />
+              {KIND_INFO[editKind].label} — {KIND_INFO[editKind].hint}
+            </span>
+          ) : (
+            <div className="seg" role="radiogroup" aria-label="Memory kind">
+              {(Object.keys(KIND_INFO) as MemoryKind[]).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={kind === k}
+                  className={`seg-opt${kind === k ? ' seg-opt--active' : ''}`}
+                  onClick={() => setKind(k)}
+                >
+                  <span className="seg-opt-label">
+                    <span className={`memory-kind-dot memory-kind-dot--${k}`} />
+                    {KIND_INFO[k].label}
+                  </span>
+                  <span className="seg-opt-hint">{KIND_INFO[k].hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </FormModal>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete memory"
+        message={
+          <p>
+            This removes the item from the agent's memory permanently:{' '}
+            <strong>
+              {deleteTarget && deleteTarget.text.length > 120
+                ? `${deleteTarget.text.slice(0, 120)}…`
+                : deleteTarget?.text}
+            </strong>
+          </p>
+        }
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
