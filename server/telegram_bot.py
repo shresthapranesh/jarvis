@@ -61,7 +61,7 @@ async def _dispatch(
 
     conv_id = f"telegram_{chat_id}"
     async with async_session() as session:
-        await get_or_create_conversation(session, conv_id, model, db_user_content[:60])
+        await get_or_create_conversation(session, conv_id, model, db_user_content[:60], surface="telegram")
         await add_message(session, conv_id, "user", db_user_content)
         task_id = await enqueue_chat_task(
             session, user_content, model, conv_id,
@@ -128,7 +128,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     conv_id = f"telegram_{chat_id}"
     async with async_session() as session:
-        await get_or_create_conversation(session, conv_id, model, text[:60])
+        await get_or_create_conversation(session, conv_id, model, text[:60], surface="telegram")
         await add_message(session, conv_id, "user", f"[Voice] {text}")
         task_id = await enqueue_chat_task(
             session, text, model, conv_id, source="telegram",

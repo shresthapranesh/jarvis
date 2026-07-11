@@ -26,6 +26,9 @@ class Automation(relay.Node):
     webhook_body: str | None
     schedule: str | None  # cron expression
     enabled: bool
+    stateful: bool
+    # Conversation backing a stateful automation's shared thread; None otherwise.
+    conversation_id: str | None
     notifications: str | None  # JSON string
     created_at: datetime
     updated_at: datetime
@@ -44,6 +47,7 @@ class Automation(relay.Node):
     ) -> Automation:
         # next_run_at depends on schedule + enabled; computed here so it's always populated.
         from server.automation_runtime import _compute_next_run_at
+        from db.ops import automation_conversation_id
         return cls(
             id=row.id,
             name=row.name,
@@ -58,6 +62,8 @@ class Automation(relay.Node):
             webhook_body=row.webhook_body,
             schedule=row.schedule,
             enabled=row.enabled,
+            stateful=row.stateful,
+            conversation_id=automation_conversation_id(row.id) if row.stateful else None,
             notifications=row.notifications,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -89,7 +95,7 @@ class Automation(relay.Node):
 class AutomationRun(relay.Node):
     id: relay.NodeID[str]
     automation_id: str
-    status: str  # "running" | "done" | "error" | "stopped" | "blocked"
+    status: str  # "running" | "done" | "error" | "stopped" | "blocked" | "skipped"
     triggered_by: str  # "schedule" | "manual"
     output: str | None
     error: str | None

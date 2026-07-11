@@ -34,6 +34,7 @@ const BLANK: CreateAutomationPayload = {
   webhook_body: '',
   schedule: '',
   enabled: true,
+  stateful: false,
 };
 
 export function AutomationForm({initialValues, onSave, onCancel}: Props) {
@@ -53,6 +54,7 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           webhook_body: initialValues.webhook_body ?? '',
           schedule: initialValues.schedule ?? '',
           enabled: initialValues.enabled,
+          stateful: initialValues.stateful,
         }
       : BLANK,
   );
@@ -185,6 +187,18 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="auto-form-check-row">
+            <input
+              id="auto-stateful"
+              type="checkbox"
+              checked={form.stateful ?? false}
+              onChange={(e) => set('stateful', e.target.checked)}
+              disabled={saving}
+            />
+            <label htmlFor="auto-stateful" className="auto-form-check-label">
+              Stateful — runs share one conversation, so the agent remembers previous runs
+            </label>
           </div>
         </>
       )}

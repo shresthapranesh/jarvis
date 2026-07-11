@@ -155,7 +155,7 @@ async def _dispatch(
 
     conv_id = f"discord_{channel.id}"
     async with async_session() as session:
-        await get_or_create_conversation(session, conv_id, model, db_user_content[:60])
+        await get_or_create_conversation(session, conv_id, model, db_user_content[:60], surface="discord")
         await add_message(session, conv_id, "user", db_user_content)
         task_id = await enqueue_chat_task(
             session, user_content, model, conv_id,
@@ -261,7 +261,7 @@ async def _handle_voice(
 
     conv_id = f"discord_{target.id}"
     async with async_session() as session:
-        await get_or_create_conversation(session, conv_id, model, transcribed[:60])
+        await get_or_create_conversation(session, conv_id, model, transcribed[:60], surface="discord")
         await add_message(session, conv_id, "user", f"[Voice] {transcribed}")
         task_id = await enqueue_chat_task(
             session, transcribed, model, conv_id, source="discord",

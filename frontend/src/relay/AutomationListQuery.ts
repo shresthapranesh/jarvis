@@ -22,6 +22,8 @@ export const automationListQuery = graphql`
       webhookBody
       schedule
       enabled
+      stateful
+      conversationId
       notifications
       createdAt
       updatedAt
@@ -51,6 +53,8 @@ export function mapAutomation(a: AutomationNode): Automation {
     webhook_body: a.webhookBody ?? null,
     schedule: a.schedule ?? null,
     enabled: a.enabled,
+    stateful: a.stateful,
+    conversation_id: a.conversationId ?? null,
     notifications: a.notifications ?? null,
     created_at: a.createdAt,
     updated_at: a.updatedAt,

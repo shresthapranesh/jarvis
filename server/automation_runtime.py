@@ -29,9 +29,12 @@ from core.safety import gate_input, gate_output
 from db import async_session
 from db.models import Automation, AutomationRun
 from db.ops import (
+    add_message,
+    automation_conversation_id,
     create_automation_run,
     finish_automation_run,
     get_automation,
+    get_or_create_conversation,
 )
 from core.notifications import send_notifications
 from core.state import (
@@ -65,7 +68,7 @@ def _compute_next_run_at(auto: Automation) -> str | None:
 # ── Execution engines ───────────────────────────────────────────────────────
 
 async def _execute_prompt_type(
-    auto: Automation, state: TaskState, checkpointer, run_id: str,
+    auto: Automation, state: TaskState, checkpointer, thread_id: str,
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
@@ -74,7 +77,7 @@ async def _execute_prompt_type(
     async for raw_chunk in agent.astream(
         {"messages": [{"role": "user", "content": auto.prompt_text or ""}]},
         config={
-            "configurable": {"thread_id": f"automation_{run_id}"},
+            "configurable": {"thread_id": thread_id},
             "recursion_limit": 100,
             "callbacks": [AgentLogger()],
         },
@@ -190,6 +193,45 @@ async def _execute_webhook_type(auto: Automation, state: TaskState) -> str:
 
 # ── Background execution dispatcher ─────────────────────────────────────────
 
+def _is_stateful_prompt(auto: Automation) -> bool:
+    return auto.input_type == "prompt" and bool(auto.stateful)
+
+
+async def _has_inflight_sibling(automation_id: str, run_id: str) -> bool:
+    """True if another run of the same automation is currently executing.
+
+    Stateful runs share one LangGraph thread, so overlapping runs would write
+    the same checkpoint concurrently. Checked against the Job table rather
+    than _tasks: a manual trigger pre-registers its TaskState while the job is
+    still pending, and a merely-pending sibling must not skip the running one —
+    job status flips to 'running' only once a worker claims it."""
+    from sqlalchemy import select
+    from db.models import Job as JobRow
+
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(JobRow.payload).where(
+                JobRow.kind == "automation",
+                JobRow.status == "running",
+                JobRow.id != run_id,
+            )
+        )).scalars().all()
+    for payload in rows:
+        try:
+            if json.loads(payload).get("automation_id") == automation_id:
+                return True
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    return False
+
+
+async def _persist_stateful_message(
+    conv_id: str, role: str, content: str, status: str = "done",
+) -> None:
+    async with async_session() as session:
+        await add_message(session, conv_id, role, content, status=status)
+
+
 async def _run_automation_inner(
     auto: Automation,
     state: TaskState,
@@ -203,9 +245,26 @@ async def _run_automation_inner(
     `state` in `_tasks` before invoking this.
     """
     final_status = "error"
+    conv_id: str | None = None
     try:
         status = "done"
         notify_status = "done"
+
+        if _is_stateful_prompt(auto):
+            if await _has_inflight_sibling(auto.id, run_id):
+                skip_msg = "skipped: a previous run of this stateful automation is still in flight"
+                async with async_session() as session:
+                    await finish_automation_run(session, run_id, "skipped", None, skip_msg)
+                emit_event(state, "error", error=skip_msg, run_id=run_id)
+                final_status = "skipped"
+                return
+            conv_id = automation_conversation_id(auto.id)
+            async with async_session() as session:
+                await get_or_create_conversation(
+                    session, conv_id, auto.model or DEFAULT_MODEL, auto.name,
+                    surface="automation",
+                )
+                await add_message(session, conv_id, "user", auto.prompt_text or "")
 
         if auto.input_type == "prompt":
             model = auto.model or DEFAULT_MODEL
@@ -216,7 +275,8 @@ async def _run_automation_inner(
                 notify_status = "blocked"
                 emit_event(state, "safety_input_blocked", message=rejection, run_id=run_id)
             else:
-                raw_output = await _execute_prompt_type(auto, state, get_async_checkpointer(), run_id)
+                thread_id = conv_id or f"automation_{run_id}"
+                raw_output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id)
                 gated, output_verdict = await gate_output(raw_output, model)
                 output = gated
                 if output_verdict:
@@ -239,6 +299,8 @@ async def _run_automation_inner(
         if state.cancelled:
             async with async_session() as session:
                 await finish_automation_run(session, run_id, "stopped", output, None)
+            if conv_id:
+                await _persist_stateful_message(conv_id, "assistant", output or "", "stopped")
             final_status = "stopped"
             emit_event(state, "stopped", output=output, run_id=run_id)
         else:
@@ -250,12 +312,16 @@ async def _run_automation_inner(
                     title=auto.name,
                     body=output or "",
                 )
+            if conv_id:
+                await _persist_stateful_message(conv_id, "assistant", output or "", status)
             final_status = status
             emit_event(state, "done", output=output, run_id=run_id)
 
     except asyncio.CancelledError:
         async with async_session() as session:
             await finish_automation_run(session, run_id, "stopped", None, None)
+        if conv_id:
+            await _persist_stateful_message(conv_id, "assistant", "", "stopped")
         final_status = "stopped"
         emit_event(state, "stopped", run_id=run_id)
 
@@ -269,6 +335,8 @@ async def _run_automation_inner(
                 title=auto.name,
                 body=err_text,
             )
+        if conv_id:
+            await _persist_stateful_message(conv_id, "assistant", err_text, "error")
         emit_event(state, "error", error=err_text)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise

@@ -22,9 +22,13 @@ class ConversationQuery:
     node: relay.Node = relay.node()
 
     @strawberry.field
-    async def conversations(self, info: strawberry.Info) -> list[Conversation]:
+    async def conversations(
+        self, info: strawberry.Info, surface: str | None = "web",
+    ) -> list[Conversation]:
+        """List conversations for one surface (default "web", so bot/automation
+        threads stay out of the sidebar). Pass surface: null to list all."""
         session = info.context["session"]
-        rows = await list_conversations(session)
+        rows = await list_conversations(session, surface=surface)
         # list_conversations returns dicts with an isoformat string for created_at.
         # message_count is resolved on demand via Conversation.message_count (one
         # COUNT(*) per conversation). N+1 in lists; revisit with DataLoader if it bites.
@@ -33,6 +37,7 @@ class ConversationQuery:
                 id=r["id"],
                 title=r["title"],
                 model=r["model"],
+                surface=r["surface"],
                 created_at=datetime.fromisoformat(r["created_at"]),
             )
             for r in rows

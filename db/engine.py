@@ -27,9 +27,18 @@ def _migrate(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_locked_until ON jobs (locked_until)"))
+    conv_cols = {c["name"] for c in inspector.get_columns("conversations")}
+    if "surface" not in conv_cols:
+        conn.execute(text("ALTER TABLE conversations ADD COLUMN surface VARCHAR DEFAULT 'web'"))
+        # Bot conversations predate the column; their ids are prefixed by surface.
+        conn.execute(text("UPDATE conversations SET surface='telegram' WHERE id LIKE 'telegram\\_%' ESCAPE '\\'"))
+        conn.execute(text("UPDATE conversations SET surface='discord' WHERE id LIKE 'discord\\_%' ESCAPE '\\'"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conversations_surface ON conversations (surface)"))
     auto_cols = {c["name"] for c in inspector.get_columns("automations")}
     if "notifications" not in auto_cols:
         conn.execute(text("ALTER TABLE automations ADD COLUMN notifications TEXT"))
+    if "stateful" not in auto_cols:
+        conn.execute(text("ALTER TABLE automations ADD COLUMN stateful BOOLEAN DEFAULT 0"))
     wf_cols = {c["name"] for c in inspector.get_columns("workflows")}
     if "notifications" not in wf_cols:
         conn.execute(text("ALTER TABLE workflows ADD COLUMN notifications TEXT"))

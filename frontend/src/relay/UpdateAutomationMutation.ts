@@ -23,6 +23,8 @@ const mutation = graphql`
       webhookBody
       schedule
       enabled
+      stateful
+      conversationId
       notifications
       createdAt
       updatedAt

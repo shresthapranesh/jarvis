@@ -21,6 +21,9 @@ class Conversation(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     model: Mapped[str] = mapped_column(String)
+    # Where the conversation lives: "web" | "telegram" | "discord" | "automation".
+    # The web UI's conversation list only shows surface="web".
+    surface: Mapped[str] = mapped_column(String, default="web", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     messages: Mapped[list[Message]] = relationship(
@@ -96,6 +99,10 @@ class Automation(Base):
     schedule: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # cron expression or null
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Prompt automations only: when True, every run shares the LangGraph thread
+    # (and Conversation row) "automation_{id}" so state persists across runs.
+    stateful: Mapped[bool] = mapped_column(Boolean, default=False)
+
     notifications: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of channel configs
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -112,7 +119,7 @@ class AutomationRun(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     automation_id: Mapped[str] = mapped_column(ForeignKey("automations.id"), nullable=False, index=True)
 
-    status: Mapped[str] = mapped_column(String, default="running")  # running | done | error
+    status: Mapped[str] = mapped_column(String, default="running")  # running | done | error | stopped | blocked | skipped
     triggered_by: Mapped[str] = mapped_column(String, nullable=False)  # schedule | manual
 
     output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

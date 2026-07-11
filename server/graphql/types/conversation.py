@@ -115,6 +115,7 @@ class Conversation(relay.Node):
     id: relay.NodeID[str]
     title: str | None
     model: str
+    surface: str  # "web" | "telegram" | "discord" | "automation"
     created_at: datetime
 
     @classmethod
@@ -123,6 +124,7 @@ class Conversation(relay.Node):
             id=row.id,
             title=row.title,
             model=row.model,
+            surface=row.surface,
             created_at=row.created_at,
         )
 

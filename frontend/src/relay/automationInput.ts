@@ -14,6 +14,7 @@ export function payloadToInput(p: CreateAutomationPayload) {
     webhookBody: p.webhook_body ?? null,
     schedule: p.schedule ?? null,
     enabled: p.enabled,
+    stateful: p.stateful ?? false,
     notifications: p.notifications ?? null,
   };
 }

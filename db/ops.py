@@ -17,15 +17,21 @@ from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conver
 logger = logging.getLogger(__name__)
 
 
-async def create_conversation(session: AsyncSession, model: str, title: str | None) -> Conversation:
-    conv = Conversation(id=str(uuid4()), model=model, title=title)
+async def create_conversation(
+    session: AsyncSession, model: str, title: str | None, surface: str = "web"
+) -> Conversation:
+    conv = Conversation(id=str(uuid4()), model=model, title=title, surface=surface)
     session.add(conv)
     await session.commit()
     return conv
 
 
 async def get_or_create_conversation(
-    session: AsyncSession, conversation_id: str | None, model: str, title: str | None
+    session: AsyncSession,
+    conversation_id: str | None,
+    model: str,
+    title: str | None,
+    surface: str = "web",
 ) -> Conversation:
     if conversation_id:
         result = await session.get(Conversation, conversation_id)
@@ -34,11 +40,11 @@ async def get_or_create_conversation(
                 result.model = model
                 await session.commit()
             return result
-        conv = Conversation(id=conversation_id, model=model, title=title)
+        conv = Conversation(id=conversation_id, model=model, title=title, surface=surface)
         session.add(conv)
         await session.commit()
         return conv
-    return await create_conversation(session, model, title)
+    return await create_conversation(session, model, title, surface)
 
 
 async def add_message(
@@ -92,23 +98,30 @@ async def add_step(
     return step
 
 
-async def list_conversations(session: AsyncSession) -> list[dict]:
+async def list_conversations(
+    session: AsyncSession, surface: str | None = "web"
+) -> list[dict]:
+    """List conversations, filtered to one surface by default. surface=None lists all."""
     msg_count = (
         select(func.count(Message.id))
         .where(Message.conversation_id == Conversation.id)
         .correlate(Conversation)
         .scalar_subquery()
     )
-    result = await session.execute(
+    stmt = (
         select(Conversation, msg_count.label("message_count"))
         .order_by(Conversation.created_at.desc())
     )
+    if surface is not None:
+        stmt = stmt.where(Conversation.surface == surface)
+    result = await session.execute(stmt)
     rows = result.all()
     return [
         {
             "id": conv.id,
             "title": conv.title,
             "model": conv.model,
+            "surface": conv.surface,
             "created_at": conv.created_at.isoformat(),
             "message_count": count,
         }
@@ -242,6 +255,7 @@ async def create_automation(
     schedule: str | None,
     enabled: bool,
     notifications: str | None = None,
+    stateful: bool = False,
 ) -> Automation:
     auto = Automation(
         id=str(uuid4()),
@@ -258,6 +272,7 @@ async def create_automation(
         schedule=schedule,
         enabled=enabled,
         notifications=notifications,
+        stateful=stateful,
     )
     session.add(auto)
     await session.commit()
@@ -348,10 +363,18 @@ async def update_automation(session: AsyncSession, automation_id: str, **kwargs:
     return auto
 
 
+def automation_conversation_id(automation_id: str) -> str:
+    """Deterministic conversation/thread id for a stateful automation's history."""
+    return f"automation_{automation_id}"
+
+
 async def delete_automation(session: AsyncSession, automation_id: str) -> bool:
     auto = await session.get(Automation, automation_id)
     if auto is None:
         return False
+    # Stateful prompt automations own a conversation (messages + checkpointer
+    # thread); delete_conversation no-ops when it was never created.
+    await delete_conversation(session, automation_conversation_id(automation_id))
     await session.delete(auto)
     await session.commit()
     return True

@@ -34,6 +34,7 @@ class AutomationInput:
     webhook_body: str | None = None
     schedule: str | None = None  # cron expression
     enabled: bool = True
+    stateful: bool = False  # prompt type only: share one thread across runs
     notifications: str | None = None  # JSON string
 
 
@@ -71,6 +72,7 @@ class AutomationMutation:
             webhook_body=input.webhook_body,
             schedule=input.schedule,
             enabled=input.enabled,
+            stateful=input.stateful,
             notifications=input.notifications,
         )
         if auto.enabled and auto.schedule:
@@ -101,6 +103,7 @@ class AutomationMutation:
             webhook_body=input.webhook_body,
             schedule=input.schedule,
             enabled=input.enabled,
+            stateful=input.stateful,
             notifications=input.notifications,
         )
         if auto is None:

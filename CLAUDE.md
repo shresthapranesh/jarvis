@@ -233,6 +233,8 @@ Three input types:
 
 Execution lives in `server/automation_runtime.py`; CRUD + listing are GraphQL (`queries/automation.py`, `mutations/automation.py`). Scheduler: APScheduler (`core/scheduler.py`); cron jobs fire in a thread — validate expressions before saving.
 
+**Stateful prompt automations** (`Automation.stateful`, opt-in): every run shares the LangGraph thread + Conversation `automation_{automation_id}` (deterministic id — see `automation_conversation_id()` in `db/ops.py`), so the agent remembers previous runs. The runtime lazily creates the Conversation (surface=`automation`) and mirrors each run into Message rows (user prompt + assistant output, statuses matching chat). Overlapping runs of the same stateful automation are **skipped** (run status `skipped`) — the guard checks the Job table for a claimed sibling (`_has_inflight_sibling`), since two runs writing one checkpointer thread would race. `delete_automation` deletes the backing conversation (messages, artifacts, checkpointer thread) via `delete_conversation`. Stateless runs keep the old per-run thread `automation_{run_id}`.
+
 ## Workflow Feature
 Visual graph executor (`workflow/engine.py`):
 - Definitions stored as JSON (`Workflow.definition`) with `nodes` + `edges` lists.
@@ -273,6 +275,8 @@ A **skill** is a named, reusable procedure the agent can author and later reload
 
 ## Default Model
 Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`). Override at runtime via `uv run python main.py model set-default <id>` — stored in the `config_settings` table under key `default.model`. `get_default_model(session)` in `db/ops.py` returns the DB value or falls back to the catalog default. Ollama and AWS Bedrock models also available — see `core/model_catalog.py`.
+
+`Conversation.surface` records where a conversation lives: `web` | `telegram` | `discord` | `automation`. The `conversations` GraphQL query filters to `surface: "web"` by default so bot threads and automation histories stay out of the web sidebar (pass another surface, or `null` for all). Bots and the automation runtime set it at `get_or_create_conversation` call sites; `_migrate()` backfills pre-existing bot rows by id prefix.
 
 `Conversation.model` is **sticky per-conversation**: the chat `startTask` mutation updates it whenever the request's model differs from the stored value, and the InputBox commits a conversation-update mutation on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model`, falling back to the catalog default only when no conversation exists yet.
 

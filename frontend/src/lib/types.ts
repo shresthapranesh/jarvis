@@ -143,6 +143,8 @@ export interface Automation {
   webhook_body: string | null;
   schedule: string | null;
   enabled: boolean;
+  stateful: boolean;
+  conversation_id: string | null;
   notifications: string | null;
   created_at: string;
   updated_at: string;
@@ -154,7 +156,7 @@ export interface Automation {
   total_count_7d?: number;
 }
 
-export type AutomationRunStatus = 'running' | 'done' | 'error';
+export type AutomationRunStatus = 'running' | 'done' | 'error' | 'stopped' | 'blocked' | 'skipped';
 
 export interface AutomationRun {
   id: string;
@@ -191,6 +193,7 @@ export interface CreateAutomationPayload {
   webhook_body?: string | null;
   schedule?: string | null;
   enabled: boolean;
+  stateful?: boolean;
   notifications?: string | null;
 }
 

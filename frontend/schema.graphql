@@ -33,6 +33,8 @@ type Automation implements Node {
   webhookBody: String
   schedule: String
   enabled: Boolean!
+  stateful: Boolean!
+  conversationId: String
   notifications: String
   createdAt: DateTime!
   updatedAt: DateTime!
@@ -63,6 +65,7 @@ input AutomationInput {
   webhookBody: String = null
   schedule: String = null
   enabled: Boolean! = true
+  stateful: Boolean! = false
   notifications: String = null
 }
 
@@ -108,6 +111,7 @@ type Conversation implements Node {
   id: ID!
   title: String
   model: String!
+  surface: String!
   createdAt: DateTime!
   messageCount: Int!
   messages(last: Int! = 10, before: String = null): MessageConnection!
@@ -279,7 +283,7 @@ type Query {
     """The ID of the object."""
     id: ID!
   ): Node!
-  conversations: [Conversation!]!
+  conversations(surface: String = "web"): [Conversation!]!
   conversation(id: ID!): Conversation
   todos(conversationId: String!): [TodoItem!]!
   artifacts(conversationId: String = null): [Artifact!]!
