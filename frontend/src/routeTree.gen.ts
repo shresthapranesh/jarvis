@@ -16,6 +16,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as LiveRouteImport } from './routes/live'
+import { Route as BoardRouteImport } from './routes/board'
 import { Route as AutomationRouteImport } from './routes/automation'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as IndexRouteImport } from './routes/index'
@@ -58,6 +59,11 @@ const LogsRoute = LogsRouteImport.update({
 const LiveRoute = LiveRouteImport.update({
   id: '/live',
   path: '/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BoardRoute = BoardRouteImport.update({
+  id: '/board',
+  path: '/board',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AutomationRoute = AutomationRouteImport.update({
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
+  '/board': typeof BoardRoute
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
@@ -122,6 +129,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
+  '/board': typeof BoardRoute
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
@@ -138,6 +146,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
+  '/board': typeof BoardRoute
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
@@ -157,6 +166,7 @@ export interface FileRouteTypes {
     | '/'
     | '/artifacts'
     | '/automation'
+    | '/board'
     | '/live'
     | '/logs'
     | '/memory'
@@ -174,6 +184,7 @@ export interface FileRouteTypes {
     | '/'
     | '/artifacts'
     | '/automation'
+    | '/board'
     | '/live'
     | '/logs'
     | '/memory'
@@ -189,6 +200,7 @@ export interface FileRouteTypes {
     | '/'
     | '/artifacts'
     | '/automation'
+    | '/board'
     | '/live'
     | '/logs'
     | '/memory'
@@ -207,6 +219,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ArtifactsRoute: typeof ArtifactsRoute
   AutomationRoute: typeof AutomationRoute
+  BoardRoute: typeof BoardRoute
   LiveRoute: typeof LiveRoute
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
@@ -266,6 +279,13 @@ declare module '@tanstack/react-router' {
       path: '/live'
       fullPath: '/live'
       preLoaderRoute: typeof LiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/board': {
+      id: '/board'
+      path: '/board'
+      fullPath: '/board'
+      preLoaderRoute: typeof BoardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/automation': {
@@ -359,6 +379,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ArtifactsRoute: ArtifactsRoute,
   AutomationRoute: AutomationRoute,
+  BoardRoute: BoardRoute,
   LiveRoute: LiveRoute,
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,

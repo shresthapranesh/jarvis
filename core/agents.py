@@ -47,6 +47,12 @@ from tools.automations import (
     list_automations,
     update_automation,
 )
+from tools.board import (
+    block_task,
+    complete_task,
+    create_task,
+    list_tasks,
+)
 from tools.workflows import (
     create_workflow,
     delete_workflow,
@@ -359,6 +365,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         create_automation,
         update_automation,
         delete_automation,
+        create_task,
+        list_tasks,
+        complete_task,
+        block_task,
         list_workflows,
         create_workflow,
         update_workflow,

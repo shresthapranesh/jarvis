@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Skill, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Skill, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -1000,6 +1000,141 @@ async def append_node_result(
     await session.commit()
 
 
+# ── Board task (kanban) CRUD ───────────────────────────────────────────────────
+
+def board_task_conversation_id(task_id: str) -> str:
+    """Deterministic conversation/thread id for a board task's run history."""
+    return f"boardtask_{task_id}"
+
+
+async def create_board_task(
+    session: AsyncSession,
+    *,
+    title: str,
+    body: str | None = None,
+    status: str = "ready",
+    priority: int = 0,
+    created_by: str = "user",
+    model: str | None = None,
+    skill: str | None = None,
+    parent_ids: list[str] | None = None,
+) -> BoardTask:
+    """Create a board task, optionally linked under existing parents.
+
+    Tasks with parents are forced to "todo" — the dispatcher promotes them to
+    "ready" once every parent is done. Raises ValueError on a missing parent.
+    """
+    parent_ids = [p for p in (parent_ids or []) if p]
+    if parent_ids:
+        found = (await session.execute(
+            select(BoardTask.id).where(BoardTask.id.in_(parent_ids))
+        )).scalars().all()
+        missing = set(parent_ids) - set(found)
+        if missing:
+            raise ValueError(f"parent task(s) not found: {', '.join(sorted(missing))}")
+        status = "todo"
+    task = BoardTask(
+        id=str(uuid4()),
+        title=title,
+        body=body,
+        status=status,
+        priority=priority,
+        created_by=created_by,
+        model=model,
+        skill=skill,
+    )
+    session.add(task)
+    for pid in parent_ids:
+        session.add(BoardTaskLink(id=str(uuid4()), parent_id=pid, child_id=task.id))
+    await session.commit()
+    return task
+
+
+async def get_board_task(session: AsyncSession, task_id: str) -> BoardTask | None:
+    return await session.get(BoardTask, task_id)
+
+
+async def get_board_task_by_job(session: AsyncSession, job_id: str) -> BoardTask | None:
+    result = await session.execute(select(BoardTask).where(BoardTask.job_id == job_id))
+    return result.scalars().first()
+
+
+async def list_board_tasks(
+    session: AsyncSession, *, include_archived: bool = False,
+) -> list[BoardTask]:
+    stmt = select(BoardTask).order_by(BoardTask.priority.desc(), BoardTask.created_at.asc())
+    if not include_archived:
+        stmt = stmt.where(BoardTask.status != "archived")
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def list_board_task_links(session: AsyncSession) -> list[BoardTaskLink]:
+    return list((await session.execute(select(BoardTaskLink))).scalars().all())
+
+
+async def get_board_task_parents(session: AsyncSession, task_id: str) -> list[BoardTask]:
+    """Parents of `task_id`, oldest link first — used to build handoff context."""
+    result = await session.execute(
+        select(BoardTask)
+        .join(BoardTaskLink, BoardTaskLink.parent_id == BoardTask.id)
+        .where(BoardTaskLink.child_id == task_id)
+        .order_by(BoardTaskLink.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def update_board_task(session: AsyncSession, task_id: str, **kwargs: Any) -> BoardTask | None:
+    task = await session.get(BoardTask, task_id)
+    if task is None:
+        return None
+    for key, value in kwargs.items():
+        setattr(task, key, value)
+    task.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return task
+
+
+async def delete_board_task(session: AsyncSession, task_id: str) -> bool:
+    task = await session.get(BoardTask, task_id)
+    if task is None:
+        return False
+    # Deleting a task orphans nothing: drop both edge directions, then the
+    # backing conversation (no-op if the task never ran).
+    for link in (await session.execute(
+        select(BoardTaskLink).where(
+            (BoardTaskLink.parent_id == task_id) | (BoardTaskLink.child_id == task_id)
+        )
+    )).scalars().all():
+        await session.delete(link)
+    await delete_conversation(session, board_task_conversation_id(task_id))
+    await session.delete(task)
+    await session.commit()
+    return True
+
+
+async def promote_ready_board_tasks(session: AsyncSession) -> int:
+    """Flip "todo" tasks whose parents are ALL done to "ready".
+
+    Only tasks that actually have parents auto-promote; a parentless todo is a
+    parked card that stays put until someone moves it. Does not commit — the
+    dispatcher commits promotion + dispatch atomically.
+    """
+    linked_todo = (await session.execute(
+        select(BoardTask)
+        .join(BoardTaskLink, BoardTaskLink.child_id == BoardTask.id)
+        .where(BoardTask.status == "todo")
+        .distinct()
+    )).scalars().all()
+    promoted = 0
+    for task in linked_todo:
+        parents = await get_board_task_parents(session, task.id)
+        if parents and all(p.status == "done" for p in parents):
+            task.status = "ready"
+            task.updated_at = datetime.now(timezone.utc)
+            promoted += 1
+    return promoted
+
+
 # ── Startup zombie sweep ───────────────────────────────────────────────────────
 
 async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
@@ -1042,6 +1177,21 @@ async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
         .values(status="pending", locked_by=None, locked_until=None, updated_at=now)
     )
     counts["jobs"] = job_res.rowcount or 0  # type: ignore[attr-defined]
+
+    # Board tasks stuck "running" whose dispatch job is gone go back to
+    # "ready" for a fresh dispatch. Tasks whose job survived as pending
+    # (flipped just above) are left alone — that job will re-run them, and
+    # flipping to ready too would let the dispatcher enqueue a duplicate.
+    live_jobs = select(Job.id).where(Job.status.in_(["pending", "running"]))
+    bt_res = await session.execute(
+        update(BoardTask)
+        .where(
+            BoardTask.status == "running",
+            (BoardTask.job_id.is_(None)) | (BoardTask.job_id.not_in(live_jobs)),
+        )
+        .values(status="ready", job_id=None, updated_at=now)
+    )
+    counts["board_tasks"] = bt_res.rowcount or 0  # type: ignore[attr-defined]
 
     await session.commit()
     return counts

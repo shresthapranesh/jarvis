@@ -24,7 +24,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from core.queue import JobQueue
 
 
-TaskKind = Literal["chat", "automation", "workflow"]
+TaskKind = Literal["chat", "automation", "workflow", "board_task"]
 
 _task_log = logging.getLogger("jarvis.tasks")
 

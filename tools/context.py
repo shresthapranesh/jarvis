@@ -61,6 +61,9 @@ class ToolContext:
     conversation_id: str | None = None
     thread_id: str | None = None
     kernel_key: str | None = None
+    # Set only while executing a board task (server/task_board_runtime.py);
+    # complete_task/block_task refuse to run without it.
+    board_task_id: str | None = None
     event_sink: EventSink = field(default=_noop_sink, repr=False)
     store: MemoryStore | None = None
     _request_input: Callable[[Any], Any] = field(default=_no_input, repr=False)
@@ -116,11 +119,13 @@ def current_ctx() -> ToolContext:
     conversation_id: Any = None
     thread_id: Any = None
     kernel_key: Any = None
+    board_task_id: Any = None
     try:
         configurable = get_config().get("configurable") or {}
         conversation_id = configurable.get("conversation_id")
         thread_id = configurable.get("thread_id")
         kernel_key = configurable.get("kernel_key")
+        board_task_id = configurable.get("board_task_id")
     except Exception:
         pass
 
@@ -140,6 +145,7 @@ def current_ctx() -> ToolContext:
         conversation_id=str(conversation_id) if conversation_id else None,
         thread_id=str(thread_id) if thread_id else None,
         kernel_key=str(kernel_key) if kernel_key else None,
+        board_task_id=str(board_task_id) if board_task_id else None,
         event_sink=sink,
         store=store,
         _request_input=interrupt,

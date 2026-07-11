@@ -194,6 +194,28 @@ function RootLayout() {
             {!navCollapsed && <span>Live</span>}
           </Link>
           <Link
+            to="/board"
+            className="nav-link"
+            activeProps={{className: 'nav-link active'}}
+            title="Board"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="3" width="5" height="14" rx="1" />
+              <rect x="10" y="3" width="5" height="18" rx="1" />
+              <rect x="17" y="3" width="5" height="10" rx="1" />
+            </svg>
+            {!navCollapsed && <span>Board</span>}
+          </Link>
+          <Link
             to="/workflow"
             className="nav-link"
             activeProps={{className: 'nav-link active'}}

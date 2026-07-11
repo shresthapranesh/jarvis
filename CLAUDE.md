@@ -56,10 +56,12 @@ jarvis/
 │   │   ├── mutations/    #   *Mutation mixins: artifact, automation, conversation (start/stop/resume_task),
 │   │   │                 #     memory, notification, task_run (stop_running_task), workflow
 │   │   └── subscriptions/#   chat (taskEvents), automation (automationRunEvents),
-│   │                     #     workflow (workflowRunEvents) — all wrap stream_task_events
+│   │                     #     board_task (boardTaskEvents), workflow (workflowRunEvents)
+│   │                     #     — all wrap stream_task_events
 │   ├── chat_runtime.py        # register_chat_task / enqueue_chat_task + chat_job_handler + _run_agent_task
 │   ├── automation_runtime.py  # register_automation_run + automation_job_handler (prompt/code/webhook)
 │   ├── workflow_runtime.py    # register_workflow_run + workflow_job_handler
+│   ├── task_board_runtime.py  # dispatch_board_tasks (kanban dispatcher) + board_task_job_handler
 │   ├── telegram_bot.py   # Optional Telegram bot (enabled by TELEGRAM_BOT_TOKEN env var)
 │   ├── discord_bot.py    # Optional Discord bot (enabled by DISCORD_BOT_TOKEN env var)
 │   ├── routes_artifacts.py    # REST: GET /artifacts/{id}/raw (binary .md download)
@@ -82,6 +84,7 @@ jarvis/
 │   ├── documents.py      # [bound] search_documents, read_document (retrieval over indexed attachments)
 │   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
 │   ├── automations.py    # [bound] CRUD as agent tools
+│   ├── board.py          # [bound] create_task/list_tasks (task board) + complete_task/block_task (in-run only)
 │   ├── workflows.py      # [bound] CRUD as agent tools
 │   ├── skills.py         # [bound] use_skill + list/create/update/delete_skill (agent-authored skills)
 │   ├── memory.py         # [bound iff embedder] remember, search_memory (discrete vector memory)
@@ -97,7 +100,7 @@ jarvis/
     ├── relay.config.json # Relay compiler config (schema → ./schema.graphql, artifacts → src/__generated__)
     ├── schema.graphql    # SDL exported from the Python schema (regenerate via `pnpm schema`)
     └── src/
-        ├── routes/       # File-based routes: index, c.$id, automation, workflow/*, artifacts,
+        ├── routes/       # File-based routes: index, c.$id, automation, board, workflow/*, artifacts,
         │                 #   memory, live, logs, tasks, settings
         ├── components/   # InputBox, MessageThread, MessageBubble, ConversationList, ActivitySidebar,
         │                 #   ArtifactPanel, ArtifactsBrowser, MemoryView, NotificationsEditor,
@@ -236,6 +239,14 @@ Execution lives in `server/automation_runtime.py`; CRUD + listing are GraphQL (`
 
 **Stateful prompt automations** (`Automation.stateful`, opt-in; monitors are always stateful): every run shares the LangGraph thread + Conversation `automation_{automation_id}` (deterministic id — see `automation_conversation_id()` in `db/ops.py`), so the agent remembers previous runs. The runtime lazily creates the Conversation (surface=`automation`) and mirrors each run into Message rows (user prompt + assistant output, statuses matching chat). Overlapping runs of the same stateful automation are **skipped** (run status `skipped`) — the guard checks the Job table for a claimed sibling (`_has_inflight_sibling`), since two runs writing one checkpointer thread would race. `delete_automation` deletes the backing conversation (messages, artifacts, checkpointer thread) via `delete_conversation`. Stateless runs keep the old per-run thread `automation_{run_id}`.
 
+## Task Board Feature (kanban)
+A durable multi-agent kanban layered on the job queue. A `BoardTask` is one card: `todo → ready → running → blocked/done → archived`, plus `BoardTaskLink` parent→child dependency edges.
+- **Dispatcher** (`server/task_board_runtime.py`): `dispatch_board_tasks()` is the single scheduling entrypoint — an APScheduler interval job (`register_board_dispatch_job`, every 15s) ticks it, and create/ready paths (GraphQL mutations, `create_task` tool, task completion) call it directly so dispatch doesn't wait for the tick. Each pass: promote `todo`→`ready` where all parents are `done` (parentless todos are parked and never auto-promote), then enqueue `ready` tasks up to `MAX_IN_PROGRESS`, ordered by priority desc. Serialized by an asyncio lock.
+- **Runs**: each dispatch enqueues a `board_task` job with a **fresh UUID** (`job.id == BoardTask.job_id`) — unlike the other kinds, the job id is NOT the domain row id, because a task can re-run and finished Job rows would collide. The handler composes the prompt (title/body + `complete_task`/`block_task` protocol + completed parents' `summary`/`result_metadata` handoffs + optional skill), runs `build_agent()` on the deterministic conversation `boardtask_{task_id}` (surface=`task`, `board_task_conversation_id()` in db/ops.py), and gates input/output like automations (a gate rejection → `blocked` with a `safety:` reason).
+- **Terminal writes respect the agent**: `complete_task(summary, metadata)` / `block_task(reason)` (tools/board.py, guarded by `ToolContext.board_task_id`) set the terminal status mid-run; the handler's `_finish_task` only overwrites status when it's still `running` (no explicit call → final reply becomes the summary). Errors → `blocked` with `error:` reason + `failure_count` bump; stop → `blocked` "stopped by user". `stop_board_task` also handles the pending-job case (queue cancel finishes the job before any handler runs, so it flips the row itself).
+- **Startup sweep**: `cleanup_zombie_running_rows` flips `running` board tasks back to `ready` only when no pending/running job holds them — tasks whose job survived restart are left for that job to re-run (flipping those too would double-dispatch).
+- **GraphQL + UI**: `boardTasks`/`boardTask` queries, `createBoardTask`/`updateBoardTask`/`setBoardTaskStatus`/`deleteBoardTask`/`stopBoardTask` mutations, `boardTaskEvents(runId)` subscription (reuses the AutomationEvent union — same wire shape). `frontend/src/components/TaskBoard.tsx` + the `/board` route render the columns (3s polling); cards link to the run transcript at `/c/boardtask_{id}`.
+
 ## Workflow Feature
 Visual graph executor (`workflow/engine.py`):
 - Definitions stored as JSON (`Workflow.definition`) with `nodes` + `edges` lists.
@@ -271,13 +282,13 @@ A **skill** is a named, reusable procedure the agent can author and later reload
 - `async_session` uses `expire_on_commit=False` — no `session.refresh()` needed after commit.
 - `update_*` functions must use ORM-level `setattr` (not raw SQL UPDATE) so `onupdate` callbacks fire.
 - All ForeignKey columns carry `index=True`; new ones must too.
-- Tables: `Conversation, Message, Step, Automation, AutomationRun, ConfigSetting, NotificationChannel, Artifact, Document, DocumentChunk, Workflow, WorkflowRun, Job, Memory, Skill` (`Job` = the durable queue's backing table; `DocumentChunk` = embedded passages for large-doc retrieval; `Memory` = discrete vector memory items; `Skill` = reusable agent procedures).
+- Tables: `Conversation, Message, Step, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, NotificationChannel, Artifact, Document, DocumentChunk, Workflow, WorkflowRun, Job, Memory, Skill` (`Job` = the durable queue's backing table; `DocumentChunk` = embedded passages for large-doc retrieval; `Memory` = discrete vector memory items; `Skill` = reusable agent procedures; `BoardTask`/`BoardTaskLink` = the task board's cards and dependency edges).
 - Two SQLite files live under `~/.jarvis/`: `database.db` (app state) and `checkpoints.db` (LangGraph thread state + the store, keyed by `thread_id == conversation_id`). Conversation deletion cascades both: ORM deletes app-DB rows, then `delete_conversation` calls `adelete_thread(conv_id)` on the async checkpointer.
 
 ## Default Model
 Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`). Override at runtime via `uv run python main.py model set-default <id>` — stored in the `config_settings` table under key `default.model`. `get_default_model(session)` in `db/ops.py` returns the DB value or falls back to the catalog default. Ollama and AWS Bedrock models also available — see `core/model_catalog.py`.
 
-`Conversation.surface` records where a conversation lives: `web` | `telegram` | `discord` | `automation`. The `conversations` GraphQL query filters to `surface: "web"` by default so bot threads and automation histories stay out of the web sidebar (pass another surface, or `null` for all). Bots and the automation runtime set it at `get_or_create_conversation` call sites; `_migrate()` backfills pre-existing bot rows by id prefix.
+`Conversation.surface` records where a conversation lives: `web` | `telegram` | `discord` | `automation` | `task`. The `conversations` GraphQL query filters to `surface: "web"` by default so bot threads, automation histories, and board-task transcripts stay out of the web sidebar (pass another surface, or `null` for all). Bots and the automation/task-board runtimes set it at `get_or_create_conversation` call sites; `_migrate()` backfills pre-existing bot rows by id prefix.
 
 `Conversation.model` is **sticky per-conversation**: the chat `startTask` mutation updates it whenever the request's model differs from the stored value, and the InputBox commits a conversation-update mutation on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model`, falling back to the catalog default only when no conversation exists yet.
 

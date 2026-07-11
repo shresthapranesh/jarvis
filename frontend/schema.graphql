@@ -98,6 +98,48 @@ type AutomationStoppedEvent {
   runId: String!
 }
 
+type BoardTask implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  title: String!
+  body: String
+  status: String!
+  priority: Int!
+  createdBy: String!
+  model: String
+  skill: String
+  blockedReason: String
+  failureCount: Int!
+  summary: String
+  resultMetadata: String
+  conversationId: String!
+  runId: String
+  parentIds: [String!]!
+  childIds: [String!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  startedAt: DateTime
+  finishedAt: DateTime
+}
+
+input BoardTaskInput {
+  title: String!
+  body: String = null
+  priority: Int! = 0
+  model: String = null
+  skill: String = null
+  parentIds: [ID!] = null
+  start: Boolean! = true
+}
+
+input BoardTaskUpdateInput {
+  title: String = null
+  body: String = null
+  priority: Int = null
+  model: String = null
+  skill: String = null
+}
+
 type BrowserStepEvent {
   thought: String!
   actions: String!
@@ -218,6 +260,11 @@ type Mutation {
   deleteAutomation(id: ID!): Boolean!
   triggerAutomation(id: ID!): String!
   stopAutomationRun(runId: String!): Boolean!
+  createBoardTask(input: BoardTaskInput!): BoardTask!
+  updateBoardTask(id: ID!, input: BoardTaskUpdateInput!): BoardTask!
+  setBoardTaskStatus(id: ID!, status: String!): BoardTask!
+  deleteBoardTask(id: ID!): Boolean!
+  stopBoardTask(id: ID!): Boolean!
   createWorkflow(input: WorkflowCreateInput!): Workflow!
   updateWorkflow(id: ID!, input: WorkflowUpdateInput!): Workflow!
   deleteWorkflow(id: ID!): Boolean!
@@ -292,6 +339,8 @@ type Query {
   automations: [Automation!]!
   automation(id: ID!): Automation
   automationRuns(automationId: ID!): [AutomationRun!]!
+  boardTasks(includeArchived: Boolean! = false): [BoardTask!]!
+  boardTask(id: ID!): BoardTask
   workflows: [Workflow!]!
   workflow(id: ID!): Workflow
   workflowRuns(workflowId: ID!): [WorkflowRun!]!
@@ -391,6 +440,7 @@ type StoppedEvent {
 type Subscription {
   taskEvents(taskId: String!): ChatEvent!
   automationRunEvents(runId: String!): AutomationEvent!
+  boardTaskEvents(runId: String!): AutomationEvent!
   workflowRunEvents(runId: String!): WorkflowEvent!
 }
 

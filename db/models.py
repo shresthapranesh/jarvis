@@ -21,7 +21,7 @@ class Conversation(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     model: Mapped[str] = mapped_column(String)
-    # Where the conversation lives: "web" | "telegram" | "discord" | "automation".
+    # Where the conversation lives: "web" | "telegram" | "discord" | "automation" | "task".
     # The web UI's conversation list only shows surface="web".
     surface: Mapped[str] = mapped_column(String, default="web", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -275,6 +275,63 @@ class WorkflowRun(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="runs")
+
+
+# ── Task board (kanban) ────────────────────────────────────────────────────────
+
+class BoardTask(Base):
+    """One card on the shared task board — a durable unit of agent work.
+
+    Statuses: "todo" (waiting on parents or parked), "ready" (eligible for
+    dispatch), "running" (claimed by a board_task job), "blocked" (stopped —
+    error, safety, user stop, or agent-reported), "done", "archived".
+    The dispatcher (server/task_board_runtime.py) promotes todo→ready when all
+    parents are done and enqueues ready tasks onto the durable job queue.
+    """
+
+    __tablename__ = "board_tasks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(String, default="todo", index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0)  # higher runs first
+    created_by: Mapped[str] = mapped_column(String, default="user")  # "user" | "agent"
+
+    model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    skill: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # skill name to apply
+
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Completion handoff for downstream tasks: prose summary + optional JSON dict.
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_metadata: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
+
+    # Job id of the current/most recent dispatch (job.kind == "board_task").
+    # The live-event stream and stopBoardTask key off this.
+    job_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BoardTaskLink(Base):
+    """Parent→child dependency edge between board tasks."""
+
+    __tablename__ = "board_task_links"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    parent_id: Mapped[str] = mapped_column(ForeignKey("board_tasks.id"), nullable=False, index=True)
+    child_id: Mapped[str] = mapped_column(ForeignKey("board_tasks.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (
+        Index("ix_board_task_links_edge", "parent_id", "child_id", unique=True),
+    )
 
 
 # ── Durable job queue ──────────────────────────────────────────────────────────

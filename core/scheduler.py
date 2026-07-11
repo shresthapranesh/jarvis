@@ -64,6 +64,36 @@ def _run_scheduled_automation(automation_id: str) -> None:
         logger.exception("failed to enqueue scheduled automation %s", automation_id)
 
 
+def _run_board_dispatch() -> None:
+    """Called from BackgroundScheduler thread — runs one board-dispatch pass
+    (promote todo→ready, enqueue ready board tasks) on the main loop."""
+    from server.task_board_runtime import dispatch_board_tasks  # noqa: PLC0415
+
+    if state._main_loop is None or state._queue is None:
+        return
+    future = asyncio.run_coroutine_threadsafe(dispatch_board_tasks(), state._main_loop)
+    try:
+        future.result(timeout=30)
+    except Exception:
+        logger.exception("board dispatch tick failed")
+
+
+def register_board_dispatch_job(interval_seconds: int = 15) -> None:
+    """Register the task-board dispatcher interval job. Called once from the
+    server lifespan. Mutations/tools also kick dispatch directly on create;
+    this tick catches promotions and anything those kicks missed."""
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    _scheduler.add_job(
+        func=_run_board_dispatch,
+        trigger=IntervalTrigger(seconds=interval_seconds),
+        id="board_dispatch",
+        replace_existing=True,
+        misfire_grace_time=30,
+    )
+    logger.info("board dispatch scheduled: every %ss", interval_seconds)
+
+
 def _run_memory_consolidation() -> None:
     """Called from BackgroundScheduler thread — submits memory consolidation onto the main loop."""
     from core.memory_consolidation import consolidate_memory  # noqa: PLC0415

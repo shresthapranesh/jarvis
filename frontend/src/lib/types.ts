@@ -402,3 +402,40 @@ export function serializeDefinition(nodes: WorkflowRFNode[], edges: WorkflowRFEd
   });
   return JSON.stringify({nodes: backendNodes, edges});
 }
+
+// ── Task board (kanban) ────────────────────────────────────────────────────
+
+export type BoardTaskStatus = 'todo' | 'ready' | 'running' | 'blocked' | 'done' | 'archived';
+
+export interface BoardTask {
+  id: string;
+  title: string;
+  body: string | null;
+  status: BoardTaskStatus;
+  priority: number;
+  created_by: 'user' | 'agent';
+  model: string | null;
+  skill: string | null;
+  blocked_reason: string | null;
+  failure_count: number;
+  summary: string | null;
+  result_metadata: string | null;
+  conversation_id: string;
+  run_id: string | null;
+  parent_ids: string[];
+  child_ids: string[];
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface CreateBoardTaskPayload {
+  title: string;
+  body?: string;
+  priority?: number;
+  model?: string | null;
+  skill?: string | null;
+  parentIds?: string[];
+  start?: boolean;
+}
