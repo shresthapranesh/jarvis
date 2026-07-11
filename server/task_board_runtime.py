@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from core.agents import DEFAULT_MODEL, build_agent
+from core.agents import build_agent
 from core.log_callback import AgentLogger
 from core.queue import Job
 from core.safety import gate_input, gate_output
@@ -30,6 +30,7 @@ from db.ops import (
     board_task_conversation_id,
     get_board_task,
     get_board_task_parents,
+    get_default_model,
     get_or_create_conversation,
     promote_ready_board_tasks,
 )
@@ -175,11 +176,13 @@ def _compose_task_prompt(task: BoardTask, parents: list[BoardTask]) -> str:
 
 # ── Execution ────────────────────────────────────────────────────────────────
 
-async def _run_agent(task: BoardTask, state: TaskState, conv_id: str, prompt: str) -> str:
+async def _run_agent(
+    task: BoardTask, state: TaskState, conv_id: str, prompt: str, model: str,
+) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
     agent = build_agent(
-        task.model or DEFAULT_MODEL,
+        model,
         checkpointer=get_async_checkpointer(),
         store=get_store(),
     )
@@ -249,9 +252,9 @@ async def _run_board_task_inner(
 ) -> None:
     final_status = "error"
     conv_id = board_task_conversation_id(task.id)
-    model = task.model or DEFAULT_MODEL
     try:
         async with async_session() as session:
+            model = task.model or await get_default_model(session)
             parents = await get_board_task_parents(session, task.id)
             await get_or_create_conversation(
                 session, conv_id, model, task.title, surface="task",
@@ -276,7 +279,7 @@ async def _run_board_task_inner(
         async with async_session() as session:
             await add_message(session, conv_id, "user", prompt)
 
-        raw_output = await _run_agent(task, state, conv_id, prompt)
+        raw_output = await _run_agent(task, state, conv_id, prompt, model)
         output, output_verdict = await gate_output(raw_output, model)
         if output_verdict:
             emit_event(
@@ -446,8 +449,8 @@ async def decompose_board_task(task_id: str) -> list[BoardTask]:
             raise ValueError("only waiting (todo/ready/blocked) tasks can be decomposed")
         if await get_board_task_parents(session, task_id):
             raise ValueError("task already has dependencies — decompose only standalone tasks")
+        model = task.model or await get_default_model(session)
 
-    model = task.model or DEFAULT_MODEL
     llm = get_model_spec(model).build_llm()
     response = await llm.ainvoke([
         SystemMessage(content=_DECOMPOSE_SYSTEM),
