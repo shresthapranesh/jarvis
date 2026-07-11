@@ -2,6 +2,8 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {Link} from '@tanstack/react-router';
 import {useState} from 'react';
 
+import {useBoardTaskEvents} from '../hooks/useBoardTaskEvents';
+import {commitAnswerBoardTask} from '../relay/AnswerBoardTaskMutation';
 import {fetchBoardTasks} from '../relay/BoardTasksQuery';
 import {commitCreateBoardTask} from '../relay/CreateBoardTaskMutation';
 import {commitDeleteBoardTask} from '../relay/DeleteBoardTaskMutation';
@@ -26,11 +28,61 @@ interface Draft {
   body: string;
   priority: number;
   start: boolean;
+  parentIds: string[];
 }
 
-const EMPTY_DRAFT: Draft = {title: '', body: '', priority: 0, start: true};
+const EMPTY_DRAFT: Draft = {title: '', body: '', priority: 0, start: true, parentIds: []};
 
 type Editor = {mode: 'add'} | {mode: 'edit'; task: BoardTask};
+
+const TAIL_CHARS = 280;
+
+/** Live token tail for a running card — one subscription per running task. */
+function RunTail({runId, onFinished}: {runId: string | null; onFinished: () => void}) {
+  const {text, streaming, error} = useBoardTaskEvents(runId, onFinished);
+  if (error) return <p className="board-card-reason">{error}</p>;
+  if (!streaming && !text) return null;
+  const tail = text.length > TAIL_CHARS ? `…${text.slice(-TAIL_CHARS)}` : text;
+  return (
+    <p className="board-card-tail">
+      {tail || 'working…'}
+      {streaming && <span className="board-tail-cursor" aria-hidden="true" />}
+    </p>
+  );
+}
+
+/** Answer box shown on blocked cards whose agent asked for input. */
+function AnswerBox({taskId, onAnswered}: {taskId: string; onAnswered: () => void}) {
+  const [answer, setAnswer] = useState('');
+  const answerMutation = useMutation({
+    mutationFn: () => commitAnswerBoardTask(taskId, answer.trim()),
+    onSuccess: () => {
+      setAnswer('');
+      onAnswered();
+    },
+  });
+  return (
+    <div className="board-answer">
+      <textarea
+        className="board-answer-input"
+        value={answer}
+        onChange={(e) => setAnswer(e.target.value)}
+        rows={2}
+        placeholder="Answer the question to resume…"
+      />
+      <button
+        className="artifact-btn primary board-answer-btn"
+        disabled={!answer.trim() || answerMutation.isPending}
+        onClick={() => answerMutation.mutate()}
+      >
+        {answerMutation.isPending ? 'Resuming…' : 'Answer & resume'}
+      </button>
+      {answerMutation.error && (
+        <span className="board-card-reason">{(answerMutation.error as Error).message}</span>
+      )}
+    </div>
+  );
+}
 
 export function TaskBoard() {
   const queryClient = useQueryClient();
@@ -60,7 +112,13 @@ export function TaskBoard() {
   }
 
   function openEdit(t: BoardTask) {
-    setDraft({title: t.title, body: t.body ?? '', priority: t.priority, start: true});
+    setDraft({
+      title: t.title,
+      body: t.body ?? '',
+      priority: t.priority,
+      start: true,
+      parentIds: [...t.parent_ids],
+    });
     setActionError(null);
     setEditor({mode: 'edit', task: t});
   }
@@ -71,6 +129,7 @@ export function TaskBoard() {
         title: draft.title.trim(),
         body: draft.body.trim() || undefined,
         priority: draft.priority,
+        parentIds: draft.parentIds,
         start: draft.start,
       }),
     onSuccess: async () => {
@@ -86,6 +145,7 @@ export function TaskBoard() {
         title: draft.title.trim(),
         body: draft.body.trim() || undefined,
         priority: draft.priority,
+        parentIds: draft.parentIds,
       }),
     onSuccess: async () => {
       await invalidate();
@@ -147,6 +207,9 @@ export function TaskBoard() {
           {t.failure_count > 0 && (
             <span className="board-chip board-chip--danger">{t.failure_count} failure{t.failure_count > 1 ? 's' : ''}</span>
           )}
+          {t.status === 'blocked' && t.blocked_kind === 'needs_input' && (
+            <span className="board-chip board-chip--question">needs input</span>
+          )}
           {pendingParents.length > 0 && (
             <span className="board-chip" title={pendingParents.join(', ')}>
               waits on {pendingParents.length}
@@ -154,8 +217,14 @@ export function TaskBoard() {
           )}
         </div>
         {t.body && <p className="board-card-body">{t.body}</p>}
+        {t.status === 'running' && <RunTail runId={t.run_id} onFinished={invalidate} />}
         {t.status === 'blocked' && t.blocked_reason && (
-          <p className="board-card-reason">{t.blocked_reason}</p>
+          <p className={`board-card-reason${t.blocked_kind === 'needs_input' ? ' board-card-reason--question' : ''}`}>
+            {t.blocked_reason}
+          </p>
+        )}
+        {t.status === 'blocked' && t.blocked_kind === 'needs_input' && (
+          <AnswerBox taskId={t.id} onAnswered={invalidate} />
         )}
         {t.status === 'done' && t.summary && (
           <p className="board-card-summary">{t.summary}</p>
@@ -330,6 +399,47 @@ export function TaskBoard() {
             onChange={(e) => setDraft({...draft, priority: Number(e.target.value) || 0})}
           />
         </div>
+        {(() => {
+          const editingId = editor?.mode === 'edit' ? editor.task.id : null;
+          const candidates = all.filter(
+            (t) => t.id !== editingId && t.status !== 'archived',
+          );
+          if (candidates.length === 0) return null;
+          return (
+            <div className="auto-form-group">
+              <span className="auto-form-label">
+                Depends on — runs after these finish, receiving their summaries
+              </span>
+              <ul className="board-parent-picker">
+                {candidates.map((t) => (
+                  <li key={t.id}>
+                    <label className="board-parent-option">
+                      <input
+                        type="checkbox"
+                        checked={draft.parentIds.includes(t.id)}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            parentIds: e.target.checked
+                              ? [...draft.parentIds, t.id]
+                              : draft.parentIds.filter((id) => id !== t.id),
+                          })
+                        }
+                      />
+                      <span className={`board-parent-status board-parent-status--${t.status}`} />
+                      {t.title}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              {draft.parentIds.length > 0 && editor?.mode === 'add' && (
+                <span className="auto-form-hint">
+                  Dependent tasks wait in todo until every parent is done.
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </FormModal>
 
       <ConfirmDialog

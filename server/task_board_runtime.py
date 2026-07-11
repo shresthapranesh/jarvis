@@ -82,9 +82,18 @@ async def dispatch_board_tasks() -> int:
                     await session.commit()
                 return 0
 
+            # Skip ready tasks whose previous run's job is still alive: a task
+            # blocked/completed by its tool call and immediately re-readied
+            # (answer, unblock, re-run) must not get a second concurrent run
+            # while the first agent loop is still wrapping up — both would
+            # write one thread, and the older run could clobber the newer row.
+            live_jobs = select(JobRow.id).where(JobRow.status.in_(["pending", "running"]))
             ready = (await session.execute(
                 select(BoardTask)
-                .where(BoardTask.status == "ready")
+                .where(
+                    BoardTask.status == "ready",
+                    (BoardTask.job_id.is_(None)) | (BoardTask.job_id.not_in(live_jobs)),
+                )
                 .order_by(BoardTask.priority.desc(), BoardTask.created_at.asc())
                 .limit(capacity)
             )).scalars().all()
@@ -121,8 +130,21 @@ You are executing a task from the shared task board.
 {skill_part}{handoff_part}
 When you have finished the task, call complete_task(summary=...) with a concise
 handoff summary for downstream tasks (optionally metadata as a JSON object
-string). If you cannot finish, call block_task(reason=...) instead. If you call
-neither, your final reply is recorded as the summary."""
+string). If you cannot finish, call block_task(reason=...) instead — pass
+needs_input=True when a human answer would unblock you; the answer is delivered
+when the task resumes. If you call neither, your final reply is recorded as the
+summary."""
+
+# Resumed run after a needs_input block: the thread already holds the original
+# task and the agent's question, so the prompt only carries the answer.
+_RESUME_PROMPT = """\
+You previously blocked the board task "{title}" with a question. The user has \
+answered:
+
+{answer}
+
+Continue the task using this answer. When you have finished, call \
+complete_task(summary=...); if you are still blocked, call block_task(reason=...)."""
 
 
 def _compose_task_prompt(task: BoardTask, parents: list[BoardTask]) -> str:
@@ -189,17 +211,23 @@ async def _run_agent(task: BoardTask, state: TaskState, conv_id: str, prompt: st
 
 async def _finish_task(
     task_id: str,
+    run_id: str,
     *,
     status: str,
     summary: str | None = None,
     blocked_reason: str | None = None,
+    blocked_kind: str | None = None,
     bump_failures: bool = False,
 ) -> None:
-    """Terminal update, respecting a status the agent already set via
-    complete_task/block_task — the handler only overwrites 'running'."""
+    """Terminal update, respecting state the run no longer owns:
+    - a newer run claimed the task (job_id != run_id) → touch nothing;
+    - a human re-queued it mid-run (status ready/todo) → touch nothing;
+    - the agent already set a terminal status via complete_task/block_task →
+      keep it, only stamp finished_at;
+    - otherwise (still 'running') apply this run's outcome."""
     async with async_session() as session:
         task = await session.get(BoardTask, task_id)
-        if task is None:
+        if task is None or task.job_id != run_id or task.status in ("ready", "todo"):
             return
         now = datetime.now(timezone.utc)
         if task.status == "running":
@@ -207,6 +235,7 @@ async def _finish_task(
             if summary is not None:
                 task.summary = summary
             task.blocked_reason = blocked_reason
+            task.blocked_kind = blocked_kind
             if bump_failures:
                 task.failure_count += 1
         task.finished_at = now
@@ -214,7 +243,10 @@ async def _finish_task(
         await session.commit()
 
 
-async def _run_board_task_inner(task: BoardTask, state: TaskState, run_id: str) -> None:
+async def _run_board_task_inner(
+    task: BoardTask, state: TaskState, run_id: str,
+    pending_answer: str | None = None,
+) -> None:
     final_status = "error"
     conv_id = board_task_conversation_id(task.id)
     model = task.model or DEFAULT_MODEL
@@ -224,13 +256,19 @@ async def _run_board_task_inner(task: BoardTask, state: TaskState, run_id: str) 
             await get_or_create_conversation(
                 session, conv_id, model, task.title, surface="task",
             )
-        prompt = _compose_task_prompt(task, parents)
+        if pending_answer:
+            prompt = _RESUME_PROMPT.format(title=task.title, answer=pending_answer)
+            gate_text = pending_answer
+        else:
+            prompt = _compose_task_prompt(task, parents)
+            gate_text = f"{task.title}\n{task.body or ''}"
 
-        rejection = await gate_input(f"{task.title}\n{task.body or ''}", model)
+        rejection = await gate_input(gate_text, model)
         if rejection:
             emit_event(state, "safety_input_blocked", message=rejection, run_id=run_id)
             await _finish_task(
-                task.id, status="blocked", blocked_reason=f"safety: {rejection}",
+                task.id, run_id, status="blocked",
+                blocked_reason=f"safety: {rejection}", blocked_kind="safety",
             )
             final_status = "blocked"
             return
@@ -251,8 +289,8 @@ async def _run_board_task_inner(task: BoardTask, state: TaskState, run_id: str) 
 
         if state.cancelled:
             await _finish_task(
-                task.id, status="blocked", summary=output or None,
-                blocked_reason="stopped by user",
+                task.id, run_id, status="blocked", summary=output or None,
+                blocked_reason="stopped by user", blocked_kind="stopped",
             )
             async with async_session() as session:
                 await add_message(session, conv_id, "assistant", output or "", status="stopped")
@@ -262,8 +300,8 @@ async def _run_board_task_inner(task: BoardTask, state: TaskState, run_id: str) 
 
         if output_verdict:
             await _finish_task(
-                task.id, status="blocked", summary=output,
-                blocked_reason=f"safety: {output_verdict.reason}",
+                task.id, run_id, status="blocked", summary=output,
+                blocked_reason=f"safety: {output_verdict.reason}", blocked_kind="safety",
             )
             async with async_session() as session:
                 await add_message(session, conv_id, "assistant", output or "", status="blocked")
@@ -272,7 +310,7 @@ async def _run_board_task_inner(task: BoardTask, state: TaskState, run_id: str) 
 
         # The agent may have already set a terminal status via
         # complete_task/block_task; _finish_task only overwrites 'running'.
-        await _finish_task(task.id, status="done", summary=output)
+        await _finish_task(task.id, run_id, status="done", summary=output)
         async with async_session() as session:
             await add_message(session, conv_id, "assistant", output or "", status="done")
             refreshed = await get_board_task(session, task.id)
@@ -286,7 +324,8 @@ async def _run_board_task_inner(task: BoardTask, state: TaskState, run_id: str) 
 
     except asyncio.CancelledError:
         await _finish_task(
-            task.id, status="blocked", blocked_reason="interrupted by shutdown",
+            task.id, run_id, status="blocked",
+            blocked_reason="interrupted by shutdown", blocked_kind="stopped",
         )
         final_status = "stopped"
         emit_event(state, "stopped", run_id=run_id)
@@ -294,12 +333,19 @@ async def _run_board_task_inner(task: BoardTask, state: TaskState, run_id: str) 
     except BaseException as exc:
         err_text = str(exc)
         await _finish_task(
-            task.id, status="blocked",
-            blocked_reason=f"error: {err_text}", bump_failures=True,
+            task.id, run_id, status="blocked", blocked_reason=f"error: {err_text}",
+            blocked_kind="error", bump_failures=True,
         )
         with contextlib.suppress(Exception):
             async with async_session() as session:
                 await add_message(session, conv_id, "assistant", err_text, status="error")
+                # The answer was consumed at claim time; put it back so a
+                # retry after a transient failure still resumes with it.
+                if pending_answer:
+                    t = await session.get(BoardTask, task.id)
+                    if t is not None and t.job_id == run_id and not t.pending_answer:
+                        t.pending_answer = pending_answer
+                        await session.commit()
         emit_event(state, "error", error=err_text)
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
@@ -330,6 +376,10 @@ async def board_task_job_handler(job: Job) -> None:
         task.job_id = run_id
         task.started_at = now
         task.updated_at = now
+        # Consume a needs_input answer at claim time; the value rides along in
+        # the local variable (and lands in the thread as a user message).
+        pending_answer = task.pending_answer
+        task.pending_answer = None
         await session.commit()
 
     state = _tasks.get(run_id)
@@ -341,7 +391,7 @@ async def board_task_job_handler(job: Job) -> None:
     queue = get_queue()
     cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
     try:
-        await _run_board_task_inner(task, state, run_id)
+        await _run_board_task_inner(task, state, run_id, pending_answer)
     finally:
         cancel_watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -378,6 +428,7 @@ async def stop_board_task(task_id: str) -> bool:
                 now = datetime.now(timezone.utc)
                 task.status = "blocked"
                 task.blocked_reason = "stopped by user"
+                task.blocked_kind = "stopped"
                 task.finished_at = now
                 task.updated_at = now
                 await session.commit()

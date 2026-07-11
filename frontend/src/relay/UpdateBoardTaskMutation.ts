@@ -18,6 +18,7 @@ const mutation = graphql`
       model
       skill
       blockedReason
+      blockedKind
       failureCount
       summary
       resultMetadata
@@ -39,6 +40,8 @@ export interface UpdateBoardTaskPayload {
   priority?: number;
   model?: string | null;
   skill?: string | null;
+  // When provided, replaces the task's parent links (empty array clears them).
+  parentIds?: string[];
 }
 
 export function commitUpdateBoardTask(rawId: string, p: UpdateBoardTaskPayload): Promise<BoardTask> {
@@ -53,6 +56,9 @@ export function commitUpdateBoardTask(rawId: string, p: UpdateBoardTaskPayload):
           priority: p.priority ?? null,
           model: p.model ?? null,
           skill: p.skill ?? null,
+          parentIds: p.parentIds
+            ? p.parentIds.map((id) => encodeGlobalId('BoardTask', id))
+            : null,
         },
       },
       onCompleted: (response, errors) => {

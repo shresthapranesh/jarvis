@@ -303,6 +303,12 @@ class BoardTask(Base):
     skill: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # skill name to apply
 
     blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Why it's blocked: "needs_input" (agent asked a question — answerable from
+    # the board) | "agent" (agent gave up) | "error" | "safety" | "stopped".
+    blocked_kind: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # A human answer to a needs_input blocker, consumed (and cleared) by the
+    # next dispatch — the resumed run continues the same thread with it.
+    pending_answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     failure_count: Mapped[int] = mapped_column(Integer, default=0)
 
     # Completion handoff for downstream tasks: prose summary + optional JSON dict.

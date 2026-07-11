@@ -1,14 +1,14 @@
 import {commitMutation, graphql} from 'react-relay';
 
-import type {SetBoardTaskStatusMutation} from '../__generated__/SetBoardTaskStatusMutation.graphql';
-import type {BoardTask, BoardTaskStatus} from '../lib/types';
+import type {AnswerBoardTaskMutation} from '../__generated__/AnswerBoardTaskMutation.graphql';
+import type {BoardTask} from '../lib/types';
 import {environment} from './environment';
 import {encodeGlobalId} from './globalId';
 import {mapBoardTask} from './BoardTasksQuery';
 
 const mutation = graphql`
-  mutation SetBoardTaskStatusMutation($id: ID!, $status: String!) {
-    setBoardTaskStatus(id: $id, status: $status) {
+  mutation AnswerBoardTaskMutation($id: ID!, $answer: String!) {
+    answerBoardTask(id: $id, answer: $answer) {
       id
       title
       body
@@ -34,20 +34,17 @@ const mutation = graphql`
   }
 `;
 
-export function commitSetBoardTaskStatus(
-  rawId: string,
-  status: Extract<BoardTaskStatus, 'todo' | 'ready' | 'done' | 'archived'>,
-): Promise<BoardTask> {
+export function commitAnswerBoardTask(rawId: string, answer: string): Promise<BoardTask> {
   return new Promise((resolve, reject) => {
-    commitMutation<SetBoardTaskStatusMutation>(environment, {
+    commitMutation<AnswerBoardTaskMutation>(environment, {
       mutation,
-      variables: {id: encodeGlobalId('BoardTask', rawId), status},
+      variables: {id: encodeGlobalId('BoardTask', rawId), answer},
       onCompleted: (response, errors) => {
         if (errors && errors.length > 0) {
           reject(new Error(errors[0].message));
           return;
         }
-        resolve(mapBoardTask(response.setBoardTaskStatus));
+        resolve(mapBoardTask(response.answerBoardTask));
       },
       onError: reject,
     });

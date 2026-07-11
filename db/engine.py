@@ -42,6 +42,11 @@ def _migrate(conn: Connection) -> None:
     wf_cols = {c["name"] for c in inspector.get_columns("workflows")}
     if "notifications" not in wf_cols:
         conn.execute(text("ALTER TABLE workflows ADD COLUMN notifications TEXT"))
+    bt_cols = {c["name"] for c in inspector.get_columns("board_tasks")}
+    if "blocked_kind" not in bt_cols:
+        conn.execute(text("ALTER TABLE board_tasks ADD COLUMN blocked_kind VARCHAR"))
+    if "pending_answer" not in bt_cols:
+        conn.execute(text("ALTER TABLE board_tasks ADD COLUMN pending_answer TEXT"))
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 

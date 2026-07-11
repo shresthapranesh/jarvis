@@ -417,6 +417,7 @@ export interface BoardTask {
   model: string | null;
   skill: string | null;
   blocked_reason: string | null;
+  blocked_kind: string | null;
   failure_count: number;
   summary: string | null;
   result_metadata: string | null;

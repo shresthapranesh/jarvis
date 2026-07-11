@@ -22,6 +22,8 @@ class BoardTask(relay.Node):
     model: str | None
     skill: str | None
     blocked_reason: str | None
+    # "needs_input" | "agent" | "error" | "safety" | "stopped" | None
+    blocked_kind: str | None
     failure_count: int
     summary: str | None
     result_metadata: str | None  # JSON object string
@@ -54,6 +56,7 @@ class BoardTask(relay.Node):
             model=row.model,
             skill=row.skill,
             blocked_reason=row.blocked_reason,
+            blocked_kind=row.blocked_kind,
             failure_count=row.failure_count,
             summary=row.summary,
             result_metadata=row.result_metadata,

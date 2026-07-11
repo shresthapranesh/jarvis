@@ -130,22 +130,26 @@ async def complete_task(summary: str, metadata: str | None = None) -> str:
         task = await update_board_task(
             session, ctx.board_task_id,
             status="done", summary=summary, result_metadata=metadata,
-            blocked_reason=None,
+            blocked_reason=None, blocked_kind=None,
         )
     if task is None:
         return "Error: current board task not found."
     return "Task marked done. Wrap up with a short final reply."
 
 
-async def block_task(reason: str) -> str:
+async def block_task(reason: str, needs_input: bool = False) -> str:
     """Mark the board task you are currently executing as blocked.
 
     Only valid inside a board-task run. Call this when you cannot finish —
     missing input, missing capability, or a decision only a human can make.
-    A human can unblock the task from the board later.
 
     Args:
-        reason: What is missing and what would unblock the task.
+        reason: What is missing and what would unblock the task. When asking
+                the user something, phrase this as the question itself.
+        needs_input: Set True when a human answer would unblock the task —
+                     the board shows an answer box on the card, and the answer
+                     is delivered to you when the task resumes (same
+                     conversation, so you keep your context).
     """
     ctx = current_ctx()
     if not ctx.board_task_id:
@@ -153,6 +157,7 @@ async def block_task(reason: str) -> str:
     async with async_session() as session:
         task = await update_board_task(
             session, ctx.board_task_id, status="blocked", blocked_reason=reason,
+            blocked_kind="needs_input" if needs_input else "agent",
         )
     if task is None:
         return "Error: current board task not found."

@@ -1083,6 +1083,67 @@ async def get_board_task_parents(session: AsyncSession, task_id: str) -> list[Bo
     return list(result.scalars().all())
 
 
+async def list_board_task_descendants(session: AsyncSession, task_id: str) -> set[str]:
+    """Ids of every task reachable from `task_id` via parent→child edges."""
+    links = await list_board_task_links(session)
+    children: dict[str, list[str]] = {}
+    for link in links:
+        children.setdefault(link.parent_id, []).append(link.child_id)
+    seen: set[str] = set()
+    frontier = [task_id]
+    while frontier:
+        node = frontier.pop()
+        for child in children.get(node, []):
+            if child not in seen:
+                seen.add(child)
+                frontier.append(child)
+    return seen
+
+
+async def replace_board_task_parents(
+    session: AsyncSession, task_id: str, parent_ids: list[str],
+) -> BoardTask | None:
+    """Replace a task's parent links with `parent_ids`.
+
+    Rejects missing parents, self-links, and cycles (a descendant of the task
+    can't become its parent). If the task is waiting (todo/ready) its status is
+    recomputed: unfinished parents park it in "todo"; otherwise it keeps its
+    current column. Raises ValueError on invalid input.
+    """
+    task = await session.get(BoardTask, task_id)
+    if task is None:
+        return None
+    parent_ids = [p for p in dict.fromkeys(parent_ids) if p]  # dedupe, keep order
+    if task_id in parent_ids:
+        raise ValueError("a task cannot depend on itself")
+    if parent_ids:
+        found = (await session.execute(
+            select(BoardTask.id).where(BoardTask.id.in_(parent_ids))
+        )).scalars().all()
+        missing = set(parent_ids) - set(found)
+        if missing:
+            raise ValueError(f"parent task(s) not found: {', '.join(sorted(missing))}")
+        descendants = await list_board_task_descendants(session, task_id)
+        cyclic = descendants & set(parent_ids)
+        if cyclic:
+            raise ValueError("dependency cycle: a task's descendant cannot be its parent")
+    for link in (await session.execute(
+        select(BoardTaskLink).where(BoardTaskLink.child_id == task_id)
+    )).scalars().all():
+        await session.delete(link)
+    for pid in parent_ids:
+        session.add(BoardTaskLink(id=str(uuid4()), parent_id=pid, child_id=task_id))
+    if task.status in ("todo", "ready") and parent_ids:
+        parents = (await session.execute(
+            select(BoardTask).where(BoardTask.id.in_(parent_ids))
+        )).scalars().all()
+        if any(p.status != "done" for p in parents):
+            task.status = "todo"
+    task.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return task
+
+
 async def update_board_task(session: AsyncSession, task_id: str, **kwargs: Any) -> BoardTask | None:
     task = await session.get(BoardTask, task_id)
     if task is None:

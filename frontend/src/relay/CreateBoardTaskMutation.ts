@@ -18,6 +18,7 @@ const mutation = graphql`
       model
       skill
       blockedReason
+      blockedKind
       failureCount
       summary
       resultMetadata

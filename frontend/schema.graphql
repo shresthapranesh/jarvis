@@ -109,6 +109,7 @@ type BoardTask implements Node {
   model: String
   skill: String
   blockedReason: String
+  blockedKind: String
   failureCount: Int!
   summary: String
   resultMetadata: String
@@ -138,6 +139,7 @@ input BoardTaskUpdateInput {
   priority: Int = null
   model: String = null
   skill: String = null
+  parentIds: [ID!] = null
 }
 
 type BrowserStepEvent {
@@ -263,6 +265,7 @@ type Mutation {
   createBoardTask(input: BoardTaskInput!): BoardTask!
   updateBoardTask(id: ID!, input: BoardTaskUpdateInput!): BoardTask!
   setBoardTaskStatus(id: ID!, status: String!): BoardTask!
+  answerBoardTask(id: ID!, answer: String!): BoardTask!
   deleteBoardTask(id: ID!): Boolean!
   stopBoardTask(id: ID!): Boolean!
   createWorkflow(input: WorkflowCreateInput!): Workflow!

@@ -10,6 +10,7 @@ from db.ops import (
     create_board_task as db_create_board_task,
     delete_board_task as db_delete_board_task,
     get_board_task,
+    replace_board_task_parents,
     update_board_task as db_update_board_task,
 )
 
@@ -38,6 +39,8 @@ class BoardTaskUpdateInput:
     priority: int | None = None
     model: str | None = None
     skill: str | None = None
+    # When provided, REPLACES the task's parent links (empty list clears them).
+    parent_ids: list[relay.GlobalID] | None = None
 
 
 async def _kick_dispatch() -> None:
@@ -98,7 +101,12 @@ class BoardTaskMutation:
         }
         task = await db_update_board_task(session, id.node_id, **fields)
         assert task is not None
-        return BoardTask.from_db(task)
+        parent_ids: list[str] | None = None
+        if input.parent_ids is not None:
+            parent_ids = [g.node_id for g in input.parent_ids]
+            task = await replace_board_task_parents(session, id.node_id, parent_ids)
+            assert task is not None
+        return BoardTask.from_db(task, parent_ids)
 
     @strawberry.mutation
     async def set_board_task_status(
@@ -120,11 +128,42 @@ class BoardTaskMutation:
         fields: dict = {"status": status}
         if status in ("todo", "ready"):
             fields["blocked_reason"] = None
+            fields["blocked_kind"] = None
             fields["finished_at"] = None
         task = await db_update_board_task(session, id.node_id, **fields)
         assert task is not None
         if status == "ready":
             await _kick_dispatch()
+        return BoardTask.from_db(task)
+
+    @strawberry.mutation
+    async def answer_board_task(
+        self,
+        info: strawberry.Info,
+        id: relay.GlobalID,
+        answer: str,
+    ) -> BoardTask:
+        """Answer a blocked task's question and resume it. The answer is
+        delivered to the resumed run (same conversation thread, so the agent
+        keeps the context of what it asked)."""
+        if not answer.strip():
+            raise ValueError("answer must not be empty")
+        session = info.context["session"]
+        task = await get_board_task(session, id.node_id)
+        if task is None:
+            raise ValueError("task not found")
+        if task.status != "blocked":
+            raise ValueError("only blocked tasks can be answered")
+        task = await db_update_board_task(
+            session, id.node_id,
+            status="ready",
+            pending_answer=answer.strip(),
+            blocked_reason=None,
+            blocked_kind=None,
+            finished_at=None,
+        )
+        assert task is not None
+        await _kick_dispatch()
         return BoardTask.from_db(task)
 
     @strawberry.mutation

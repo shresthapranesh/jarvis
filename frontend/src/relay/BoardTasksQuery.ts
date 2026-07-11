@@ -18,6 +18,7 @@ export const boardTasksQuery = graphql`
       model
       skill
       blockedReason
+      blockedKind
       failureCount
       summary
       resultMetadata
@@ -46,6 +47,7 @@ export function mapBoardTask(t: BoardTaskNode): BoardTask {
     model: t.model ?? null,
     skill: t.skill ?? null,
     blocked_reason: t.blockedReason ?? null,
+    blocked_kind: t.blockedKind ?? null,
     failure_count: t.failureCount,
     summary: t.summary ?? null,
     result_metadata: t.resultMetadata ?? null,
