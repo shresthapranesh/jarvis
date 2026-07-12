@@ -14,7 +14,7 @@ jarvis/
 ├── main.py               # CLI entrypoint (typer): run, start, config *, model *
 ├── core/
 │   ├── agents.py         # build_agent(model) — LangGraph agent factory + subagents
-│   ├── messages.py       # LLM-message hygiene: strip_historical_thinking,
+│   ├── messages.py       # LLM-message hygiene: elide_stale_tool_results, strip_historical_thinking,
 │   │                     #   repair_orphan_tool_calls, build_llm_messages (+ estimate_tokens)
 │   ├── model_catalog.py  # AVAILABLE_MODELS, DEFAULT_MODEL, is_valid_model()
 │   ├── state.py          # TaskState, _tasks, _notify(), stream_task_events(),
@@ -83,10 +83,10 @@ jarvis/
 │   ├── todos.py          # [bound] write_todos, set_todo_status (per-conversation plan)
 │   ├── documents.py      # [bound] search_documents, read_document (retrieval over indexed attachments)
 │   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
-│   ├── automations.py    # [bound] CRUD as agent tools
+│   ├── automations.py    # [bound] manage_automations — CRUD via one action-dispatch tool
 │   ├── board.py          # [bound] create_task/list_tasks (task board) + complete_task/block_task (in-run only)
-│   ├── workflows.py      # [bound] CRUD as agent tools
-│   ├── skills.py         # [bound] use_skill + list/create/update/delete_skill (agent-authored skills)
+│   ├── workflows.py      # [bound] manage_workflows — CRUD via one action-dispatch tool
+│   ├── skills.py         # [bound] use_skill + manage_skills (agent-authored skills)
 │   ├── memory.py         # [bound iff embedder] remember, search_memory (discrete vector memory)
 │   ├── context.py        # current_ctx() — per-call ToolContext (code_session_key, conversation_id)
 │   ├── research.py       # [kernel-preloaded] search() (Tavily/Brave, ddgs fallback) + read()
@@ -267,7 +267,7 @@ GraphQL `agentMemory` query + `updateMemory` (blob) / `updateMemoryItem` (discre
 
 ## Skills Feature
 A **skill** is a named, reusable procedure the agent can author and later reload: a `description` (the routing key, embedded for intent retrieval) plus a `body` (the full instructions, loaded on demand). Stored in the `Skill` SQL table.
-- **Agent tools** (`tools/skills.py`, all bound): `use_skill(name)` loads a body to follow; `list_skills` / `create_skill` / `update_skill` / `delete_skill` curate them.
+- **Agent tools** (`tools/skills.py`, all bound): `use_skill(name)` loads a body to follow; `manage_skills(action=list/create/update/delete, ...)` curates them.
 - **Surfacing** (`core/skill_store.py`): each description is embedded; `skill_catalog(query)` returns enabled skills ranked by intent match, which `core/agents.py` (`_skills_volatile_parts`) injects as a `## Available Skills` list — **name + description only** — in the volatile suffix. The body stays out of context until `use_skill` pulls it.
 - **GraphQL + UI**: `skills` query + `createSkill`/`updateSkill`/`deleteSkill` mutations (`server/graphql/queries|mutations/skill.py`, type in `types/skill.py`); `frontend/src/components/SkillsView.tsx` + the `/skills` route manage them.
 
@@ -296,7 +296,7 @@ Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`
 `Conversation.model` is **sticky per-conversation**: the chat `startTask` mutation updates it whenever the request's model differs from the stored value, and the InputBox commits a conversation-update mutation on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model`, falling back to the catalog default only when no conversation exists yet.
 
 ## LLM-call node requirement
-Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks).
+Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks). Loop nodes should also run `elide_stale_tool_results` first (token hygiene: clips bulky tool outputs older than the last few AI turns; per-call only, the checkpointer keeps the full text).
 
 ## Telegram Bot
 Optional — enabled by setting `TELEGRAM_BOT_TOKEN` before starting the server. Implemented in `server/telegram_bot.py`:

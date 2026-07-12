@@ -27,7 +27,7 @@ async def use_skill(name: str) -> str:
     async with async_session() as session:
         skill = await get_skill_by_name(session, name.strip())
     if skill is None:
-        return f"No skill named '{name}'. Call list_skills to see what's available."
+        return f"No skill named '{name}'. Call manage_skills(action=\"list\") to see what's available."
     if not skill.enabled:
         return f"Skill '{name}' is disabled."
     return skill.body
@@ -70,7 +70,7 @@ async def create_skill(
         return "Skill body is required."
     async with async_session() as session:
         if await get_skill_by_name(session, name) is not None:
-            return f"A skill named '{name}' already exists — use update_skill to change it."
+            return f"A skill named '{name}' already exists — update it instead (action=\"update\")."
         skill = await save_new_skill(
             session,
             name=name,
@@ -117,3 +117,57 @@ async def delete_skill(skill_id: str) -> str:
     async with async_session() as session:
         deleted = await _delete(session, skill_id)
     return f"Deleted skill {skill_id}." if deleted else f"Skill '{skill_id}' not found."
+
+
+async def manage_skills(
+    action: str,
+    skill_id: str | None = None,
+    name: str | None = None,
+    description: str | None = None,
+    body: str | None = None,
+    enabled: bool | None = None,
+) -> str:
+    """List, create, update, or delete reusable skills (saved procedures you
+    can reload later with use_skill).
+
+    For update, pass skill_id plus only the fields to change. Changing the
+    description re-embeds the skill for intent retrieval.
+
+    Args:
+        action: One of "list", "create", "update", "delete".
+        skill_id: Target skill id (required for update/delete).
+        name: Unique short handle, kebab-case recommended
+            (e.g. "weekly-market-recap"). Required for create.
+        description: One line on WHEN to use this skill — the routing key
+            matched against user intent, so make it specific and
+            trigger-oriented. Required for create.
+        body: The full procedure/instructions in markdown. Loaded only when
+            the skill is invoked, so it can be as detailed as needed.
+            Required for create.
+        enabled: Whether the skill is active. Create default True.
+    """
+    action = (action or "").strip().lower()
+    if action == "list":
+        return await list_skills()
+    if action == "create":
+        if not name or not description or not body:
+            return "Error: create requires name, description, and body."
+        return await create_skill(
+            name=name,
+            description=description,
+            body=body,
+            enabled=True if enabled is None else enabled,
+        )
+    if action == "update":
+        if not skill_id:
+            return "Error: update requires skill_id."
+        if name is None and description is None and body is None and enabled is None:
+            return "Error: update requires at least one field to change."
+        return await update_skill(
+            skill_id, name=name, description=description, body=body, enabled=enabled
+        )
+    if action == "delete":
+        if not skill_id:
+            return "Error: delete requires skill_id."
+        return await delete_skill(skill_id)
+    return f"Error: unknown action '{action}'; must be one of list, create, update, delete."

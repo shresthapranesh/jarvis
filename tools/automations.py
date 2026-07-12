@@ -138,3 +138,103 @@ async def delete_automation(automation_id: str) -> str:
         if deleted
         else f"Automation '{automation_id}' not found."
     )
+
+
+async def manage_automations(
+    action: str,
+    automation_id: str | None = None,
+    name: str | None = None,
+    input_type: str | None = None,
+    description: str | None = None,
+    prompt_text: str | None = None,
+    model: str | None = None,
+    code_text: str | None = None,
+    webhook_url: str | None = None,
+    webhook_method: str | None = None,
+    webhook_headers: str | None = None,
+    webhook_body: str | None = None,
+    schedule: str | None = None,
+    enabled: bool | None = None,
+    stateful: bool | None = None,
+) -> str:
+    """List, create, update, or delete automations (scheduled or on-demand tasks).
+
+    For update, pass automation_id plus only the fields to change (an empty
+    string clears a text field like schedule).
+
+    Args:
+        action: One of "list", "create", "update", "delete".
+        automation_id: Target automation id (required for update/delete).
+        name: Human-readable name (required for create).
+        input_type: (create) "prompt" (LLM agent run), "code" (Python
+            subprocess), "webhook" (HTTP call), or "monitor" (watch something
+            and notify only when it changes — always stateful, stays silent
+            when nothing changed).
+        description: Optional short description.
+        prompt_text: (prompt) The query/instruction the agent will run.
+            (monitor) The target to watch, e.g. "NVDA closing price; alert
+            when it drops below 150".
+        model: (prompt/monitor) Model ID, e.g. "google_genai:gemini-2.5-pro".
+            None = use default.
+        code_text: (code) Python source code to execute.
+        webhook_url: (webhook) Target URL.
+        webhook_method: (webhook) HTTP method. Defaults to "POST".
+        webhook_headers: (webhook) JSON string of headers.
+        webhook_body: (webhook) Raw request body.
+        schedule: Cron expression for recurring runs, e.g. "0 9 * * *" =
+            daily 9am. None/empty = manual trigger only.
+        enabled: Whether the automation is active. Create default True.
+        stateful: (prompt) Share one conversation across runs so the agent
+            remembers previous runs. Monitors are always stateful.
+    """
+    action = (action or "").strip().lower()
+    if action == "list":
+        return await list_automations()
+    if action == "create":
+        if not name or not input_type:
+            return "Error: create requires name and input_type."
+        return await create_automation(
+            name=name,
+            input_type=input_type,
+            description=description,
+            prompt_text=prompt_text,
+            model=model,
+            code_text=code_text,
+            webhook_url=webhook_url,
+            webhook_method=webhook_method,
+            webhook_headers=webhook_headers,
+            webhook_body=webhook_body,
+            schedule=schedule,
+            enabled=True if enabled is None else enabled,
+            stateful=bool(stateful),
+        )
+    if action == "update":
+        if not automation_id:
+            return "Error: update requires automation_id."
+        fields = {
+            k: v
+            for k, v in dict(
+                name=name,
+                input_type=input_type,
+                description=description,
+                prompt_text=prompt_text,
+                model=model,
+                code_text=code_text,
+                webhook_url=webhook_url,
+                webhook_method=webhook_method,
+                webhook_headers=webhook_headers,
+                webhook_body=webhook_body,
+                schedule=schedule,
+                enabled=enabled,
+                stateful=stateful,
+            ).items()
+            if v is not None
+        }
+        if not fields:
+            return "Error: update requires at least one field to change."
+        return await update_automation(automation_id, **fields)
+    if action == "delete":
+        if not automation_id:
+            return "Error: delete requires automation_id."
+        return await delete_automation(automation_id)
+    return f"Error: unknown action '{action}'; must be one of list, create, update, delete."

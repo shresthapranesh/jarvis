@@ -152,7 +152,8 @@ async def maybe_summarize(
         summary = await summarizer.ainvoke([
             SystemMessage(
                 "Summarize the following conversation history concisely. "
-                "Preserve all key facts, decisions, tool outputs, and results."
+                "Preserve all key facts, decisions, tool outputs, and results. "
+                "Keep the summary under about 800 words."
             ),
             *safe_msgs,
         ])

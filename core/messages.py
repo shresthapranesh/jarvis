@@ -5,6 +5,7 @@ before `.ainvoke`. Kept out of `core/agents.py` because they have no
 LangGraph/agent dependency and are reused across every agent-loop node.
 
 Required pre-`.ainvoke` pipeline for any new agent-loop node:
+    history = elide_stale_tool_results(history)   # token hygiene (optional but recommended)
     history = strip_historical_thinking(history)
     history = repair_orphan_tool_calls(history)
     msgs = build_llm_messages(system_prompt, use_cache, history)
@@ -169,6 +170,56 @@ def repair_orphan_tool_calls(messages: list[AnyMessage]) -> list[AnyMessage]:
                     tool_call_id=tcid,
                 ))
         i = j
+    return result
+
+
+# Tool results older than this many assistant turns get their bulky content
+# clipped before the LLM call. Old tool outputs are the bulk of agent-loop
+# history and are rarely re-read once the model has acted on them, yet they
+# get re-billed as input tokens on every subsequent call.
+TOOL_RESULT_KEEP_TURNS = 4
+TOOL_RESULT_ELIDE_MIN_CHARS = 2500
+TOOL_RESULT_ELIDE_HEAD_CHARS = 400
+
+
+def elide_stale_tool_results(
+    messages: list[AnyMessage],
+    *,
+    keep_turns: int = TOOL_RESULT_KEEP_TURNS,
+    min_chars: int = TOOL_RESULT_ELIDE_MIN_CHARS,
+    head_chars: int = TOOL_RESULT_ELIDE_HEAD_CHARS,
+) -> list[AnyMessage]:
+    """Clip bulky ToolMessages older than the last ``keep_turns`` AI turns.
+
+    Purely per-call and non-destructive: it operates on message copies, so the
+    checkpointer keeps the full output and every later call re-derives the
+    same (deterministic) elision. Only plain-string tool content is touched —
+    list content (vision blocks, structured tool results) passes through, as
+    do results at or under ``min_chars``.
+    """
+    cutoff = 0
+    seen_ai = 0
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], AIMessage):
+            seen_ai += 1
+            if seen_ai >= keep_turns:
+                cutoff = i
+                break
+    if cutoff == 0:
+        return messages
+    result = list(messages)
+    for i in range(cutoff):
+        msg = result[i]
+        if getattr(msg, "type", "") != "tool":
+            continue
+        content = msg.content
+        if not isinstance(content, str) or len(content) <= min_chars:
+            continue
+        stub = (
+            f"{content[:head_chars]}\n... [{len(content) - head_chars} chars of stale "
+            "tool output elided to save context — re-run the tool if you need it again]"
+        )
+        result[i] = msg.model_copy(update={"content": stub})
     return result
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3 as _sqlite3
+from collections import OrderedDict
 from pathlib import Path
 from typing import Annotated, NotRequired, TypedDict
 
@@ -19,6 +20,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from .config import get_config
 from .messages import (
     build_llm_messages,
+    elide_stale_tool_results,
     message_text,
     repair_orphan_tool_calls,
     strip_historical_thinking,
@@ -41,31 +43,15 @@ from tools.files import list_files, read_file, write_file
 from tools.memory import remember, search_memory as search_memory_tool
 from tools.todos import set_todo_status, write_todos
 from tools.workers import make_spawn_workers
-from tools.automations import (
-    create_automation,
-    delete_automation,
-    list_automations,
-    update_automation,
-)
+from tools.automations import manage_automations
 from tools.board import (
     block_task,
     complete_task,
     create_task,
     list_tasks,
 )
-from tools.workflows import (
-    create_workflow,
-    delete_workflow,
-    list_workflows,
-    update_workflow,
-)
-from tools.skills import (
-    create_skill,
-    delete_skill,
-    list_skills,
-    update_skill,
-    use_skill,
-)
+from tools.workflows import manage_workflows
+from tools.skills import manage_skills, use_skill
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +269,35 @@ async def _skills_volatile_parts(messages: list[AnyMessage]) -> list[str]:
     ]
 
 
+# Retrieval-backed context (memory + skills) is computed once per user turn
+# and reused across that turn's agent-loop iterations: the retrieval query is
+# the latest HumanMessage, which doesn't change mid-turn, so recomputing every
+# iteration burns embedding calls on identical results. Keyed by the latest
+# human message's id (unique per turn — add_messages assigns UUIDs). Items
+# written mid-turn (remember / manage_skills) surface on the next user turn.
+_RETRIEVAL_CACHE_MAX = 256
+_retrieval_cache: OrderedDict[str, list[str]] = OrderedDict()
+
+
+async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[str]:
+    """Memory + skills sections for the volatile suffix, cached per user turn."""
+    key = None
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            key = m.id
+            break
+    if key is not None and key in _retrieval_cache:
+        _retrieval_cache.move_to_end(key)
+        return list(_retrieval_cache[key])
+    parts = await _memory_volatile_parts(store, messages)
+    parts += await _skills_volatile_parts(messages)
+    if key is not None:
+        _retrieval_cache[key] = list(parts)
+        while len(_retrieval_cache) > _RETRIEVAL_CACHE_MAX:
+            _retrieval_cache.popitem(last=False)
+    return parts
+
+
 # ── Checkpointer ─────────────────────────────────────────────────────────────
 
 _sync_checkpointer: SqliteSaver | None = None
@@ -326,7 +341,8 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
                 # signature: Field required"), and route through
                 # build_llm_messages so any embedded SystemMessages are
                 # collapsed into the single system prompt.
-                history = strip_historical_thinking(list(state.get("messages", [])))
+                history = elide_stale_tool_results(list(state.get("messages", [])))
+                history = strip_historical_thinking(history)
                 history = repair_orphan_tool_calls(history)
                 response = await role_llm.ainvoke(
                     build_llm_messages(prompt, use_cache, history),
@@ -361,22 +377,13 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         search_documents,
         read_document,
         spawn_workers,
-        list_automations,
-        create_automation,
-        update_automation,
-        delete_automation,
+        manage_automations,
         create_task,
         list_tasks,
         complete_task,
         block_task,
-        list_workflows,
-        create_workflow,
-        update_workflow,
-        delete_workflow,
-        list_skills,
-        create_skill,
-        update_skill,
-        delete_skill,
+        manage_workflows,
+        manage_skills,
         use_skill,
     ]
 
@@ -407,19 +414,22 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         # into the static prompt — otherwise every todo flip / memory edit busts
         # the cached prefix (system prompt + tool schemas). See core/messages.py.
         raw_messages = list(state.get("messages", []))
-        volatile_parts: list[str] = await _memory_volatile_parts(store, raw_messages)
-        volatile_parts += await _skills_volatile_parts(raw_messages)
+        volatile_parts: list[str] = await _retrieved_volatile_parts(store, raw_messages)
         todos = _normalise_todos(state.get("todos"))
         if todos:
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
             volatile_parts.append(f"## Current Tasks\n\n{todo_lines}")
         volatile = "\n\n".join(volatile_parts)
-        summarized = await maybe_summarize(raw_messages, llm=llm, summarizer=llm_for_summary)
+        # Clip stale tool outputs BEFORE the summarize check so the token
+        # estimate reflects what we'd actually send — elision alone often
+        # keeps the history under the summarization threshold.
+        lean_messages = elide_stale_tool_results(raw_messages)
+        summarized = await maybe_summarize(lean_messages, llm=llm, summarizer=llm_for_summary)
         if summarized is not None:
             messages_for_llm, state_update_msgs = summarized
         else:
-            messages_for_llm, state_update_msgs = raw_messages, []
+            messages_for_llm, state_update_msgs = lean_messages, []
         messages_for_llm = strip_historical_thinking(messages_for_llm)
         messages_for_llm = repair_orphan_tool_calls(messages_for_llm)
         response = await llm_with_tools.ainvoke(
