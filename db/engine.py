@@ -19,6 +19,10 @@ def _migrate(conn: Connection) -> None:
     msg_cols = {c["name"] for c in inspector.get_columns("messages")}
     if "status" not in msg_cols:
         conn.execute(text("ALTER TABLE messages ADD COLUMN status VARCHAR DEFAULT 'done'"))
+    if "input_tokens" not in msg_cols:
+        conn.execute(text("ALTER TABLE messages ADD COLUMN input_tokens INTEGER"))
+    if "output_tokens" not in msg_cols:
+        conn.execute(text("ALTER TABLE messages ADD COLUMN output_tokens INTEGER"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conv_created ON messages (conversation_id, created_at)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_steps_message_id ON steps (message_id)"))

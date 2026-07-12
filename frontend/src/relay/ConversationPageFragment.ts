@@ -24,6 +24,8 @@ export const conversationPageFragment = graphql`
           content
           model
           status
+          inputTokens
+          outputTokens
           createdAt
           steps {
             id

@@ -191,3 +191,52 @@ class AgentLogger(BaseCallbackHandler):
             return
         name, started = info
         logger.warning("node[%s] FAIL %.0fms: %s", name, _ms(started), error)
+
+
+class UsageAccumulator(BaseCallbackHandler):
+    """Sums provider-reported token usage across every LLM call in one run.
+
+    Attach a fresh instance per agent invocation alongside ``AgentLogger``;
+    callbacks propagate to child runnables, so worker/subagent calls are
+    included. Safety-judge calls (tagged ``safety_judge``) are excluded so
+    the totals reflect only the agent's own work. Input tokens count the
+    full context sent on each call, so per-message totals grow with history.
+    """
+
+    def __init__(self) -> None:
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self._seen = False
+
+    @property
+    def has_usage(self) -> bool:
+        return self._seen
+
+    def on_llm_end(
+        self,
+        response: LLMResult,
+        *,
+        run_id: UUID,
+        tags: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if tags and "safety_judge" in tags:
+            return
+        found = False
+        for gen_list in response.generations:
+            for gen in gen_list:
+                usage = getattr(getattr(gen, "message", None), "usage_metadata", None)
+                if usage:
+                    self.input_tokens += usage.get("input_tokens", 0) or 0
+                    self.output_tokens += usage.get("output_tokens", 0) or 0
+                    found = True
+        if not found:
+            # Older/odd providers only stuff counts into llm_output.
+            fallback = (response.llm_output or {}).get("token_usage") or {}
+            in_tok = fallback.get("prompt_tokens") or fallback.get("input_tokens")
+            out_tok = fallback.get("completion_tokens") or fallback.get("output_tokens")
+            if in_tok is not None or out_tok is not None:
+                self.input_tokens += in_tok or 0
+                self.output_tokens += out_tok or 0
+                found = True
+        self._seen = self._seen or found

@@ -46,6 +46,10 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="done")
+    # Provider-reported token usage summed over every LLM call in the run that
+    # produced this message (assistant rows only; NULL = not recorded).
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")

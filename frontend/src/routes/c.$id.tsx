@@ -216,6 +216,8 @@ function ConversationPage() {
       content: query,
       model: null,
       status: 'done',
+      input_tokens: null,
+      output_tokens: null,
       created_at: new Date().toISOString(),
       steps: [],
     });

@@ -56,6 +56,24 @@ function parseMultimodal(raw: string): ContentPart[] | null {
   return null;
 }
 
+function formatTokens(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function TokenBadge({input, output}: {input: number | null; output: number | null}) {
+  if (input == null && output == null) return null;
+  return (
+    <span
+      className="token-badge"
+      title={`Tokens for this turn — input: ${(input ?? 0).toLocaleString()} (full context sent), output: ${(output ?? 0).toLocaleString()}`}
+    >
+      ↑ {formatTokens(input ?? 0)} ↓ {formatTokens(output ?? 0)}
+    </span>
+  );
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -392,6 +410,7 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
             {message.steps.length} step{message.steps.length !== 1 ? 's' : ''}
           </button>
         )}
+        <TokenBadge input={message.input_tokens} output={message.output_tokens} />
       </div>
     </div>
   );

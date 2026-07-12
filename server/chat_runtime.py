@@ -26,7 +26,7 @@ from langgraph.types import Command
 
 from core.agents import build_agent
 from core.config import get_config
-from core.log_callback import AgentLogger
+from core.log_callback import AgentLogger, UsageAccumulator
 from core.queue import Job, JobQueue
 from core.safety import gate_input, gate_output
 from core.schemas import AttachmentIn
@@ -62,7 +62,15 @@ async def _run_agent_task(
     accumulated: list[str] = []
     step_seq_ref = [0]
     coalescer = TokenCoalescer(state)
+    usage = UsageAccumulator()
     status = "error"
+
+    async def finalize(content: str, final_status: str) -> None:
+        await _finalize_message(
+            task_id, content, final_status,
+            input_tokens=usage.input_tokens if usage.has_usage else None,
+            output_tokens=usage.output_tokens if usage.has_usage else None,
+        )
 
     try:
         # Input gate — judge the user's prompt before spinning up the agent.
@@ -71,7 +79,7 @@ async def _run_agent_task(
         emit_event(state, "step", node="safety", source="main", data="Reviewing input")
         rejection = await gate_input(query, model)
         if rejection:
-            await _finalize_message(task_id, rejection, "blocked")
+            await finalize(rejection, "blocked")
             status = "blocked"
             emit_event(state, "safety_input_blocked", message=rejection, conversation_id=conv_id)
             emit_event(state, "done", message=rejection, conversation_id=conv_id)
@@ -83,7 +91,7 @@ async def _run_agent_task(
         config = {
             "configurable": {"thread_id": conv_id, "conversation_id": conv_id},
             "recursion_limit": 100,
-            "callbacks": [AgentLogger()],
+            "callbacks": [AgentLogger(), usage],
         }
         # Reset the per-conversation plan at the start of each new turn. Todos
         # live in the checkpointer keyed by thread_id, so without this a plan
@@ -133,13 +141,13 @@ async def _run_agent_task(
         final_message = "".join(accumulated)
         if state.cancelled:
             # Cancelled mid-run — partial output is non-final; skip the gate.
-            await _finalize_message(task_id, final_message, "stopped")
+            await finalize(final_message, "stopped")
             status = "stopped"
             emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
         else:
             persisted, output_verdict = await gate_output(final_message, model)
             status = "blocked" if output_verdict else "done"
-            await _finalize_message(task_id, persisted, status)
+            await finalize(persisted, status)
             if output_verdict:
                 emit_event(
                     state, "safety_output_blocked",
@@ -153,7 +161,7 @@ async def _run_agent_task(
     except asyncio.CancelledError:
         coalescer.flush_all()
         final_message = "".join(accumulated)
-        await _finalize_message(task_id, final_message, "stopped")
+        await finalize(final_message, "stopped")
         status = "stopped"
         emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
 
@@ -162,7 +170,7 @@ async def _run_agent_task(
         final_message = "".join(accumulated) or "(agent reached iteration limit)"
         persisted, output_verdict = await gate_output(final_message, model)
         status = "blocked" if output_verdict else "done"
-        await _finalize_message(task_id, persisted, status)
+        await finalize(persisted, status)
         if output_verdict:
             emit_event(
                 state, "safety_output_blocked",
@@ -182,7 +190,7 @@ async def _run_agent_task(
         final_message = "".join(accumulated) or f"The run failed before completing: {exc}"
         emit_event(state, "error", error=str(exc))
         try:
-            await _finalize_message(task_id, final_message, "error")
+            await finalize(final_message, "error")
         except Exception:
             pass
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):

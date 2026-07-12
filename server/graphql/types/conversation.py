@@ -61,6 +61,8 @@ class Message(relay.Node):
     content: str
     model: str | None
     status: str
+    input_tokens: int | None
+    output_tokens: int | None
     created_at: datetime
     steps: list[Step]
 
@@ -72,6 +74,8 @@ class Message(relay.Node):
             content=row.content,
             model=row.model,
             status=row.status,
+            input_tokens=row.input_tokens,
+            output_tokens=row.output_tokens,
             created_at=row.created_at,
             steps=[Step.from_db(s) for s in sorted(row.steps, key=lambda x: x.seq)],
         )

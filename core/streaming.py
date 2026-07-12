@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from typing import Any, TypeAlias
 
 from db import async_session
-from db.ops import add_step, update_message_content, update_message_status
+from db.ops import add_step, update_message_content, update_message_status, update_message_usage
 
 from langgraph.types import StreamMode
 
@@ -417,8 +417,17 @@ async def _process_chunk(
 
 # ── Finalize message ─────────────────────────────────────────────────────────
 
-async def _finalize_message(task_id: str, content: str, status: str) -> None:
+async def _finalize_message(
+    task_id: str,
+    content: str,
+    status: str,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+) -> None:
     """Short-lived session write for a final message state update."""
     async with async_session() as session:
         await update_message_content(session, task_id, content)
         await update_message_status(session, task_id, status)
+        if input_tokens is not None or output_tokens is not None:
+            await update_message_usage(session, task_id, input_tokens, output_tokens)

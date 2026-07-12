@@ -29,6 +29,10 @@ export interface Message {
   content: string;
   model: string | null;
   status: string;
+  // Provider-reported token usage summed over every LLM call in the run that
+  // produced this assistant message; null for user messages and older rows.
+  input_tokens: number | null;
+  output_tokens: number | null;
   created_at: string;
   steps: Step[];
 }
@@ -51,6 +55,8 @@ export interface RelayMessageNode {
   content: string;
   model: string | null | undefined;
   status: string;
+  inputTokens: number | null | undefined;
+  outputTokens: number | null | undefined;
   createdAt: string;
   steps: ReadonlyArray<{
     id: string;
@@ -362,6 +368,8 @@ export function mapMessage(m: RelayMessageNode): Message {
     content: m.content,
     model: m.model ?? null,
     status: m.status,
+    input_tokens: m.inputTokens ?? null,
+    output_tokens: m.outputTokens ?? null,
     created_at: m.createdAt,
     steps: m.steps.map((s) => ({
       id: s.id,

@@ -218,6 +218,8 @@ type Message implements Node {
   content: String!
   model: String
   status: String!
+  inputTokens: Int
+  outputTokens: Int
   createdAt: DateTime!
   steps: [Step!]!
 }

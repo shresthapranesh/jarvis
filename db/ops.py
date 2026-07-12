@@ -75,6 +75,19 @@ async def update_message_status(session: AsyncSession, message_id: str, status: 
         await session.commit()
 
 
+async def update_message_usage(
+    session: AsyncSession,
+    message_id: str,
+    input_tokens: int | None,
+    output_tokens: int | None,
+) -> None:
+    msg = await session.get(Message, message_id)
+    if msg:
+        msg.input_tokens = input_tokens
+        msg.output_tokens = output_tokens
+        await session.commit()
+
+
 async def add_step(
     session: AsyncSession,
     message_id: str,

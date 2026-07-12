@@ -798,6 +798,15 @@ body {
   border-color: var(--accent-dim);
 }
 
+/* Token usage badge (assistant turns) */
+.token-badge {
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  padding: 3px 4px;
+  cursor: default;
+}
+
 /* Error */
 .error-bubble {
   background: var(--error-bg);
