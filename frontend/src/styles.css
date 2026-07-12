@@ -157,6 +157,7 @@ body {
 
 /* ── Left panel ── */
 .left-panel {
+  position: relative;
   width: var(--left-w);
   flex-shrink: 0;
   background: var(--glass-bg);
@@ -174,6 +175,25 @@ body {
   width: var(--left-collapsed-w);
 }
 
+.left-panel.resizing {
+  transition: none;
+}
+
+.nav-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  transition: background 0.15s;
+}
+.nav-resize-handle:hover,
+.left-panel.resizing .nav-resize-handle {
+  background: var(--accent-dim);
+}
+
 .left-panel-header {
   display: flex;
   align-items: center;
@@ -185,7 +205,7 @@ body {
 
 .brand {
   font-family: var(--font-display);
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--text);
@@ -321,7 +341,7 @@ body {
 
 .conv-empty {
   padding: 20px 14px;
-  font-size: 0.78rem;
+  font-size: 0.73rem;
   color: var(--text-dim);
   text-align: center;
 }
@@ -365,22 +385,23 @@ body {
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
   text-decoration: none;
 }
 
 .conv-title {
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.conv-meta {
-  font-size: 0.68rem;
-  color: var(--text-dim);
+.conv-pin-icon {
+  flex-shrink: 0;
+  color: var(--accent);
 }
 
 .conv-title-input {
@@ -390,57 +411,87 @@ body {
   border: 1px solid var(--accent-dim);
   border-radius: 4px;
   color: var(--text);
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   padding: 2px 6px;
   outline: none;
 }
 
-.conv-actions {
-  display: flex;
-  gap: 2px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.conv-row:hover .conv-actions,
-.conv-row.active .conv-actions {
-  opacity: 1;
-}
-
-.conv-action-btn {
+.conv-menu-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
+  flex-shrink: 0;
   background: none;
   border: 1px solid transparent;
   border-radius: 4px;
   color: var(--text-dim);
   cursor: pointer;
-  transition:
-    color 0.15s,
-    border-color 0.15s,
-    transform 0.1s;
   padding: 0;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
-.conv-action-btn:hover {
+.conv-row:hover .conv-menu-btn,
+.conv-row.active .conv-menu-btn,
+.conv-row.menu-open .conv-menu-btn {
+  opacity: 1;
+}
+.conv-menu-btn:hover,
+.conv-row.menu-open .conv-menu-btn {
   color: var(--accent);
   border-color: var(--accent-dim);
 }
-.conv-action-btn:active {
-  transform: scale(0.88);
-}
-.conv-action-btn--danger:hover {
-  color: #f87171;
-  border-color: #5c1515;
+
+.conv-menu {
+  position: fixed;
+  transform: translateX(-100%);
+  min-width: 130px;
+  background: linear-gradient(
+      180deg,
+      rgba(var(--tint-rgb), 0.05),
+      rgba(var(--tint-rgb), 0.02)
+    ),
+    var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(var(--shadow-rgb), 0.45);
+  padding: 4px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
 }
 
-.conv-delete-confirm-label {
-  font-size: 0.68rem;
+.conv-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 0.73rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.conv-menu-item svg {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+.conv-menu-item:hover {
+  background: var(--surface2);
+}
+.conv-menu-item--danger:hover {
+  background: rgba(248, 113, 113, 0.1);
   color: #f87171;
-  white-space: nowrap;
-  align-self: center;
+}
+.conv-menu-item--danger:hover svg {
+  color: #f87171;
 }
 
 /* ── Main panel ── */
@@ -1536,7 +1587,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  font-size: 0.8rem;
+  font-size: 0.73rem;
   color: var(--text-dim);
   text-decoration: none;
   border-radius: 6px;

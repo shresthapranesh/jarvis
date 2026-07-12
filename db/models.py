@@ -24,6 +24,7 @@ class Conversation(Base):
     # Where the conversation lives: "web" | "telegram" | "discord" | "automation" | "task".
     # The web UI's conversation list only shows surface="web".
     surface: Mapped[str] = mapped_column(String, default="web", index=True)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     messages: Mapped[list[Message]] = relationship(

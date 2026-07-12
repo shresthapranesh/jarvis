@@ -1,6 +1,6 @@
 import {useQuery, type QueryClient} from '@tanstack/react-query';
 import {createRootRouteWithContext, Link, Outlet, useNavigate} from '@tanstack/react-router';
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import type {Environment} from 'relay-runtime';
 
 import {ConversationList} from '../components/ConversationList';
@@ -13,6 +13,10 @@ interface RouterContext {
   queryClient: QueryClient;
   environment: Environment;
 }
+
+const NAV_MIN_W = 180;
+const NAV_MAX_W = 440;
+const NAV_DEFAULT_W = 260;
 
 function RootLayout() {
   const {data} = useQuery({
@@ -34,6 +38,40 @@ function RootLayout() {
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem('nav-collapsed') === 'true',
   );
+
+  const [navWidth, setNavWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('nav-width'));
+    return Number.isFinite(saved) ? Math.min(NAV_MAX_W, Math.max(NAV_MIN_W, saved)) : NAV_DEFAULT_W;
+  });
+  const [navResizing, setNavResizing] = useState(false);
+  const navWidthRef = useRef(navWidth);
+  navWidthRef.current = navWidth;
+
+  const startNavResize = useCallback(() => {
+    setNavResizing(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: PointerEvent) => {
+      const w = Math.min(NAV_MAX_W, Math.max(NAV_MIN_W, ev.clientX));
+      navWidthRef.current = w;
+      setNavWidth(w);
+    };
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      setNavResizing(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      localStorage.setItem('nav-width', String(navWidthRef.current));
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }, []);
+
+  const resetNavWidth = useCallback(() => {
+    setNavWidth(NAV_DEFAULT_W);
+    localStorage.setItem('nav-width', String(NAV_DEFAULT_W));
+  }, []);
 
   const navigate = useNavigate();
 
@@ -89,7 +127,10 @@ function RootLayout() {
   return (
     <ToastProvider>
     <div className="app-shell">
-      <aside className={`left-panel${navCollapsed ? ' collapsed' : ''}`}>
+      <aside
+        className={`left-panel${navCollapsed ? ' collapsed' : ''}${navResizing ? ' resizing' : ''}`}
+        style={navCollapsed ? undefined : {width: navWidth}}
+      >
         <div className="left-panel-header">
           <div className={`status-dot ${healthy ? 'ok' : 'err'}`} />
           {!navCollapsed && <span className="brand">Assistant</span>}
@@ -372,6 +413,14 @@ function RootLayout() {
           </Link>
         </div>
         {!navCollapsed && <ConversationList />}
+        {!navCollapsed && (
+          <div
+            className="nav-resize-handle"
+            onPointerDown={startNavResize}
+            onDoubleClick={resetNavWidth}
+            title="Drag to resize · double-click to reset"
+          />
+        )}
       </aside>
       <main className="main-panel">
         <Outlet />

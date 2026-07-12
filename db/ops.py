@@ -123,7 +123,7 @@ async def list_conversations(
     )
     stmt = (
         select(Conversation, msg_count.label("message_count"))
-        .order_by(Conversation.created_at.desc())
+        .order_by(Conversation.pinned.desc(), Conversation.created_at.desc())
     )
     if surface is not None:
         stmt = stmt.where(Conversation.surface == surface)
@@ -135,6 +135,7 @@ async def list_conversations(
             "title": conv.title,
             "model": conv.model,
             "surface": conv.surface,
+            "pinned": conv.pinned,
             "created_at": conv.created_at.isoformat(),
             "message_count": count,
         }
@@ -154,6 +155,7 @@ async def update_conversation(
     conv_id: str,
     title: str | None = None,
     model: str | None = None,
+    pinned: bool | None = None,
 ) -> Conversation | None:
     conv = await session.get(Conversation, conv_id)
     if conv is None:
@@ -162,6 +164,8 @@ async def update_conversation(
         conv.title = title
     if model is not None:
         conv.model = model
+    if pinned is not None:
+        conv.pinned = pinned
     await session.commit()
     return conv
 

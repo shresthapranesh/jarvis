@@ -156,6 +156,7 @@ type Conversation implements Node {
   title: String
   model: String!
   surface: String!
+  pinned: Boolean!
   createdAt: DateTime!
   messageCount: Int!
   messages(last: Int! = 10, before: String = null): MessageConnection!
@@ -254,7 +255,7 @@ type Mutation {
   startTask(input: StartTaskInput!): StartTaskPayload!
   stopTask(taskId: String!): Boolean!
   resumeTask(taskId: String!, answer: String!): Boolean!
-  updateConversation(id: ID!, title: String = null, model: String = null): Conversation!
+  updateConversation(id: ID!, title: String = null, model: String = null, pinned: Boolean = null): Conversation!
   deleteConversation(id: ID!): Boolean!
   updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!
   deleteArtifact(id: ID!): Boolean!

@@ -38,6 +38,7 @@ class ConversationQuery:
                 title=r["title"],
                 model=r["model"],
                 surface=r["surface"],
+                pinned=r["pinned"],
                 created_at=datetime.fromisoformat(r["created_at"]),
             )
             for r in rows

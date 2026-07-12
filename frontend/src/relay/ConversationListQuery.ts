@@ -9,7 +9,7 @@ export const conversationListQuery = graphql`
     conversations {
       id
       title
-      createdAt
+      pinned
     }
   }
 `;

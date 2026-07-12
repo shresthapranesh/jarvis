@@ -32,6 +32,8 @@ def _migrate(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_locked_until ON jobs (locked_until)"))
     conv_cols = {c["name"] for c in inspector.get_columns("conversations")}
+    if "pinned" not in conv_cols:
+        conn.execute(text("ALTER TABLE conversations ADD COLUMN pinned BOOLEAN DEFAULT 0"))
     if "surface" not in conv_cols:
         conn.execute(text("ALTER TABLE conversations ADD COLUMN surface VARCHAR DEFAULT 'web'"))
         # Bot conversations predate the column; their ids are prefixed by surface.

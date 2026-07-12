@@ -136,13 +136,16 @@ class ConversationMutation:
         id: relay.GlobalID,
         title: str | None = None,
         model: str | None = None,
+        pinned: bool | None = None,
     ) -> Conversation:
         if model is not None and not is_valid_model(model):
             raise ValueError(f"unknown model {model!r}; query `models` for the catalog")
-        if title is None and model is None:
+        if title is None and model is None and pinned is None:
             raise ValueError("no fields to update")
         session = info.context["session"]
-        conv = await update_conversation(session, id.node_id, title=title, model=model)
+        conv = await update_conversation(
+            session, id.node_id, title=title, model=model, pinned=pinned,
+        )
         if conv is None:
             raise ValueError("conversation not found")
         return Conversation.from_db(conv)

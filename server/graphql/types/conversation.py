@@ -120,6 +120,7 @@ class Conversation(relay.Node):
     title: str | None
     model: str
     surface: str  # "web" | "telegram" | "discord" | "automation"
+    pinned: bool
     created_at: datetime
 
     @classmethod
@@ -129,6 +130,7 @@ class Conversation(relay.Node):
             title=row.title,
             model=row.model,
             surface=row.surface,
+            pinned=row.pinned,
             created_at=row.created_at,
         )
 
