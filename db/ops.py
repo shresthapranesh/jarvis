@@ -12,15 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Skill, Step, Workflow, WorkflowRun
+from db.models import Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
 
 async def create_conversation(
-    session: AsyncSession, model: str, title: str | None, surface: str = "web"
+    session: AsyncSession, model: str, title: str | None, surface: str = "web",
+    project_id: str | None = None,
 ) -> Conversation:
-    conv = Conversation(id=str(uuid4()), model=model, title=title, surface=surface)
+    conv = Conversation(id=str(uuid4()), model=model, title=title, surface=surface, project_id=project_id)
     session.add(conv)
     await session.commit()
     return conv
@@ -32,6 +33,7 @@ async def get_or_create_conversation(
     model: str,
     title: str | None,
     surface: str = "web",
+    project_id: str | None = None,
 ) -> Conversation:
     if conversation_id:
         result = await session.get(Conversation, conversation_id)
@@ -40,11 +42,11 @@ async def get_or_create_conversation(
                 result.model = model
                 await session.commit()
             return result
-        conv = Conversation(id=conversation_id, model=model, title=title, surface=surface)
+        conv = Conversation(id=conversation_id, model=model, title=title, surface=surface, project_id=project_id)
         session.add(conv)
         await session.commit()
         return conv
-    return await create_conversation(session, model, title, surface)
+    return await create_conversation(session, model, title, surface, project_id)
 
 
 async def add_message(
@@ -136,6 +138,7 @@ async def list_conversations(
             "model": conv.model,
             "surface": conv.surface,
             "pinned": conv.pinned,
+            "project_id": conv.project_id,
             "created_at": conv.created_at.isoformat(),
             "message_count": count,
         }
@@ -220,6 +223,107 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
 
 async def get_conversation_meta(session: AsyncSession, conv_id: str) -> Conversation | None:
     return await session.get(Conversation, conv_id)
+
+
+# ── Projects ──────────────────────────────────────────────────────────────────
+
+async def create_project(
+    session: AsyncSession,
+    name: str,
+    description: str | None = None,
+    instructions: str = "",
+) -> Project:
+    proj = Project(
+        id=str(uuid4()), name=name, description=description, instructions=instructions
+    )
+    session.add(proj)
+    await session.commit()
+    return proj
+
+
+async def get_project(session: AsyncSession, project_id: str) -> Project | None:
+    return await session.get(Project, project_id)
+
+
+async def list_projects(session: AsyncSession) -> list[Project]:
+    result = await session.execute(select(Project).order_by(Project.updated_at.desc()))
+    return list(result.scalars())
+
+
+async def update_project(session: AsyncSession, project_id: str, **kwargs: Any) -> Project | None:
+    proj = await session.get(Project, project_id)
+    if proj is None:
+        return None
+    for key, value in kwargs.items():
+        setattr(proj, key, value)
+    proj.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return proj
+
+
+async def append_project_memory(session: AsyncSession, project_id: str, text: str) -> Project | None:
+    proj = await session.get(Project, project_id)
+    if proj is None:
+        return None
+    proj.memory = f"{proj.memory.rstrip()}\n\n{text.strip()}".strip()
+    proj.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return proj
+
+
+async def delete_project(session: AsyncSession, project_id: str) -> bool:
+    """Delete a project, keeping its conversations (their project_id is nulled).
+
+    The explicit UPDATE matters: there is no ORM relationship to cascade, and
+    SQLite FK enforcement is off, so a bare delete would leave dangling ids.
+    """
+    proj = await session.get(Project, project_id)
+    if proj is None:
+        return False
+    await session.execute(
+        update(Conversation)
+        .where(Conversation.project_id == project_id)
+        .values(project_id=None)
+    )
+    await session.delete(proj)
+    await session.commit()
+    return True
+
+
+async def list_project_conversations(session: AsyncSession, project_id: str) -> list[Conversation]:
+    result = await session.execute(
+        select(Conversation)
+        .where(Conversation.project_id == project_id)
+        .order_by(Conversation.pinned.desc(), Conversation.created_at.desc())
+    )
+    return list(result.scalars())
+
+
+async def count_project_conversations(session: AsyncSession, project_id: str) -> int:
+    result = await session.execute(
+        select(func.count(Conversation.id)).where(Conversation.project_id == project_id)
+    )
+    return result.scalar_one()
+
+
+async def set_conversation_project(
+    session: AsyncSession, conv_id: str, project_id: str | None
+) -> Conversation | None:
+    """Assign a conversation to a project (or remove it with project_id=None).
+
+    Only web conversations may join projects — automation/board/bot threads
+    have their own context regimes and must never pick up project injection.
+    """
+    conv = await session.get(Conversation, conv_id)
+    if conv is None:
+        return None
+    if conv.surface != "web":
+        raise ValueError("only web conversations can belong to a project")
+    if project_id is not None and await session.get(Project, project_id) is None:
+        raise ValueError(f"project not found: {project_id}")
+    conv.project_id = project_id
+    await session.commit()
+    return conv
 
 
 async def list_messages_connection(

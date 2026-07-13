@@ -44,10 +44,12 @@ from core.state import (
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _build_message_content, _finalize_message, _process_chunk
 
 from db import async_session
+from db.models import Conversation
 from db.ops import (
     add_message,
     create_document,
     get_or_create_conversation,
+    get_project,
 )
 
 
@@ -88,8 +90,19 @@ async def _run_agent_task(
         content = await _build_message_content(query, attachments, model)
 
         agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
+        # Project membership is resolved fresh at run start (not baked into the
+        # job payload) so bots and post-restart resumes need no payload changes
+        # and add/remove-from-project applies on the next run.
+        project_id: str | None = None
+        async with async_session() as session:
+            conv_row = await session.get(Conversation, conv_id)
+            if conv_row is not None:
+                project_id = conv_row.project_id
+        configurable: dict[str, Any] = {"thread_id": conv_id, "conversation_id": conv_id}
+        if project_id:
+            configurable["project_id"] = project_id
         config = {
-            "configurable": {"thread_id": conv_id, "conversation_id": conv_id},
+            "configurable": configurable,
             "recursion_limit": 100,
             "callbacks": [AgentLogger(), usage],
         }
@@ -340,14 +353,21 @@ async def register_chat_task(
     model: str,
     conversation_id: str | None = None,
     attachments: list | None = None,
+    project_id: str | None = None,
 ) -> tuple[str, str]:
     """GraphQL-side wrapper: create conversation if missing, write the user
     Message + any document attachments, then enqueue the chat job.
 
+    ``project_id`` only applies when a new conversation is created here;
+    joining an existing conversation goes through ``setConversationProject``.
     Returns ``(task_id, conversation_id)``. Caller validates ``model``.
     """
+    if project_id and await get_project(session, project_id) is None:
+        raise ValueError(f"project not found: {project_id}")
     title = query[:60] if not conversation_id else None
-    conv = await get_or_create_conversation(session, conversation_id, model, title)
+    conv = await get_or_create_conversation(
+        session, conversation_id, model, title, project_id=project_id
+    )
 
     if attachments:
         display_parts: list[dict] = [{"type": "text", "text": query}]

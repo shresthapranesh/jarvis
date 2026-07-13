@@ -6276,3 +6276,163 @@ body {
 @keyframes board-split-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── Projects ── */
+.project-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.project-card {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.project-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface2);
+}
+.project-card-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.project-card-name svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.project-detail {
+  gap: 18px;
+}
+.project-breadcrumb {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+.project-breadcrumb a {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.project-breadcrumb a:hover {
+  color: var(--text);
+}
+.project-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.project-detail-title svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.project-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+@media (max-width: 900px) {
+  .project-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.project-section-hint {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  margin: 0;
+}
+.project-textarea {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 120px;
+}
+.project-section-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.project-add-existing-btn {
+  margin-left: auto;
+  font-size: 0.72rem;
+}
+
+.project-conv-list,
+.project-candidate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.project-conv-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.project-conv-row:hover {
+  border-color: var(--border-strong);
+  background: var(--surface2);
+}
+.project-conv-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-decoration: none;
+  color: inherit;
+}
+.project-conv-title {
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-detail-footer {
+  margin-top: auto;
+}
+.project-newchat-hint {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  margin: 0 0 6px 2px;
+}
+
+/* Small pill on the chat page linking back to the owning project */
+.project-badge-bar {
+  display: flex;
+  padding: 8px 16px 0;
+  flex-shrink: 0;
+}
+.project-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.project-badge:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.project-badge svg {
+  color: var(--accent);
+}

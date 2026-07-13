@@ -40,6 +40,9 @@ def _migrate(conn: Connection) -> None:
         conn.execute(text("UPDATE conversations SET surface='telegram' WHERE id LIKE 'telegram\\_%' ESCAPE '\\'"))
         conn.execute(text("UPDATE conversations SET surface='discord' WHERE id LIKE 'discord\\_%' ESCAPE '\\'"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conversations_surface ON conversations (surface)"))
+    if "project_id" not in conv_cols:
+        conn.execute(text("ALTER TABLE conversations ADD COLUMN project_id VARCHAR REFERENCES projects(id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conversations_project_id ON conversations (project_id)"))
     auto_cols = {c["name"] for c in inspector.get_columns("automations")}
     if "notifications" not in auto_cols:
         conn.execute(text("ALTER TABLE automations ADD COLUMN notifications TEXT"))

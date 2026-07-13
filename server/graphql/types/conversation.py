@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import strawberry
 from sqlalchemy.orm import selectinload
@@ -16,10 +16,10 @@ from sqlalchemy import func, select
 from strawberry import relay
 
 from db import models as db_models
-from db.ops import get_conversation_meta, list_messages_connection
+from db.ops import get_conversation_meta, get_project, list_messages_connection
 
 if TYPE_CHECKING:
-    pass
+    from .project import Project
 
 
 def _encode_cursor(msg: db_models.Message) -> str:
@@ -121,6 +121,7 @@ class Conversation(relay.Node):
     model: str
     surface: str  # "web" | "telegram" | "discord" | "automation"
     pinned: bool
+    project_id: str | None  # raw DB id of the owning project, if any
     created_at: datetime
 
     @classmethod
@@ -131,6 +132,7 @@ class Conversation(relay.Node):
             model=row.model,
             surface=row.surface,
             pinned=row.pinned,
+            project_id=row.project_id,
             created_at=row.created_at,
         )
 
@@ -149,6 +151,17 @@ class Conversation(relay.Node):
                 raise ValueError(f"Conversation {node_id} not found")
             return None
         return cls.from_db(row)
+
+    @strawberry.field
+    async def project(
+        self, info: strawberry.Info
+    ) -> Annotated["Project", strawberry.lazy(".project")] | None:
+        if not self.project_id:
+            return None
+        from .project import Project
+        session = info.context["session"]
+        row = await get_project(session, self.project_id)
+        return Project.from_db(row) if row else None
 
     @strawberry.field
     async def message_count(self, info: strawberry.Info) -> int:

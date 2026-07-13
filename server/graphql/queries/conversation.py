@@ -39,6 +39,7 @@ class ConversationQuery:
                 model=r["model"],
                 surface=r["surface"],
                 pinned=r["pinned"],
+                project_id=r["project_id"],
                 created_at=datetime.fromisoformat(r["created_at"]),
             )
             for r in rows

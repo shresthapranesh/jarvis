@@ -162,7 +162,14 @@ export interface Automation {
   total_count_7d?: number;
 }
 
-export type AutomationRunStatus = 'running' | 'done' | 'error' | 'stopped' | 'blocked' | 'skipped' | 'no_change';
+export type AutomationRunStatus =
+  | 'running'
+  | 'done'
+  | 'error'
+  | 'stopped'
+  | 'blocked'
+  | 'skipped'
+  | 'no_change';
 
 export interface AutomationRun {
   id: string;
@@ -320,6 +327,31 @@ export interface MemoryItem {
   updated_at: string;
 }
 
+// ── Projects ──────────────────────────────────────────────────────────────────
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  conversation_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectConversation {
+  id: string;
+  title: string | null;
+  pinned: boolean;
+  message_count: number;
+  created_at: string;
+}
+
+export interface ProjectDetail extends Project {
+  instructions: string;
+  memory: string;
+  conversations: ProjectConversation[];
+}
+
 // ── Skills ────────────────────────────────────────────────────────────────────
 
 export interface Skill {
@@ -383,10 +415,19 @@ export function mapMessage(m: RelayMessageNode): Message {
 }
 
 // Convert backend definition JSON → React Flow nodes/edges
-export function parseDefinition(defJson: string): {nodes: WorkflowRFNode[]; edges: WorkflowRFEdge[]} {
+export function parseDefinition(defJson: string): {
+  nodes: WorkflowRFNode[];
+  edges: WorkflowRFEdge[];
+} {
   try {
     const def = JSON.parse(defJson || '{"nodes":[],"edges":[]}') as {
-      nodes?: Array<{id: string; type: WorkflowNodeType; label?: string; position?: {x: number; y: number}; config?: Record<string, unknown>}>;
+      nodes?: Array<{
+        id: string;
+        type: WorkflowNodeType;
+        label?: string;
+        position?: {x: number; y: number};
+        config?: Record<string, unknown>;
+      }>;
       edges?: WorkflowRFEdge[];
     };
     const nodes: WorkflowRFNode[] = (def.nodes ?? []).map((n) => ({

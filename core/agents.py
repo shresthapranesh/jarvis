@@ -52,6 +52,7 @@ from tools.board import (
 )
 from tools.workflows import manage_workflows
 from tools.skills import manage_skills, use_skill
+from tools.projects import project_memory
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,44 @@ async def _skills_volatile_parts(messages: list[AnyMessage]) -> list[str]:
     ]
 
 
+async def _project_volatile_parts(project_id: str | None) -> list[str]:
+    """Project instructions + shared memory for the volatile suffix.
+
+    Re-read from the DB every model iteration (like todos, deliberately NOT via
+    _retrieval_cache) so the agent's own project_memory writes and live user
+    edits to the instructions surface on the very next LLM call.
+    """
+    if not project_id:
+        return []
+    from db.engine import async_session
+    from db.models import Project
+    try:
+        async with async_session() as session:
+            proj = await session.get(Project, project_id)
+    except Exception as exc:
+        logger.warning("project context load failed: %s", exc)
+        return []
+    if proj is None:
+        return []
+    header = f"## Project: {proj.name}\n\n"
+    if proj.description and proj.description.strip():
+        header += f"{proj.description.strip()}\n\n"
+    header += (
+        "This conversation belongs to a project; all of the project's "
+        "conversations share the instructions and memory below. When you learn "
+        "something durable that every conversation in this project should know "
+        "— a decision, a convention, key state — save it with "
+        '`project_memory(action="append", content=...)` (or `"write"` to '
+        "condense/reorganize the whole memory)."
+    )
+    parts = [header]
+    if proj.instructions.strip():
+        parts.append(f"### Project Instructions\n\n{proj.instructions.strip()}")
+    if proj.memory.strip():
+        parts.append(f"### Project Memory\n\n{proj.memory.strip()}")
+    return parts
+
+
 # Retrieval-backed context (memory + skills) is computed once per user turn
 # and reused across that turn's agent-loop iterations: the retrieval query is
 # the latest HumanMessage, which doesn't change mid-turn, so recomputing every
@@ -385,6 +424,9 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         manage_workflows,
         manage_skills,
         use_skill,
+        # Bound unconditionally, runtime-guarded like complete_task/block_task:
+        # inert unless the conversation belongs to a project.
+        project_memory,
     ]
 
     # Long-term memory tools are only meaningful with an embedder (the discrete
@@ -415,6 +457,9 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         # the cached prefix (system prompt + tool schemas). See core/messages.py.
         raw_messages = list(state.get("messages", []))
         volatile_parts: list[str] = await _retrieved_volatile_parts(store, raw_messages)
+        volatile_parts += await _project_volatile_parts(
+            (config.get("configurable") or {}).get("project_id")
+        )
         todos = _normalise_todos(state.get("todos"))
         if todos:
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}

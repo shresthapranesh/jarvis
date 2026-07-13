@@ -1,5 +1,5 @@
 import {useQueryClient} from '@tanstack/react-query';
-import {createFileRoute, useNavigate} from '@tanstack/react-router';
+import {createFileRoute, Link, useNavigate} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {useLazyLoadQuery, usePaginationFragment} from 'react-relay';
 
@@ -11,11 +11,19 @@ import type {DocumentListQuery} from '../__generated__/DocumentListQuery.graphql
 import type {TodoListQuery} from '../__generated__/TodoListQuery.graphql';
 import {ActivitySidebar} from '../components/ActivitySidebar';
 import {ArtifactPanel} from '../components/ArtifactPanel';
+import {FolderIcon} from '../components/icons';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {useTaskEvents} from '../hooks/useTaskEvents';
-import type {MediaAttachment, Message, PersistedDocument, Step, TodoItem, TodoStatus} from '../lib/types';
+import type {
+  MediaAttachment,
+  Message,
+  PersistedDocument,
+  Step,
+  TodoItem,
+  TodoStatus,
+} from '../lib/types';
 import {mapMessage} from '../lib/types';
 import {uploadStagedAttachment} from '../lib/uploads';
 import {artifactListQuery} from '../relay/ArtifactListQuery';
@@ -71,8 +79,17 @@ function ConversationPage() {
   const [pendingTaskId, setPendingTaskId] = useState<string | null>(searchTaskId ?? null);
   const streamTaskId = pendingTaskId ?? runningMsg?.id ?? null;
 
-  const {streaming, text, thinkingText, steps, artifacts, todos: liveTodos, error, pendingInterrupt, safetyBlock} =
-    useTaskEvents(streamTaskId, id);
+  const {
+    streaming,
+    text,
+    thinkingText,
+    steps,
+    artifacts,
+    todos: liveTodos,
+    error,
+    pendingInterrupt,
+    safetyBlock,
+  } = useTaskEvents(streamTaskId, id);
 
   const queryClient = useQueryClient();
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
@@ -269,6 +286,18 @@ function ConversationPage() {
 
   return (
     <div className="page">
+      {data.project && (
+        <div className="project-badge-bar">
+          <Link
+            to="/projects/$id"
+            params={{id: decodeGlobalId(data.project.id)}}
+            className="project-badge"
+            title="Open project"
+          >
+            <FolderIcon size={12} /> {data.project.name}
+          </Link>
+        </div>
+      )}
       <MessageThread
         messages={messages}
         streamingText={isActive ? text : undefined}
@@ -302,10 +331,7 @@ function ConversationPage() {
       )}
       <footer className="page-footer">
         {pendingInterrupt && runningMsg && (
-          <InterruptPrompt
-            taskId={runningMsg.id}
-            question={pendingInterrupt.question}
-          />
+          <InterruptPrompt taskId={runningMsg.id} question={pendingInterrupt.question} />
         )}
         <InputBox
           onSubmit={handleSubmit}

@@ -27,6 +27,9 @@ class StartTaskInput:
     model: str | None = None
     conversation_id: str | None = None
     attachment_uploads: list[UploadReferenceInput] | None = None
+    # Raw project id (matches conversation_id's convention); applies only when
+    # this call creates a new conversation.
+    project_id: str | None = None
 
 
 @strawberry.type
@@ -91,6 +94,7 @@ class ConversationMutation:
 
         task_id, conv_id = await register_chat_task(
             session, input.query, model, input.conversation_id, attachments,
+            project_id=input.project_id,
         )
         # register_chat_task has now copied document bytes to documents_dir and
         # baked image/audio/video bytes into the message content; safe to drop

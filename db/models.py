@@ -25,6 +25,12 @@ class Conversation(Base):
     # The web UI's conversation list only shows surface="web".
     surface: Mapped[str] = mapped_column(String, default="web", index=True)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Optional project membership (web conversations only). Deliberately no
+    # relationship on Project: deleting a project nulls this instead of
+    # cascading into conversations.
+    project_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     messages: Mapped[list[Message]] = relationship(
@@ -35,6 +41,30 @@ class Conversation(Base):
     )
     documents: Mapped[list["Document"]] = relationship(
         "Document", back_populates="conversation", cascade="all, delete-orphan"
+    )
+
+
+class Project(Base):
+    """A group of conversations sharing instructions and agent-maintained memory.
+
+    `instructions` are user-owned guidance injected into every conversation in
+    the project; `memory` is a free-text blob the agent itself reads and edits
+    via the project_memory tool (tools/projects.py). Both ride the volatile
+    system-prompt suffix (core/agents.py), so edits apply on the next LLM call
+    without busting the prompt cache. Deleting a project keeps its
+    conversations — their project_id is nulled (db/ops.py delete_project).
+    """
+
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    memory: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
     )
 
 

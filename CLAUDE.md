@@ -38,7 +38,7 @@ jarvis/
 ├── db/
 │   ├── models.py         # ORM: Conversation, Message, Step, Automation, AutomationRun,
 │   │                     #   ConfigSetting, NotificationChannel, Artifact, Document,
-│   │                     #   Workflow, WorkflowRun, Job
+│   │                     #   Project, Workflow, WorkflowRun, Job
 │   ├── ops.py            # Async CRUD functions
 │   └── engine.py         # DB init, _migrate(), async_session, get_session
 ├── server/
@@ -49,12 +49,13 @@ jarvis/
 │   │   ├── context.py    #   get_context() — injects the AsyncSession per request
 │   │   ├── export_schema.py  # dumps schema.graphql for the frontend Relay compiler
 │   │   ├── types/        #   GraphQL types (Relay Nodes): artifact, document, upload, conversation,
-│   │   │                 #     automation, workflow, memory, notification, task_run, model_catalog,
-│   │   │                 #     events, automation_events, workflow_events, todo
+│   │   │                 #     automation, workflow, memory, notification, project, task_run,
+│   │   │                 #     model_catalog, events, automation_events, workflow_events, todo
 │   │   ├── queries/      #   *Query mixins: artifact, automation, conversation, memory, models,
-│   │   │                 #     notification, task_run, workflow
+│   │   │                 #     notification, project, task_run, workflow
 │   │   ├── mutations/    #   *Mutation mixins: artifact, automation, conversation (start/stop/resume_task),
-│   │   │                 #     memory, notification, task_run (stop_running_task), workflow
+│   │   │                 #     memory, notification, project (+setConversationProject),
+│   │   │                 #     task_run (stop_running_task), workflow
 │   │   └── subscriptions/#   chat (taskEvents), automation (automationRunEvents),
 │   │                     #     board_task (boardTaskEvents), workflow (workflowRunEvents)
 │   │                     #     — all wrap stream_task_events
@@ -87,6 +88,7 @@ jarvis/
 │   ├── board.py          # [bound] create_task/list_tasks (task board) + complete_task/block_task (in-run only)
 │   ├── workflows.py      # [bound] manage_workflows — CRUD via one action-dispatch tool
 │   ├── skills.py         # [bound] use_skill + manage_skills (agent-authored skills)
+│   ├── projects.py       # [bound] project_memory (in-project-run only) — shared project notepad
 │   ├── memory.py         # [bound iff embedder] remember, search_memory (discrete vector memory)
 │   ├── context.py        # current_ctx() — per-call ToolContext (code_session_key, conversation_id)
 │   ├── research.py       # [kernel-preloaded] search() (Tavily/Brave, ddgs fallback) + read()
@@ -100,11 +102,12 @@ jarvis/
     ├── relay.config.json # Relay compiler config (schema → ./schema.graphql, artifacts → src/__generated__)
     ├── schema.graphql    # SDL exported from the Python schema (regenerate via `pnpm schema`)
     └── src/
-        ├── routes/       # File-based routes: index, c.$id, automation, board, workflow/*, artifacts,
-        │                 #   memory, live, logs, tasks, settings
+        ├── routes/       # File-based routes: index, c.$id, automation, board, workflow/*, projects/*,
+        │                 #   artifacts, memory, live, logs, tasks, settings
         ├── components/   # InputBox, MessageThread, MessageBubble, ConversationList, ActivitySidebar,
         │                 #   ArtifactPanel, ArtifactsBrowser, MemoryView, NotificationsEditor,
-        │                 #   WorkflowEditor*, AutomationForm, AutomationRunsPanel, InterruptPrompt, …
+        │                 #   ProjectsView, ProjectDetail, WorkflowEditor*, AutomationForm,
+        │                 #   AutomationRunsPanel, InterruptPrompt, …
         ├── hooks/        # useTaskEvents, useAutomationRunEvents, useWorkflowRunEvents (live streams),
         │                 #   useModels, useLiveSocket, useAudioTTS, useWhisperSTT, useSpeechRecognition, useLogStream
         ├── relay/        # Per-operation query/mutation modules + environment.ts, globalId.ts
@@ -265,6 +268,13 @@ Agent memory has **two layers**, selected by whether an embedder is configured (
 
 GraphQL `agentMemory` query + `updateMemory` (blob) / `updateMemoryItem` (discrete) mutations expose both; `frontend/src/components/MemoryView.tsx` + the `/memory` route render and edit them.
 
+## Projects Feature
+A **project** groups web conversations under shared context (claude.ai-style): `Project.instructions` (user-owned guidance) and `Project.memory` (a free-text blob the agent maintains itself). `Conversation.project_id` is a nullable indexed FK; **only `surface="web"` conversations may join** (enforced in `set_conversation_project`, db/ops.py). Deleting a project keeps its conversations — the FK is nulled explicitly before the row delete.
+- **Injection**: `_project_volatile_parts` (core/agents.py) re-reads the project row **every model iteration** (todos pattern, NOT `_retrieval_cache`) and appends `## Project` / `### Project Instructions` / `### Project Memory` sections to the volatile suffix — so agent writes and live user edits apply on the very next LLM call without busting the prompt cache. The graph is model-shared, so project context must never be closured into `_build_agent`.
+- **Scope plumbing**: `_run_agent_task` (server/chat_runtime.py) resolves `Conversation.project_id` fresh at run start and puts it in `config["configurable"]["project_id"]` → `current_ctx().project_id` (tools/context.py). Automation/board/bot/CLI runtimes never set it, so injection + tool are inert there.
+- **Agent tool**: `project_memory(action=read|append|write, content)` (tools/projects.py) — bound unconditionally, guarded on `ctx.project_id` like the board tools; memory capped at 24k chars (over-cap → instructed to `write` a condensed version).
+- **GraphQL + UI**: `projects`/`project` queries; `createProject`/`updateProject`/`deleteProject` + `setConversationProject(conversationId, projectId)` (dedicated mutation — `updateConversation`'s None-means-unchanged convention can't express "clear"; pass `projectId: null` to remove). `StartTaskInput.projectId` attaches a *new* conversation at creation. Frontend: `/projects` + `/projects/$id` routes (`ProjectsView`/`ProjectDetail`), a project badge on `/c/$id`, and a new-chat InputBox embedded in the detail page.
+
 ## Skills Feature
 A **skill** is a named, reusable procedure the agent can author and later reload: a `description` (the routing key, embedded for intent retrieval) plus a `body` (the full instructions, loaded on demand). Stored in the `Skill` SQL table.
 - **Agent tools** (`tools/skills.py`, all bound): `use_skill(name)` loads a body to follow; `manage_skills(action=list/create/update/delete, ...)` curates them.
@@ -285,7 +295,7 @@ A **skill** is a named, reusable procedure the agent can author and later reload
 - `async_session` uses `expire_on_commit=False` — no `session.refresh()` needed after commit.
 - `update_*` functions must use ORM-level `setattr` (not raw SQL UPDATE) so `onupdate` callbacks fire.
 - All ForeignKey columns carry `index=True`; new ones must too.
-- Tables: `Conversation, Message, Step, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, NotificationChannel, Artifact, Document, DocumentChunk, Workflow, WorkflowRun, Job, Memory, Skill` (`Job` = the durable queue's backing table; `DocumentChunk` = embedded passages for large-doc retrieval; `Memory` = discrete vector memory items; `Skill` = reusable agent procedures; `BoardTask`/`BoardTaskLink` = the task board's cards and dependency edges).
+- Tables: `Conversation, Message, Step, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, NotificationChannel, Artifact, Document, DocumentChunk, Workflow, WorkflowRun, Job, Memory, Project, Skill` (`Job` = the durable queue's backing table; `DocumentChunk` = embedded passages for large-doc retrieval; `Memory` = discrete vector memory items; `Project` = conversation groups with shared instructions/memory; `Skill` = reusable agent procedures; `BoardTask`/`BoardTaskLink` = the task board's cards and dependency edges).
 - Two SQLite files live under `~/.jarvis/`: `database.db` (app state) and `checkpoints.db` (LangGraph thread state + the store, keyed by `thread_id == conversation_id`). Conversation deletion cascades both: ORM deletes app-DB rows, then `delete_conversation` calls `adelete_thread(conv_id)` on the async checkpointer.
 
 ## Default Model

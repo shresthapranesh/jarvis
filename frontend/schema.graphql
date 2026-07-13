@@ -157,7 +157,9 @@ type Conversation implements Node {
   model: String!
   surface: String!
   pinned: Boolean!
+  projectId: String
   createdAt: DateTime!
+  project: Project
   messageCount: Int!
   messages(last: Int! = 10, before: String = null): MessageConnection!
 }
@@ -280,6 +282,10 @@ type Mutation {
   createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!
   updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!
   deleteNotificationChannel(id: ID!): Boolean!
+  createProject(input: ProjectCreateInput!): Project!
+  updateProject(id: ID!, input: ProjectUpdateInput!): Project!
+  deleteProject(id: ID!): Boolean!
+  setConversationProject(conversationId: ID!, projectId: ID = null): Conversation!
   createSkill(input: SkillCreateInput!): Skill!
   updateSkill(id: ID!, input: SkillUpdateInput!): Skill!
   deleteSkill(id: ID!): Boolean!
@@ -329,6 +335,32 @@ type PageInfo {
   endCursor: String
 }
 
+type Project implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  name: String!
+  description: String
+  instructions: String!
+  memory: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  conversationCount: Int!
+  conversations: [Conversation!]!
+}
+
+input ProjectCreateInput {
+  name: String!
+  description: String = null
+  instructions: String! = ""
+}
+
+input ProjectUpdateInput {
+  name: String = null
+  description: String = null
+  instructions: String = null
+  memory: String = null
+}
+
 type Query {
   models: ModelCatalog!
   agentMemory: Memory!
@@ -353,6 +385,8 @@ type Query {
   workflowRuns(workflowId: ID!): [WorkflowRun!]!
   workflowRun(id: ID!): WorkflowRun
   notificationChannels: [NotificationChannel!]!
+  projects: [Project!]!
+  project(id: ID!): Project
   skills: [Skill!]!
   runningTasks: [RunningTask!]!
 }
@@ -410,6 +444,7 @@ input StartTaskInput {
   model: String = null
   conversationId: String = null
   attachmentUploads: [UploadReferenceInput!] = null
+  projectId: String = null
 }
 
 type StartTaskPayload {

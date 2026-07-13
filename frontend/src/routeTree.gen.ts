@@ -13,6 +13,7 @@ import { Route as WorkflowRouteImport } from './routes/workflow'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as LiveRouteImport } from './routes/live'
@@ -21,7 +22,9 @@ import { Route as AutomationRouteImport } from './routes/automation'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkflowIndexRouteImport } from './routes/workflow.index'
+import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as WorkflowIdRouteImport } from './routes/workflow.$id'
+import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
 import { Route as CIdRouteImport } from './routes/c.$id'
 import { Route as WorkflowIdIndexRouteImport } from './routes/workflow.$id.index'
 import { Route as WorkflowIdRunsRunIdRouteImport } from './routes/workflow.$id.runs.$runId'
@@ -44,6 +47,11 @@ const SkillsRoute = SkillsRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsRoute = ProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MemoryRoute = MemoryRouteImport.update({
@@ -86,10 +94,20 @@ const WorkflowIndexRoute = WorkflowIndexRouteImport.update({
   path: '/',
   getParentRoute: () => WorkflowRoute,
 } as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProjectsRoute,
+} as any)
 const WorkflowIdRoute = WorkflowIdRouteImport.update({
   id: '/$id',
   path: '/$id',
   getParentRoute: () => WorkflowRoute,
+} as any)
+const ProjectsIdRoute = ProjectsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ProjectsRoute,
 } as any)
 const CIdRoute = CIdRouteImport.update({
   id: '/c/$id',
@@ -115,12 +133,15 @@ export interface FileRoutesByFullPath {
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
+  '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
+  '/projects/$id': typeof ProjectsIdRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
+  '/projects/': typeof ProjectsIndexRoute
   '/workflow/': typeof WorkflowIndexRoute
   '/workflow/$id/': typeof WorkflowIdIndexRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
@@ -137,6 +158,8 @@ export interface FileRoutesByTo {
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/c/$id': typeof CIdRoute
+  '/projects/$id': typeof ProjectsIdRoute
+  '/projects': typeof ProjectsIndexRoute
   '/workflow': typeof WorkflowIndexRoute
   '/workflow/$id': typeof WorkflowIdIndexRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
@@ -150,12 +173,15 @@ export interface FileRoutesById {
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
+  '/projects': typeof ProjectsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
+  '/projects/$id': typeof ProjectsIdRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
+  '/projects/': typeof ProjectsIndexRoute
   '/workflow/': typeof WorkflowIndexRoute
   '/workflow/$id/': typeof WorkflowIdIndexRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
@@ -170,12 +196,15 @@ export interface FileRouteTypes {
     | '/live'
     | '/logs'
     | '/memory'
+    | '/projects'
     | '/settings'
     | '/skills'
     | '/tasks'
     | '/workflow'
     | '/c/$id'
+    | '/projects/$id'
     | '/workflow/$id'
+    | '/projects/'
     | '/workflow/'
     | '/workflow/$id/'
     | '/workflow/$id/runs/$runId'
@@ -192,6 +221,8 @@ export interface FileRouteTypes {
     | '/skills'
     | '/tasks'
     | '/c/$id'
+    | '/projects/$id'
+    | '/projects'
     | '/workflow'
     | '/workflow/$id'
     | '/workflow/$id/runs/$runId'
@@ -204,12 +235,15 @@ export interface FileRouteTypes {
     | '/live'
     | '/logs'
     | '/memory'
+    | '/projects'
     | '/settings'
     | '/skills'
     | '/tasks'
     | '/workflow'
     | '/c/$id'
+    | '/projects/$id'
     | '/workflow/$id'
+    | '/projects/'
     | '/workflow/'
     | '/workflow/$id/'
     | '/workflow/$id/runs/$runId'
@@ -223,6 +257,7 @@ export interface RootRouteChildren {
   LiveRoute: typeof LiveRoute
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
+  ProjectsRoute: typeof ProjectsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   SkillsRoute: typeof SkillsRoute
   TasksRoute: typeof TasksRoute
@@ -258,6 +293,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects': {
+      id: '/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof ProjectsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/memory': {
@@ -316,12 +358,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowIndexRouteImport
       parentRoute: typeof WorkflowRoute
     }
+    '/projects/': {
+      id: '/projects/'
+      path: '/'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof ProjectsRoute
+    }
     '/workflow/$id': {
       id: '/workflow/$id'
       path: '/$id'
       fullPath: '/workflow/$id'
       preLoaderRoute: typeof WorkflowIdRouteImport
       parentRoute: typeof WorkflowRoute
+    }
+    '/projects/$id': {
+      id: '/projects/$id'
+      path: '/$id'
+      fullPath: '/projects/$id'
+      preLoaderRoute: typeof ProjectsIdRouteImport
+      parentRoute: typeof ProjectsRoute
     }
     '/c/$id': {
       id: '/c/$id'
@@ -346,6 +402,20 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ProjectsRouteChildren {
+  ProjectsIdRoute: typeof ProjectsIdRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
+}
+
+const ProjectsRouteChildren: ProjectsRouteChildren = {
+  ProjectsIdRoute: ProjectsIdRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
+}
+
+const ProjectsRouteWithChildren = ProjectsRoute._addFileChildren(
+  ProjectsRouteChildren,
+)
 
 interface WorkflowIdRouteChildren {
   WorkflowIdIndexRoute: typeof WorkflowIdIndexRoute
@@ -383,6 +453,7 @@ const rootRouteChildren: RootRouteChildren = {
   LiveRoute: LiveRoute,
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
+  ProjectsRoute: ProjectsRouteWithChildren,
   SettingsRoute: SettingsRoute,
   SkillsRoute: SkillsRoute,
   TasksRoute: TasksRoute,

@@ -192,6 +192,26 @@ function RootLayout() {
         </div>
         <div className="left-panel-nav">
           <Link
+            to="/projects"
+            className="nav-link"
+            activeProps={{className: 'nav-link active'}}
+            title="Projects"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            {!navCollapsed && <span>Projects</span>}
+          </Link>
+          <Link
             to="/automation"
             className="nav-link"
             activeProps={{className: 'nav-link active'}}

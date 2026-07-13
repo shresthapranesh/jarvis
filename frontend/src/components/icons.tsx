@@ -136,6 +136,12 @@ export const SearchIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const FolderIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+  </Icon>
+);
+
 export const PlusIcon = (p: IconProps) => (
   <Icon {...p}>
     <line x1="12" y1="5" x2="12" y2="19" />
