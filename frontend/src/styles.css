@@ -636,6 +636,121 @@ body {
   display: none;
 }
 
+/* Worker fan-out panel (live spawn_workers progress) */
+.worker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.worker-panel-header {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.worker-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.worker-card--running {
+  border-color: var(--border-strong);
+}
+
+.worker-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.worker-status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.worker-status-dot--running {
+  background: var(--accent);
+  animation: worker-pulse 1.2s ease-in-out infinite;
+}
+.worker-status-dot--done {
+  background: var(--accent);
+  opacity: 0.55;
+}
+.worker-status-dot--error {
+  background: #d06a5c;
+}
+
+@keyframes worker-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.worker-role {
+  flex: none;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+
+.worker-task {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worker-activity {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  padding-left: 14px;
+}
+
+.worker-tail {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  line-height: 1.45;
+  max-height: 60px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column-reverse; /* keep the newest text visible */
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: 14px;
+  opacity: 0.85;
+}
+
+.worker-result {
+  font-size: 0.76rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: 14px;
+}
+.worker-result--clipped {
+  opacity: 0.9;
+}
+
 .thinking-dots span {
   display: inline-block;
   width: 7px;
@@ -1092,6 +1207,70 @@ body {
   color: var(--text);
   word-break: break-word;
 }
+
+/* ── Worker groups in the steps panel ── */
+.worker-group {
+  border-top: 1px solid var(--border);
+  animation: step-enter 0.18s ease forwards;
+}
+.worker-group:first-of-type {
+  border-top: none;
+}
+
+.worker-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+}
+.worker-group-head:hover {
+  background: var(--surface2);
+}
+.worker-group.open > .worker-group-head .step-chevron {
+  transform: rotate(90deg);
+}
+
+.worker-group-count {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+.worker-group-head .step-chevron {
+  margin-left: 0;
+}
+.worker-group-head .worker-task {
+  flex: 1;
+}
+
+.worker-group-body {
+  border-left: 2px solid var(--border-strong);
+  margin: 0 0 6px 20px;
+}
+.worker-group-body .step-row:first-of-type {
+  border-top: none;
+}
+.worker-group-body .step-summary,
+.worker-group-body .step-detail {
+  padding-left: 10px;
+}
+.worker-group-body .sidebar-empty {
+  padding: 10px;
+  text-align: left;
+}
+
+.worker-status-dot--unknown {
+  background: var(--text-dim);
+  opacity: 0.5;
+}
+
 .sidebar-empty {
   padding: 32px 16px;
   text-align: center;

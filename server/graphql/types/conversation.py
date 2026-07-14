@@ -38,6 +38,7 @@ class Step:
     id: str
     node: str
     source: str
+    subagent: str | None
     data: str | None
     seq: int
     created_at: datetime
@@ -48,6 +49,7 @@ class Step:
             id=row.id,
             node=row.node,
             source=row.source,
+            subagent=row.subagent,
             data=row.data,
             seq=row.seq,
             created_at=row.created_at,

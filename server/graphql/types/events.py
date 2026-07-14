@@ -43,6 +43,36 @@ class BrowserStepEvent:
 
 
 @strawberry.type
+class WorkerStartEvent:
+    idx: int
+    role: str
+    task: str
+
+
+@strawberry.type
+class WorkerStepEvent:
+    idx: int
+    role: str
+    node: str
+    data: str  # JSON-encoded payload, same shape as StepEvent.data
+
+
+@strawberry.type
+class WorkerTokenEvent:
+    idx: int
+    text: str
+
+
+@strawberry.type
+class WorkerDoneEvent:
+    idx: int
+    role: str
+    task: str
+    status: str  # "done" | "error"
+    result: str
+
+
+@strawberry.type
 class ArtifactEvent:
     artifact_id: str
     title: str
@@ -104,6 +134,10 @@ ChatEvent = Annotated[
         ThinkingTokenEvent,
         StepEvent,
         BrowserStepEvent,
+        WorkerStartEvent,
+        WorkerStepEvent,
+        WorkerTokenEvent,
+        WorkerDoneEvent,
         ArtifactEvent,
         TodosUpdatedEvent,
         InterruptEvent,
@@ -158,6 +192,32 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
             thought=_as_str(data.get("thought")),
             actions=_as_str(data.get("actions")),
             source=data.get("source", ""),
+        )
+    if event_name == "worker_start":
+        return WorkerStartEvent(
+            idx=int(data.get("idx", 0)),
+            role=data.get("role", ""),
+            task=data.get("task", ""),
+        )
+    if event_name == "worker_step":
+        return WorkerStepEvent(
+            idx=int(data.get("idx", 0)),
+            role=data.get("role", ""),
+            node=data.get("node", ""),
+            data=_as_str(data.get("data")),
+        )
+    if event_name == "worker_token":
+        return WorkerTokenEvent(
+            idx=int(data.get("idx", 0)),
+            text=data.get("text", ""),
+        )
+    if event_name == "worker_done":
+        return WorkerDoneEvent(
+            idx=int(data.get("idx", 0)),
+            role=data.get("role", ""),
+            task=data.get("task", ""),
+            status=data.get("status", "done"),
+            result=data.get("result", ""),
         )
     if event_name == "artifact":
         return ArtifactEvent(

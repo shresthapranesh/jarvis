@@ -84,6 +84,7 @@ function ConversationPage() {
     text,
     thinkingText,
     steps,
+    workers,
     artifacts,
     todos: liveTodos,
     error,
@@ -303,6 +304,7 @@ function ConversationPage() {
         streamingText={isActive ? text : undefined}
         streamingThinkingText={isActive ? thinkingText : undefined}
         streamingSteps={isActive ? steps : undefined}
+        streamingWorkers={isActive ? workers : undefined}
         isStreaming={isActive}
         streamError={error ?? undefined}
         streamSafetyBlock={isActive ? safetyBlock : null}

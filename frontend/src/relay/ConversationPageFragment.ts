@@ -30,6 +30,7 @@ export const conversationPageFragment = graphql`
             id
             node
             source
+            subagent
             data
             seq
             createdAt

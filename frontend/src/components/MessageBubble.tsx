@@ -27,8 +27,9 @@ function SpinnerIcon() {
 }
 
 import {describeStep, getStepPreview} from '../lib/steps';
-import type {SafetyBlock} from '../hooks/useTaskEvents';
+import type {SafetyBlock, WorkerInfo} from '../hooks/useTaskEvents';
 import type {Message, Step} from '../lib/types';
+import {WorkerPanel} from './WorkerPanel';
 
 function SafetyBanner({block}: {block: SafetyBlock}) {
   const layerLabel = block.layer === 'input' ? 'Input blocked' : 'Output redacted';
@@ -191,11 +192,12 @@ interface StreamingBubbleProps {
   text: string;
   thinkingText: string;
   steps: Step[];
+  workers?: WorkerInfo[];
   safetyBlock?: SafetyBlock | null;
   onShowSteps?: (steps: Step[]) => void;
 }
 
-export function StreamingBubble({text, thinkingText, steps, safetyBlock, onShowSteps}: StreamingBubbleProps) {
+export function StreamingBubble({text, thinkingText, steps, workers, safetyBlock, onShowSteps}: StreamingBubbleProps) {
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
@@ -228,6 +230,7 @@ export function StreamingBubble({text, thinkingText, steps, safetyBlock, onShowS
   return (
     <div className="turn">
       {safetyBlock && <SafetyBanner block={safetyBlock} />}
+      {workers && workers.length > 0 && <WorkerPanel workers={workers} />}
       {text ? (
         <div className={`agent-bubble streaming${safetyBlock ? ' agent-bubble--blocked' : ''}`}>
           <span dangerouslySetInnerHTML={{__html: marked.parse(text) as string}} />

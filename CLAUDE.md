@@ -218,7 +218,9 @@ Conventions:
 - `running_tasks` query (`queries/task_run.py`) lists everything currently in `_tasks` for the Tasks page; finished tasks linger ~5s before being popped so the UI can show their terminal state.
 
 ### Chat events
-`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `safety_input_blocked`, `safety_output_blocked`, `done`, `stopped`, `error`
+`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `safety_input_blocked`, `safety_output_blocked`, `done`, `stopped`, `error`
+
+Worker lifecycle events (`worker_*`) stream live from `tools/workers.py` and — except `worker_token` — are also persisted as `Step` rows (`source="subagent"`, `subagent="<role>:<idx>"`, result capped at `WORKER_RESULT_PERSIST_CAP`), so the activity sidebar can rebuild per-worker groups after a reload.
 
 Custom events (anything except `token`/`thinking_token`/`step`) are dispatched from tools via `adispatch_custom_event(name, {"type": name, ...})` (the `"type"` key is required — `core/streaming.py:_process_chunk` switches on it). Token/thinking/step events flow naturally from LangGraph stream modes (`STREAM_MODES`).
 

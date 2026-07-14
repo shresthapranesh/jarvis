@@ -34,6 +34,10 @@ StreamChunk: TypeAlias = tuple[tuple[str, ...] | None, str, Any]
 # list[str] which doesn't match the Literal-based overload signatures.
 STREAM_MODES: Sequence[StreamMode] = ["updates", "messages", "custom"]
 
+# Cap on the worker result text stored in a worker_done Step row. The live
+# event keeps the full result; only the persisted transcript copy is clipped.
+WORKER_RESULT_PERSIST_CAP = 2000
+
 
 # ── Step data extraction ─────────────────────────────────────────────────────
 
@@ -337,13 +341,39 @@ async def _process_chunk(
                 actions=data.get("actions"),
                 source=source,
             )
-        elif event_type == "worker_done":
-            coalescer.flush_all()
-            idx = data.get("idx", "?")
-            task = data.get("task", "")
-            result = data.get("result", "")
-            text = f"\n**[Worker {idx}]** {task}\n{result}\n"
-            emit_event(state, "token", text=text, source="worker")
+        elif event_type in ("worker_start", "worker_step", "worker_token", "worker_done"):
+            # Worker lifecycle events from tools/workers.py — forwarded to the
+            # live stream and (except tokens) persisted as Step rows so the
+            # transcript can rebuild per-worker groups after a reload.
+            # worker_token is already coalesced at the source (_TokenTail) and
+            # never interleaves with main-agent text (the parent is blocked in
+            # the spawn_workers tool call), so it skips the flush.
+            if event_type != "worker_token":
+                coalescer.flush_all()
+            payload = {k: v for k, v in data.items() if k != "type"}
+            if (
+                event_type != "worker_token"
+                and persist_steps and task_id and conv_id and step_seq_ref is not None
+            ):
+                # Group key must match what useTaskEvents builds live: "<role>:<idx>".
+                worker_key = f"{payload.get('role', 'worker')}:{payload.get('idx', '?')}"
+                if event_type == "worker_step":
+                    node = payload.get("node", "worker")
+                    step_data = payload.get("data")
+                else:
+                    node = event_type
+                    record = {k: payload.get(k) for k in ("idx", "role", "task")}
+                    if event_type == "worker_done":
+                        record["status"] = payload.get("status", "done")
+                        record["result"] = str(payload.get("result") or "")[:WORKER_RESULT_PERSIST_CAP]
+                    step_data = json.dumps(record)
+                async with async_session() as session:
+                    await add_step(
+                        session, task_id, conv_id, node, "subagent", step_data,
+                        step_seq_ref[0], subagent=worker_key,
+                    )
+                step_seq_ref[0] += 1
+            emit_event(state, event_type, **payload)
         elif event_type == "artifact":
             coalescer.flush_all()
             payload = {k: v for k, v in data.items() if k != "type"}
@@ -404,6 +434,7 @@ async def _process_chunk(
                         for node_name, src, step_data in step_records:
                             await add_step(
                                 session, task_id, conv_id, node_name, src, step_data, step_seq_ref[0],
+                                subagent=subagent,
                             )
                             _emit_step(node_name, src, step_data)
                             step_seq_ref[0] += 1

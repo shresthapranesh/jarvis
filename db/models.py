@@ -101,6 +101,10 @@ class Step(Base):
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
     node: Mapped[str] = mapped_column(String)
     source: Mapped[str] = mapped_column(String)
+    # Worker identity ("<role>:<idx>", e.g. "researcher:1") for steps produced
+    # inside a spawned worker; NULL for main-agent steps. Groups a worker's
+    # steps together in the activity sidebar.
+    subagent: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     seq: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

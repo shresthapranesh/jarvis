@@ -23,12 +23,30 @@ export interface SafetyBlock {
   reason?: string;
 }
 
+// Live state of one spawned worker, accumulated from worker_* events.
+// Keyed by idx (1-based); a later spawn_workers batch in the same turn
+// reuses idxs and overwrites the previous batch's cards.
+export interface WorkerInfo {
+  idx: number;
+  role: string;
+  task: string;
+  status: 'running' | 'done' | 'error';
+  // Latest node + step payload (same JSON shape as Step.data) — drives the
+  // per-card activity label via describeStep().
+  node: string | null;
+  stepData: string | null;
+  // Rolling tail of the worker's streamed text (last ~800 chars).
+  tail: string;
+  result: string | null;
+}
+
 interface StreamState {
   streaming: boolean;
   text: string;
   thinkingText: string;
   steps: Step[];
   browserSteps: BrowserStep[];
+  workers: WorkerInfo[];
   artifacts: ArtifactRef[];
   todos: TodoItem[] | null;
   error: string | null;
@@ -42,12 +60,55 @@ const EMPTY_STATE: StreamState = {
   thinkingText: '',
   steps: [],
   browserSteps: [],
+  workers: [],
   artifacts: [],
   todos: null,
   error: null,
   pendingInterrupt: null,
   safetyBlock: null,
 };
+
+function upsertWorker(workers: WorkerInfo[], next: WorkerInfo): WorkerInfo[] {
+  const i = workers.findIndex((w) => w.idx === next.idx);
+  if (i === -1) return [...workers, next].sort((a, b) => a.idx - b.idx);
+  const copy = [...workers];
+  copy[i] = next;
+  return copy;
+}
+
+function patchWorker(
+  workers: WorkerInfo[],
+  idx: number,
+  patch: (w: WorkerInfo) => WorkerInfo,
+): WorkerInfo[] {
+  const i = workers.findIndex((w) => w.idx === idx);
+  if (i === -1) return workers;
+  const copy = [...workers];
+  copy[i] = patch(copy[i]);
+  return copy;
+}
+
+// Must match WORKER_RESULT_PERSIST_CAP in core/streaming.py so the live
+// mirror of worker_done matches the persisted Step row.
+const WORKER_RESULT_CAP = 2000;
+
+function makeWorkerStep(
+  seq: number,
+  role: string,
+  idx: number,
+  node: 'worker_start' | 'worker_done',
+  data: Record<string, unknown>,
+): Step {
+  return {
+    id: String(seq),
+    node,
+    source: 'subagent',
+    subagent: `${role}:${idx}`,
+    data: JSON.stringify(data),
+    seq,
+    created_at: new Date().toISOString(),
+  };
+}
 
 const taskEventsSubscription = graphql`
   subscription useTaskEventsSubscription($taskId: String!) {
@@ -71,6 +132,28 @@ const taskEventsSubscription = graphql`
         thought
         actions
         source
+      }
+      ... on WorkerStartEvent {
+        idx
+        role
+        task
+      }
+      ... on WorkerStepEvent {
+        idx
+        role
+        node
+        data
+      }
+      ... on WorkerTokenEvent {
+        idx
+        text
+      }
+      ... on WorkerDoneEvent {
+        idx
+        role
+        task
+        status
+        result
       }
       ... on ArtifactEvent {
         artifactId
@@ -173,6 +256,89 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
               at: new Date().toISOString(),
             };
             setState((s) => ({...s, browserSteps: [...s.browserSteps, browserStep]}));
+            break;
+          }
+          case 'WorkerStartEvent': {
+            // Mirror into `steps` with the same shape the backend persists
+            // (node/subagent/data), so the grouped sidebar looks identical
+            // live and after a reload.
+            const step = makeWorkerStep(seqRef.current++, evt.role, evt.idx, 'worker_start', {
+              idx: evt.idx,
+              role: evt.role,
+              task: evt.task,
+            });
+            setState((s) => ({
+              ...s,
+              steps: [...s.steps, step],
+              workers: upsertWorker(s.workers, {
+                idx: evt.idx,
+                role: evt.role,
+                task: evt.task,
+                status: 'running',
+                node: null,
+                stepData: null,
+                tail: '',
+                result: null,
+              }),
+            }));
+            break;
+          }
+          case 'WorkerStepEvent': {
+            const step: Step = {
+              id: String(seqRef.current),
+              node: evt.node,
+              source: 'subagent',
+              subagent: `${evt.role}:${evt.idx}`,
+              data: evt.data,
+              seq: seqRef.current++,
+              created_at: new Date().toISOString(),
+            };
+            setState((s) => ({
+              ...s,
+              steps: [...s.steps, step],
+              workers: patchWorker(s.workers, evt.idx, (w) => ({
+                ...w,
+                node: evt.node,
+                stepData: evt.data,
+              })),
+            }));
+            break;
+          }
+          case 'WorkerTokenEvent':
+            setState((s) => ({
+              ...s,
+              workers: patchWorker(s.workers, evt.idx, (w) => ({
+                ...w,
+                tail: (w.tail + evt.text).slice(-800),
+              })),
+            }));
+            break;
+          case 'WorkerDoneEvent': {
+            const step = makeWorkerStep(seqRef.current++, evt.role, evt.idx, 'worker_done', {
+              idx: evt.idx,
+              role: evt.role,
+              task: evt.task,
+              status: evt.status,
+              result: evt.result.slice(0, WORKER_RESULT_CAP),
+            });
+            setState((s) => ({
+              ...s,
+              steps: [...s.steps, step],
+              workers: upsertWorker(s.workers, {
+                ...(s.workers.find((w) => w.idx === evt.idx) ?? {
+                  idx: evt.idx,
+                  role: evt.role,
+                  task: evt.task,
+                  node: null,
+                  stepData: null,
+                  tail: '',
+                }),
+                role: evt.role,
+                task: evt.task,
+                status: evt.status === 'error' ? 'error' : 'done',
+                result: evt.result,
+              }),
+            }));
             break;
           }
           case 'ArtifactEvent': {

@@ -62,11 +62,23 @@ function trimInput(val: unknown, max = 40): string | null {
   return val.length > max ? val.slice(0, max) + '…' : val;
 }
 
+// "researcher:1" → "researcher #1" for display.
+function prettySubagent(key: string | null | undefined): string {
+  if (!key) return 'worker';
+  return key.replace(/:(\d+)$/, ' #$1');
+}
+
 export function describeStep(step: Step | null | undefined): string {
   if (!step) return 'Working…';
 
+  if (step.node === 'worker_start') {
+    return `Spawning ${prettySubagent(step.subagent)}…`;
+  }
+  if (step.node === 'worker_done') {
+    return `${prettySubagent(step.subagent)} finished`;
+  }
   if (step.subagent) {
-    return `Running ${step.subagent}…`;
+    return `Running ${prettySubagent(step.subagent)}…`;
   }
 
   if (step.data) {

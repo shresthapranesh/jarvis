@@ -148,7 +148,7 @@ type BrowserStepEvent {
   source: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | SafetyInputBlockedEvent | SafetyOutputBlockedEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | SafetyInputBlockedEvent | SafetyOutputBlockedEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
   """The Globally Unique ID of this object"""
@@ -456,6 +456,7 @@ type Step {
   id: String!
   node: String!
   source: String!
+  subagent: String
   data: String
   seq: Int!
   createdAt: DateTime!
@@ -508,6 +509,32 @@ type TokenEvent {
 
 input UploadReferenceInput {
   uploadId: String!
+}
+
+type WorkerDoneEvent {
+  idx: Int!
+  role: String!
+  task: String!
+  status: String!
+  result: String!
+}
+
+type WorkerStartEvent {
+  idx: Int!
+  role: String!
+  task: String!
+}
+
+type WorkerStepEvent {
+  idx: Int!
+  role: String!
+  node: String!
+  data: String!
+}
+
+type WorkerTokenEvent {
+  idx: Int!
+  text: String!
 }
 
 type Workflow implements Node {

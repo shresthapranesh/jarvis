@@ -9,6 +9,11 @@ The tool is built per agent via `make_spawn_workers(role_factories)` in
 `core/agents.py`, so each agent's workers run on that agent's own model —
 a process-global registry here would make whichever model built its agent
 last own the workers of every conversation.
+
+Each worker surfaces live progress to the parent stream via the ToolContext
+event sink: `worker_start` when it spins up, `worker_step` per node
+transition, coalesced `worker_token` text, and `worker_done` (status
+done|error) at the end. `core/streaming.py` forwards these to the UI.
 """
 
 from __future__ import annotations
@@ -26,6 +31,54 @@ from tools.context import current_ctx
 logger = logging.getLogger(__name__)
 
 DEFAULT_ROLE = "general"
+
+
+def _chunk_text(content: Any) -> str:
+    """Flatten one streamed AI chunk's content to plain text.
+
+    Reasoning models stream content as a list of typed blocks; take only
+    `text` blocks (thinking stays out of the worker's visible tail).
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
+
+
+class _TokenTail:
+    """Coalesces a worker's streamed text into `worker_token` events.
+
+    Same motivation as core.streaming.TokenCoalescer: a verbose worker emits
+    thousands of tiny chunks, and each emitted event wakes every stream
+    subscriber. Buffer until `max_chars`, plus explicit flushes at step
+    boundaries so ordering against `worker_step` events is preserved.
+    """
+
+    def __init__(self, emit: Callable[..., None], idx: int, max_chars: int = 120):
+        self._emit = emit
+        self._idx = idx
+        self._max = max_chars
+        self._buf: list[str] = []
+        self._len = 0
+
+    def add(self, text: str) -> None:
+        if not text:
+            return
+        self._buf.append(text)
+        self._len += len(text)
+        if self._len >= self._max:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self._buf:
+            return
+        text = "".join(self._buf)
+        self._buf, self._len = [], 0
+        self._emit("worker_token", idx=self._idx, text=text)
 
 
 def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
@@ -74,8 +127,9 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
             if factory is None:
                 available = ", ".join(sorted(role_factories))
                 err = f"Unknown role '{role}' (available: {available})"
-                tctx.emit("worker_done", idx=idx, role=role, task=label, result=f"ERROR: {err}")
+                tctx.emit("worker_done", idx=idx, role=role, task=label, status="error", result=f"ERROR: {err}")
                 return idx, role, label, err
+            tctx.emit("worker_start", idx=idx, role=role, task=label)
             # Each worker gets its OWN kernel via a unique kernel_key so that
             # concurrent workers' run_cell sessions stay isolated (they'd
             # otherwise collide on the parent conversation's single kernel).
@@ -99,11 +153,48 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
                     "recursion_limit": 50,
                     "configurable": configurable,
                 }
-                result = await worker.ainvoke(
+                # Stream the worker instead of ainvoke so its progress is
+                # visible live. `updates` gives node transitions (→ worker_step),
+                # `messages` gives LLM tokens (→ coalesced worker_token), and
+                # `custom` catches events the worker's own tools emit (e.g.
+                # write_artifact) — re-dispatched upward through the parent's
+                # sink, which they'd otherwise never reach.
+                from core.streaming import _extract_step_data
+                tail = _TokenTail(tctx.emit, idx)
+                final_msg: Any = None
+                async for mode, chunk in worker.astream(
                     {"messages": [{"role": "user", "content": prompt}]},
                     config=worker_config,
-                )
-                raw_content = result["messages"][-1].content
+                    stream_mode=["updates", "messages", "custom"],
+                ):
+                    if mode == "messages":
+                        token, _meta = chunk
+                        if getattr(token, "type", "") in ("ai", "AIMessageChunk"):
+                            tail.add(_chunk_text(getattr(token, "content", "")))
+                    elif mode == "custom":
+                        if isinstance(chunk, dict) and chunk.get("type"):
+                            tail.flush()
+                            tctx.emit(chunk["type"], **{k: v for k, v in chunk.items() if k != "type"})
+                    elif mode == "updates" and isinstance(chunk, dict):
+                        for node_name, node_data in chunk.items():
+                            if not node_name or node_name.startswith("__"):
+                                continue
+                            tail.flush()
+                            # Worker graphs name their model node "agent"; normalise
+                            # to "model_request" so the step extractor and the
+                            # frontend's describeStep() treat worker steps exactly
+                            # like main-agent ones.
+                            step_node = "model_request" if node_name == "agent" else node_name
+                            data_dict = node_data if isinstance(node_data, dict) else {}
+                            tctx.emit(
+                                "worker_step",
+                                idx=idx, role=role, node=step_node,
+                                data=_extract_step_data(step_node, data_dict),
+                            )
+                            if node_name == "agent" and (msgs := data_dict.get("messages")):
+                                final_msg = msgs[-1]
+                tail.flush()
+                raw_content = getattr(final_msg, "content", "") if final_msg is not None else ""
                 # Thinking models (Anthropic extended thinking, Bedrock) return
                 # content as a list of typed blocks, not a plain string.  Extract
                 # the text portion so downstream consumers (the main agent's
@@ -116,11 +207,11 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
                 else:
                     answer = str(raw_content)
                 logger.info("worker %d (%s) done (%d chars): %s", idx, role, len(answer), label)
-                tctx.emit("worker_done", idx=idx, role=role, task=label, result=answer)
+                tctx.emit("worker_done", idx=idx, role=role, task=label, status="done", result=answer)
                 return idx, role, label, answer
             except Exception as exc:
                 logger.warning("worker %d (%s) failed: %s — %s", idx, role, label, exc)
-                tctx.emit("worker_done", idx=idx, role=role, task=label, result=f"ERROR: {exc}")
+                tctx.emit("worker_done", idx=idx, role=role, task=label, status="error", result=f"ERROR: {exc}")
                 return idx, role, label, exc
             finally:
                 # Free the worker's kernel promptly — unique keys would otherwise

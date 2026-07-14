@@ -98,6 +98,7 @@ async def add_step(
     source: str,
     data: str | None,
     seq: int,
+    subagent: str | None = None,
 ) -> Step:
     step = Step(
         id=str(uuid4()),
@@ -105,6 +106,7 @@ async def add_step(
         conversation_id=conv_id,
         node=node,
         source=source,
+        subagent=subagent,
         data=data,
         seq=seq,
     )

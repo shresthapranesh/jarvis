@@ -12,11 +12,10 @@ export interface Step {
   id: string;
   node: string;
   source: string;
-  // Friendly subagent name ("researcher", "coder", …) when `source` is
-  // "subagent"; absent or null for main-agent steps. Used by describeStep()
-  // to label the live activity indicator. Not persisted to the DB — only
-  // present on SSE-streamed steps, so the field is optional for historical
-  // steps fetched via GET /conversations/{id}.
+  // Worker identity ("<role>:<idx>", e.g. "researcher:1") when the step ran
+  // inside a spawned worker; null for main-agent steps. Persisted to the DB
+  // and used to group steps by sub-agent in the activity sidebar and to
+  // label the live activity indicator (describeStep()).
   subagent?: string | null;
   data: string | null;
   seq: number;
@@ -62,6 +61,7 @@ export interface RelayMessageNode {
     id: string;
     node: string;
     source: string;
+    subagent?: string | null | undefined;
     data: string | null | undefined;
     seq: number;
     createdAt: string;
@@ -407,6 +407,7 @@ export function mapMessage(m: RelayMessageNode): Message {
       id: s.id,
       node: s.node,
       source: s.source,
+      subagent: s.subagent ?? null,
       data: s.data ?? null,
       seq: s.seq,
       created_at: s.createdAt,
