@@ -156,31 +156,29 @@ async def _run_agent_task(
             await finalize(final_message, status)
             emit_event(state, "done", message=final_message, conversation_id=conv_id)
 
-            # ── Project memory auto-init (safety net for Phase 1) ────────
-            # If this conversation belongs to a project and its memory is still
-            # empty, the main agent likely forgot to call project_memory.
-            # Fire-and-forget a background LLM that extracts durable facts from
-            # this transcript and initializes the memory. Best-effort, never
-            # blocks the user-visible done event.
+            # ── Project memory auto-maintain (safety net) ───────────────
+            # Layer 2 guarantee: if project memory is empty, init it; if stale
+            # (>_STALE_DAYS) and transcript is substantive, merge refresh.
+            # Fire-and-forget — never blocks user-visible done event.
             if project_id and final_message and final_message.strip():
                 try:
                     from core.project_memory_consolidation import (
-                        maybe_initialize_project_memory,
+                        maybe_auto_maintain_project_memory,
                     )
 
                     asyncio.create_task(
-                        maybe_initialize_project_memory(
+                        maybe_auto_maintain_project_memory(
                             project_id, conv_id, query, final_message, model
                         )
                     )
                     logger.info(
-                        "project_memory auto-init scheduled for project=%s conv=%s",
+                        "project_memory auto scheduled for project=%s conv=%s",
                         project_id,
                         conv_id,
                     )
                 except Exception as exc:
                     logger.warning(
-                        "project_memory auto-init scheduling failed: %s", exc
+                        "project_memory auto scheduling failed: %s", exc
                     )
 
     except asyncio.CancelledError:
@@ -199,11 +197,11 @@ async def _run_agent_task(
         if project_id and final_message and final_message.strip():
             try:
                 from core.project_memory_consolidation import (
-                    maybe_initialize_project_memory,
+                    maybe_auto_maintain_project_memory,
                 )
 
                 asyncio.create_task(
-                    maybe_initialize_project_memory(
+                    maybe_auto_maintain_project_memory(
                         project_id, conv_id, query, final_message, model
                     )
                 )
