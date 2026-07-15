@@ -28,16 +28,6 @@ const subscription = graphql`
         output
         runId
       }
-      ... on AutomationSafetyInputBlockedEvent {
-        message
-        runId
-      }
-      ... on AutomationSafetyOutputBlockedEvent {
-        severity
-        reason
-        redactedOutput
-        runId
-      }
       ... on ErrorEvent {
         error
       }
@@ -70,20 +60,6 @@ export function useAutomationRunEvents(runId: string | null, automationId: strin
               text: evt.output ?? s.text,
               streaming: false,
             }));
-            void (async () => {
-              if (automationId) await refreshAutomationRuns(automationId);
-              await refreshAutomationList();
-            })();
-            break;
-          case 'AutomationSafetyInputBlockedEvent':
-            setState((s) => ({...s, text: evt.message, streaming: false}));
-            void (async () => {
-              if (automationId) await refreshAutomationRuns(automationId);
-              await refreshAutomationList();
-            })();
-            break;
-          case 'AutomationSafetyOutputBlockedEvent':
-            setState((s) => ({...s, text: evt.redactedOutput, streaming: false}));
             void (async () => {
               if (automationId) await refreshAutomationRuns(automationId);
               await refreshAutomationList();

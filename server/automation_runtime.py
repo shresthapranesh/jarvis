@@ -25,7 +25,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.agents import DEFAULT_MODEL, build_agent
 from core.log_callback import AgentLogger
 from core.queue import Job, JobQueue
-from core.safety import gate_input, gate_output
 from db import async_session
 from db.models import Automation, AutomationRun
 from db.ops import (
@@ -286,7 +285,6 @@ async def _run_automation_inner(
     conv_id: str | None = None
     try:
         status = "done"
-        notify_status = "done"
 
         if _is_stateful_prompt(auto):
             if await _has_inflight_sibling(auto.id, run_id):
@@ -305,28 +303,8 @@ async def _run_automation_inner(
                 await add_message(session, conv_id, "user", auto.prompt_text or "")
 
         if auto.input_type in ("prompt", "monitor"):
-            model = auto.model or DEFAULT_MODEL
-            rejection = await gate_input(auto.prompt_text or "", model)
-            if rejection:
-                output = rejection
-                status = "blocked"
-                notify_status = "blocked"
-                emit_event(state, "safety_input_blocked", message=rejection, run_id=run_id)
-            else:
-                thread_id = conv_id or f"automation_{run_id}"
-                raw_output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id)
-                gated, output_verdict = await gate_output(raw_output, model)
-                output = gated
-                if output_verdict:
-                    status = "blocked"
-                    notify_status = "blocked"
-                    emit_event(
-                        state, "safety_output_blocked",
-                        severity=output_verdict.severity,
-                        reason=output_verdict.reason,
-                        redacted_output=gated,
-                        run_id=run_id,
-                    )
+            thread_id = conv_id or f"automation_{run_id}"
+            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id)
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":
@@ -342,11 +320,7 @@ async def _run_automation_inner(
             final_status = "stopped"
             emit_event(state, "stopped", output=output, run_id=run_id)
         else:
-            if (
-                auto.input_type == "monitor"
-                and status == "done"
-                and _monitor_reported_no_change(output)
-            ):
+            if auto.input_type == "monitor" and _monitor_reported_no_change(output):
                 status = "no_change"
             async with async_session() as session:
                 await finish_automation_run(session, run_id, status, output, None)
@@ -354,14 +328,13 @@ async def _run_automation_inner(
                 if status != "no_change":
                     await send_notifications(
                         session, auto.notifications,
-                        status=notify_status,
+                        status="done",
                         title=auto.name,
                         body=output or "",
                     )
             if conv_id:
                 # "no_change" is a run status, not a chat message status.
-                msg_status = "blocked" if status == "blocked" else "done"
-                await _persist_stateful_message(conv_id, "assistant", output or "", msg_status)
+                await _persist_stateful_message(conv_id, "assistant", output or "", "done")
             final_status = status
             emit_event(state, "done", output=output, run_id=run_id)
 

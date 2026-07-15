@@ -27,17 +27,17 @@ function SpinnerIcon() {
 }
 
 import {describeStep, getStepPreview} from '../lib/steps';
-import type {SafetyBlock, WorkerInfo} from '../hooks/useTaskEvents';
+import type {WorkerInfo} from '../hooks/useTaskEvents';
 import type {Message, Step} from '../lib/types';
 import {WorkerPanel} from './WorkerPanel';
 
-function SafetyBanner({block}: {block: SafetyBlock}) {
-  const layerLabel = block.layer === 'input' ? 'Input blocked' : 'Output redacted';
-  const sev = block.severity ? ` · ${block.severity}` : '';
+// Rendering for historical messages persisted with status "blocked" by the
+// old safety gates (feature removed; rows may still exist in the DB).
+function SafetyBanner({layer}: {layer: 'input' | 'output'}) {
+  const layerLabel = layer === 'input' ? 'Input blocked' : 'Output redacted';
   return (
-    <div className={`safety-banner safety-banner--${block.layer}`}>
-      <span className="safety-banner__label">⚠ {layerLabel}{sev}</span>
-      {block.reason && <span className="safety-banner__reason">{block.reason}</span>}
+    <div className={`safety-banner safety-banner--${layer}`}>
+      <span className="safety-banner__label">⚠ {layerLabel}</span>
     </div>
   );
 }
@@ -193,11 +193,10 @@ interface StreamingBubbleProps {
   thinkingText: string;
   steps: Step[];
   workers?: WorkerInfo[];
-  safetyBlock?: SafetyBlock | null;
   onShowSteps?: (steps: Step[]) => void;
 }
 
-export function StreamingBubble({text, thinkingText, steps, workers, safetyBlock, onShowSteps}: StreamingBubbleProps) {
+export function StreamingBubble({text, thinkingText, steps, workers, onShowSteps}: StreamingBubbleProps) {
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
@@ -229,12 +228,11 @@ export function StreamingBubble({text, thinkingText, steps, workers, safetyBlock
 
   return (
     <div className="turn">
-      {safetyBlock && <SafetyBanner block={safetyBlock} />}
       {workers && workers.length > 0 && <WorkerPanel workers={workers} />}
       {text ? (
-        <div className={`agent-bubble streaming${safetyBlock ? ' agent-bubble--blocked' : ''}`}>
+        <div className="agent-bubble streaming">
           <span dangerouslySetInnerHTML={{__html: marked.parse(text) as string}} />
-          {!safetyBlock && <span className="cursor" />}
+          <span className="cursor" />
         </div>
       ) : (
         <div className="working-widget">
@@ -365,16 +363,12 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
 
   const html = marked.parse(message.content) as string;
   const blocked = message.status === 'blocked';
-  // Persisted blocks have no streaming-side reason payload; the bubble
-  // content itself carries the rejection/redaction text. Infer the layer
-  // from the content prefix so users still see which gate fired.
-  const persistedBlock: SafetyBlock | null = blocked
-    ? {layer: message.content.startsWith('[OUTPUT REDACTED') ? 'output' : 'input'}
-    : null;
 
   return (
     <div className="turn">
-      {persistedBlock && <SafetyBanner block={persistedBlock} />}
+      {blocked && (
+        <SafetyBanner layer={message.content.startsWith('[OUTPUT REDACTED') ? 'output' : 'input'} />
+      )}
       <div
         className={`agent-bubble${blocked ? ' agent-bubble--blocked' : ''}`}
         dangerouslySetInnerHTML={{__html: html}}

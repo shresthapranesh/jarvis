@@ -16,7 +16,6 @@ import discord
 if TYPE_CHECKING:
     from discord.abc import MessageableChannel
 
-from core.safety import gate_input, gate_output
 from core.schemas import AttachmentIn
 from core.state import (
     TaskState,
@@ -144,15 +143,6 @@ async def _dispatch(
 ) -> None:
     """Create DB records, start the agent task, and kick off streaming."""
     loading_task = asyncio.create_task(_loading_animation(channel))
-    rejection = await gate_input(user_content, model)
-    if rejection:
-        loading_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await loading_task
-        with contextlib.suppress(Exception):
-            await channel.send(rejection[:_MAX_MSG_LEN])
-        return
-
     conv_id = f"discord_{channel.id}"
     async with async_session() as session:
         await get_or_create_conversation(session, conv_id, model, db_user_content[:60], surface="discord")
@@ -163,7 +153,7 @@ async def _dispatch(
         )
 
     task_state = _tasks[task_id]
-    asyncio.create_task(_stream_to_discord(channel, None, task_state, model, loading_task=loading_task, reply_to=reply_to))
+    asyncio.create_task(_stream_to_discord(channel, None, task_state, loading_task=loading_task, reply_to=reply_to))
 
 
 async def _loading_animation(channel: discord.abc.Messageable) -> None:
@@ -177,7 +167,6 @@ async def _stream_to_discord(
     channel: "MessageableChannel",
     placeholder: discord.Message | None,
     state: TaskState,
-    model: str,
     loading_task: asyncio.Task | None = None,
     reply_to: discord.Message | None = None,
 ) -> None:
@@ -220,7 +209,6 @@ async def _stream_to_discord(
             await loading_task
 
     final = accumulated if accumulated else "(no response)"
-    final, _output_verdict = await gate_output(final, model)
     try:
         await render(final)
     except Exception as exc:
@@ -247,18 +235,6 @@ async def _handle_voice(
         placeholder = await _send_reply(target, "⏳ Transcribing...", message)
 
     loading_task = asyncio.create_task(_loading_animation(target))
-    rejection = await gate_input(transcribed, model)
-    if rejection:
-        loading_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await loading_task
-        with contextlib.suppress(Exception):
-            if placeholder is not None:
-                await placeholder.edit(content=rejection[:_MAX_MSG_LEN])
-            else:
-                await _send_reply(target, rejection[:_MAX_MSG_LEN], message)
-        return
-
     conv_id = f"discord_{target.id}"
     async with async_session() as session:
         await get_or_create_conversation(session, conv_id, model, transcribed[:60], surface="discord")
@@ -269,7 +245,7 @@ async def _handle_voice(
 
     task_state = _tasks[task_id]
 
-    asyncio.create_task(_stream_to_discord(target, placeholder, task_state, model, loading_task=loading_task, reply_to=message))
+    asyncio.create_task(_stream_to_discord(target, placeholder, task_state, loading_task=loading_task, reply_to=message))
 
 
 async def _handle_message(client: discord.Client, message: discord.Message) -> None:

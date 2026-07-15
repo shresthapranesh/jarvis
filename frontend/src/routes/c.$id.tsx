@@ -89,7 +89,6 @@ function ConversationPage() {
     todos: liveTodos,
     error,
     pendingInterrupt,
-    safetyBlock,
   } = useTaskEvents(streamTaskId, id);
 
   const queryClient = useQueryClient();
@@ -307,7 +306,6 @@ function ConversationPage() {
         streamingWorkers={isActive ? workers : undefined}
         isStreaming={isActive}
         streamError={error ?? undefined}
-        streamSafetyBlock={isActive ? safetyBlock : null}
         todos={todos}
         bottomRef={bottomRef}
         topRef={topRef}

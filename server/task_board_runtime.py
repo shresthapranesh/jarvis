@@ -21,7 +21,6 @@ from uuid import uuid4
 from core.agents import build_agent
 from core.log_callback import AgentLogger
 from core.queue import Job
-from core.safety import gate_input, gate_output
 from db import async_session
 from db.models import BoardTask
 from db.models import Job as JobRow
@@ -261,34 +260,13 @@ async def _run_board_task_inner(
             )
         if pending_answer:
             prompt = _RESUME_PROMPT.format(title=task.title, answer=pending_answer)
-            gate_text = pending_answer
         else:
             prompt = _compose_task_prompt(task, parents)
-            gate_text = f"{task.title}\n{task.body or ''}"
-
-        rejection = await gate_input(gate_text, model)
-        if rejection:
-            emit_event(state, "safety_input_blocked", message=rejection, run_id=run_id)
-            await _finish_task(
-                task.id, run_id, status="blocked",
-                blocked_reason=f"safety: {rejection}", blocked_kind="safety",
-            )
-            final_status = "blocked"
-            return
 
         async with async_session() as session:
             await add_message(session, conv_id, "user", prompt)
 
-        raw_output = await _run_agent(task, state, conv_id, prompt, model)
-        output, output_verdict = await gate_output(raw_output, model)
-        if output_verdict:
-            emit_event(
-                state, "safety_output_blocked",
-                severity=output_verdict.severity,
-                reason=output_verdict.reason,
-                redacted_output=output,
-                run_id=run_id,
-            )
+        output = await _run_agent(task, state, conv_id, prompt, model)
 
         if state.cancelled:
             await _finish_task(
@@ -299,16 +277,6 @@ async def _run_board_task_inner(
                 await add_message(session, conv_id, "assistant", output or "", status="stopped")
             final_status = "stopped"
             emit_event(state, "stopped", output=output, run_id=run_id)
-            return
-
-        if output_verdict:
-            await _finish_task(
-                task.id, run_id, status="blocked", summary=output,
-                blocked_reason=f"safety: {output_verdict.reason}", blocked_kind="safety",
-            )
-            async with async_session() as session:
-                await add_message(session, conv_id, "assistant", output or "", status="blocked")
-            final_status = "blocked"
             return
 
         # The agent may have already set a terminal status via

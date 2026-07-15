@@ -290,12 +290,6 @@ async def _process_chunk(
 
     if mode == "messages":
         token, metadata = data
-        # Drop tokens emitted by the safety judge — its LLM call inherits the
-        # parent agent's callbacks via contextvars, so its JSON verdict /
-        # thinking blocks would otherwise leak into the user-visible stream.
-        tags = (metadata or {}).get("tags") or []
-        if "safety_judge" in tags:
-            return False
         is_ai = getattr(token, "type", "") in ("ai", "AIMessageChunk")
         if not is_ai or not hasattr(token, "content"):
             return False
@@ -381,19 +375,6 @@ async def _process_chunk(
         elif event_type == "todos_updated":
             coalescer.flush_all()
             emit_event(state, "todos_updated", todos=data.get("todos", []), source=source)
-        elif event_type in ("safety_review_start", "safety_review_passed", "safety_review_blocked"):
-            # Surface the judge's activity as a step so the UI sidebar shows it
-            # alongside the model and tool nodes. Payload mirrors what
-            # `_extract_step_data` would produce for a real node.
-            coalescer.flush_all()
-            payload = {k: v for k, v in data.items() if k != "type"}
-            emit_event(
-                state, "step",
-                node=event_type,
-                source=source,
-                subagent=subagent,
-                data=json.dumps(payload),
-            )
         return False
 
     if mode == "updates":

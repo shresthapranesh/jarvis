@@ -1,4 +1,4 @@
-import type {SafetyBlock, WorkerInfo} from '../hooks/useTaskEvents';
+import type {WorkerInfo} from '../hooks/useTaskEvents';
 import type {Message, Step, TodoItem} from '../lib/types';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
 import {TodoList} from './TodoList';
@@ -11,7 +11,6 @@ interface Props {
   streamingWorkers?: WorkerInfo[];
   isStreaming?: boolean;
   streamError?: string;
-  streamSafetyBlock?: SafetyBlock | null;
   todos?: TodoItem[];
   bottomRef: React.RefObject<HTMLDivElement | null>;
   topRef?: React.RefObject<HTMLDivElement | null>;
@@ -28,7 +27,6 @@ export function MessageThread({
   streamingWorkers,
   isStreaming,
   streamError,
-  streamSafetyBlock,
   todos,
   bottomRef,
   topRef,
@@ -56,7 +54,6 @@ export function MessageThread({
           thinkingText={streamingThinkingText ?? ''}
           steps={streamingSteps ?? []}
           workers={streamingWorkers ?? []}
-          safetyBlock={streamSafetyBlock ?? null}
           onShowSteps={onShowSteps}
         />
       )}

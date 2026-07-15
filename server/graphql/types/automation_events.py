@@ -27,27 +27,11 @@ class AutomationStoppedEvent:
     run_id: str
 
 
-@strawberry.type
-class AutomationSafetyInputBlockedEvent:
-    message: str
-    run_id: str
-
-
-@strawberry.type
-class AutomationSafetyOutputBlockedEvent:
-    severity: str
-    reason: str
-    redacted_output: str
-    run_id: str
-
-
 AutomationEvent = Annotated[
     Union[
         TokenEvent,
         AutomationDoneEvent,
         AutomationStoppedEvent,
-        AutomationSafetyInputBlockedEvent,
-        AutomationSafetyOutputBlockedEvent,
         ErrorEvent,
     ],
     strawberry.union("AutomationEvent"),
@@ -78,18 +62,6 @@ def coerce_automation_event(raw: dict) -> AutomationEvent | None:
     if event_name == "stopped":
         return AutomationStoppedEvent(
             output=data.get("output"),
-            run_id=data.get("run_id", ""),
-        )
-    if event_name == "safety_input_blocked":
-        return AutomationSafetyInputBlockedEvent(
-            message=data.get("message", ""),
-            run_id=data.get("run_id", ""),
-        )
-    if event_name == "safety_output_blocked":
-        return AutomationSafetyOutputBlockedEvent(
-            severity=data.get("severity", ""),
-            reason=data.get("reason", ""),
-            redacted_output=data.get("redacted_output", ""),
             run_id=data.get("run_id", ""),
         )
     if event_name == "error":

@@ -29,7 +29,6 @@ from core.agents import build_agent, prefetch_retrieval
 from core.config import get_config
 from core.log_callback import AgentLogger, UsageAccumulator
 from core.queue import Job, JobQueue
-from core.safety import gate_input, gate_output
 from core.schemas import AttachmentIn
 from core.state import (
     TaskState,
@@ -76,31 +75,15 @@ async def _run_agent_task(
         )
 
     try:
-        # Input gate — judge the user's prompt before spinning up the agent.
-        # Surface a step immediately so the activity sidebar shows feedback
-        # while the judge runs (a cold Bedrock connection can take ~60s).
-        # The gate must resolve before the agent loop starts, but everything
-        # else in turn setup is independent of its verdict — so message
-        # content (attachment extraction / doc indexing), the project lookup,
-        # and the turn's memory+skill retrieval all run concurrently with it
-        # instead of stacking their latencies after it.
-        emit_event(state, "step", node="safety", source="main", data="Reviewing input")
+        # Turn setup — message content (attachment extraction / doc indexing),
+        # the project lookup, and the turn's memory+skill retrieval are
+        # independent of each other, so they run concurrently instead of
+        # stacking their latencies.
         user_msg_id = str(uuid4())
         store = get_store()
         prefetch_retrieval(store, query, user_msg_id)
-        gate_task = asyncio.create_task(gate_input(query, model))
         content_task = asyncio.create_task(_build_message_content(query, attachments, model))
         project_task = asyncio.create_task(_resolve_project_id(conv_id))
-        rejection = await gate_task
-        if rejection:
-            for t in (content_task, project_task):
-                t.cancel()
-            await asyncio.gather(content_task, project_task, return_exceptions=True)
-            await finalize(rejection, "blocked")
-            status = "blocked"
-            emit_event(state, "safety_input_blocked", message=rejection, conversation_id=conv_id)
-            emit_event(state, "done", message=rejection, conversation_id=conv_id)
-            return
 
         content = await content_task
 
@@ -164,23 +147,13 @@ async def _run_agent_task(
         coalescer.flush_all()
         final_message = "".join(accumulated)
         if state.cancelled:
-            # Cancelled mid-run — partial output is non-final; skip the gate.
             await finalize(final_message, "stopped")
             status = "stopped"
             emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
         else:
-            persisted, output_verdict = await gate_output(final_message, model)
-            status = "blocked" if output_verdict else "done"
-            await finalize(persisted, status)
-            if output_verdict:
-                emit_event(
-                    state, "safety_output_blocked",
-                    severity=output_verdict.severity,
-                    reason=output_verdict.reason,
-                    redacted_message=persisted,
-                    conversation_id=conv_id,
-                )
-            emit_event(state, "done", message=persisted, conversation_id=conv_id)
+            status = "done"
+            await finalize(final_message, status)
+            emit_event(state, "done", message=final_message, conversation_id=conv_id)
 
     except asyncio.CancelledError:
         coalescer.flush_all()
@@ -192,18 +165,9 @@ async def _run_agent_task(
     except GraphRecursionError:
         coalescer.flush_all()
         final_message = "".join(accumulated) or "(agent reached iteration limit)"
-        persisted, output_verdict = await gate_output(final_message, model)
-        status = "blocked" if output_verdict else "done"
-        await finalize(persisted, status)
-        if output_verdict:
-            emit_event(
-                state, "safety_output_blocked",
-                severity=output_verdict.severity,
-                reason=output_verdict.reason,
-                redacted_message=persisted,
-                conversation_id=conv_id,
-            )
-        emit_event(state, "done", message=persisted, conversation_id=conv_id)
+        status = "done"
+        await finalize(final_message, status)
+        emit_event(state, "done", message=final_message, conversation_id=conv_id)
 
     except BaseException as exc:
         coalescer.flush_all()

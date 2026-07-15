@@ -198,9 +198,8 @@ class UsageAccumulator(BaseCallbackHandler):
 
     Attach a fresh instance per agent invocation alongside ``AgentLogger``;
     callbacks propagate to child runnables, so worker/subagent calls are
-    included. Safety-judge calls (tagged ``safety_judge``) are excluded so
-    the totals reflect only the agent's own work. Input tokens count the
-    full context sent on each call, so per-message totals grow with history.
+    included. Input tokens count the full context sent on each call, so
+    per-message totals grow with history.
     """
 
     def __init__(self) -> None:
@@ -220,8 +219,6 @@ class UsageAccumulator(BaseCallbackHandler):
         tags: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
-        if tags and "safety_judge" in tags:
-            return
         found = False
         for gen_list in response.generations:
             for gen in gen_list:

@@ -17,12 +17,6 @@ export interface BrowserStep {
   at: string;
 }
 
-export interface SafetyBlock {
-  layer: 'input' | 'output';
-  severity?: 'low' | 'medium' | 'high';
-  reason?: string;
-}
-
 // Live state of one spawned worker, accumulated from worker_* events.
 // Keyed by idx (1-based); a later spawn_workers batch in the same turn
 // reuses idxs and overwrites the previous batch's cards.
@@ -51,7 +45,6 @@ interface StreamState {
   todos: TodoItem[] | null;
   error: string | null;
   pendingInterrupt: {id: string; question: string} | null;
-  safetyBlock: SafetyBlock | null;
 }
 
 const EMPTY_STATE: StreamState = {
@@ -65,7 +58,6 @@ const EMPTY_STATE: StreamState = {
   todos: null,
   error: null,
   pendingInterrupt: null,
-  safetyBlock: null,
 };
 
 function upsertWorker(workers: WorkerInfo[], next: WorkerInfo): WorkerInfo[] {
@@ -174,14 +166,6 @@ const taskEventsSubscription = graphql`
       }
       ... on InterruptResolvedEvent {
         interruptId
-      }
-      ... on SafetyInputBlockedEvent {
-        message
-      }
-      ... on SafetyOutputBlockedEvent {
-        severity
-        reason
-        redactedMessage
       }
       ... on DoneEvent {
         message
@@ -372,20 +356,6 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             setState((s) =>
               s.pendingInterrupt?.id === evt.interruptId ? {...s, pendingInterrupt: null} : s,
             );
-            break;
-          case 'SafetyInputBlockedEvent':
-            setState((s) => ({...s, safetyBlock: {layer: 'input'}, text: evt.message}));
-            break;
-          case 'SafetyOutputBlockedEvent':
-            setState((s) => ({
-              ...s,
-              safetyBlock: {
-                layer: 'output',
-                severity: evt.severity as SafetyBlock['severity'],
-                reason: evt.reason,
-              },
-              text: evt.redactedMessage,
-            }));
             break;
           case 'DoneEvent':
           case 'StoppedEvent':

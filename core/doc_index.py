@@ -43,7 +43,7 @@ _EMBED_BATCH = 64
 _READ_WINDOW_CHARS = 6000
 
 # Process-wide override, set from the `embedding.model` config row by the
-# server lifespan (same pattern as safety.configure_judge_model).
+# server lifespan.
 _embedding_model_override: str | None = None
 _embedder_cache: dict[str, Any] = {}
 

@@ -50,7 +50,7 @@ type AutomationDoneEvent {
   runId: String!
 }
 
-union AutomationEvent = TokenEvent | AutomationDoneEvent | AutomationStoppedEvent | AutomationSafetyInputBlockedEvent | AutomationSafetyOutputBlockedEvent | ErrorEvent
+union AutomationEvent = TokenEvent | AutomationDoneEvent | AutomationStoppedEvent | ErrorEvent
 
 input AutomationInput {
   name: String!
@@ -79,18 +79,6 @@ type AutomationRun implements Node {
   error: String
   startedAt: DateTime!
   finishedAt: DateTime
-}
-
-type AutomationSafetyInputBlockedEvent {
-  message: String!
-  runId: String!
-}
-
-type AutomationSafetyOutputBlockedEvent {
-  severity: String!
-  reason: String!
-  redactedOutput: String!
-  runId: String!
 }
 
 type AutomationStoppedEvent {
@@ -148,7 +136,7 @@ type BrowserStepEvent {
   source: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | SafetyInputBlockedEvent | SafetyOutputBlockedEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
   """The Globally Unique ID of this object"""
@@ -400,18 +388,6 @@ type RunningTask {
   hasInterrupt: Boolean!
   cancelled: Boolean!
   done: Boolean!
-}
-
-type SafetyInputBlockedEvent {
-  message: String!
-  conversationId: String!
-}
-
-type SafetyOutputBlockedEvent {
-  severity: String!
-  reason: String!
-  redactedMessage: String!
-  conversationId: String!
 }
 
 type Skill implements Node {

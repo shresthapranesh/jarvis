@@ -98,20 +98,6 @@ class InterruptResolvedEvent:
 
 
 @strawberry.type
-class SafetyInputBlockedEvent:
-    message: str
-    conversation_id: str
-
-
-@strawberry.type
-class SafetyOutputBlockedEvent:
-    severity: str
-    reason: str
-    redacted_message: str
-    conversation_id: str
-
-
-@strawberry.type
 class DoneEvent:
     message: str
     conversation_id: str
@@ -142,8 +128,6 @@ ChatEvent = Annotated[
         TodosUpdatedEvent,
         InterruptEvent,
         InterruptResolvedEvent,
-        SafetyInputBlockedEvent,
-        SafetyOutputBlockedEvent,
         DoneEvent,
         StoppedEvent,
         ErrorEvent,
@@ -243,18 +227,6 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
         )
     if event_name == "interrupt_resolved":
         return InterruptResolvedEvent(interrupt_id=data.get("interrupt_id", ""))
-    if event_name == "safety_input_blocked":
-        return SafetyInputBlockedEvent(
-            message=data.get("message", ""),
-            conversation_id=data.get("conversation_id", ""),
-        )
-    if event_name == "safety_output_blocked":
-        return SafetyOutputBlockedEvent(
-            severity=data.get("severity", ""),
-            reason=data.get("reason", ""),
-            redacted_message=data.get("redacted_message", ""),
-            conversation_id=data.get("conversation_id", ""),
-        )
     if event_name == "done":
         return DoneEvent(
             message=data.get("message", ""),
