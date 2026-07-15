@@ -23,11 +23,11 @@ from core.doc_index import configure_embedding_model
 from core.log_setup import get_broadcast_handler, setup_logging
 from core.model_catalog import load_custom_models
 from core.queue import SqliteJobQueue, Worker
-from core.safety import configure_judge_model
+from core.safety import configure_judge_model, warm_judge
 
 from core import state
 from db import async_session, init_db
-from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
+from db.ops import cleanup_zombie_running_rows, get_custom_models, get_default_model, get_setting, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
 from .routes_documents import router as documents_router
@@ -58,9 +58,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         configure_judge_model(await get_setting(session, "safety.judge_model"))
         configure_embedding_model(await get_setting(session, "embedding.model"))
         load_custom_models(await get_custom_models(session))
+        default_model = await get_default_model(session)
         automations = await list_enabled_scheduled_automations(session)
         for auto in automations:
             _register_scheduler_job(auto)
+    # Warm the safety judge in the background so the first real turn doesn't
+    # pay its cold-start cost (~60s on a cold Bedrock connection).
+    _judge_warm_task = asyncio.create_task(warm_judge(default_model))
     async with (
         AsyncSqliteSaver.from_conn_string(get_config().checkpoints_db) as cp,
         AsyncSqliteStore.from_conn_string(get_config().checkpoints_db) as store,
@@ -131,6 +135,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _reaper_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await _reaper_task
+
+        _judge_warm_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _judge_warm_task
 
         # Tear down any live run_cell kernels (workers are already stopped).
         from core.kernels import get_kernel_registry

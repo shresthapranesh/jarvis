@@ -21,10 +21,11 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from core.agents import build_agent
+from core.agents import build_agent, prefetch_retrieval
 from core.config import get_config
 from core.log_callback import AgentLogger, UsageAccumulator
 from core.queue import Job, JobQueue
@@ -78,26 +79,33 @@ async def _run_agent_task(
         # Input gate — judge the user's prompt before spinning up the agent.
         # Surface a step immediately so the activity sidebar shows feedback
         # while the judge runs (a cold Bedrock connection can take ~60s).
+        # The gate must resolve before the agent loop starts, but everything
+        # else in turn setup is independent of its verdict — so message
+        # content (attachment extraction / doc indexing), the project lookup,
+        # and the turn's memory+skill retrieval all run concurrently with it
+        # instead of stacking their latencies after it.
         emit_event(state, "step", node="safety", source="main", data="Reviewing input")
-        rejection = await gate_input(query, model)
+        user_msg_id = str(uuid4())
+        store = get_store()
+        prefetch_retrieval(store, query, user_msg_id)
+        gate_task = asyncio.create_task(gate_input(query, model))
+        content_task = asyncio.create_task(_build_message_content(query, attachments, model))
+        project_task = asyncio.create_task(_resolve_project_id(conv_id))
+        rejection = await gate_task
         if rejection:
+            for t in (content_task, project_task):
+                t.cancel()
+            await asyncio.gather(content_task, project_task, return_exceptions=True)
             await finalize(rejection, "blocked")
             status = "blocked"
             emit_event(state, "safety_input_blocked", message=rejection, conversation_id=conv_id)
             emit_event(state, "done", message=rejection, conversation_id=conv_id)
             return
 
-        content = await _build_message_content(query, attachments, model)
+        content = await content_task
 
-        agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
-        # Project membership is resolved fresh at run start (not baked into the
-        # job payload) so bots and post-restart resumes need no payload changes
-        # and add/remove-from-project applies on the next run.
-        project_id: str | None = None
-        async with async_session() as session:
-            conv_row = await session.get(Conversation, conv_id)
-            if conv_row is not None:
-                project_id = conv_row.project_id
+        agent = build_agent(model, checkpointer=get_async_checkpointer(), store=store)
+        project_id = await project_task
         configurable: dict[str, Any] = {"thread_id": conv_id, "conversation_id": conv_id}
         if project_id:
             configurable["project_id"] = project_id
@@ -113,7 +121,10 @@ async def _run_agent_task(
         # in the activity sidebar. Passing todos=[] overwrites the LastValue
         # channel (correctness on reload); the explicit event clears live
         # subscribers immediately, since a channel write alone dispatches none.
-        stream_input: Any = {"messages": [{"role": "user", "content": content}], "todos": []}
+        # The explicit id matches the prefetch_retrieval key above — add_messages
+        # preserves provided ids, so the graph's retrieval-cache lookup hits the
+        # task started before the gate resolved.
+        stream_input: Any = {"messages": [HumanMessage(content=content, id=user_msg_id)], "todos": []}
         emit_event(state, "todos_updated", todos=[], source="main")
 
         while True:
@@ -219,6 +230,15 @@ async def _run_agent_task(
         # "stopped" state for a few seconds before the row vanishes.
         loop = asyncio.get_running_loop()
         loop.call_later(5.0, lambda tid=task_id: _tasks.pop(tid, None))
+
+
+async def _resolve_project_id(conv_id: str) -> str | None:
+    """Project membership, resolved fresh at run start (not baked into the
+    job payload) so bots and post-restart resumes need no payload changes
+    and add/remove-from-project applies on the next run."""
+    async with async_session() as session:
+        conv_row = await session.get(Conversation, conv_id)
+        return conv_row.project_id if conv_row is not None else None
 
 
 # ── Queue handler ────────────────────────────────────────────────────────────

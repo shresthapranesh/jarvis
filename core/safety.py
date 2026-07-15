@@ -163,6 +163,24 @@ async def _judge_text(
         return SafetyVerdict(block=False, severity="low", reason="Judge unavailable; fail-open.")
 
 
+async def warm_judge(default_model: str) -> None:
+    """Pay the judge's cold-start cost (client build, connection handshake,
+    first inference) at server startup instead of on the first real turn.
+
+    A cold Bedrock judge can take ~60s on its first call; warming it in the
+    lifespan means that latency never lands in front of a user's message.
+    Uses the same path as gate_input, so the resolved judge (override or the
+    default agent model) ends up in `_judge_cache` with a live connection.
+    Fire-and-forget: failures are logged, never raised — the per-turn gates
+    have their own fail-open handling.
+    """
+    try:
+        await review_input("warm-up ping", default_model)
+        logger.info("safety judge warmed (model=%s)", _effective_model(default_model))
+    except Exception as exc:
+        logger.warning("safety judge warm-up failed: %s", exc)
+
+
 def _emit(event_type: str, **fields) -> None:
     try:
         writer = get_stream_writer()

@@ -237,6 +237,17 @@ def message_text(m: AnyMessage) -> str:
     return ""
 
 
+def estimate_tokens_heuristic(messages: list[AnyMessage]) -> int:
+    """Zero-cost token approximation: 4 chars per token over flattened text.
+
+    Roughly correct for English/code. Used as a cheap pre-filter so the
+    accurate count (which for several providers is a count-tokens API call —
+    a network round-trip per agent-loop iteration) only runs when the history
+    is actually near the summarization threshold.
+    """
+    return sum(len(message_text(m)) for m in messages) // 4
+
+
 def estimate_tokens(messages: list[AnyMessage], llm) -> int:
     """Best-effort token count, falling back to a chars-per-token heuristic.
 
@@ -248,7 +259,7 @@ def estimate_tokens(messages: list[AnyMessage], llm) -> int:
     try:
         return cast(Any, llm).get_num_tokens_from_messages(messages)
     except Exception:
-        return sum(len(message_text(m)) for m in messages) // 4
+        return estimate_tokens_heuristic(messages)
 
 
 def _make_system_message(static_text: str, volatile_text: str, cache: bool) -> SystemMessage:

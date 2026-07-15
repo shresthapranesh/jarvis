@@ -20,7 +20,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
-from .messages import estimate_tokens, message_text
+from .messages import estimate_tokens, estimate_tokens_heuristic, message_text
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,19 @@ async def maybe_summarize(
     the event loop.
     """
     threshold = summarize_threshold()
+    # Cheap pre-filter: the accurate count below can be a count-tokens API
+    # call (a network round-trip) or a full tokenizer pass over the history,
+    # and this check runs on EVERY agent-loop iteration. Only pay for the
+    # accurate count when the heuristic says we're within 20% of the
+    # threshold — the margin absorbs the heuristic's underestimate on
+    # token-dense content (CJK, base64, dense markup).
+    heuristic = estimate_tokens_heuristic(messages)
+    if heuristic <= int(threshold * 0.8):
+        logger.debug(
+            "summarize check: ~%d tokens / %d msgs (heuristic, under %d threshold) — skip",
+            heuristic, len(messages), threshold,
+        )
+        return None
     token_count = estimate_tokens(messages, llm)
     if token_count <= threshold:
         logger.debug(

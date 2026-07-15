@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3 as _sqlite3
 from collections import OrderedDict
@@ -202,11 +203,12 @@ def _latest_user_text(messages: list[AnyMessage]) -> str:
     return ""
 
 
-async def _memory_volatile_parts(store, messages: list[AnyMessage]) -> list[str]:
+async def _memory_volatile_parts(store, query: str) -> list[str]:
     """Build the memory section(s) for the system message's volatile suffix.
 
     With an embedder: always-on `core` items + the top-k `fact` items retrieved
-    for the latest user turn. Without one: today's single AGENTS.md blob.
+    for `query` (the latest user turn's text). Without one: today's single
+    AGENTS.md blob.
     """
     if not embeddings_available():
         blob = await _load_memory_from_store(store) if store is not None else _load_memory_from_disk()
@@ -228,7 +230,6 @@ async def _memory_volatile_parts(store, messages: list[AnyMessage]) -> list[str]
     core = await load_core()
     if core:
         parts.append(f"## Agent Memory\n\n{core}")
-    query = _latest_user_text(messages)
     if query:
         try:
             hits = await search_memory(query, k=6)
@@ -241,7 +242,7 @@ async def _memory_volatile_parts(store, messages: list[AnyMessage]) -> list[str]
     return parts
 
 
-async def _skills_volatile_parts(messages: list[AnyMessage]) -> list[str]:
+async def _skills_volatile_parts(query: str) -> list[str]:
     """Build the `## Available Skills` section for the volatile suffix.
 
     Surfaces only enabled skills' name + description (the routing key), narrowed
@@ -251,7 +252,6 @@ async def _skills_volatile_parts(messages: list[AnyMessage]) -> list[str]:
     `use_skill(name)`. Returns [] when there are no skills, so nothing about
     skills appears in the prompt until at least one exists.
     """
-    query = _latest_user_text(messages)
     try:
         catalog = await skill_catalog(query)
     except Exception as exc:
@@ -314,8 +314,50 @@ async def _project_volatile_parts(project_id: str | None) -> list[str]:
 # iteration burns embedding calls on identical results. Keyed by the latest
 # human message's id (unique per turn — add_messages assigns UUIDs). Items
 # written mid-turn (remember / manage_skills) surface on the next user turn.
+#
+# The cache holds asyncio.Tasks rather than values so a trigger can *prefetch*
+# the retrieval (overlapping the embedding round-trips with the input safety
+# gate — see prefetch_retrieval) and the graph's first iteration awaits the
+# same in-flight task instead of racing it with a duplicate computation.
 _RETRIEVAL_CACHE_MAX = 256
-_retrieval_cache: OrderedDict[str, list[str]] = OrderedDict()
+_retrieval_cache: "OrderedDict[str, asyncio.Task[list[str]]]" = OrderedDict()
+
+
+async def _compute_retrieval(store, query: str) -> list[str]:
+    """Memory + skills sections, fetched concurrently (two embedding calls)."""
+    try:
+        mem_parts, skill_parts = await asyncio.gather(
+            _memory_volatile_parts(store, query),
+            _skills_volatile_parts(query),
+        )
+        return mem_parts + skill_parts
+    except Exception as exc:
+        # Never let a cached failed task poison every iteration of the turn —
+        # degrade to no retrieved context, matching the per-part fallbacks.
+        logger.warning("retrieval context failed: %s", exc)
+        return []
+
+
+def _get_retrieval_task(store, query: str, key: str) -> "asyncio.Task[list[str]]":
+    task = _retrieval_cache.get(key)
+    if task is not None:
+        _retrieval_cache.move_to_end(key)
+        return task
+    task = asyncio.create_task(_compute_retrieval(store, query))
+    _retrieval_cache[key] = task
+    while len(_retrieval_cache) > _RETRIEVAL_CACHE_MAX:
+        _retrieval_cache.popitem(last=False)
+    return task
+
+
+def prefetch_retrieval(store, query: str, key: str) -> None:
+    """Kick off this turn's memory+skill retrieval without awaiting it.
+
+    Called by triggers (chat_runtime) with the id they will stamp on the
+    user's HumanMessage, so the work overlaps the input safety gate and the
+    graph's first `_retrieved_volatile_parts` call finds it already in flight.
+    """
+    _get_retrieval_task(store, query, key)
 
 
 async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[str]:
@@ -325,16 +367,10 @@ async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[s
         if isinstance(m, HumanMessage):
             key = m.id
             break
-    if key is not None and key in _retrieval_cache:
-        _retrieval_cache.move_to_end(key)
-        return list(_retrieval_cache[key])
-    parts = await _memory_volatile_parts(store, messages)
-    parts += await _skills_volatile_parts(messages)
-    if key is not None:
-        _retrieval_cache[key] = list(parts)
-        while len(_retrieval_cache) > _RETRIEVAL_CACHE_MAX:
-            _retrieval_cache.popitem(last=False)
-    return parts
+    query = _latest_user_text(messages)
+    if key is None:
+        return await _compute_retrieval(store, query)
+    return list(await _get_retrieval_task(store, query, key))
 
 
 # ── Checkpointer ─────────────────────────────────────────────────────────────
