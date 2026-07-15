@@ -293,18 +293,30 @@ async def _project_volatile_parts(project_id: str | None) -> list[str]:
     if proj.description and proj.description.strip():
         header += f"{proj.description.strip()}\n\n"
     header += (
-        "This conversation belongs to a project; all of the project's "
-        "conversations share the instructions and memory below. When you learn "
-        "something durable that every conversation in this project should know "
-        "— a decision, a convention, key state — save it with "
-        '`project_memory(action="append", content=...)` (or `"write"` to '
-        "condense/reorganize the whole memory)."
+        f"This conversation is part of project '{proj.name}'. All conversations in this project share the "
+        "instructions and memory below.\n\n"
+        "**CRITICAL — You MUST actively maintain project memory:**\n"
+        "- When you learn a durable fact this project will need later, IMMEDIATELY save it with "
+        '`project_memory(action="append", content="...")`. Don\'t wait to be asked.\n'
+        "- What to save: tech stack & versions, architecture decisions, coding conventions, important file "
+        "paths/modules, API contracts, user preferences specific to this project, current goals/status/remaining work.\n"
+        "- If project memory is empty, initialize it on the first significant turn with key facts from this conversation.\n"
+        "- Before finishing ANY task, ask yourself: does project memory need updating? If so, update it.\n"
+        "- Prefer `project_memory` for project-specific facts; use `remember` ONLY for global cross-project user preferences.\n"
+        "- If existing memory is outdated/conflicting, use `project_memory(action=\"write\", content=...)` to replace "
+        "with a condensed, correct version.\n"
+        "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — treat as signal to initialize)."
     )
     parts = [header]
     if proj.instructions.strip():
         parts.append(f"### Project Instructions\n\n{proj.instructions.strip()}")
     if proj.memory.strip():
         parts.append(f"### Project Memory\n\n{proj.memory.strip()}")
+    else:
+        parts.append(
+            "### Project Memory\n\n(empty — initialize with `project_memory(action=\"append\", content=...)` "
+            "when you learn durable facts like stack, decisions, conventions, or goals)"
+        )
     return parts
 
 
