@@ -66,6 +66,7 @@ async def _run_agent_task(
     coalescer = TokenCoalescer(state)
     usage = UsageAccumulator()
     status = "error"
+    project_id: str | None = None
 
     async def finalize(content: str, final_status: str) -> None:
         await _finalize_message(
@@ -155,6 +156,33 @@ async def _run_agent_task(
             await finalize(final_message, status)
             emit_event(state, "done", message=final_message, conversation_id=conv_id)
 
+            # ── Project memory auto-init (safety net for Phase 1) ────────
+            # If this conversation belongs to a project and its memory is still
+            # empty, the main agent likely forgot to call project_memory.
+            # Fire-and-forget a background LLM that extracts durable facts from
+            # this transcript and initializes the memory. Best-effort, never
+            # blocks the user-visible done event.
+            if project_id and final_message and final_message.strip():
+                try:
+                    from core.project_memory_consolidation import (
+                        maybe_initialize_project_memory,
+                    )
+
+                    asyncio.create_task(
+                        maybe_initialize_project_memory(
+                            project_id, conv_id, query, final_message, model
+                        )
+                    )
+                    logger.info(
+                        "project_memory auto-init scheduled for project=%s conv=%s",
+                        project_id,
+                        conv_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "project_memory auto-init scheduling failed: %s", exc
+                    )
+
     except asyncio.CancelledError:
         coalescer.flush_all()
         final_message = "".join(accumulated)
@@ -168,6 +196,19 @@ async def _run_agent_task(
         status = "done"
         await finalize(final_message, status)
         emit_event(state, "done", message=final_message, conversation_id=conv_id)
+        if project_id and final_message and final_message.strip():
+            try:
+                from core.project_memory_consolidation import (
+                    maybe_initialize_project_memory,
+                )
+
+                asyncio.create_task(
+                    maybe_initialize_project_memory(
+                        project_id, conv_id, query, final_message, model
+                    )
+                )
+            except Exception:
+                pass
 
     except BaseException as exc:
         coalescer.flush_all()
