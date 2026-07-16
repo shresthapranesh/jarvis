@@ -337,12 +337,28 @@ _retrieval_cache: "OrderedDict[str, asyncio.Task[list[str]]]" = OrderedDict()
 
 
 async def _compute_retrieval(store, query: str) -> list[str]:
-    """Memory + skills sections, fetched concurrently (two embedding calls)."""
+    """Memory + skills sections, fetched concurrently (deduplicated via query cache)."""
     try:
         mem_parts, skill_parts = await asyncio.gather(
             _memory_volatile_parts(store, query),
             _skills_volatile_parts(query),
         )
+        # Emit cache stats for /server-logs observability (debug level per-turn,
+        # info level periodically via doc_index itself)
+        try:
+            from core.doc_index import get_query_cache_stats
+
+            stats = get_query_cache_stats()
+            logger.debug(
+                "retrieval done query_len=%d mem_parts=%d skill_parts=%d cache_hit_rate=%.1f%% saved=%d",
+                len(query),
+                len(mem_parts),
+                len(skill_parts),
+                stats["hit_rate"] * 100,
+                stats["saved_calls"],
+            )
+        except Exception:
+            pass
         return mem_parts + skill_parts
     except Exception as exc:
         # Never let a cached failed task poison every iteration of the turn —
