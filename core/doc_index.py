@@ -18,8 +18,11 @@ thousand chunks, where exact search beats any index.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
+from collections import OrderedDict
 from typing import Any
 from uuid import uuid4
 
@@ -41,6 +44,15 @@ _CHUNK_SIZE = 1600   # chars per chunk
 _CHUNK_OVERLAP = 200
 _EMBED_BATCH = 64
 _READ_WINDOW_CHARS = 6000
+
+# ── Query embedding cache (deduplicate + avoid re-embedding same text) ────────
+# Many turns reuse similar queries; memory + skills both embed the same query
+# concurrently. Cache stores numpy vectors keyed by "model::normalized_query"
+# with 1h TTL and 512-entry LRU. Concurrent callers for same key share one Task.
+_QUERY_CACHE_MAX = 512
+_QUERY_CACHE_TTL = 3600  # seconds
+_query_cache: OrderedDict[str, tuple[np.ndarray, float]] = OrderedDict()
+_query_tasks: dict[str, asyncio.Task[np.ndarray | None]] = {}
 
 # Process-wide override, set from the `embedding.model` config row by the
 # server lifespan.
@@ -81,6 +93,101 @@ def get_embedder() -> Any | None:
 
 def embeddings_available() -> bool:
     return get_embedder() is not None
+
+
+# ── Query embedding cache with deduplication ──────────────────────────────────
+
+_TRIVIAL_QUERIES = {
+    "hi", "hello", "hey", "thanks", "thank you", "ty", "ok", "okay", "yes", "no", "sure",
+    "hello there", "hi there", "hey there", "thanks!", "thank you!", "ok thanks",
+}
+
+
+def _is_trivial_query(query: str) -> bool:
+    """Heuristic: greetings / very short small-talk don't need fact retrieval."""
+    q = query.strip().lower()
+    if not q:
+        return True
+    if q in _TRIVIAL_QUERIES:
+        return True
+    if len(q) <= 4:
+        return True
+    # "hi" + punctuation already covered, but also "yo", "sup" etc short
+    return False
+
+
+async def _aembed_query_inner(query: str) -> np.ndarray | None:
+    embedder = get_embedder()
+    if embedder is None:
+        return None
+    try:
+        vec = await embedder.aembed_query(query)
+        return np.asarray(vec, dtype=np.float32)
+    except Exception as exc:
+        logger.warning("query embedding failed: %s", exc)
+        return None
+
+
+async def aembed_query_cached(query: str) -> np.ndarray | None:
+    """Cached, deduplicated query embedding. Returns None if no embedder or on error.
+
+    Keyed by "model::normalized_query". Concurrent callers for same key share
+    one Task. LRU with TTL. Trivial queries bypass embedding (return None) —
+    callers treat None as 'skip fact retrieval, only core memories'.
+    """
+    if _is_trivial_query(query):
+        return None
+
+    normalized = " ".join(query.strip().split())  # collapse whitespace
+    if len(normalized) < 3:
+        return None
+
+    model = _effective_model()
+    cache_key = f"{model}::{normalized}"
+
+    now = time.time()
+
+    # Fast path: cache hit and not expired
+    cached = _query_cache.get(cache_key)
+    if cached is not None:
+        vec, ts = cached
+        if now - ts < _QUERY_CACHE_TTL:
+            _query_cache.move_to_end(cache_key)
+            return vec
+        else:
+            _query_cache.pop(cache_key, None)
+
+    # Deduplicate concurrent in-flight embeddings for same key
+    existing_task = _query_tasks.get(cache_key)
+    if existing_task is not None:
+        try:
+            return await existing_task
+        except Exception:
+            # Task failed, fall through to retry
+            _query_tasks.pop(cache_key, None)
+
+    # Create new task
+    task = asyncio.create_task(_aembed_query_inner(query))
+    _query_tasks[cache_key] = task
+
+    try:
+        vec = await task
+        if vec is not None:
+            _query_cache[cache_key] = (vec, now)
+            while len(_query_cache) > _QUERY_CACHE_MAX:
+                _query_cache.popitem(last=False)
+        return vec
+    finally:
+        _query_tasks.pop(cache_key, None)
+
+
+def get_query_cache_stats() -> dict:
+    return {
+        "size": len(_query_cache),
+        "inflight": len(_query_tasks),
+        "max": _QUERY_CACHE_MAX,
+        "ttl": _QUERY_CACHE_TTL,
+    }
 
 
 # ── Chunking ─────────────────────────────────────────────────────────────────
@@ -166,7 +273,16 @@ async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[di
     if embedder is None:
         raise RuntimeError("no embedding model available (GOOGLE_API_KEY unset?)")
 
-    qvec = np.asarray(await embedder.aembed_query(query), dtype=np.float32)
+    qvec = await aembed_query_cached(query)
+    if qvec is None:
+        # Trivial query or embedding failure — fall back to direct call
+        # (so search_documents tool still works for short queries) or empty?
+        # For doc search, we still want to try embedding even trivial, so direct:
+        try:
+            qvec = np.asarray(await embedder.aembed_query(query), dtype=np.float32)
+        except Exception:
+            raise
+    # qvec is already np array from cache
 
     async with async_session() as session:
         rows = (await session.execute(

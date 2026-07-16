@@ -112,13 +112,16 @@ async def search_skills(query: str, *, k: int, skills: list[Skill]) -> list[dict
     """Top-k enabled `skills` whose description best matches `query`.
 
     Returns ``[{name, description}]`` ordered by cosine similarity. Empty when
-    there is no embedder, the query is blank, or no skill carries a comparable
-    embedding (unembedded skills simply don't surface via vector search).
+    there is no embedder, trivial query, or no comparable embedding.
+    Uses cached query embedding to share work with memory retrieval.
     """
-    embedder = get_embedder()
-    if embedder is None or not query.strip():
+    from core.doc_index import aembed_query_cached
+
+    if not query.strip():
         return []
-    qvec = np.asarray(await embedder.aembed_query(query), dtype=np.float32)
+    qvec = await aembed_query_cached(query)
+    if qvec is None:
+        return []
     qnorm = float(np.linalg.norm(qvec)) or 1.0
 
     scored: list[tuple[float, str, str]] = []
@@ -140,7 +143,13 @@ async def skill_catalog(query: str) -> list[dict]:
     skill; larger ones narrow to the top-K whose descriptions best match
     `query`, falling back to a capped slice if retrieval yields nothing. Bodies
     are never included — the agent pulls those on demand via ``use_skill``.
+    Trivial queries (greetings) return empty to avoid wasteful injection.
     """
+    from core.doc_index import _is_trivial_query
+
+    if _is_trivial_query(query):
+        return []
+
     async with async_session() as session:
         skills = await list_skills(session, enabled_only=True)
     if not skills:

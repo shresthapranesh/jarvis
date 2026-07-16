@@ -63,12 +63,14 @@ async def search_memory(query: str, k: int = 6) -> list[dict]:
     """Top-k `fact` items for `query` by cosine similarity.
 
     Returns ``[{id, text, score}]``. Empty list when no embedder, no fact rows,
-    or every stored embedding mismatches the query model's dimensionality.
+    trivial query (greeting), or every stored embedding mismatches.
+    Uses cached query embedding to deduplicate concurrent memory+skill calls.
     """
-    embedder = get_embedder()
-    if embedder is None:
+    from core.doc_index import aembed_query_cached
+
+    qvec = await aembed_query_cached(query)
+    if qvec is None:
         return []
-    qvec = np.asarray(await embedder.aembed_query(query), dtype=np.float32)
     qnorm = float(np.linalg.norm(qvec)) or 1.0
 
     async with async_session() as session:
