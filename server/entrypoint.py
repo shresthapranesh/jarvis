@@ -34,7 +34,15 @@ from .routes_live import router as live_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
 from .routes_uploads import router as uploads_router
-from core.scheduler import _register_scheduler_job, _scheduler, register_board_dispatch_job, register_kernel_reaper_job, register_memory_consolidation_job, register_staging_cleanup_job
+from core.scheduler import (
+    _register_scheduler_job,
+    _scheduler,
+    register_board_dispatch_job,
+    register_kernel_reaper_job,
+    register_memory_activity_prune_job,
+    register_memory_consolidation_job,
+    register_staging_cleanup_job,
+)
 
 _DIST = pathlib.Path(__file__).resolve().parent.parent / "static" / "dist"
 
@@ -77,6 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         register_staging_cleanup_job()
         register_kernel_reaper_job()
         register_board_dispatch_job()
+        register_memory_activity_prune_job()
 
         _tg_app = None
         _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")

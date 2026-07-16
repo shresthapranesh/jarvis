@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _uuid() -> str:
+    return str(uuid.uuid4())
 
 
 class Base(DeclarativeBase):
@@ -435,6 +440,35 @@ class Memory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class MemoryActivity(Base):
+    """Audit log for when a Memory was surfaced.
+
+    Separate table (not a column on Memory) so we keep history, avoid bumping
+    Memory.updated_at on every read, and can prune independently. Fact-only
+    for v1 to avoid noise from core memories injected every turn.
+    """
+
+    __tablename__ = "memory_activities"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    memory_id: Mapped[str] = mapped_column(
+        String, ForeignKey("memories.id", ondelete="CASCADE"), index=True
+    )
+    conversation_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String, index=True)  # core/fact
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    query: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # truncated 500 chars
+    source: Mapped[str] = mapped_column(String, index=True)  # retrieval | explicit_search | core_injection
+    accessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+    __table_args__ = (
+        Index("ix_mem_act_mem_time", "memory_id", "accessed_at"),
+        Index("ix_mem_act_conv_time", "conversation_id", "accessed_at"),
     )
 
 

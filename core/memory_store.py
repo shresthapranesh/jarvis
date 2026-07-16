@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 import numpy as np
 
@@ -35,7 +36,7 @@ _DEDUP_THRESHOLD = 0.88
 # per turn (trivial queries hit this too). Cap to avoid token bloat.
 _CORE_CACHE_TTL = 30  # seconds
 _CORE_CACHE_MAX_CHARS = 2000
-_core_cache: dict[str, any] = {"text": "", "ts": 0.0, "count": 0}
+_core_cache: dict[str, Any] = {"text": "", "ts": 0.0, "count": 0}
 
 
 def _cosine(a: np.ndarray, anorm: float, b: bytes) -> float | None:
@@ -101,12 +102,19 @@ def get_core_cache_stats() -> dict:
     }
 
 
-async def search_memory(query: str, k: int = 6) -> list[dict]:
+async def search_memory(
+    query: str,
+    k: int = 6,
+    *,
+    conversation_id: str | None = None,
+    source: str = "retrieval",
+) -> list[dict]:
     """Top-k `fact` items for `query` by cosine similarity.
 
     Returns ``[{id, text, score}]``. Empty list when no embedder, no fact rows,
     trivial query (greeting), or every stored embedding mismatches.
     Uses cached query embedding to deduplicate concurrent memory+skill calls.
+    Logs access to memory_activities table fire-and-forget for audit.
     """
     from core.doc_index import aembed_query_cached
 
@@ -127,7 +135,35 @@ async def search_memory(query: str, k: int = 6) -> list[dict]:
             scored.append((score, r.id, r.text))
 
     scored.sort(key=lambda t: t[0], reverse=True)
-    return [{"id": i, "text": t, "score": round(s, 4)} for s, i, t in scored[:k]]
+    result = [{"id": i, "text": t, "score": round(s, 4)} for s, i, t in scored[:k]]
+
+    # Fire-and-forget activity log — track when memories were used
+    if result:
+        try:
+            from core.memory_activity import touch_memories_background
+
+            # Resolve conversation_id from context if not provided (tool path has it via current_ctx)
+            if conversation_id is None:
+                try:
+                    from tools.context import current_ctx
+
+                    conversation_id = current_ctx().conversation_id
+                except Exception:
+                    conversation_id = None
+
+            scores_map = {r["id"]: r["score"] for r in result}
+            touch_memories_background(
+                [r["id"] for r in result],
+                scores=scores_map,
+                query=query,
+                conversation_id=conversation_id,
+                kind="fact",
+                source=source,
+            )
+        except Exception:
+            pass  # best-effort, never break retrieval
+
+    return result
 
 
 async def upsert_memory(text: str, kind: str = "fact") -> str | None:

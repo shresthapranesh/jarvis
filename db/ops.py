@@ -1026,6 +1026,87 @@ async def count_memories(session: AsyncSession) -> int:
     return (await session.execute(select(func.count()).select_from(Memory))).scalar_one()
 
 
+# ── Memory activity (audit log for when memories were surfaced) ───────────────
+
+async def log_memory_activities(
+    session: AsyncSession, activities: list[dict]
+) -> int:
+    """Bulk insert memory activity rows. Each dict: memory_id, conversation_id, kind, score, query, source."""
+    from db.models import MemoryActivity
+
+    if not activities:
+        return 0
+    objs = []
+    for act in activities:
+        objs.append(
+            MemoryActivity(
+                id=str(uuid4()),
+                memory_id=act["memory_id"],
+                conversation_id=act.get("conversation_id"),
+                kind=act.get("kind", "fact"),
+                score=act.get("score"),
+                query=(act.get("query") or "")[:500] if act.get("query") else None,
+                source=act.get("source", "retrieval"),
+            )
+        )
+    session.add_all(objs)
+    await session.commit()
+    return len(objs)
+
+
+async def list_memory_activities(
+    session: AsyncSession, memory_id: str, limit: int = 50
+) -> list:
+    from db.models import MemoryActivity
+
+    q = (
+        select(MemoryActivity)
+        .where(MemoryActivity.memory_id == memory_id)
+        .order_by(MemoryActivity.accessed_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(q)
+    return list(result.scalars().all())
+
+
+async def get_memory_usage_map(
+    session: AsyncSession, memory_ids: list[str] | None = None
+) -> dict[str, dict]:
+    """Return {memory_id: {last_used, count}} for given ids or all if None."""
+    from db.models import MemoryActivity
+
+    q = select(
+        MemoryActivity.memory_id,
+        func.max(MemoryActivity.accessed_at).label("last_used"),
+        func.count().label("cnt"),
+    ).group_by(MemoryActivity.memory_id)
+
+    if memory_ids:
+        q = q.where(MemoryActivity.memory_id.in_(memory_ids))
+
+    rows = (await session.execute(q)).all()
+    return {
+        r.memory_id: {"last_used": r.last_used, "count": r.cnt}
+        for r in rows
+    }
+
+
+async def prune_memory_activities(session: AsyncSession, older_than_days: int = 90) -> int:
+    from datetime import timedelta
+
+    from db.models import MemoryActivity
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    q = select(MemoryActivity).where(MemoryActivity.accessed_at < cutoff)
+    rows = (await session.execute(q)).scalars().all()
+    count = len(rows)
+    for r in rows:
+        await session.delete(r)
+    if count:
+        await session.commit()
+    return count
+
+
 # ── Skills CRUD ───────────────────────────────────────────────────────────────
 # Pure persistence; the description-embedding lives one layer up in
 # core/skill_store.py so both the GraphQL mutations and the agent tools share it.

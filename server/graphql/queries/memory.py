@@ -6,9 +6,9 @@ import strawberry
 
 from core.memory_consolidation import _MEMORY_KEY, _MEMORY_NS, _migrate_legacy_key
 from core.state import get_store
-from db.ops import list_memories
+from db.ops import get_memory_usage_map, list_memories, list_memory_activities
 
-from ..types.memory import Memory, MemoryItem
+from ..types.memory import Memory, MemoryActivity, MemoryItem
 
 
 @strawberry.type
@@ -37,4 +37,26 @@ class MemoryQuery:
         """Discrete memory items (empty on keyless setups, which use the blob)."""
         session = info.context["session"]
         rows = await list_memories(session, kind=kind)
+        return [MemoryItem.from_db(m) for m in rows]
+
+    @strawberry.field
+    async def memory_activities(
+        self, info: strawberry.Info, memory_id: str, limit: int = 50
+    ) -> list[MemoryActivity]:
+        """Audit log for when a specific memory was surfaced."""
+        session = info.context["session"]
+        rows = await list_memory_activities(session, memory_id, limit=limit)
+        return [MemoryActivity.from_db(r) for r in rows]
+
+    @strawberry.field
+    async def memory_usage(
+        self, info: strawberry.Info
+    ) -> list[MemoryItem]:
+        """All memories (same as memories) but ensures usage resolvers have data —
+        use memories query with lastUsedAt/useCount fields for per-item usage.
+        This field exists for explicit usage overview.
+        """
+        session = info.context["session"]
+        rows = await list_memories(session)
+        # Prefetch usage map to warm cache? Resolvers will fetch per-id anyway.
         return [MemoryItem.from_db(m) for m in rows]

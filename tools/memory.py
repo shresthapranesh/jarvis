@@ -64,7 +64,16 @@ async def search_memory(query: str, k: int = 6) -> str:
     if not embeddings_available():
         return "Long-term memory search is unavailable (no embedding model configured)."
     try:
-        hits = await _search_memory(query, k=k)
+        # Explicit search via tool — log with source explicit_search for audit
+        from tools.context import current_ctx
+
+        conv_id = None
+        try:
+            conv_id = current_ctx().conversation_id
+        except Exception:
+            conv_id = None
+
+        hits = await _search_memory(query, k=k, conversation_id=conv_id, source="explicit_search")
     except Exception as exc:
         logger.warning("search_memory failed: %s", exc)
         return f"Memory search failed: {exc}"

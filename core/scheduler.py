@@ -183,3 +183,35 @@ def register_kernel_reaper_job(cron_expr: str = "*/10 * * * *") -> None:
         misfire_grace_time=120,
     )
     logger.info("kernel reaper scheduled: %s", cron_expr)
+
+
+def _prune_memory_activities_job() -> None:
+    """Prune memory_activities older than 90 days — runs on main loop."""
+    if state._main_loop is None:
+        return
+    from db.engine import async_session
+    from db.ops import prune_memory_activities
+
+    async def _prune() -> None:
+        async with async_session() as session:
+            count = await prune_memory_activities(session, older_than_days=90)
+            if count:
+                logger.info("pruned %d old memory_activities", count)
+
+    future = asyncio.run_coroutine_threadsafe(_prune(), state._main_loop)
+    try:
+        future.result(timeout=60)
+    except Exception:
+        logger.exception("memory_activities prune failed")
+
+
+def register_memory_activity_prune_job(cron_expr: str = "0 4 * * *") -> None:
+    """Register daily prune for memory_activities (default 04:00 UTC)."""
+    _scheduler.add_job(
+        func=_prune_memory_activities_job,
+        trigger=CronTrigger.from_crontab(cron_expr),
+        id="memory_activity_prune",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("memory_activity prune scheduled: %s", cron_expr)
