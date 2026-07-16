@@ -83,22 +83,57 @@ def _effective_model() -> str:
 
 
 def get_embedder() -> Any | None:
-    """Return a cached embeddings client, or None when unavailable
-    (no GOOGLE_API_KEY / package missing). Callers treat None as
-    "fall back to inlining"."""
-    if not os.environ.get("GOOGLE_API_KEY"):
-        return None
+    """Return a cached embeddings client, or None when unavailable.
+
+    Priority: Google Gemini if GOOGLE_API_KEY set, else Ollama (nomic-embed-text)
+    if langchain-ollama is installed. Callers treat None as 'fall back to
+    inlining / no memory search'. Cache keyed by effective model.
+    """
     model = _effective_model()
     cached = _embedder_cache.get(model)
     if cached is not None:
         return cached
+
+    # Google path
+    if os.environ.get("GOOGLE_API_KEY"):
+        try:
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings  # noqa: PLC0415
+
+            embedder = GoogleGenerativeAIEmbeddings(model=model)
+            _embedder_cache[model] = embedder
+            return embedder
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.warning("Google embedder init failed: %s", exc)
+
+    # Ollama fallback — lets Ollama-only setups still have vector memory
     try:
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings  # noqa: PLC0415
+        from langchain_ollama import OllamaEmbeddings  # noqa: PLC0415
+
+        # If user overrode embedding.model with a non-Google name, use that,
+        # else default to nomic-embed-text (common Ollama embedding model)
+        ollama_model = _embedding_model_override if _embedding_model_override else "nomic-embed-text"
+        # Strip Google prefix if user accidentally left it
+        if ollama_model.startswith("models/"):
+            ollama_model = "nomic-embed-text"
+
+        ollama_key = f"ollama::{ollama_model}"
+        cached_ollama = _embedder_cache.get(ollama_key)
+        if cached_ollama is not None:
+            return cached_ollama
+
+        embedder = OllamaEmbeddings(model=ollama_model)
+        _embedder_cache[ollama_key] = embedder
+        _embedder_cache[model] = embedder  # also cache under requested model for quick lookup
+        logger.info("Using Ollama embeddings fallback model=%s", ollama_model)
+        return embedder
     except ImportError:
-        return None
-    embedder = GoogleGenerativeAIEmbeddings(model=model)
-    _embedder_cache[model] = embedder
-    return embedder
+        pass
+    except Exception as exc:
+        logger.debug("Ollama embedder not available: %s", exc)
+
+    return None
 
 
 def embeddings_available() -> bool:
@@ -139,26 +174,27 @@ async def _aembed_query_inner(query: str) -> np.ndarray | None:
         return None
 
 
-async def aembed_query_cached(query: str) -> np.ndarray | None:
+async def aembed_query_cached(query: str, *, allow_trivial: bool = False) -> np.ndarray | None:
     """Cached, deduplicated query embedding. Returns None if no embedder or on error.
 
     Keyed by "model::normalized_query". Concurrent callers for same key share
-    one Task. LRU with TTL. Trivial queries bypass embedding (return None) —
-    callers treat None as 'skip fact retrieval, only core memories'.
+    one Task. LRU with TTL. Trivial queries bypass embedding (return None) unless
+    allow_trivial=True — callers treat None as 'skip fact retrieval, only core memories'.
     Metrics are emitted via logger.debug for /server-logs observability.
     """
     _query_cache_metrics["total"] += 1
 
-    if _is_trivial_query(query):
+    if not allow_trivial and _is_trivial_query(query):
         _query_cache_metrics["trivial"] += 1
         logger.debug("query-cache trivial skip query=%r", query[:80])
         return None
 
     normalized = " ".join(query.strip().split())  # collapse whitespace
     if len(normalized) < 3:
-        _query_cache_metrics["trivial"] += 1
-        logger.debug("query-cache too short skip query=%r", query[:80])
-        return None
+        if not allow_trivial:
+            _query_cache_metrics["trivial"] += 1
+            logger.debug("query-cache too short skip query=%r", query[:80])
+            return None
 
     model = _effective_model()
     cache_key = f"{model}::{normalized}"
@@ -345,16 +381,13 @@ async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[di
     if embedder is None:
         raise RuntimeError("no embedding model available (GOOGLE_API_KEY unset?)")
 
-    qvec = await aembed_query_cached(query)
+    # For doc search we allow trivial queries but still use cache
+    qvec = await aembed_query_cached(query, allow_trivial=True)
     if qvec is None:
-        # Trivial query or embedding failure — fall back to direct call
-        # (so search_documents tool still works for short queries) or empty?
-        # For doc search, we still want to try embedding even trivial, so direct:
         try:
             qvec = np.asarray(await embedder.aembed_query(query), dtype=np.float32)
         except Exception:
             raise
-    # qvec is already np array from cache
 
     async with async_session() as session:
         rows = (await session.execute(

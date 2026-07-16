@@ -16,6 +16,7 @@ retrieval query as a *query* (``aembed_query``), matching ``doc_index``.
 from __future__ import annotations
 
 import logging
+import time
 
 import numpy as np
 
@@ -29,6 +30,12 @@ logger = logging.getLogger(__name__)
 # and update it in place rather than inserting a near-duplicate. Keeps
 # contradictions from piling up the way the whole-doc rewrite handled for free.
 _DEDUP_THRESHOLD = 0.88
+
+# Core memories are always injected — cache them briefly to avoid DB hit
+# per turn (trivial queries hit this too). Cap to avoid token bloat.
+_CORE_CACHE_TTL = 30  # seconds
+_CORE_CACHE_MAX_CHARS = 2000
+_core_cache: dict[str, any] = {"text": "", "ts": 0.0, "count": 0}
 
 
 def _cosine(a: np.ndarray, anorm: float, b: bytes) -> float | None:
@@ -53,10 +60,45 @@ async def embed_for_storage(text: str) -> bytes | None:
 
 
 async def load_core() -> str:
-    """All `core` memory items, newline-joined. Always injected into context."""
+    """All `core` memory items, newline-joined, cached 30s and capped to avoid bloat.
+
+    Always injected into context, but token cost grows with core count. Cache
+    avoids DB hit per turn; cap prevents 200 core items = 10k tokens injection.
+    """
+    now = time.time()
+    # Fast path: cached and not expired
+    if now - _core_cache["ts"] < _CORE_CACHE_TTL and _core_cache["text"] is not None:
+        return _core_cache["text"]
+
     async with async_session() as session:
         rows = await list_memories(session, kind="core")
-    return "\n".join(f"- {r.text}" for r in rows)
+
+    text = "\n".join(f"- {r.text}" for r in rows)
+
+    # Cap chars to avoid token bloat, keep most recent (last rows are newest? order by created_at asc via DB default)
+    if len(text) > _CORE_CACHE_MAX_CHARS:
+        truncated = text[:_CORE_CACHE_MAX_CHARS].rsplit("\n", 1)[0]
+        remaining = len(rows) - truncated.count("\n") - 1
+        if remaining > 0:
+            truncated += f"\n- ... and {remaining} more core memories (use search_memory to find specific ones)"
+        text = truncated
+        logger.debug("core memory capped from %d rows to %d chars", len(rows), len(text))
+
+    _core_cache["text"] = text
+    _core_cache["ts"] = now
+    _core_cache["count"] = len(rows)
+
+    return text
+
+
+def get_core_cache_stats() -> dict:
+    return {
+        "count": _core_cache.get("count", 0),
+        "chars": len(_core_cache.get("text", "")),
+        "age": round(time.time() - _core_cache.get("ts", 0), 1),
+        "max_chars": _CORE_CACHE_MAX_CHARS,
+        "ttl": _CORE_CACHE_TTL,
+    }
 
 
 async def search_memory(query: str, k: int = 6) -> list[dict]:

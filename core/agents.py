@@ -208,11 +208,31 @@ async def _memory_volatile_parts(store, query: str) -> list[str]:
 
     With an embedder: always-on `core` items + the top-k `fact` items retrieved
     for `query` (the latest user turn's text). Without one: today's single
-    AGENTS.md blob.
+    AGENTS.md blob. Trivial queries (greetings) skip fact retrieval and, if core
+    is large, skip the instructional header to save tokens.
     """
     if not embeddings_available():
         blob = await _load_memory_from_store(store) if store is not None else _load_memory_from_disk()
         return [f"## Agent Memory\n\n{blob}"] if blob else []
+
+    # Trivial detection — reuse same heuristic as query cache
+    try:
+        from core.doc_index import _is_trivial_query
+
+        is_trivial = _is_trivial_query(query) if query else False
+    except Exception:
+        is_trivial = False
+
+    core = await load_core()
+
+    # For trivial greetings (hi, thanks), don't inject fact memories and
+    # skip the instructional header if core is empty — saves ~100 tokens and
+    # 2 embedding calls (already saved via cache, but also token cost)
+    if is_trivial:
+        if core:
+            # Only core identity, no header, no relevant search
+            return [f"## Agent Memory\n\n{core}"]
+        return []
 
     # Lead with a short how-to so the agent knows it can WRITE memory, not just
     # read the items injected below. Gated on embeddings_available() (same
@@ -227,7 +247,6 @@ async def _memory_volatile_parts(store, query: str) -> list[str]:
         "injected below automatically; call `search_memory(query)` to dig for "
         "something specific that hasn't surfaced."
     ]
-    core = await load_core()
     if core:
         parts.append(f"## Agent Memory\n\n{core}")
     if query:
