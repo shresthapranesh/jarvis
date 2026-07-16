@@ -156,9 +156,12 @@ async def _run_agent_task(
             await finalize(final_message, status)
             emit_event(state, "done", message=final_message, conversation_id=conv_id)
 
-            # ── Project memory auto-maintain (safety net) ───────────────
-            # Layer 2 guarantee: if project memory is empty, init it; if stale
-            # (>_STALE_DAYS) and transcript is substantive, merge refresh.
+            # ── Project memory auto-init (conservative safety net) ────
+            # Layer 2: only when memory is empty and transcript is substantive
+            # (>400 chars). Does NOT include general user prefs — those belong to
+            # global memory (remember). Refresh (>14 days) is available via
+            # maybe_auto_maintain with mode="auto"/"refresh" but not auto-triggered
+            # on every run to avoid aggressiveness.
             # Fire-and-forget — never blocks user-visible done event.
             if project_id and final_message and final_message.strip():
                 try:
@@ -168,11 +171,11 @@ async def _run_agent_task(
 
                     asyncio.create_task(
                         maybe_auto_maintain_project_memory(
-                            project_id, conv_id, query, final_message, model
+                            project_id, conv_id, query, final_message, model, mode="init"
                         )
                     )
                     logger.info(
-                        "project_memory auto scheduled for project=%s conv=%s",
+                        "project_memory auto-init scheduled for project=%s conv=%s",
                         project_id,
                         conv_id,
                     )
@@ -202,7 +205,7 @@ async def _run_agent_task(
 
                 asyncio.create_task(
                     maybe_auto_maintain_project_memory(
-                        project_id, conv_id, query, final_message, model
+                        project_id, conv_id, query, final_message, model, mode="init"
                     )
                 )
             except Exception:

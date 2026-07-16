@@ -295,17 +295,18 @@ async def _project_volatile_parts(project_id: str | None) -> list[str]:
     header += (
         f"This conversation is part of project '{proj.name}'. All conversations in this project share the "
         "instructions and memory below.\n\n"
-        "**CRITICAL — You MUST actively maintain project memory:**\n"
-        "- When you learn a durable fact this project will need later, IMMEDIATELY save it with "
+        "**CRITICAL — You MUST actively maintain project memory (but ONLY project-specific facts):**\n"
+        "- When you learn a durable fact about THIS project that future conversations will need, save it with "
         '`project_memory(action="append", content="...")`. Don\'t wait to be asked.\n'
-        "- What to save: tech stack & versions, architecture decisions, coding conventions, important file "
-        "paths/modules, API contracts, user preferences specific to this project, current goals/status/remaining work.\n"
-        "- If project memory is empty, initialize it on the first significant turn with key facts from this conversation.\n"
-        "- Before finishing ANY task, ask yourself: does project memory need updating? If so, update it.\n"
-        "- Prefer `project_memory` for project-specific facts; use `remember` ONLY for global cross-project user preferences.\n"
-        "- If existing memory is outdated/conflicting, use `project_memory(action=\"write\", content=...)` to replace "
-        "with a condensed, correct version.\n"
-        "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — treat as signal to initialize)."
+        "- What to save: tech stack & versions for THIS project, architecture decisions for THIS project, "
+        "coding conventions specific to THIS project, important file paths/modules, API contracts, goals/status for THIS project.\n"
+        "- What NOT to save: general user info (name, role, background), general communication prefs "
+        '("likes concise answers"), global coding prefs that apply to ALL projects — those belong to `remember`, not project_memory. '
+        "If a preference is not explicitly tied to THIS project, use `remember` instead.\n"
+        "- If project memory is empty and this conversation established project-specific stack/decisions/files, initialize it.\n"
+        "- Before finishing a task, ask: did we learn something project-specific that future chats in THIS project need? If yes, update.\n"
+        "- If existing memory is outdated/conflicting, use `project_memory(action=\"write\", content=...)` to replace with condensed version.\n"
+        "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — only init if you have project-specific facts)."
     )
     parts = [header]
     if proj.instructions.strip():

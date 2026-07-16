@@ -34,18 +34,23 @@ async def project_memory(action: str, content: str | None = None) -> str:
     project. It is injected into your system prompt each turn, so edits are
     visible on the very next LLM call.
 
-    WHEN TO USE — call proactively, don't wait to be asked:
-    - Tech stack: "Stack: FastAPI + Strawberry GraphQL (HTTP POST /graphql, WS subscriptions), React 19 + Relay, SQLite + SQLAlchemy async, APScheduler"
-    - Architecture decisions: "Decision: durable SQLite-backed job queue (Job table) instead of bare asyncio.create_task — survives restarts, single cancellation path via job.id == task_id"
-    - Conventions: "GraphQL-first API; REST only for binary download/upload/audio/TTS. Frontend uses pnpm, not npm. Generated Relay artifacts in src/__generated__ must not be edited."
-    - Important paths: "core/agents.py=agent factory + volatile injection, server/chat_runtime.py=chat job handler, tools/projects.py=project_memory tool, db/ops.py=project CRUD"
-    - User preferences for this project: "User prefers verbose logging, dark theme, BFS workflow executor"
-    - Goals / status: "Phase 1: prompt strengthening for project memory done; Phase 2 pending: auto-consolidation"
+    WHEN TO USE — only for facts explicitly tied to THIS project:
+    - Tech stack: "Stack for THIS project: FastAPI + Strawberry GraphQL, React 19 + Relay"
+    - Architecture decisions: "Decision for THIS project: durable SQLite job queue (Job table) instead of bare asyncio.create_task"
+    - Conventions: "Conventions for THIS project: GraphQL-first API; REST only for binary download. pnpm used in this repo."
+    - Important paths: "Key files in THIS project: core/agents.py=agent factory, server/chat_runtime.py=chat handler"
+
+    WHEN NOT TO USE — these belong to global memory via `remember`, NOT project_memory:
+    - User personal info: name, role, background
+    - General communication style: "likes concise answers"
+    - Global coding prefs: "prefers pnpm", "always use type hints" unless explicitly "for this project we use..."
+    - Any fact not explicitly tied to THIS project context
 
     Rules:
-    - For project-specific durable facts ALWAYS prefer this over remember. Use remember ONLY for global, cross-project user preferences.
-    - If memory is empty, initialize it now with key facts from this conversation.
-    - Before finishing any task, check if memory needs update. If existing memory is outdated, use write to replace with condensed version.
+    - Prefer this over remember ONLY when fact is explicitly tied to THIS project. If global, use remember.
+    - If memory empty AND you have project-specific facts, initialize it. Don't init with general prefs.
+    - Before finishing, check if THIS project learned something project-specific that future chats need. If outdated, use write to condense.
+    - Keep content focused, no general memory pollution.
 
     Args:
         action: "read" | "append" (add a note at the end) | "write" (replace

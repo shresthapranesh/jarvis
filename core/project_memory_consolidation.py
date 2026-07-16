@@ -35,39 +35,71 @@ from db.ops import get_default_model, update_project
 logger = logging.getLogger(__name__)
 
 _MEMORY_CAP = 24_000
-_INIT_MIN_CHARS = 100
-_REFRESH_MIN_CHARS = 200
-_STALE_DAYS = 7
+# Conservative thresholds — only trigger on substantive conversations
+_INIT_MIN_CHARS = 400
+_REFRESH_MIN_CHARS = 800
+_STALE_DAYS = 14
+_RECENT_UPDATE_MINUTES = 10
 _NO_UPDATE_MARKER = "__NO_UPDATE__"
 
-_SYSTEM_PROMPT = """You initialize project memory — a shared notepad every conversation in this project will see.
+_SYSTEM_PROMPT = """You initialize project memory — a shared notepad every conversation in THIS project will see.
 
-Given a conversation transcript from the project, extract durable, project-wide facts worth remembering.
+Goal: Extract ONLY facts that are explicitly tied to THIS specific project.
 
 Rules:
 - Output ONLY markdown bullet list or short paragraphs — no preamble, no explanation, no code fences.
-- Focus on: tech stack & versions, architecture decisions, coding conventions, important file paths/modules, API contracts, user preferences specific to this project, current goals/status.
-- Skip transient details of this one chat (e.g. "user asked X") — keep only facts that future conversations will need.
-- Keep it under 100 lines, concise bullets. If transcript has no durable facts, output empty string.
-- Never invent — only facts present in the transcript.
-- Don't include secrets, tokens, or credentials.
+- Keep it under 80 lines, concise bullets.
+- If transcript has no project-specific durable facts, output empty string.
+
+What to SAVE (project-specific ONLY — must be explicitly mentioned for THIS project):
+- Tech stack & versions used in THIS project (e.g., "This project uses FastAPI + React 19")
+- Architecture decisions made for THIS project
+- Coding conventions specific to THIS project (not global prefs)
+- Important file paths/modules in THIS project
+- API contracts / endpoints defined in THIS project
+- Goals, status, todos specific to THIS project
+
+CRITICAL — DO NOT SAVE (these belong to global memory via `remember`, not project memory):
+- User's personal info: name, role, background, location
+- General communication preferences: "likes concise answers", "prefers detailed explanations"
+- Global coding preferences: "prefers pnpm", "always use type hints" UNLESS explicitly tied to this project ("for this project we use pnpm")
+- General knowledge, small talk, greetings
+- Any fact not explicitly tied to THIS project by context
+
+If transcript only contains general user info, small talk, or global preferences with NO project-specific facts, output empty string.
+- Never invent — only facts present in transcript.
+- Don't include secrets, tokens, credentials.
 """
 
-_REFRESH_SYSTEM_PROMPT = """You maintain project memory — a shared notepad every conversation in this project sees.
+_REFRESH_SYSTEM_PROMPT = """You maintain project memory — a shared notepad for THIS project only.
 
 You are given:
-1. Existing project memory (may be outdated/incomplete)
-2. New conversation transcript from this project
+1. Existing project memory for THIS project
+2. New conversation transcript from THIS project
 
-Task: Merge any new durable facts from transcript into existing memory, and prune outdated/conflicting entries. 
+Task: Merge any NEW project-specific durable facts from transcript into existing memory, prune outdated.
 
 Rules:
 - Output ONLY the updated full project memory — markdown bullets/short paras, no preamble, no fences.
-- If transcript has no new durable facts beyond what's already in memory, output exactly: __NO_UPDATE__
-- Keep under 100 lines, concise. Preserve important existing facts unless contradicted.
-- Focus on: tech stack & versions, architecture decisions, coding conventions, important files/modules, API contracts, user prefs for this project, goals/status/remaining work.
+- If transcript has no NEW project-specific facts beyond existing memory, output exactly: __NO_UPDATE__
+- Keep under 80 lines, concise. Preserve existing facts unless contradicted by transcript.
+- If transcript fact contradicts existing memory, prefer transcript.
+
+What to SAVE (only project-specific, explicitly tied to THIS project):
+- Tech stack & versions for THIS project
+- Architecture decisions for THIS project
+- Coding conventions specific to THIS project
+- Important files/modules, API contracts in THIS project
+- Project goals/status/todos
+
+CRITICAL — DO NOT INCLUDE (belongs to global memory):
+- User's personal info, background, general prefs
+- Global coding style that applies to ALL projects
+- General communication preferences
+- Small talk, greetings, non-project facts
+
+If nothing new project-specific, output __NO_UPDATE__.
 - Never invent beyond transcript+existing memory. Don't include secrets/tokens.
-- If a fact in existing memory is contradicted by transcript, prefer transcript.
 """
 
 
@@ -168,8 +200,10 @@ async def maybe_auto_maintain_project_memory(
     """
     try:
         transcript_len = len((query or "").strip() + "\n" + (final_message or "").strip())
-        if transcript_len < _INIT_MIN_CHARS:
-            logger.debug("project_memory auto: transcript too short for %s", project_id)
+        # Short transcripts never qualify for either path
+        min_needed = _INIT_MIN_CHARS if mode != "refresh" else _REFRESH_MIN_CHARS
+        if transcript_len < min_needed:
+            logger.debug("project_memory auto: transcript too short (%d < %d) for %s", transcript_len, min_needed, project_id)
             return False
 
         async with async_session() as session:
@@ -182,32 +216,50 @@ async def maybe_auto_maintain_project_memory(
 
         is_empty = not existing
 
+        # Guard: if memory was updated very recently (agent just called project_memory), skip auto
+        if updated_at is not None:
+            now = datetime.now(timezone.utc)
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            minutes_since = (now - updated_at).total_seconds() / 60
+            if minutes_since < _RECENT_UPDATE_MINUTES:
+                logger.debug(
+                    "project_memory auto: skip recent update (%.1f min ago) for %s",
+                    minutes_since,
+                    project_id,
+                )
+                return False
+
         # Decide which path
         should_init = is_empty and mode in ("auto", "init")
         should_refresh = False
 
         if not is_empty and mode in ("auto", "refresh"):
-            # stale check: updated_at older than _STALE_DAYS
+            # stale check: updated_at older than _STALE_DAYS AND transcript large enough
             if updated_at is None:
-                should_refresh = True
+                should_refresh = transcript_len >= _REFRESH_MIN_CHARS
             else:
-                # ensure aware datetime
                 now = datetime.now(timezone.utc)
-                # updated_at may be naive — treat as UTC
                 if updated_at.tzinfo is None:
                     updated_at = updated_at.replace(tzinfo=timezone.utc)
-                if now - updated_at > timedelta(days=_STALE_DAYS):
-                    should_refresh = transcript_len >= _REFRESH_MIN_CHARS
+                age_days = (now - updated_at).total_seconds() / 86400
+                if age_days > _STALE_DAYS and transcript_len >= _REFRESH_MIN_CHARS:
+                    should_refresh = True
+                else:
+                    logger.debug(
+                        "project_memory auto: not stale (age %.1f days, need %d) for %s",
+                        age_days if updated_at else 0,
+                        _STALE_DAYS,
+                        project_id,
+                    )
 
         if not should_init and not should_refresh:
-            if is_empty:
-                # empty but transcript too short already handled, or mode=refresh
-                return False
             logger.debug(
-                "project_memory auto: skip project=%s empty=%s stale_days_check mode=%s",
+                "project_memory auto: skip project=%s empty=%s mode=%s len=%d",
                 project_id,
                 is_empty,
                 mode,
+                transcript_len,
             )
             return False
 
