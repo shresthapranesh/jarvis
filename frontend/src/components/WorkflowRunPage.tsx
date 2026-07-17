@@ -22,6 +22,16 @@ function RunNodeDetail({rec}: {rec: NodeRecord}) {
     ? `${((new Date(rec.finished_at).getTime() - new Date(rec.started_at).getTime()) / 1000).toFixed(1)}s`
     : null;
 
+  const plan = (() => {
+    if (rec.node_type !== 'planner' && rec.node_type !== 'plan') return null;
+    const out = rec.outputs || {};
+    const raw = (out as any).plan || (out as any).result || [];
+    if (Array.isArray(raw)) return raw as string[];
+    return null;
+  })();
+
+  const isPlanner = rec.node_type === 'planner' || rec.node_type === 'plan';
+
   return (
     <div className="wf-run-detail-panel">
       <div className="wf-run-detail-header">
@@ -43,14 +53,23 @@ function RunNodeDetail({rec}: {rec: NodeRecord}) {
 
       {rec.error && <div className="wf-run-detail-error">{rec.error}</div>}
 
-      {rec.rendered_prompt && (
+      {isPlanner && plan && plan.length > 0 && (
+        <div className="wf-run-detail-section">
+          <div className="wf-run-detail-label">Plan ({plan.length} steps)</div>
+          <ol style={{margin:0, paddingLeft:20, fontSize:'0.86rem', lineHeight:1.6}}>
+            {plan.map((s: string, i: number) => (<li key={i} style={{marginBottom:2}}>{s}</li>))}
+          </ol>
+        </div>
+      )}
+
+      {rec.rendered_prompt && !isPlanner && (
         <div className="wf-run-detail-section">
           <div className="wf-run-detail-label">Prompt</div>
           <pre className="wf-run-detail-pre">{rec.rendered_prompt}</pre>
         </div>
       )}
 
-      {rec.node_type !== 'start' && (
+      {rec.node_type !== 'start' && !isPlanner && (
         <div className="wf-run-detail-section">
           <div className="wf-run-detail-label">In</div>
           <pre className="wf-run-detail-pre">
@@ -59,7 +78,7 @@ function RunNodeDetail({rec}: {rec: NodeRecord}) {
         </div>
       )}
 
-      {rec.node_type !== 'conditional' && (
+      {rec.node_type !== 'conditional' && !isPlanner && (
         <div className="wf-run-detail-section">
           <div className="wf-run-detail-label">Out</div>
           <pre className="wf-run-detail-pre">
@@ -67,6 +86,13 @@ function RunNodeDetail({rec}: {rec: NodeRecord}) {
               ? JSON.stringify(rec.outputs, null, 2)
               : '—'}
           </pre>
+        </div>
+      )}
+
+      {isPlanner && rec.outputs && (
+        <div className="wf-run-detail-section">
+          <div className="wf-run-detail-label">Raw Outputs</div>
+          <pre className="wf-run-detail-pre">{JSON.stringify(rec.outputs, null, 2)}</pre>
         </div>
       )}
     </div>

@@ -17,6 +17,13 @@ class RunningTask:
     has_interrupt: bool
     cancelled: bool
     done: bool
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    llm_calls: int = 0
+    tool_calls: int = 0
+    budget_exceeded: bool = False
+    budget_reason: str | None = None
 
 
 @strawberry.type

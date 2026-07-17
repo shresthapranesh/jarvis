@@ -34,6 +34,14 @@ export interface WorkerInfo {
   result: string | null;
 }
 
+interface BudgetInfo {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  llmCalls: number;
+  toolCalls: number;
+}
+
 interface StreamState {
   streaming: boolean;
   text: string;
@@ -45,6 +53,7 @@ interface StreamState {
   todos: TodoItem[] | null;
   error: string | null;
   pendingInterrupt: {id: string; question: string} | null;
+  budget: BudgetInfo | null;
 }
 
 const EMPTY_STATE: StreamState = {
@@ -58,6 +67,7 @@ const EMPTY_STATE: StreamState = {
   todos: null,
   error: null,
   pendingInterrupt: null,
+  budget: null,
 };
 
 function upsertWorker(workers: WorkerInfo[], next: WorkerInfo): WorkerInfo[] {
@@ -184,6 +194,14 @@ const taskEventsSubscription = graphql`
       }
       ... on BudgetExceededEvent {
         reason
+        snapshot
+      }
+      ... on BudgetUpdateEvent {
+        inputTokens
+        outputTokens
+        totalTokens
+        llmCalls
+        toolCalls
         snapshot
       }
       ... on DoneEvent {
@@ -400,6 +418,18 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             setState((s) => ({
               ...s,
               error: `Budget exceeded: ${evt.reason}`,
+            }));
+            break;
+          case 'BudgetUpdateEvent':
+            setState((s) => ({
+              ...s,
+              budget: {
+                inputTokens: (evt as any).inputTokens,
+                outputTokens: (evt as any).outputTokens,
+                totalTokens: (evt as any).totalTokens,
+                llmCalls: (evt as any).llmCalls,
+                toolCalls: (evt as any).toolCalls,
+              },
             }));
             break;
           case 'DoneEvent':

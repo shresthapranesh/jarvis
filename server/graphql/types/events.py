@@ -137,6 +137,16 @@ class BudgetExceededEvent:
 
 
 @strawberry.type
+class BudgetUpdateEvent:
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    llm_calls: int
+    tool_calls: int
+    snapshot: str  # JSON-encoded snapshot
+
+
+@strawberry.type
 class ErrorEvent:
     error: str
 
@@ -159,6 +169,7 @@ ChatEvent = Annotated[
         ApprovalResolvedEvent,
         WorkflowToolEvent,
         BudgetExceededEvent,
+        BudgetUpdateEvent,
         DoneEvent,
         StoppedEvent,
         ErrorEvent,
@@ -290,6 +301,16 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
         return BudgetExceededEvent(
             reason=data.get("reason", ""),
             snapshot=_as_str(data.get("snapshot") or {k: v for k, v in data.items() if k != "reason"}),
+        )
+    if event_name == "budget_update":
+        snap = data.get("snapshot")
+        return BudgetUpdateEvent(
+            input_tokens=_safe_int(data.get("input_tokens", 0)),
+            output_tokens=_safe_int(data.get("output_tokens", 0)),
+            total_tokens=_safe_int(data.get("total_tokens", 0)),
+            llm_calls=_safe_int(data.get("llm_calls", 0)),
+            tool_calls=_safe_int(data.get("tool_calls", 0)),
+            snapshot=_as_str(snap or data),
         )
     if event_name == "done":
         return DoneEvent(

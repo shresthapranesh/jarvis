@@ -17,6 +17,16 @@ export const artifactDetailQuery = graphql`
       messageId
       createdAt
       updatedAt
+      versionCount
+      versions {
+        id
+        artifactId
+        version
+        title
+        filename
+        createdAt
+        content
+      }
     }
   }
 `;

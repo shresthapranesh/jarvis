@@ -10,6 +10,7 @@ import {artifactListQuery, refreshArtifactList} from '../relay/ArtifactListQuery
 import {commitDeleteArtifact} from '../relay/DeleteArtifactMutation';
 import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
 import {commitUpdateArtifact} from '../relay/UpdateArtifactMutation';
+import {commitRestoreArtifactVersion} from '../relay/RestoreArtifactVersionMutation';
 
 const svg = (path: React.ReactNode, w = 2) => (
   <svg
@@ -177,6 +178,9 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
 
   if (!detail) return null;
 
+  const versions = (detail as any).versions as Array<{id: string; version: number; title: string; createdAt: string; content: string}>;
+  const versionCount = (detail as any).versionCount ?? versions?.length ?? 0;
+
   async function save() {
     if (!detail) return;
     setSaving(true);
@@ -204,6 +208,69 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
     setTimeout(() => setCopied(false), 1500);
   }
 
+  // ── Version / diff state ──────────────────────────────────────────
+  const [showVersions, setShowVersions] = useState(false);
+  const [compareFrom, setCompareFrom] = useState<number | null>(null);
+  const [compareTo, setCompareTo] = useState<number | null>(null);
+  const [restoring, setRestoring] = useState<number | null>(null);
+
+  async function restoreVersion(v: number) {
+    if (!confirm(`Restore version ${v} as new current version?`)) return;
+    setRestoring(v);
+    try {
+      await commitRestoreArtifactVersion(rawId, v);
+      await Promise.all([refreshArtifactDetail(rawId), refreshList()]);
+    } finally {
+      setRestoring(null);
+    }
+  }
+
+  // Simple line diff (Myers-ish via LCS DP, limited to 2000 lines to stay cheap)
+  function lineDiff(a: string, b: string): Array<{type: 'same' | 'add' | 'del'; text: string}> {
+    const aLines = a.split('\n');
+    const bLines = b.split('\n');
+    const n = aLines.length;
+    const m = bLines.length;
+    // Clamp to avoid O(n*m) blow up on huge artifacts
+    if (n > 2000 || m > 2000) {
+      return [{type: 'same', text: `Diff too large to display (${n} vs ${m} lines). Showing full new content.`}, ...bLines.map(l => ({type: 'same' as const, text: l}))];
+    }
+    const dp: number[][] = Array.from({length: n + 1}, () => Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] = aLines[i] === bLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    const out: Array<{type: 'same' | 'add' | 'del'; text: string}> = [];
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && aLines[i] === bLines[j]) {
+        out.push({type: 'same', text: aLines[i]});
+        i++; j++;
+      } else if (j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j])) {
+        out.push({type: 'add', text: bLines[j]});
+        j++;
+      } else if (i < n) {
+        out.push({type: 'del', text: aLines[i]});
+        i++;
+      }
+    }
+    return out;
+  }
+
+  function getVersionContent(vNum: number | null): string {
+    if (vNum === null) return (detail as any).content as string;
+    const found = versions?.find(v => v.version === vNum);
+    return found?.content ?? '';
+  }
+
+  const diffRows = (() => {
+    if (compareFrom === null || compareTo === null) return null;
+    const fromContent = getVersionContent(compareFrom);
+    const toContent = getVersionContent(compareTo === -1 ? null : compareTo);
+    return lineDiff(fromContent, toContent);
+  })();
+
   return (
     <div className="artifact-detail">
       <div className="artifact-detail-toolbar">
@@ -224,21 +291,17 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
               {ICON.edit}
               <span>Edit</span>
             </button>
-            <button
-              className={`artifact-btn${copied ? ' success' : ''}`}
-              onClick={copy}
-            >
+            <button className={`artifact-btn${copied ? ' success' : ''}`} onClick={copy}>
               {copied ? ICON.check : ICON.copy}
               <span>{copied ? 'Copied' : 'Copy'}</span>
             </button>
-            <a
-              className="artifact-btn"
-              href={artifactDownloadUrl(rawId)}
-              download={`${detail.title || rawId}.md`}
-            >
+            <a className="artifact-btn" href={artifactDownloadUrl(rawId)} download={`${detail.title || rawId}.md`}>
               {ICON.download}
               <span>Download</span>
             </a>
+            <button className="artifact-btn" onClick={() => setShowVersions(!showVersions)}>
+              <span>🕑 {versionCount}v{showVersions ? ' ▲' : ' ▼'}</span>
+            </button>
             <button className="artifact-btn danger" onClick={remove}>
               {ICON.trash}
               <span>Delete</span>
@@ -247,28 +310,62 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
         )}
       </div>
 
+      {showVersions && (
+        <div className="artifact-versions-panel">
+          <div className="artifact-versions-header">
+            <strong>Version history</strong>
+            <span style={{fontSize: '0.75rem', opacity: 0.7}}>Compare any two versions, restore old as new</span>
+          </div>
+          <div className="artifact-versions-list">
+            {/* Current */}
+            <div className={`artifact-version-row ${compareTo === -1 ? 'active' : ''}`}>
+              <span className="artifact-version-badge">current</span>
+              <span className="artifact-version-title">{detail.title}</span>
+              <span className="artifact-version-meta">{new Date((detail as any).updatedAt).toLocaleString()}</span>
+              <div className="artifact-version-actions">
+                <button className="artifact-btn small" onClick={() => setCompareFrom(compareFrom === null ? versions?.[versions.length-1]?.version ?? null : null)}>from</button>
+                <button className="artifact-btn small primary" onClick={() => setCompareTo(-1)}>to</button>
+              </div>
+            </div>
+            {(versions || []).slice().reverse().map((v) => (
+              <div key={v.version} className={`artifact-version-row ${compareFrom === v.version || compareTo === v.version ? 'active' : ''}`}>
+                <span className="artifact-version-badge">v{v.version}</span>
+                <span className="artifact-version-title">{v.title}</span>
+                <span className="artifact-version-meta">{new Date(v.createdAt).toLocaleString()}</span>
+                <div className="artifact-version-actions">
+                  <button className="artifact-btn small" onClick={() => setCompareFrom(v.version)} title="Set as diff source">from</button>
+                  <button className="artifact-btn small primary" onClick={() => setCompareTo(v.version)} title="Set as diff target">to</button>
+                  <button className="artifact-btn small" disabled={restoring === v.version} onClick={() => restoreVersion(v.version)}>{restoring === v.version ? '…' : 'restore'}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {compareFrom !== null && compareTo !== null && diffRows && (
+            <div className="artifact-diff">
+              <div className="artifact-diff-header">
+                Diff: v{compareFrom} → {compareTo === -1 ? 'current' : `v${compareTo}`}
+                <button className="artifact-btn small" onClick={() => {setCompareFrom(null); setCompareTo(null);}}>clear</button>
+              </div>
+              <pre className="artifact-diff-content">
+                {diffRows.map((row, idx) => (
+                  <div key={idx} className={`diff-line diff-${row.type}`}>{row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '} {row.text}</div>
+                ))}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
       {editing ? (
         <div className="artifact-editor">
-          <input
-            className="artifact-title-input"
-            value={draftTitle}
-            onChange={(e) => setDraftTitle(e.target.value)}
-            placeholder="Title"
-          />
-          <textarea
-            className="artifact-content-textarea"
-            value={draftContent}
-            onChange={(e) => setDraftContent(e.target.value)}
-            spellCheck={false}
-          />
+          <input className="artifact-title-input" value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="Title" />
+          <textarea className="artifact-content-textarea" value={draftContent} onChange={(e) => setDraftContent(e.target.value)} spellCheck={false} />
         </div>
       ) : (
         <>
           <h2 className="artifact-detail-title">{detail.title}</h2>
-          <div
-            className="artifact-detail-content agent-bubble"
-            dangerouslySetInnerHTML={{__html: marked.parse(detail.content) as string}}
-          />
+          <div className="artifact-detail-content agent-bubble" dangerouslySetInnerHTML={{__html: marked.parse(detail.content) as string}} />
         </>
       )}
     </div>

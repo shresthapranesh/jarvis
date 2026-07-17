@@ -25,13 +25,128 @@ function SettingsPage() {
         </div>
         <div style={{fontSize: '0.85rem', color: 'var(--text-dim)'}}>
           Define notification channels once here, then pick them by name when
-          configuring an automation or workflow.
+          configuring an automation or workflow. MCP servers are shared tools from
+          external processes (ADK McpToolset analog).
         </div>
       </div>
-      <div style={{padding: '20px 28px', overflow: 'auto'}}>
+      <div style={{padding: '20px 28px', overflow: 'auto', display:'flex', flexDirection:'column', gap:32, maxWidth:900}}>
         <NotificationChannelsSection />
+        <McpServersSection />
       </div>
     </div>
+  );
+}
+
+function McpServersSection() {
+  const queryClient = useQueryClient();
+  const {data, isLoading} = useQuery({
+    queryKey: ['mcp-servers'],
+    queryFn: async () => {
+      const {fetchMcpServers} = await import('../relay/McpServersQuery');
+      return fetchMcpServers();
+    },
+  });
+  const [draftName, setDraftName] = useState('');
+  const [draftConfig, setDraftConfig] = useState('{\n  "command": "npx",\n  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],\n  "transport": "stdio"\n}');
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editingConfig, setEditingConfig] = useState('');
+  const toast = useToast();
+
+  async function refresh() {
+    await queryClient.invalidateQueries({queryKey: ['mcp-servers']});
+  }
+
+  const addMut = useMutation({
+    mutationFn: async () => {
+      const {commitAddMcpServer} = await import('../relay/AddMcpServerMutation');
+      await commitAddMcpServer(draftName.trim(), draftConfig);
+    },
+    onSuccess: () => { toast.push('MCP server added', 'success'); setDraftName(''); refresh(); },
+    onError: (e: any) => toast.push(e.message, 'error'),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: async () => {
+      if (!editingName) return;
+      const {commitUpdateMcpServer} = await import('../relay/UpdateMcpServerMutation');
+      await commitUpdateMcpServer(editingName, editingConfig);
+    },
+    onSuccess: () => { toast.push('MCP server updated', 'success'); setEditingName(null); refresh(); },
+    onError: (e: any) => toast.push(e.message, 'error'),
+  });
+
+  const removeMut = useMutation({
+    mutationFn: async (name: string) => {
+      const {commitRemoveMcpServer} = await import('../relay/RemoveMcpServerMutation');
+      await commitRemoveMcpServer(name);
+    },
+    onSuccess: () => { toast.push('MCP server removed', 'success'); refresh(); },
+    onError: (e: any) => toast.push(e.message, 'error'),
+  });
+
+  const reloadMut = useMutation({
+    mutationFn: async () => {
+      const {commitReloadMcpServers} = await import('../relay/ReloadMcpServersMutation');
+      await commitReloadMcpServers();
+    },
+    onSuccess: () => { toast.push('MCP reloaded', 'success'); refresh(); },
+    onError: (e: any) => toast.push(e.message, 'error'),
+  });
+
+  const servers = data?.servers ?? [];
+  const tools = data?.tools ?? [];
+
+  return (
+    <section style={{maxWidth:720}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+        <h2 style={{fontSize:'1rem', margin:0}}>MCP Servers (dynamic)</h2>
+        <button type="button" className="activity-btn" onClick={() => reloadMut.mutate()} disabled={reloadMut.isPending}>
+          {reloadMut.isPending ? 'Reloading…' : '↻ Reload'}
+        </button>
+      </div>
+      <div style={{fontSize:'0.82rem', color:'var(--text-dim)', marginBottom:12}}>
+        Add external tools via MCP. Config JSON is the connection dict: e.g. stdio <code>{"command": "npx", "args": [...]}</code> or http <code>{"url": "http://..."}</code>.
+        DB wins over file/env. {tools.length > 0 && <span>Loaded <strong>{tools.length}</strong> tools: {tools.slice(0,8).join(', ')}{tools.length > 8 ? '…' : ''}</span>}
+      </div>
+
+      {isLoading && <div style={{color:'var(--text-dim)'}}>Loading…</div>}
+
+      <div style={{display:'flex', flexDirection:'column', gap:8, marginBottom:16}}>
+        {servers.map((s: any) => (
+          <div key={s.name} style={{border:'1px solid var(--border)', borderRadius:6, padding:'10px 12px', background: editingName === s.name ? 'var(--surface2)' : 'transparent'}}>
+            <div style={{display:'flex', gap:10, alignItems:'center'}}>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:600}}>{s.name} <span style={{fontSize:'0.72rem', color:'var(--text-dim)', fontWeight:400}}>· {s.transport} · {s.toolCount} tools</span></div>
+                <div style={{fontSize:'0.76rem', color:'var(--text-dim)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{s.command || s.url || ''}</div>
+              </div>
+              <button className="activity-btn" onClick={() => { setEditingName(s.name); setEditingConfig(s.config); }}>Edit</button>
+              <button className="activity-btn" onClick={() => { if (confirm(`Remove ${s.name}?`)) removeMut.mutate(s.name); }} disabled={removeMut.isPending}>Delete</button>
+            </div>
+            {editingName === s.name && (
+              <div style={{marginTop:10}}>
+                <textarea className="auto-form-textarea" style={{minHeight:120, fontFamily:'ui-monospace, monospace', fontSize:'0.8rem'}} value={editingConfig} onChange={e => setEditingConfig(e.target.value)} />
+                <div style={{display:'flex', gap:8, justifyContent:'flex-end', marginTop:8}}>
+                  <button className="auto-form-cancel-btn" onClick={() => setEditingName(null)}>Cancel</button>
+                  <button className="auto-form-save-btn" onClick={() => updateMut.mutate()} disabled={updateMut.isPending}>{updateMut.isPending ? 'Saving…' : 'Save'}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        {servers.length === 0 && !isLoading && <div style={{fontSize:'0.85rem', color:'var(--text-dim)'}}>No MCP servers. env/file + DB empty.</div>}
+      </div>
+
+      <div style={{borderTop:'1px solid var(--border)', paddingTop:12}}>
+        <div style={{fontWeight:600, fontSize:'0.9rem', marginBottom:6}}>Add new server</div>
+        <div style={{display:'flex', gap:8, marginBottom:8}}>
+          <input className="auto-form-input" placeholder="name (e.g. filesystem)" value={draftName} onChange={e => setDraftName(e.target.value)} style={{flex:'0 0 160px'}} />
+        </div>
+        <textarea className="auto-form-textarea" style={{minHeight:140, fontFamily:'ui-monospace, monospace', fontSize:'0.8rem'}} value={draftConfig} onChange={e => setDraftConfig(e.target.value)} placeholder='{"command": "npx", "args": [...]}' />
+        <div style={{display:'flex', justifyContent:'flex-end', marginTop:8}}>
+          <button className="auto-form-save-btn" onClick={() => addMut.mutate()} disabled={!draftName.trim() || !draftConfig.trim() || addMut.isPending}>{addMut.isPending ? 'Adding…' : 'Add server'}</button>
+        </div>
+      </div>
+    </section>
   );
 }
 

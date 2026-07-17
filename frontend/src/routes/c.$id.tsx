@@ -89,7 +89,8 @@ function ConversationPage() {
     todos: liveTodos,
     error,
     pendingInterrupt,
-  } = useTaskEvents(streamTaskId, id);
+    budget: liveBudget,
+  } = useTaskEvents(streamTaskId, id) as any;
 
   const queryClient = useQueryClient();
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
@@ -318,6 +319,7 @@ function ConversationPage() {
           steps={panelSteps}
           isLive={isActive}
           todos={todos}
+          budget={liveBudget}
           onClose={() => setPanelOpen(false)}
         />
       )}

@@ -19,6 +19,13 @@ export const runningTasksQuery = graphql`
       hasInterrupt
       cancelled
       done
+      inputTokens
+      outputTokens
+      totalTokens
+      llmCalls
+      toolCalls
+      budgetExceeded
+      budgetReason
     }
   }
 `;
@@ -35,6 +42,13 @@ function mapTask(t: Node): RunningTask {
     has_interrupt: t.hasInterrupt,
     cancelled: t.cancelled,
     done: t.done,
+    input_tokens: (t as any).inputTokens ?? 0,
+    output_tokens: (t as any).outputTokens ?? 0,
+    total_tokens: (t as any).totalTokens ?? 0,
+    llm_calls: (t as any).llmCalls ?? 0,
+    tool_calls: (t as any).toolCalls ?? 0,
+    budget_exceeded: !!(t as any).budgetExceeded,
+    budget_reason: (t as any).budgetReason ?? null,
   };
 }
 

@@ -5143,6 +5143,112 @@ body {
   border-color: var(--accent);
 }
 
+/* Artifact versions & diff */
+.artifact-versions-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.artifact-versions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.88rem;
+}
+.artifact-versions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.artifact-version-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 0.82rem;
+}
+.artifact-version-row:hover {
+  background: var(--surface2);
+  border-color: var(--border);
+}
+.artifact-version-row.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.artifact-version-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  min-width: 36px;
+  text-align: center;
+}
+.artifact-version-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artifact-version-meta {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.artifact-version-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.artifact-btn.small {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+.artifact-diff {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.artifact-diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.artifact-diff-content {
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.diff-line.diff-add {
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+.diff-line.diff-del {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  text-decoration: line-through;
+}
+
 /* Floating button to reopen the artifact panel mid-conversation */
 .artifact-fab {
   position: fixed;

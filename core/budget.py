@@ -157,6 +157,23 @@ class BudgetTracker:
             if self._exceeded_reason:
                 self._task_state.budget_exceeded = True
                 self._task_state.budget_reason = self._exceeded_reason
+            # Emit live budget update for UI progress bars — throttled by caller
+            # (record_llm/record_tool call per LLM/tool, which is already low freq)
+            try:
+                from core.state import emit_event
+
+                emit_event(
+                    self._task_state,
+                    "budget_update",
+                    input_tokens=self.input_tokens,
+                    output_tokens=self.output_tokens,
+                    total_tokens=self.total_tokens,
+                    llm_calls=self.llm_calls,
+                    tool_calls=self.tool_calls,
+                    snapshot=self.snapshot(),
+                )
+            except Exception:
+                pass
         except Exception:
             pass
 

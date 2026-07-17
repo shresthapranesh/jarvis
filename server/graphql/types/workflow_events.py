@@ -104,6 +104,16 @@ class WorkflowBudgetExceededEvent:
 
 
 @strawberry.type
+class WorkflowBudgetUpdateEvent:
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    llm_calls: int
+    tool_calls: int
+    snapshot: str | None = None
+
+
+@strawberry.type
 class WorkflowNodeRetryEvent:
     node_id: str
     attempt: int
@@ -125,6 +135,7 @@ WorkflowEvent = Annotated[
         WorkflowInterruptEvent,
         WorkflowInterruptResolvedEvent,
         WorkflowBudgetExceededEvent,
+        WorkflowBudgetUpdateEvent,
         WorkflowNodeRetryEvent,
         WorkflowDoneEvent,
         WorkflowErrorEvent,
@@ -219,6 +230,15 @@ def coerce_workflow_event(raw: dict) -> WorkflowEvent | None:
     if event_name == "budget_exceeded":
         return WorkflowBudgetExceededEvent(
             reason=data.get("reason", ""),
+            snapshot=data.get("snapshot") if isinstance(data.get("snapshot"), str) else json.dumps(data.get("snapshot") or {}),
+        )
+    if event_name == "budget_update":
+        return WorkflowBudgetUpdateEvent(
+            input_tokens=int(data.get("input_tokens", 0)),
+            output_tokens=int(data.get("output_tokens", 0)),
+            total_tokens=int(data.get("total_tokens", 0)),
+            llm_calls=int(data.get("llm_calls", 0)),
+            tool_calls=int(data.get("tool_calls", 0)),
             snapshot=data.get("snapshot") if isinstance(data.get("snapshot"), str) else json.dumps(data.get("snapshot") or {}),
         )
     if event_name == "node_retry":

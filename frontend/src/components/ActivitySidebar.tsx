@@ -3,10 +3,19 @@ import {useEffect, useRef, useState} from 'react';
 import type {Step, TodoItem} from '../lib/types';
 import {TodoList} from './TodoList';
 
+interface Budget {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  llmCalls: number;
+  toolCalls: number;
+}
+
 interface Props {
   steps: Step[];
   isLive?: boolean;
   todos?: TodoItem[];
+  budget?: Budget | null;
   onClose: () => void;
 }
 
@@ -176,7 +185,7 @@ function WorkerGroupRow({group}: {group: WorkerGroup}) {
   );
 }
 
-export function ActivitySidebar({steps, isLive, todos, onClose}: Props) {
+export function ActivitySidebar({steps, isLive, todos, budget, onClose}: Props) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll to bottom when new steps arrive during live streaming
@@ -220,6 +229,23 @@ export function ActivitySidebar({steps, isLive, todos, onClose}: Props) {
       </div>
       <div className="steps-panel-body" ref={bodyRef}>
         {todos && todos.length > 0 && <TodoList todos={todos} compact />}
+        {budget && (
+          <div style={{padding:'8px 12px', margin:'0 0 8px', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, fontSize:'0.78rem'}}>
+            <div style={{display:'flex', justifyContent:'space-between', marginBottom:4}}>
+              <strong>Budget</strong>
+              <span style={{color: budget.totalTokens > 400000 ? 'var(--error-text)' : budget.totalTokens > 300000 ? 'var(--warning-text)' : 'var(--text-dim)'}}>{budget.totalTokens.toLocaleString()} tokens</span>
+            </div>
+            <div style={{height:4, background:'var(--surface2)', borderRadius:4, overflow:'hidden', marginBottom:6}}>
+              <div style={{width:`${Math.min(100, Math.round(budget.totalTokens/500000*100))}%`, height:'100%', background: budget.totalTokens > 400000 ? 'var(--error-text)' : 'var(--accent)', transition:'width 0.3s'}} />
+            </div>
+            <div style={{display:'flex', gap:12, color:'var(--text-dim)'}}>
+              <span>{budget.inputTokens.toLocaleString()} in</span>
+              <span>{budget.outputTokens.toLocaleString()} out</span>
+              <span>{budget.llmCalls} llm</span>
+              <span>{budget.toolCalls} tools</span>
+            </div>
+          </div>
+        )}
         {items.length === 0 ? (
           <div className="sidebar-empty">No activity recorded.</div>
         ) : (
