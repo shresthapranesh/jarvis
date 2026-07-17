@@ -16,13 +16,17 @@ jarvis/
 │   ├── agents.py         # build_agent(model) — LangGraph agent factory + subagents
 │   ├── messages.py       # LLM-message hygiene: elide_stale_tool_results, strip_historical_thinking,
 │   │                     #   repair_orphan_tool_calls, build_llm_messages (+ estimate_tokens)
+│   │                     #   _is_tool_result_carrier covers Anthropic HumanMessage tool_result blocks
+│   ├── compaction.py     # group_messages(), apply_per_call_compaction() (elide + collapse_old_tool_results),
+│   │                     #   maybe_compact() — incremental sliding-window summarization with cached summary
+│   │                     #   (MAF-inspired grouping, ADK-inspired token-budget, pins recent user)
 │   ├── model_catalog.py  # AVAILABLE_MODELS, DEFAULT_MODEL, is_valid_model()
 │   ├── state.py          # TaskState, _tasks, _notify(), stream_task_events(),
 │   │                     #   get_queue(), get_store(), get_async_checkpointer()
 │   ├── queue/            # Durable job queue: protocol.py (Job, JobQueue ABC),
 │   │                     #   sqlite.py (SqliteJobQueue), worker.py (Worker)
 │   ├── streaming.py      # TokenCoalescer, STREAM_MODES, _process_chunk(), _finalize_message()
-│   ├── summarization.py  # maybe_summarize() — history trimming for the agent loop
+│   ├── summarization.py  # DEPRECATED — use compaction.maybe_compact; kept for backwards compat
 │   ├── memory_consolidation.py  # AGENTS.md blob store keys + consolidate_memory() (keyless fallback)
 │   ├── memory_store.py   # discrete vector memory — load_core/search_memory/upsert_memory (Memory rows)
 │   ├── skill_store.py    # skill description embedding + intent retrieval — skill_catalog()/search_skills()
@@ -308,7 +312,7 @@ Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`
 `Conversation.model` is **sticky per-conversation**: the chat `startTask` mutation updates it whenever the request's model differs from the stored value, and the InputBox commits a conversation-update mutation on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model`, falling back to the catalog default only when no conversation exists yet.
 
 ## LLM-call node requirement
-Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks). Loop nodes should also run `elide_stale_tool_results` first (token hygiene: clips bulky tool outputs older than the last few AI turns; per-call only, the checkpointer keeps the full text).
+Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks). Loop nodes should also run `apply_per_call_compaction()` (token hygiene: `elide_stale_tool_results` + `collapse_old_tool_results`, per-call only, checkpointer keeps full text) from `core/compaction.py`. `group_messages()` handles Anthropic HumanMessage tool_result carriers via `_is_tool_result_carrier`.
 
 ## Telegram Bot
 Optional — enabled by setting `TELEGRAM_BOT_TOKEN` before starting the server. Implemented in `server/telegram_bot.py`:

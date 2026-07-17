@@ -19,9 +19,9 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from .config import get_config
+from .compaction import apply_per_call_compaction, maybe_compact
 from .messages import (
     build_llm_messages,
-    elide_stale_tool_results,
     message_text,
     repair_orphan_tool_calls,
     strip_historical_thinking,
@@ -33,7 +33,6 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     is_valid_model,
 )
 from .schemas import TodoItem, _normalise_todos, reduce_todos
-from .summarization import maybe_summarize
 from core.doc_index import embeddings_available
 from core.memory_store import load_core, search_memory
 from core.skill_store import skill_catalog
@@ -464,7 +463,8 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
                 # signature: Field required"), and route through
                 # build_llm_messages so any embedded SystemMessages are
                 # collapsed into the single system prompt.
-                history = elide_stale_tool_results(list(state.get("messages", [])))
+                # Use new per-call compaction (elide + collapse old tool groups)
+                history = apply_per_call_compaction(list(state.get("messages", [])))
                 history = strip_historical_thinking(history)
                 history = repair_orphan_tool_calls(history)
                 response = await role_llm.ainvoke(
@@ -550,15 +550,22 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
             volatile_parts.append(f"## Current Tasks\n\n{todo_lines}")
         volatile = "\n\n".join(volatile_parts)
-        # Clip stale tool outputs BEFORE the summarize check so the token
-        # estimate reflects what we'd actually send — elision alone often
-        # keeps the history under the summarization threshold.
-        lean_messages = elide_stale_tool_results(raw_messages)
-        summarized = await maybe_summarize(lean_messages, llm=llm, summarizer=llm_for_summary)
-        if summarized is not None:
-            messages_for_llm, state_update_msgs = summarized
+
+        # ── New compaction pipeline (MAF + ADK inspired) ─────────────────
+        # maybe_compact internally does elide-first token counting (per-call view)
+        # but groups/removes against raw_messages. See core/compaction.py.
+        compacted = await maybe_compact(
+            raw_messages, llm=llm, summarizer=llm_for_summary
+        )
+        if compacted is not None:
+            messages_for_llm_raw, state_update_msgs = compacted
+            # Keep cheap path on the compacted result so kept groups' old tool
+            # outputs stay collapsed per-call
+            messages_for_llm = apply_per_call_compaction(messages_for_llm_raw)
         else:
-            messages_for_llm, state_update_msgs = lean_messages, []
+            messages_for_llm = apply_per_call_compaction(raw_messages)
+            state_update_msgs = []
+
         messages_for_llm = strip_historical_thinking(messages_for_llm)
         messages_for_llm = repair_orphan_tool_calls(messages_for_llm)
         response = await llm_with_tools.ainvoke(

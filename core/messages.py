@@ -196,6 +196,9 @@ def elide_stale_tool_results(
     same (deterministic) elision. Only plain-string tool content is touched —
     list content (vision blocks, structured tool results) passes through, as
     do results at or under ``min_chars``.
+
+    NOTE: this is step 1 of `core/compaction.py:apply_per_call_compaction()`
+    which also collapses old tool_call groups into short stubs.
     """
     cutoff = 0
     seen_ai = 0
