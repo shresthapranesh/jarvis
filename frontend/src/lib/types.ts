@@ -237,7 +237,9 @@ export type WorkflowNodeType =
   | 'parallel'
   | 'loop'
   | 'approval'
-  | 'human_input';
+  | 'human_input'
+  | 'planner'
+  | 'plan';
 
 export interface WorkflowNodeData extends Record<string, unknown> {
   label: string;
@@ -282,6 +284,14 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   on_deny?: 'error' | 'continue';
   prompt?: string;
   question?: string;
+  // planner
+  goal?: string;
+  max_steps?: number;
+  // resilience
+  retries?: number;
+  retry_delay_seconds?: number;
+  on_error?: 'error' | 'continue' | 'skip';
+  fallback_output?: Record<string, unknown>;
 }
 
 export interface WorkflowRFNode {

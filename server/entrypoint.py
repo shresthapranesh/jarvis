@@ -80,12 +80,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # ── MCP (ADK McpToolset analog) ─────────────────────────────────
         # Warm up MCP client so tools are cached before first agent build.
+        # Merge env + file + DB (DB wins) so runtime-added servers are active on boot.
         try:
-            from core.mcp import initialize_mcp
-            mcp_tools = await initialize_mcp()
-            logger.info("MCP initialized: %d tools", len(mcp_tools))
+            from core.mcp import get_mcp_manager, load_mcp_server_configs_with_db
+
+            db_cfg: dict = {}
+            try:
+                from core.mcp import get_mcp_servers_from_db
+                from db import async_session as _async_session
+
+                async with _async_session() as _sess:
+                    db_cfg = await get_mcp_servers_from_db(_sess)
+            except Exception:
+                db_cfg = {}
+
+            merged = load_mcp_server_configs_with_db(db_cfg=db_cfg)
+            mcp_tools = await get_mcp_manager().initialize(merged if merged else None)
+            logger.info("MCP initialized: %d tools from %d servers", len(mcp_tools), len(merged))
         except Exception as exc:
-            logger.warning("MCP init failed: %s", exc)
+            logger.warning("MCP init failed: %s", exc, exc_info=True)
 
         # ── Runner (ADK analog) ───────────────────────────────────────
         # Centralizes checkpointer/store/queue/config and cache config.

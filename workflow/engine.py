@@ -42,10 +42,30 @@ Graph definition format (stored as JSON in ``Workflow.definition``):
         ]
     }
 
+Per-node resilience (new):
+    config options:
+      timeout_seconds (float): max wall-clock for this node
+      retries (int, default 0): number of retry attempts after failure
+      retry_delay_seconds (float, default 1): sleep between retries
+      on_error (str, default "error"): "error" (branch stalls) or "continue"
+        (emit done with fallback_output or {} and keep branch)
+      fallback_output (dict): data to return when on_error="continue" after all
+        retries exhausted; merged under output ports if provided
+
+Expression language (new):
+    prompt_template / condition / instruction / reason / rubric etc now use
+    Jinja2 if installed, else regex fallback:
+      {{var}} -> same as {{inputs.var}} (legacy direct)
+      {{inputs.foo}}
+      {{nodes.node_id.port}} or {{nodes.node_id}} (whole output dict as JSON string in fallback)
+      {{workflow.foo}} -> top-level workflow inputs
+    Filters when Jinja available: upper, lower, trim, default, tojson/json, fromjson
+
 SSE events emitted:
     node_start:     {node_id, node_type, label}
     node_token:     {node_id, text}           — streaming from AgentNode
     node_condition: {node_id, verdict}        — "true" | "false"
+    node_retry:     {node_id, attempt, max_retries, error} — emitted between retries
     node_done:      {node_id, output}
     node_error:     {node_id, error}
     workflow_done:  {outputs, run_id}
@@ -60,6 +80,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core.state import TaskState
+from core.workflow_template import (
+    render_template,
+    reset_template_context,
+    set_template_context,
+)
 from workflow.nodes import NodeOutput, build_node, _emit, _interpolate
 
 
@@ -181,24 +206,47 @@ async def execute_workflow(
     node_records: list[dict] = []
 
     async def _run_node(node_id: str) -> tuple[str, NodeOutput | None, dict]:
-        """Execute one node and emit its lifecycle events.
+        """Execute one node with retry/timeout/on_error resilience.
 
         Returns ``(node_id, result, record)``; ``result`` is None when the node
-        raised — the caller skips state updates for it but keeps the error
-        record so independent branches keep running. Reads ``completed`` /
-        ``pruned_edges`` but never mutates shared state, so a whole frontier can
-        run concurrently under ``asyncio.gather``.
+        ultimately failed and on_error="error" — branch stalls; otherwise
+        result may be a fallback NodeOutput when on_error="continue".
         """
         node_def = nodes_by_id[node_id]
         node_type = node_def.get("type", "")
         label = node_def.get("label", node_id)
         config = node_def.get("config", {})
 
-        # Resolve inputs: from edges for non-start nodes; from workflow inputs for start nodes
+        # Resolve inputs
         node_inputs = _resolve_node_inputs(node_id, edges, completed, pruned_edges)
         if not node_inputs:
-            # Start node — inject workflow-level inputs
             node_inputs = dict(inputs)
+
+        # Resilience knobs
+        timeout_raw = config.get("timeout_seconds", config.get("timeout"))
+        try:
+            timeout_val: float | None = float(timeout_raw) if timeout_raw is not None else None
+            if timeout_val is not None and timeout_val <= 0:
+                timeout_val = None
+        except Exception:
+            timeout_val = None
+
+        try:
+            retries = max(0, int(config.get("retries", 0)))
+        except Exception:
+            retries = 0
+        retries = min(retries, 10)
+
+        try:
+            retry_delay = float(config.get("retry_delay_seconds", config.get("retry_delay", 1.0)))
+        except Exception:
+            retry_delay = 1.0
+        retry_delay = max(0.0, min(retry_delay, 60.0))
+
+        on_error = str(config.get("on_error", "error")).lower()
+        if on_error not in ("error", "continue", "skip"):
+            on_error = "error"
+        fallback_output = config.get("fallback_output")
 
         _emit(task_state, "node_start", node_id=node_id, node_type=node_type, label=label)
 
@@ -212,30 +260,115 @@ async def execute_workflow(
             "error": None,
             "started_at": _now_iso(),
             "finished_at": None,
+            "attempts": 0,
+            "timeout_seconds": timeout_val,
+            "retries_config": retries,
+            "on_error": on_error,
         }
         if node_type == "agent":
-            record["rendered_prompt"] = _interpolate(
-                config.get("prompt_template", ""), node_inputs
-            )
+            try:
+                rendered = render_template(
+                    config.get("prompt_template", ""), node_inputs, completed, inputs
+                )
+            except Exception:
+                rendered = _interpolate(config.get("prompt_template", ""), node_inputs, completed, inputs)
+            record["rendered_prompt"] = rendered
+
+        # Set template context var for {{nodes.*}} resolution inside node.execute
+        ctx_token = set_template_context(completed, inputs)
+
+        last_error: str | None = None
+        last_exc: Exception | None = None
 
         try:
-            node = build_node(node_id, node_type, config)
-            result = await node.execute(node_inputs, task_state)
-        except Exception as exc:
-            error_msg = str(exc)
+            for attempt in range(retries + 1):
+                if task_state.cancelled:
+                    raise asyncio.CancelledError()
+
+                record["attempts"] = attempt + 1
+                try:
+                    node = build_node(node_id, node_type, config)
+                    if timeout_val is not None:
+                        result = await asyncio.wait_for(
+                            node.execute(node_inputs, task_state), timeout=timeout_val
+                        )
+                    else:
+                        result = await node.execute(node_inputs, task_state)
+
+                    # Success
+                    record["status"] = "done"
+                    record["outputs"] = result.data
+                    record["finished_at"] = _now_iso()
+                    if result.next_handles is not None:
+                        record["verdict"] = result.next_handles[0]
+                    _emit(task_state, "node_done", node_id=node_id, output=result.data)
+                    return node_id, result, record
+
+                except asyncio.TimeoutError as exc:
+                    last_exc = exc
+                    last_error = f"timeout after {timeout_val}s"
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    last_exc = exc
+                    last_error = str(exc)
+
+                # Failure handling for this attempt
+                if attempt < retries:
+                    _emit(
+                        task_state,
+                        "node_retry",
+                        node_id=node_id,
+                        attempt=attempt + 1,
+                        max_retries=retries,
+                        error=last_error,
+                    )
+                    # Respect cancellation during sleep
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.sleep(retry_delay), timeout=retry_delay + 1
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                    if task_state.cancelled:
+                        raise asyncio.CancelledError()
+                    continue
+                else:
+                    # Exhausted retries
+                    break
+
+            # All attempts failed
+            error_msg = last_error or "unknown error"
             record["status"] = "error"
             record["error"] = error_msg
             record["finished_at"] = _now_iso()
             _emit(task_state, "node_error", node_id=node_id, error=error_msg)
+
+            if on_error in ("continue", "skip"):
+                # Produce fallback output so branch continues
+                if isinstance(fallback_output, dict):
+                    fallback_data = fallback_output
+                else:
+                    fallback_data = {}
+                # If fallback empty and we have an output_key hint, produce empty under that key? Keep empty dict.
+                fallback_result = NodeOutput(data=fallback_data)
+                record["status"] = "done"
+                record["outputs"] = fallback_result.data
+                record["error"] = error_msg  # keep error for visibility but status done
+                record["fallback_used"] = True
+                _emit(task_state, "node_done", node_id=node_id, output=fallback_result.data)
+                return node_id, fallback_result, record
+
             return node_id, None, record
 
-        record["status"] = "done"
-        record["outputs"] = result.data
-        record["finished_at"] = _now_iso()
-        if result.next_handles is not None:
-            record["verdict"] = result.next_handles[0]  # "true" or "false"
-        _emit(task_state, "node_done", node_id=node_id, output=result.data)
-        return node_id, result, record
+        except asyncio.CancelledError:
+            record["status"] = "error"
+            record["error"] = "cancelled"
+            record["finished_at"] = _now_iso()
+            _emit(task_state, "node_error", node_id=node_id, error="cancelled")
+            return node_id, None, record
+        finally:
+            reset_template_context(ctx_token)
 
     # Level-synchronized BFS: each iteration drains the entire ready frontier
     # and runs those nodes concurrently. They are independent by construction —

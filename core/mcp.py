@@ -24,7 +24,8 @@ Config sources (merged, file wins over env, env JSON wins over nothing):
    }
    or {"servers": {...}} or top-level dict of servers.
 
-3. DB config_settings key "mcp.servers" — read lazily via file? Skipped for now; can be added in runner.
+ 3. DB config_settings key "mcp.servers" — JSON object for runtime-managed servers
+    added via GraphQL mutations. DB wins over file wins over env.
 
 If no config, returns empty — agent works without MCP.
 
@@ -37,6 +38,7 @@ Agent integration:
     main_tools += get_mcp_tools_sync()
 
 Design: mirrors ADK Runner's toolset loading but keeps it optional.
+Dynamic reload via reload_mcp_servers GraphQL mutation.
 """
 
 from __future__ import annotations
@@ -150,6 +152,20 @@ def _load_from_files(work_dir: Path | None = None) -> dict[str, dict[str, Any]]:
     return {}
 
 
+MCP_DB_KEY = "mcp.servers"
+
+
+def _parse_db_raw(raw: str | None) -> dict[str, dict[str, Any]]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return _normalize_servers(data)
+    except Exception as exc:
+        logger.warning("Failed to parse MCP DB config: %s", exc)
+        return {}
+
+
 def load_mcp_server_configs(work_dir: Path | None = None) -> dict[str, dict[str, Any]]:
     """Load and merge MCP server configs from env + files. File wins over env."""
     env_cfg = _load_from_env()
@@ -160,6 +176,78 @@ def load_mcp_server_configs(work_dir: Path | None = None) -> dict[str, dict[str,
         logger.info("MCP servers configured: %s", list(merged.keys()))
     else:
         logger.debug("No MCP servers configured")
+    return merged
+
+
+def load_mcp_server_configs_with_db(
+    db_cfg: dict[str, dict[str, Any]] | None = None,
+    work_dir: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Merge env + file + DB. DB wins over file wins over env."""
+    env_cfg = _load_from_env()
+    file_cfg = _load_from_files(work_dir)
+    db_normalized = _normalize_servers(db_cfg) if db_cfg else {}
+    merged = {**env_cfg, **file_cfg, **db_normalized}
+    if merged:
+        logger.info("MCP servers configured (env+file+db): %s", list(merged.keys()))
+    return merged
+
+
+# ── Async DB helpers ──────────────────────────────────────────────────────
+
+async def get_mcp_servers_from_db(session) -> dict[str, dict[str, Any]]:
+    """Read DB persistence layer (config_settings key MCP_DB_KEY)."""
+    try:
+        from db.ops import get_setting
+
+        raw = await get_setting(session, MCP_DB_KEY)
+        return _parse_db_raw(raw)
+    except Exception as exc:
+        logger.warning("get_mcp_servers_from_db failed: %s", exc)
+        return {}
+
+
+async def set_mcp_servers_in_db(session, servers: dict[str, dict[str, Any]]) -> None:
+    """Persist full dict to DB."""
+    from db.ops import set_setting
+
+    await set_setting(session, MCP_DB_KEY, json.dumps(servers))
+
+
+async def add_mcp_server_to_db(session, name: str, cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    servers = await get_mcp_servers_from_db(session)
+    # Normalize single entry
+    normalized = _normalize_servers({name: cfg})
+    if not normalized:
+        raise ValueError(f"invalid MCP server config for {name}")
+    servers.update(normalized)
+    await set_mcp_servers_in_db(session, servers)
+    return servers
+
+
+async def update_mcp_server_in_db(session, name: str, cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return await add_mcp_server_to_db(session, name, cfg)
+
+
+async def remove_mcp_server_from_db(session, name: str) -> dict[str, dict[str, Any]]:
+    servers = await get_mcp_servers_from_db(session)
+    if name not in servers:
+        raise ValueError(f"MCP server {name!r} not found in DB (found: {list(servers.keys())})")
+    del servers[name]
+    await set_mcp_servers_in_db(session, servers)
+    return servers
+
+
+async def load_mcp_server_configs_async(work_dir: Path | None = None, session=None) -> dict[str, dict[str, Any]]:
+    """Async version that includes DB if session provided."""
+    env_cfg = _load_from_env()
+    file_cfg = _load_from_files(work_dir)
+    db_cfg: dict[str, dict[str, Any]] = {}
+    if session is not None:
+        db_cfg = await get_mcp_servers_from_db(session)
+    merged = {**env_cfg, **file_cfg, **db_cfg}
+    if merged:
+        logger.info("MCP servers configured (async env+file+db): %s", list(merged.keys()))
     return merged
 
 
@@ -221,6 +309,21 @@ class McpManager:
         if not self._initialized:
             await self.initialize()
         return list(self._tools)
+
+    async def reload(self, connections: dict[str, dict[str, Any]] | None = None) -> list[Any]:
+        """Force reload — clears cache and re-initializes with new connections (or existing)."""
+        async with self._lock:
+            if connections is not None:
+                self.connections = connections
+            # Clear old client
+            self._client = None
+            self._tools = []
+            self._initialized = False
+
+        # Re-init outside lock? initialize takes its own lock, so need to avoid deadlock
+        # We'll call initialize which acquires lock again after clearing.
+        # To avoid holding lock twice, we already cleared inside first lock, now re-acquire via initialize.
+        return await self.initialize(self.connections if connections is None else connections)
 
     async def close(self) -> None:
         async with self._lock:

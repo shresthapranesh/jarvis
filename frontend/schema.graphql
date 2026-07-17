@@ -218,6 +218,16 @@ The `JSON` scalar type represents JSON values as specified by [ECMA-404](https:/
 """
 scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
 
+type McpServer {
+  name: String!
+  config: String!
+  transport: String!
+  command: String
+  url: String
+  toolCount: Int!
+  enabled: Boolean!
+}
+
 type Memory {
   content: String!
   exists: Boolean!
@@ -323,6 +333,10 @@ type Mutation {
   updateSkill(id: ID!, input: SkillUpdateInput!): Skill!
   deleteSkill(id: ID!): Boolean!
   stopRunningTask(taskId: String!): StopRunningTaskPayload!
+  addMcpServer(name: String!, configJson: String!): McpServer!
+  updateMcpServer(name: String!, configJson: String!): McpServer!
+  removeMcpServer(name: String!): Boolean!
+  reloadMcpServers: [McpServer!]!
 }
 
 """An object with a Globally Unique ID"""
@@ -425,6 +439,8 @@ type Query {
   project(id: ID!): Project
   skills: [Skill!]!
   runningTasks: [RunningTask!]!
+  mcpServers: [McpServer!]!
+  mcpTools: [String!]!
 }
 
 type RunningTask {
@@ -608,7 +624,7 @@ type WorkflowErrorEvent {
   runId: String!
 }
 
-union WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowApprovalRequestEvent | WorkflowApprovalResolvedEvent | WorkflowInterruptEvent | WorkflowInterruptResolvedEvent | WorkflowBudgetExceededEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent
+union WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowApprovalRequestEvent | WorkflowApprovalResolvedEvent | WorkflowInterruptEvent | WorkflowInterruptResolvedEvent | WorkflowBudgetExceededEvent | WorkflowNodeRetryEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent
 
 type WorkflowInterruptEvent {
   interruptId: String!
@@ -642,6 +658,13 @@ type WorkflowNodeDoneEvent {
 
 type WorkflowNodeErrorEvent {
   nodeId: String!
+  error: String!
+}
+
+type WorkflowNodeRetryEvent {
+  nodeId: String!
+  attempt: Int!
+  maxRetries: Int!
   error: String!
 }
 

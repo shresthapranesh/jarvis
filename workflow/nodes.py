@@ -73,12 +73,28 @@ class BaseNode(ABC):
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
 
-def _interpolate(template: str, inputs: dict[str, Any]) -> str:
-    """Replace ``{{var}}`` placeholders in template with values from inputs."""
-    def replace(m: re.Match) -> str:
-        key = m.group(1).strip()
-        return str(inputs.get(key, m.group(0)))
-    return re.sub(r"\{\{(.+?)\}\}", replace, template)
+def _interpolate(
+    template: str,
+    inputs: dict[str, Any],
+    completed: dict[str, Any] | None = None,
+    workflow_inputs: dict[str, Any] | None = None,
+) -> str:
+    """Replace ``{{var}}`` placeholders — now Jinja-backed with {{nodes.*}} support.
+
+    Backward compat: _interpolate(template, inputs) still works,
+    pulling completed/workflow from the ContextVar set by the engine.
+    """
+    try:
+        from core.workflow_template import render_template
+
+        return render_template(template, inputs, completed, workflow_inputs)
+    except Exception:
+        # Ultimate fallback — legacy regex
+        def replace(m: re.Match) -> str:
+            key = m.group(1).strip()
+            return str(inputs.get(key, m.group(0)))
+
+        return re.sub(r"\{\{(.+?)\}\}", replace, template)
 
 
 def _get_model_spec(model_id: str):
@@ -444,6 +460,125 @@ class MapNode(BaseNode):
             return sub_graph
 
         raise ValueError("MapNode requires either 'workflow_id' or 'sub_graph' in config")
+
+
+# ── PlannerNode (ADK planning analog) ─────────────────────────────────────
+
+class PlannerNode(BaseNode):
+    """Planning node — produces a structured plan (list of steps) from a goal.
+
+    Uses a single-turn LLM call (no tool loop) for fast, cheap planning.
+    Emits ``node_token`` for each planned step and returns the plan as list.
+
+    Config fields:
+        prompt_template (str): goal / task with {{var}} placeholders
+        rubric (str): optional guidance / constraints for planning
+        model (str): model id, defaults to DEFAULT_MODEL
+        max_steps (int): max steps (default 5, clamped 1..10)
+        output_key (str): output port name, defaults to "plan"
+        output_schema (dict|str|None): optional schema for structured plan output
+    """
+
+    node_type = "planner"
+
+    def output_ports(self) -> list[str]:
+        return [self.config.get("output_key", "plan"), "result", f"{self.config.get('output_key','plan')}_text"]
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        base_prompt = _interpolate(str(self.config.get("prompt_template", self.config.get("goal", "") or "")), inputs)
+        rubric = _interpolate(str(self.config.get("rubric", "") or ""), inputs)
+        model_id = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        output_key = self.config.get("output_key", "plan")
+        max_steps = max(1, min(10, int(self.config.get("max_steps", 5))))
+        output_schema = self.config.get("output_schema")
+
+        instruction = (
+            f"You are a planning assistant. Given the goal, break it into exactly {max_steps} "
+            f"or fewer concrete, actionable steps. Each step should be a short sentence (10-15 words). "
+            "Return ONLY a JSON array of strings — no explanation, no markdown, no numbering inside strings."
+        )
+        if rubric:
+            instruction += f"\n\nGuidance / constraints:\n{rubric}"
+
+        # If output_schema requested, include it
+        if output_schema:
+            schema_str = output_schema if isinstance(output_schema, str) else json.dumps(output_schema, indent=2)
+            instruction += f"\n\nOutput must match JSON schema:\n{schema_str}"
+
+        llm = _get_model_spec(model_id).build_llm()
+
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content=instruction),
+                HumanMessage(content=base_prompt or "Plan the steps to accomplish the inputs"),
+            ]
+        )
+        raw_text = _block_text(response.content)
+
+        # Try structured parse first if schema present
+        parsed: Any = None
+        if output_schema:
+            parsed_try, _err = _maybe_parse_structured_output(raw_text, output_schema)
+            if isinstance(parsed_try, (dict, list)):
+                parsed = parsed_try
+
+        # Try to extract JSON array
+        plan_list: list[str] = []
+        if parsed is None:
+            extracted = _extract_first_json(raw_text)
+            if isinstance(extracted, list):
+                plan_list = [str(x).strip() for x in extracted if str(x).strip()]
+            elif isinstance(extracted, dict):
+                # If dict contains steps/plans key
+                for key in ("steps", "plan", "tasks", "items"):
+                    if key in extracted and isinstance(extracted[key], list):
+                        plan_list = [str(x).strip() for x in extracted[key] if str(x).strip()]
+                        break
+
+        # Fallback: split raw_text by newlines / numbers
+        if not plan_list:
+            # Split on numbered or bullet lines
+            lines = re.split(r"\r?\n", raw_text.strip())
+            candidates: list[str] = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                # Remove leading numbering/bullet
+                line = re.sub(r"^\s*(?:\d+[\.\)]\s*|[-*]\s+|step\s*\d+[:\.]\s*)", "", line, flags=re.IGNORECASE).strip()
+                # Strip quotes/brackets
+                line = line.strip('"\'' )
+                if line and len(line) > 5:
+                    candidates.append(line)
+            if candidates:
+                plan_list = candidates[:max_steps]
+            else:
+                # Last resort: single plan = raw text
+                plan_list = [raw_text[:500]]
+
+        # Clamp to max_steps
+        plan_list = plan_list[:max_steps]
+
+        # Emit tokens for visibility
+        for idx, step in enumerate(plan_list, 1):
+            _emit(task_state, "node_token", node_id=self.node_id, text=f"{idx}. {step}\n")
+
+        data: dict[str, Any] = {
+            output_key: plan_list,
+            f"{output_key}_text": "\n".join(f"{i+1}. {s}" for i, s in enumerate(plan_list)),
+            "result": plan_list,
+        }
+        # If structured schema parsed and it's dict/list, merge
+        if isinstance(parsed, dict):
+            for k, v in parsed.items():
+                if k not in data:
+                    data[k] = v
+        elif isinstance(parsed, list) and output_key not in data:
+            data[output_key] = parsed
+
+        return NodeOutput(data=data)
 
 
 # ── StartNode ─────────────────────────────────────────────────────────────────
@@ -1052,6 +1187,8 @@ NODE_REGISTRY: dict[str, type[BaseNode]] = {
     "loop": LoopNode,
     "approval": ApprovalNode,
     "human_input": HumanInputNode,
+    "planner": PlannerNode,
+    "plan": PlannerNode,  # alias
 }
 
 

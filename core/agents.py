@@ -651,6 +651,21 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
             volatile_non_cached.append(f"## Current Tasks\n\n{todo_lines}")
+        else:
+            # ── Planning mode injection (ADK planning analog) ──────────────
+            # If no todos yet and query looks complex, inject a strong directive
+            # forcing the model to call write_todos first. This is the cheapest
+            # planning path (no extra LLM call) and is gated by
+            # JARVIS_PLANNING_MODE env (auto/always/off, default auto).
+            try:
+                from core.planning import build_planning_directive
+
+                latest_query = _latest_user_text(raw_messages)
+                directive = build_planning_directive(latest_query)
+                if directive:
+                    volatile_non_cached.append(directive)
+            except Exception:
+                pass
 
         volatile_suffix = "\n\n".join(volatile_non_cached)
 

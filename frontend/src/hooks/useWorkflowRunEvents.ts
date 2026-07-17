@@ -72,6 +72,12 @@ const subscription = graphql`
         reason
         snapshot
       }
+      ... on WorkflowNodeRetryEvent {
+        nodeId
+        attempt
+        maxRetries
+        error
+      }
       ... on WorkflowDoneEvent {
         outputs
         runId
@@ -226,6 +232,22 @@ export function useWorkflowRunEvents(
             break;
           case 'WorkflowBudgetExceededEvent':
             setState((s) => ({...s, error: `Budget exceeded: ${evt.reason}`}));
+            break;
+          case 'WorkflowNodeRetryEvent':
+            setState((s) => {
+              const existing = s.nodeStatuses[evt.nodeId] ?? {status: 'running' as const};
+              return {
+                ...s,
+                nodeStatuses: {
+                  ...s.nodeStatuses,
+                  [evt.nodeId]: {
+                    ...existing,
+                    status: 'running',
+                    error: `Retry ${evt.attempt}/${evt.maxRetries}: ${evt.error}`,
+                  },
+                },
+              };
+            });
             break;
           case 'WorkflowDoneEvent':
             setState((s) => ({

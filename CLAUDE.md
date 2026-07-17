@@ -89,11 +89,14 @@ jarvis/
 │   ├── routes_live.py         # WS: /ws/live (live audio session)
 │   └── routes_logs.py         # REST: GET /server-logs, GET /server-logs/stream
 ├── workflow/
-│   ├── engine.py         # BFS workflow executor — execute_workflow()
-│   └── nodes.py          # AgentNode (output_schema support), ConditionalNode, MapNode, StartNode, RouterNode,
+│   ├── engine.py         # BFS workflow executor — execute_workflow() + retry/timeout/on_error + template ctx
+│   └── nodes.py          # AgentNode (output_schema), ConditionalNode, MapNode, StartNode, RouterNode,
 │                         #   RefineNode, SequentialNode (output_schema per step), ParallelNode, LoopNode,
-│                         #   ApprovalNode, HumanInputNode + _emit() — ADK Sequential/Parallel/Loop/Approval analogs
-│                         #   + structured output via output_schema
+│                         #   ApprovalNode, HumanInputNode, PlannerNode + _emit() — ADK Sequential/Parallel/Loop/Approval/Planning analogs
+│                         #   + structured output via output_schema + resilience
+├── core/
+│   ├── workflow_template.py  # Jinja2 expression engine — {{inputs.*}}, {{nodes.*}}, {{workflow.*}} + filters
+│   ├── planning.py           # ADK planning analog — should_plan_for_query(), planning directive injection
 ├── tools/                # The main agent is CODE-FIRST: it binds only the [bound] tools
 │   │                     #   below; web/finance/datetime/browser work is done by writing
 │   │                     #   Python in run_cell, NOT via dedicated tools. [unbound] files
@@ -280,13 +283,33 @@ A durable multi-agent kanban layered on the job queue. A `BoardTask` is one card
 Visual graph executor (`workflow/engine.py`):
 - Definitions stored as JSON (`Workflow.definition`) with `nodes` + `edges` lists.
 - `execute_workflow(run_id, definition, inputs, task_state)` runs BFS over the graph; `server/workflow_runtime.py` is the background trigger.
-- Node types: `agent` (full LangGraph loop, supports `output_schema`), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults), `router` (N-way classifier), `refine` (generate+evaluate loop), `approval` (human approval gate), `human_input` (free-text human input).
-- **ADK multi-agent analogs** (`workflow/nodes.py`): `sequential` (SequentialAgent — steps in order sharing state, each step can have `output_schema`), `parallel` (ParallelAgent — branches concurrently), `loop` (LoopAgent — generate/evaluate until PASS or max_iter), `approval` (LongRunningFunctionTool analog — emits `approval_request` + `interrupt`, waits on `TaskState.resume_future`, supports `approved`/`denied` branching), `human_input` (Human-in-the-loop — emits `interrupt`, waits for free-text answer). These compose via `steps`/`branches` config lists and stream `node_token` per sub-step.
+- Node types: `agent` (full LangGraph loop, supports `output_schema`), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults), `router` (N-way classifier), `refine` (generate+evaluate loop), `approval` (human approval gate), `human_input` (free-text human input), `planner` (fast single-turn LLM that outputs JSON array of steps).
+- **ADK multi-agent analogs** (`workflow/nodes.py`): `sequential` (SequentialAgent — steps in order sharing state, each step can have `output_schema`), `parallel` (ParallelAgent — branches concurrently), `loop` (LoopAgent — generate/evaluate until PASS or max_iter), `approval` (LongRunningFunctionTool analog — emits `approval_request` + `interrupt`, waits on `TaskState.resume_future`, supports `approved`/`denied` branching), `human_input` (Human-in-the-loop — emits `interrupt`, waits for free-text answer), `planner` (Planning agent — cheap single-turn planning, outputs plan list + text). These compose via `steps`/`branches` config lists and stream `node_token` per sub-step.
 - **Structured output**: `AgentNode` and `SequentialNode` support `output_schema` (JSON schema dict or JSON string). Prompt is augmented to request JSON, `_extract_first_json()` extracts first JSON object/array, merges dict keys as top-level outputs. `output_schema_mode="strict"` raises if no JSON.
+- **Resilience per node** (new): every node config can set `timeout_seconds` (float), `retries` (int, 0-10), `retry_delay_seconds` (float), `on_error` (`error` = branch stalls, `continue`/`skip` = emit `node_done` with `fallback_output` dict and keep branch), `fallback_output` (dict). Engine emits `node_retry` between attempts, respects `task_state.cancelled` during sleep, records `attempts` in node record. Implemented in `_run_node` wrapper with `asyncio.wait_for` + retry loop + `ContextVar` template context.
+- **Expression language** (new, `core/workflow_template.py`): templates now Jinja2-backed if installed, fallback regex otherwise. Available vars: `{{var}}` = `{{inputs.var}}` (legacy), `{{inputs.foo}}`, `{{nodes.node_id.output_key}}` or `{{nodes.node_id}}` (full output dict), `{{workflow.foo}}` (top-level workflow inputs). Filters: `upper`, `lower`, `trim`, `default`, `tojson`/`json`, `fromjson` when Jinja available. ContextVar `_template_ctx` set by engine before each node so `_interpolate` inside nodes can resolve `{{nodes.*}}` even without explicit completed arg. Backward compatible with old `{{var}}` placeholders.
 - **Agent-as-Tool**: `run_workflow(workflow_id, inputs_json)` (`tools/workflows.py`, bound) lets main agent invoke a saved workflow as sub-agent (ADK AgentTool). Emits `worker_start`/`worker_done` + `workflow_event` for visibility.
 - Conditional nodes prune inactive branches via `pruned_edges`; pruned nodes never execute.
 - **HITL**: workflow approval/human_input nodes pause via `TaskState.pending_interrupt_id` + `resume_future`, resumed via GraphQL `resumeWorkflowRun(runId, answer)` / `resolveWorkflowApproval(runId, approved, answer)` mutations (`mutations/workflow.py`). Events `approval_request`/`approval_resolved`/`interrupt`/`interrupt_resolved` flow via `workflowRunEvents` subscription (`WorkflowApprovalRequestEvent` etc).
-- CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`. All node types including `sequential`/`parallel`/`loop`/`router`/`refine`/`approval`/`human_input` added to `WorkflowNodeType` in `lib/types.ts` for future UI support.
+- CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`. All node types including `sequential`/`parallel`/`loop`/`router`/`refine`/`approval`/`human_input`/`planner` added to `WorkflowNodeType` in `lib/types.ts` for future UI support.
+
+## Workflow Resilience + Template (new)
+- `core/workflow_template.py`: `render_template(template, inputs, completed, workflow_inputs)` tries Jinja2 `Environment` with custom filters (`fromjson`, `json`/`tojson`), falls back to regex supporting `{{nodes.id.port}}`. ContextVar `set_template_context(completed, workflow_inputs)` / `reset_template_context` lets legacy `_interpolate` calls resolve nodes.
+- `workflow/engine.py`: `_run_node` now parses `timeout_seconds`, `retries`, `retry_delay_seconds`, `on_error`, `fallback_output` from config, implements retry loop with `node_retry` event emission and cancellation check during delay sleep. Uses `ContextVar` to expose `completed` to nodes. `node_records` now include `attempts`, `timeout_seconds`, `retries_config`, `on_error`, `fallback_used`.
+- `server/graphql/types/workflow_events.py`: new `WorkflowNodeRetryEvent(node_id, attempt, max_retries, error)`, added to `WorkflowEvent` union and `coerce_workflow_event`.
+- `frontend/src/hooks/useWorkflowRunEvents.ts`: subscription includes `WorkflowNodeRetryEvent`, state stores retry info as error field.
+
+## MCP Dynamic Management (ADK McpToolset runtime CRUD)
+- `core/mcp.py`: new constant `MCP_DB_KEY="mcp.servers"`, helpers `_parse_db_raw`, `load_mcp_server_configs_with_db(db_cfg)`, `get_mcp_servers_from_db(session)`, `set_mcp_servers_in_db`, `add_mcp_server_to_db`, `remove_mcp_server_from_db`, `load_mcp_server_configs_async`. Merging order env < file < DB (DB wins). `McpManager.reload(connections?)` method clears client/tools and re-initializes (avoids dead-lock by releasing lock before re-init).
+- `server/entrypoint.py`: lifespan now loads DB mcp config via `async_session` + `get_mcp_servers_from_db` and merges via `load_mcp_server_configs_with_db` before `McpManager.initialize(merged)`.
+- GraphQL: new type `McpServer(name, config JSON string, transport, command, url, tool_count, enabled)` in `types/mcp.py`, query `mcpServers` + `mcpTools` in `queries/mcp.py` (merges env+file+DB, reports tool count heuristically), mutations `addMcpServer(name, configJson)`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers` in `mutations/mcp.py` (persist to DB, reload manager). Wired in `schema.py`.
+- Frontend: `schema.graphql` includes `McpServer` and `WorkflowNodeRetryEvent`; `pnpm relay` compiles.
+
+## Planning Mode (ADK planning analog)
+- `core/planning.py`: `get_planning_mode()` reads `JARVIS_PLANNING_MODE` env (auto/always/off, default auto), `should_auto_plan(query)` heuristic (multi-line, 80+ chars, numbered/bullet list, keywords like research/implement/build..., phrases "and then"/"first"/"step"), `should_plan_for_query`, `build_planning_directive` (injected as volatile `## Planning Required` telling model to call `write_todos` first), `prefill_todos_with_llm` optional fast path via `JARVIS_PLANNING_PREFILL=1`.
+- `core/agents.py`: `model_request_node` now checks if todos empty and injects planning directive via `build_planning_directive(_latest_user_text)`, added to `volatile_non_cached` before compaction. So first iteration forces `write_todos` for complex queries without extra LLM call.
+- `core/system_prompt.md`: Planning section strengthened — MUST call `write_todos` first when `## Planning Required` appears, concrete 3-7 steps, verb-led, update list if scope grows, skip for one-shot Q&A.
+- `workflow/nodes.py`: new `PlannerNode` (`node_type="planner"`, alias `"plan"`) — single-turn LLM call with instruction to output JSON array of steps (max_steps 1..10), parses via `_extract_first_json`, fallback splits numbered/bullet lines, emits `node_token` per step, returns `{plan: [str], plan_text: "1. ...", result: [str]}`. Registered in `NODE_REGISTRY`.
 
 ## Artifact Versioning (ADK ArtifactService analog)
 - `db/models.py`: `ArtifactVersion` (artifact_id FK cascade, version int unique per artifact, title, filename, created_at). `Artifact.versions` relationship.
