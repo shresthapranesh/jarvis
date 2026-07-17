@@ -7311,9 +7311,9 @@ body {
 .mcp-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(var(--shadow-rgb),0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(var(--shadow-rgb),0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   z-index: 100;
   display: flex;
   align-items: center;
@@ -7322,10 +7322,8 @@ body {
 }
 
 .mcp-modal {
-  background: var(--glass-bg);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-  border: 1px solid var(--glass-border);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
   border-radius: 14px;
   width: 640px;
   max-width: 94vw;
@@ -7333,7 +7331,9 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(var(--shadow-rgb),0.5);
+  box-shadow:
+    0 24px 70px rgba(var(--shadow-rgb),0.55),
+    0 0 0 1px rgba(var(--tint-rgb),0.06) inset;
 }
 
 .mcp-modal-header {
