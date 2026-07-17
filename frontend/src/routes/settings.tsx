@@ -105,7 +105,7 @@ function McpServersSection() {
         </button>
       </div>
       <div style={{fontSize:'0.82rem', color:'var(--text-dim)', marginBottom:12}}>
-        Add external tools via MCP. Config JSON is the connection dict: e.g. stdio <code>{"command": "npx", "args": [...]}</code> or http <code>{"url": "http://..."}</code>.
+        Add external tools via MCP. Config JSON is the connection dict: e.g. stdio <code>{'{"command": "npx", "args": [...]}'}</code> or http <code>{'{"url": "http://..."}'}</code>.
         DB wins over file/env. {tools.length > 0 && <span>Loaded <strong>{tools.length}</strong> tools: {tools.slice(0,8).join(', ')}{tools.length > 8 ? '…' : ''}</span>}
       </div>
 

@@ -423,7 +423,7 @@ function ConfigPanel({node, models, onUpdate, onDelete}: ConfigPanelProps) {
           )}
           {mapMode === 'inline' && (
             <div className="wf-config-field">
-              <div className="wf-config-hint">Paste {"nodes":[], "edges":[]}</div>
+              <div className="wf-config-hint">Paste {'{"nodes":[], "edges":[]}'}</div>
               <textarea className="wf-config-textarea" rows={5} value={(d.sub_graph as string) || ''} onChange={(e) => onUpdate({sub_graph: e.target.value})} placeholder='{"nodes": [], "edges": []}' />
             </div>
           )}
