@@ -167,6 +167,21 @@ const taskEventsSubscription = graphql`
       ... on InterruptResolvedEvent {
         interruptId
       }
+      ... on ApprovalRequestEvent {
+        tool
+        reason
+        args
+      }
+      ... on ApprovalResolvedEvent {
+        tool
+        approved
+        answer
+      }
+      ... on WorkflowToolEvent {
+        parentRunId
+        childEvent
+        data
+      }
       ... on DoneEvent {
         message
         conversationId
@@ -356,6 +371,26 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             setState((s) =>
               s.pendingInterrupt?.id === evt.interruptId ? {...s, pendingInterrupt: null} : s,
             );
+            break;
+          case 'ApprovalRequestEvent': {
+            // Approval piggy-backs on interrupt mechanism; but if interrupt
+            // hasn't arrived yet, show a pending prompt immediately from the
+            // approval event. This gives richer UI (tool + reason) while still
+            // letting the interrupt be the source of truth for resume.
+            const q = `${evt.tool}: ${evt.reason}\n${evt.args ? `Args: ${evt.args}` : ''}`;
+            setState((s) => ({
+              ...s,
+              pendingInterrupt: s.pendingInterrupt ?? {id: `approval-${evt.tool}`, question: q},
+            }));
+            break;
+          }
+          case 'ApprovalResolvedEvent':
+            // Clear any synthetic approval prompt; interrupt_resolved will also
+            // clear the real interrupt id.
+            setState((s) => ({...s, pendingInterrupt: null}));
+            break;
+          case 'WorkflowToolEvent':
+            // Treat workflow sub-agent events as steps for now
             break;
           case 'DoneEvent':
           case 'StoppedEvent':

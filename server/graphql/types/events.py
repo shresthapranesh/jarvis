@@ -110,6 +110,27 @@ class StoppedEvent:
 
 
 @strawberry.type
+class ApprovalRequestEvent:
+    tool: str
+    reason: str
+    args: str  # JSON-encoded
+
+
+@strawberry.type
+class ApprovalResolvedEvent:
+    tool: str
+    approved: bool
+    answer: str
+
+
+@strawberry.type
+class WorkflowToolEvent:
+    parent_run_id: str
+    child_event: str
+    data: str  # JSON-encoded remainder
+
+
+@strawberry.type
 class ErrorEvent:
     error: str
 
@@ -128,6 +149,9 @@ ChatEvent = Annotated[
         TodosUpdatedEvent,
         InterruptEvent,
         InterruptResolvedEvent,
+        ApprovalRequestEvent,
+        ApprovalResolvedEvent,
+        WorkflowToolEvent,
         DoneEvent,
         StoppedEvent,
         ErrorEvent,
@@ -142,6 +166,16 @@ def _as_str(value: object) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value)
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except Exception:
+        try:
+            return int(str(value).strip() or default)
+        except Exception:
+            return default
 
 
 def coerce_chat_event(raw: dict) -> ChatEvent | None:
@@ -179,25 +213,25 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
         )
     if event_name == "worker_start":
         return WorkerStartEvent(
-            idx=int(data.get("idx", 0)),
+            idx=_safe_int(data.get("idx", 0)),
             role=data.get("role", ""),
             task=data.get("task", ""),
         )
     if event_name == "worker_step":
         return WorkerStepEvent(
-            idx=int(data.get("idx", 0)),
+            idx=_safe_int(data.get("idx", 0)),
             role=data.get("role", ""),
             node=data.get("node", ""),
             data=_as_str(data.get("data")),
         )
     if event_name == "worker_token":
         return WorkerTokenEvent(
-            idx=int(data.get("idx", 0)),
+            idx=_safe_int(data.get("idx", 0)),
             text=data.get("text", ""),
         )
     if event_name == "worker_done":
         return WorkerDoneEvent(
-            idx=int(data.get("idx", 0)),
+            idx=_safe_int(data.get("idx", 0)),
             role=data.get("role", ""),
             task=data.get("task", ""),
             status=data.get("status", "done"),
@@ -227,6 +261,24 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
         )
     if event_name == "interrupt_resolved":
         return InterruptResolvedEvent(interrupt_id=data.get("interrupt_id", ""))
+    if event_name == "approval_request":
+        return ApprovalRequestEvent(
+            tool=data.get("tool", ""),
+            reason=data.get("reason", ""),
+            args=_as_str(data.get("args", {})),
+        )
+    if event_name == "approval_resolved":
+        return ApprovalResolvedEvent(
+            tool=data.get("tool", ""),
+            approved=bool(data.get("approved", False)),
+            answer=data.get("answer", ""),
+        )
+    if event_name == "workflow_event":
+        return WorkflowToolEvent(
+            parent_run_id=data.get("parent_run_id", ""),
+            child_event=data.get("child_event", ""),
+            data=_as_str({k: v for k, v in data.items() if k not in ("parent_run_id", "child_event")}),
+        )
     if event_name == "done":
         return DoneEvent(
             message=data.get("message", ""),

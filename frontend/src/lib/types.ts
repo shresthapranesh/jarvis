@@ -226,7 +226,16 @@ export interface NodeRecord {
   rendered_prompt?: string;
 }
 
-export type WorkflowNodeType = 'agent' | 'conditional' | 'map' | 'start';
+export type WorkflowNodeType =
+  | 'agent'
+  | 'conditional'
+  | 'router'
+  | 'map'
+  | 'start'
+  | 'refine'
+  | 'sequential'
+  | 'parallel'
+  | 'loop';
 
 export interface WorkflowNodeData extends Record<string, unknown> {
   label: string;
@@ -246,6 +255,16 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   sub_graph?: string; // JSON string for inline sub-graph
   result_key?: string;
   concurrency?: number;
+  // router
+  categories?: string[];
+  instruction?: string;
+  // refine / loop
+  rubric?: string;
+  max_iterations?: number;
+  exit_on?: string;
+  // sequential / parallel (ADK analogs)
+  steps?: Array<{prompt_template: string; output_key?: string; model?: string; label?: string}>;
+  branches?: Array<{prompt_template: string; output_key?: string; model?: string; label?: string}>;
 }
 
 export interface WorkflowRFNode {

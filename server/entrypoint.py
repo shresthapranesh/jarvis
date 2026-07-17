@@ -25,6 +25,7 @@ from core.model_catalog import load_custom_models
 from core.queue import SqliteJobQueue, Worker
 
 from core import state
+from core.runner import JarvisRunner, set_runner
 from db import async_session, init_db
 from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
 from .graphql import graphql_router
@@ -76,6 +77,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._store = store
         state._http_client = http
         state._queue = _build_queue()
+
+        # ── Runner (ADK analog) ───────────────────────────────────────
+        # Centralizes checkpointer/store/queue/config and cache config.
+        try:
+            set_runner(
+                JarvisRunner(
+                    config=get_config(),
+                    checkpointer=cp,
+                    store=store,
+                    queue=state._queue,
+                    http_client=http,
+                )
+            )
+            logger.info("runner initialized: %s", get_config().queue_backend)
+        except Exception as exc:
+            logger.warning("runner init failed: %s", exc)
+
         _reaper_task = asyncio.create_task(_run_lock_reaper(state._queue))
         _automation_worker_task = asyncio.create_task(_build_automation_worker(state._queue).run())
         _workflow_worker_task = asyncio.create_task(_build_workflow_worker(state._queue).run())
@@ -148,6 +166,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._store = None
         state._http_client = None
         state._queue = None
+        set_runner(None)
     _scheduler.shutdown(wait=False)
     state._main_loop = None
 

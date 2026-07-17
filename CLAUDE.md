@@ -17,15 +17,23 @@ jarvis/
 │   ├── messages.py       # LLM-message hygiene: elide_stale_tool_results, strip_historical_thinking,
 │   │                     #   repair_orphan_tool_calls, build_llm_messages (+ estimate_tokens)
 │   │                     #   _is_tool_result_carrier covers Anthropic HumanMessage tool_result blocks
+│   │                     #   multi-breakpoint via context_cache.CacheSegment
 │   ├── compaction.py     # group_messages(), apply_per_call_compaction() (elide + collapse_old_tool_results),
 │   │                     #   maybe_compact() — incremental sliding-window summarization with cached summary
 │   │                     #   (MAF-inspired grouping, ADK-inspired token-budget, pins recent user)
+│   ├── context_cache.py  # ADK ContextCacheConfig analog — CacheSegment, ContextCacheConfig,
+│   │                     #   build_cached_system_message() multi-breakpoint (max 4)
+│   ├── runner.py         # ADK Runner analog — JarvisRunner owns checkpointer/store/queue/http,
+│   │                     #   should_use_cache(), get_context_cache_config(), build_agent()
+│   ├── approval.py       # ADK LongRunningFunctionTool analog — request_tool_approval() via interrupt,
+│   │                     #   is_affirmative_answer(), require_approval decorator
 │   ├── model_catalog.py  # AVAILABLE_MODELS, DEFAULT_MODEL, is_valid_model()
 │   ├── state.py          # TaskState, _tasks, _notify(), stream_task_events(),
 │   │                     #   get_queue(), get_store(), get_async_checkpointer()
 │   ├── queue/            # Durable job queue: protocol.py (Job, JobQueue ABC),
 │   │                     #   sqlite.py (SqliteJobQueue), worker.py (Worker)
 │   ├── streaming.py      # TokenCoalescer, STREAM_MODES, _process_chunk(), _finalize_message()
+│   │                     #   forwards approval_request/approval_resolved/workflow_event
 │   ├── summarization.py  # DEPRECATED — use compaction.maybe_compact; kept for backwards compat
 │   ├── memory_consolidation.py  # AGENTS.md blob store keys + consolidate_memory() (keyless fallback)
 │   ├── memory_store.py   # discrete vector memory — load_core/search_memory/upsert_memory (Memory rows)
@@ -76,7 +84,8 @@ jarvis/
 │   └── routes_logs.py         # REST: GET /server-logs, GET /server-logs/stream
 ├── workflow/
 │   ├── engine.py         # BFS workflow executor — execute_workflow()
-│   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode + _emit()
+│   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode, RouterNode, RefineNode,
+│                         #   SequentialNode, ParallelNode, LoopNode + _emit() — ADK Sequential/Parallel/Loop analogs
 ├── tools/                # The main agent is CODE-FIRST: it binds only the [bound] tools
 │   │                     #   below; web/finance/datetime/browser work is done by writing
 │   │                     #   Python in run_cell, NOT via dedicated tools. [unbound] files
@@ -89,7 +98,7 @@ jarvis/
 │   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
 │   ├── automations.py    # [bound] manage_automations — CRUD via one action-dispatch tool
 │   ├── board.py          # [bound] create_task/list_tasks (task board) + complete_task/block_task (in-run only)
-│   ├── workflows.py      # [bound] manage_workflows — CRUD via one action-dispatch tool
+│   ├── workflows.py      # [bound] manage_workflows + run_workflow (Agent-as-Tool — ADK AgentTool analog)
 │   ├── skills.py         # [bound] use_skill + manage_skills (agent-authored skills)
 │   ├── projects.py       # [bound] project_memory (in-project-run only) — shared project notepad
 │   ├── memory.py         # [bound iff embedder] remember, search_memory (discrete vector memory)
@@ -221,7 +230,7 @@ Conventions:
 - `running_tasks` query (`queries/task_run.py`) lists everything currently in `_tasks` for the Tasks page; finished tasks linger ~5s before being popped so the UI can show their terminal state.
 
 ### Chat events
-`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `done`, `stopped`, `error`
+`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `done`, `stopped`, `error`
 
 Worker lifecycle events (`worker_*`) stream live from `tools/workers.py` and — except `worker_token` — are also persisted as `Step` rows (`source="subagent"`, `subagent="<role>:<idx>"`, result capped at `WORKER_RESULT_PERSIST_CAP`), so the activity sidebar can rebuild per-worker groups after a reload.
 
@@ -262,9 +271,55 @@ A durable multi-agent kanban layered on the job queue. A `BoardTask` is one card
 Visual graph executor (`workflow/engine.py`):
 - Definitions stored as JSON (`Workflow.definition`) with `nodes` + `edges` lists.
 - `execute_workflow(run_id, definition, inputs, task_state)` runs BFS over the graph; `server/workflow_runtime.py` is the background trigger.
-- Node types: `agent` (full LangGraph loop), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults).
+- Node types: `agent` (full LangGraph loop), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults), `router` (N-way classifier), `refine` (generate+evaluate loop).
+- **ADK multi-agent analogs** (`workflow/nodes.py`): `sequential` (SequentialAgent — steps in order sharing state), `parallel` (ParallelAgent — branches concurrently), `loop` (LoopAgent — generate/evaluate until PASS or max_iter). These compose via `steps`/`branches` config lists and stream `node_token` per sub-step.
+- **Agent-as-Tool**: `run_workflow(workflow_id, inputs_json)` (`tools/workflows.py`, bound) lets main agent invoke a saved workflow as sub-agent (ADK AgentTool). Emits `worker_start`/`worker_done` + `workflow_event` for visibility.
 - Conditional nodes prune inactive branches via `pruned_edges`; pruned nodes never execute.
-- CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`.
+- CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`. New node types `sequential`/`parallel`/`loop`/`router`/`refine` added to `WorkflowNodeType` in `lib/types.ts` for future UI support.
+
+## Approval / Long-Running Tools (ADK LongRunningFunctionTool analog)
+`core/approval.py`: generic human-in-the-loop approval layered on LangGraph's
+`interrupt` mechanism (previously used only by the browser tool).
+- `request_tool_approval(tool_name, args, reason)` emits `approval_request`
+  SSE event (structured: tool, args, reason) and suspends via
+  `current_ctx().request_input({"type":"approval", ...})`. Frontend shows
+  `InterruptPrompt` with the reason + args; user replies `approve`/`deny`
+  (free-text, parsed by `is_affirmative_answer()` with affirmative/negative sets).
+  On resume emits `approval_resolved`.
+- `require_approval(reason_template)` decorator for tools that always need approval.
+- Currently wired into `write_file` (overwrite guard) and
+  `delete_automation` / `delete_workflow`. Additional tools can opt-in via
+  the same helper. Outside a run (tests/CLI), auto-approves.
+- GraphQL `events.py` adds `ApprovalRequestEvent` / `ApprovalResolvedEvent` /
+  `WorkflowToolEvent` to `ChatEvent` union; `frontend/src/hooks/useTaskEvents.ts`
+  surfaces approval as pending interrupt (rich question = `tool: reason`).
+- Streaming: `core/streaming.py` forwards `approval_request`/`approval_resolved`/
+  `workflow_event` custom events.
+
+## Context Caching + Runner (ADK Runner / ContextCacheConfig analog)
+- `core/context_cache.py`: `CacheSegment` (name, content, cacheable, token_est),
+  `ContextCacheConfig` (enabled, max_breakpoints=4, min_chars=50),
+  `build_cached_system_message()` builds a `SystemMessage` with up to 4
+  `cache_control: ephemeral` blocks. Logs per-call cache stats.
+  - Layout: [system prompt cached] + [core_memory cached] + [skills cached] +
+    [project_instructions cached] + [project_memory + todos volatile uncached].
+  - Tiny segments (<50 chars) skip cache to avoid breakpoint waste.
+  - ADK pattern: stable content (system, memory, skills, instructions) gets its
+    own cached block; highly volatile (todos, project_memory live edits,
+    summary SystemMessages folded from history) stays after last breakpoint.
+- `core/messages.py`: legacy `_make_system_message()` (single breakpoint) kept,
+  new `_make_system_message_multi()` delegates to `context_cache`. `build_llm_messages()`
+  now accepts `cache_segments: list[CacheSegment]` for multi-breakpoint.
+- `core/agents.py`: `model_request_node` classifies `_retrieved_volatile_parts`
+  + `_project_volatile_parts` into cacheable vs volatile: agent memory,
+  relevant memories, skills, project header/instructions → cached;
+  project memory, current tasks → volatile suffix. Logs cache stats via
+  `get_last_cache_stats()`.
+- `core/runner.py`: `JarvisRunner` (ADK Runner analog) owns checkpointer/store/
+  queue/http/config, exposes `build_agent()`, `should_use_cache(provider in
+  {bedrock, anthropic, google_genai})`, `get_context_cache_config()`. Lifespan
+  in `server/entrypoint.py` creates global runner via `set_runner()` and tears
+  down with `set_runner(None)`. Future backends (Postgres, Redis) slot in here.
 
 ## Memory Feature
 Agent memory has **two layers**, selected by whether an embedder is configured (`embeddings_available()`):
@@ -312,7 +367,7 @@ Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`
 `Conversation.model` is **sticky per-conversation**: the chat `startTask` mutation updates it whenever the request's model differs from the stored value, and the InputBox commits a conversation-update mutation on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model`, falling back to the catalog default only when no conversation exists yet.
 
 ## LLM-call node requirement
-Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks). Loop nodes should also run `apply_per_call_compaction()` (token hygiene: `elide_stale_tool_results` + `collapse_old_tool_results`, per-call only, checkpointer keeps full text) from `core/compaction.py`. `group_messages()` handles Anthropic HumanMessage tool_result carriers via `_is_tool_result_carrier`.
+Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks). Loop nodes should also run `apply_per_call_compaction()` (token hygiene: `elide_stale_tool_results` + `collapse_old_tool_results`, per-call only, checkpointer keeps full text) from `core/compaction.py`. `group_messages()` handles Anthropic HumanMessage tool_result carriers via `_is_tool_result_carrier`. For multi-breakpoint caching, pass `cache_segments: list[CacheSegment]` from `core/context_cache.py` to `build_llm_messages` — see `core/agents.py:model_request_node` for classification (stable → cached, volatile → suffix).
 
 ## Telegram Bot
 Optional — enabled by setting `TELEGRAM_BOT_TOKEN` before starting the server. Implemented in `server/telegram_bot.py`:

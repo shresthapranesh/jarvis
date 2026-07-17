@@ -1,3 +1,15 @@
+type ApprovalRequestEvent {
+  tool: String!
+  reason: String!
+  args: String!
+}
+
+type ApprovalResolvedEvent {
+  tool: String!
+  approved: Boolean!
+  answer: String!
+}
+
 type Artifact implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
@@ -136,7 +148,7 @@ type BrowserStepEvent {
   source: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
   """The Globally Unique ID of this object"""
@@ -195,11 +207,25 @@ type Memory {
   modifiedAt: String
 }
 
+type MemoryActivity {
+  id: String!
+  memoryId: String!
+  conversationId: String
+  kind: String!
+  score: Float
+  query: String
+  source: String!
+  accessedAt: String!
+}
+
 type MemoryItem {
   id: String!
   kind: String!
   text: String!
   updatedAt: String!
+  lastUsedAt: String
+  useCount: Int!
+  activities(limit: Int! = 20): [MemoryActivity!]!
 }
 
 type Message implements Node {
@@ -353,6 +379,8 @@ type Query {
   models: ModelCatalog!
   agentMemory: Memory!
   memories(kind: String = null): [MemoryItem!]!
+  memoryActivities(memoryId: String!, limit: Int! = 50): [MemoryActivity!]!
+  memoryUsage: [MemoryItem!]!
   node(
     """The ID of the object."""
     id: ID!
@@ -595,6 +623,12 @@ type WorkflowRun implements Node {
 
 type WorkflowStoppedEvent {
   runId: String!
+}
+
+type WorkflowToolEvent {
+  parentRunId: String!
+  childEvent: String!
+  data: String!
 }
 
 input WorkflowUpdateInput {

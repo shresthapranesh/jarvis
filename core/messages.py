@@ -266,7 +266,7 @@ def estimate_tokens(messages: list[AnyMessage], llm) -> int:
 
 
 def _make_system_message(static_text: str, volatile_text: str, cache: bool) -> SystemMessage:
-    """Build a SystemMessage with the static prompt as the cacheable prefix.
+    """Legacy single-breakpoint builder. Kept for backwards compat.
 
     When ``cache`` is on (Bedrock/Anthropic), the static text carries the single
     ``cache_control`` breakpoint and any volatile text (memory, todos, folded
@@ -274,6 +274,7 @@ def _make_system_message(static_text: str, volatile_text: str, cache: bool) -> S
     suffix never invalidates the cached static prefix (system prompt + tool
     schemas). When ``cache`` is off, both are concatenated into one plain
     string (some non-Anthropic providers dislike multi-block system content).
+    For multi-breakpoint (ADK-style) use `build_llm_messages` with cache_segments.
     """
     if cache:
         blocks: list[dict[str, Any] | str] = [
@@ -284,6 +285,38 @@ def _make_system_message(static_text: str, volatile_text: str, cache: bool) -> S
         return SystemMessage(content=blocks)
     full = static_text if not volatile_text.strip() else f"{static_text}\n\n{volatile_text}"
     return SystemMessage(full)
+
+
+def _make_system_message_multi(
+    static_text: str,
+    segments: list[Any] | None,
+    volatile_text: str,
+    cache: bool,
+) -> SystemMessage:
+    """ADK multi-breakpoint builder — delegates to context_cache module.
+
+    segments is list[CacheSegment]; if None, falls back to legacy builder.
+    Even when cache=False we delegate to build_cached_system_message because
+    its no-cache path concatenates segments + volatile correctly; the legacy
+    path would silently drop memory/skills/project context on google_genai/Ollama.
+    """
+    if not segments:
+        return _make_system_message(static_text, volatile_text, cache)
+
+    try:
+        from core.context_cache import ContextCacheConfig, build_cached_system_message
+
+        sys_msg, _stats = build_cached_system_message(
+            static_prompt=static_text,
+            segments=segments,
+            volatile_suffix=volatile_text,
+            use_cache=cache,
+            config=ContextCacheConfig(enabled=cache),
+        )
+        return sys_msg
+    except Exception:
+        # Fallback to legacy on any error (never break LLM call)
+        return _make_system_message(static_text, volatile_text, cache)
 
 
 def _system_text(msg: SystemMessage) -> str:
@@ -304,6 +337,7 @@ def build_llm_messages(
     history: list[AnyMessage],
     *,
     volatile_suffix: str = "",
+    cache_segments: list[Any] | None = None,
 ) -> list[AnyMessage]:
     """Build the message list for an LLM call with exactly one SystemMessage.
 
@@ -319,6 +353,11 @@ def build_llm_messages(
     (memory, todos, …) plus any folded summarizer SystemMessages form the
     volatile region, which is placed after the cache breakpoint so it can
     change every turn without busting the cached prefix.
+
+    ADK multi-breakpoint: if ``cache_segments`` (list[CacheSegment]) is
+    provided and cache=True, builds up to 4 cache-controlled blocks
+    (system + core_memory + skills + project_instructions), keeping volatile
+    suffix (todos, summaries) uncached. See core/context_cache.py.
     """
     extras: list[str] = []
     rest: list[AnyMessage] = []
@@ -331,4 +370,7 @@ def build_llm_messages(
             rest.append(m)
     volatile_parts = [p for p in [volatile_suffix.strip(), *extras] if p]
     volatile_text = "\n\n".join(volatile_parts)
+
+    if cache_segments:
+        return [_make_system_message_multi(system_text, cache_segments, volatile_text, cache)] + rest
     return [_make_system_message(system_text, volatile_text, cache)] + rest

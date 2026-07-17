@@ -498,6 +498,221 @@ class RefineNode(BaseNode):
         })
 
 
+# ── SequentialNode (ADK SequentialAgent analog) ──────────────────────────
+
+class SequentialNode(BaseNode):
+    """ADK SequentialAgent analog — runs agent steps in order, sharing state.
+
+    Each step's output is injected into the next step's template via
+    ``{{output_key}}``. All steps run on the same inputs plus accumulated
+    outputs from prior steps. Tokens stream as ``node_token`` with a
+    sub-step label.
+
+    Config fields:
+        steps (list[dict]): each item ``{"prompt_template": str,
+            "output_key": str (default step_<idx>), "model": str (optional),
+            "label": str (optional)}``
+        output_key (str): if set, only this key is returned as final output
+            aggregated (otherwise all step outputs + inputs are returned).
+
+    Example:
+        steps=[
+          {"prompt_template": "Research {{topic}}", "output_key": "research"},
+          {"prompt_template": "Write report using {{research}}",
+           "output_key": "report"}
+        ]
+    """
+
+    node_type = "sequential"
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        steps = self.config.get("steps", [])
+        if not steps:
+            raise ValueError("SequentialNode requires non-empty 'steps' list")
+        model_default = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        final_output_key = self.config.get("output_key")
+
+        data: dict[str, Any] = dict(inputs)
+        for idx, step in enumerate(steps):
+            template = step.get("prompt_template", "")
+            output_key = step.get("output_key", f"step_{idx}")
+            model_id = step.get("model", model_default) or model_default
+            label = step.get("label", output_key)
+
+            prompt = _interpolate(template, data)
+            _emit(
+                task_state,
+                "node_token",
+                node_id=self.node_id,
+                text=f"\n\n— sequential step {idx + 1}/{len(steps)}: {label} —\n\n",
+            )
+            result = await _run_agent_text(f"{self.node_id}_seq_{idx}", model_id, prompt, task_state)
+            data[output_key] = result
+
+        if final_output_key:
+            return NodeOutput(data={final_output_key: data.get(final_output_key, "")})
+        return NodeOutput(data=data)
+
+
+# ── ParallelNode (ADK ParallelAgent analog) ─────────────────────────────────
+
+class ParallelNode(BaseNode):
+    """ADK ParallelAgent analog — runs agent branches concurrently.
+
+    Each branch interpolates its prompt from the *same* input dict (no cross-
+    branch dependency, true fan-out). Concurrency is bounded optionally.
+
+    Config fields:
+        branches (list[dict]): each ``{"prompt_template": str,
+            "output_key": str (default branch_<idx>), "model": str (optional),
+            "label": str (optional)}``
+        concurrency (int | None): max parallel branches, None = all at once
+        output_key (str): if set, return this key's merged view? Ignored for now,
+            returns all branch outputs plus inputs.
+    """
+
+    node_type = "parallel"
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        branches = self.config.get("branches", [])
+        if not branches:
+            raise ValueError("ParallelNode requires non-empty 'branches' list")
+        model_default = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        concurrency = self.config.get("concurrency")
+
+        _emit(task_state, "map_start", node_id=self.node_id, total=len(branches))
+
+        async def run_branch(idx: int, branch: dict) -> tuple[str, Any]:
+            template = branch.get("prompt_template", "")
+            output_key = branch.get("output_key", f"branch_{idx}")
+            model_id = branch.get("model", model_default) or model_default
+            label = branch.get("label", output_key)
+            prompt = _interpolate(template, inputs)
+            result = await _run_agent_text(f"{self.node_id}_par_{idx}", model_id, prompt, task_state)
+            _emit(task_state, "map_item_done", node_id=self.node_id, index=idx, result={output_key: result, "label": label})
+            return output_key, result
+
+        async def _gather_with_exceptions(coros):
+            # Use return_exceptions=True so one failing branch doesn't leave
+            # siblings running detached with tokens still streaming.
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            # Re-raise first real exception, but log others
+            errors = [r for r in results if isinstance(r, BaseException)]
+            if errors:
+                # If any branch errored, surface the first; others already logged via _emit
+                for err in errors:
+                    if not isinstance(err, asyncio.CancelledError):
+                        raise err
+            return [r for r in results if not isinstance(r, BaseException)]
+
+        if concurrency:
+            sem = asyncio.Semaphore(int(concurrency))
+
+            async def run_limited(i: int, b: dict):
+                async with sem:
+                    return await run_branch(i, b)
+
+            gathered = await _gather_with_exceptions([run_limited(i, b) for i, b in enumerate(branches)])
+        else:
+            gathered = await _gather_with_exceptions([run_branch(i, b) for i, b in enumerate(branches)])
+
+        data: dict[str, Any] = dict(inputs)
+        for key, value in gathered:
+            data[key] = value
+
+        return NodeOutput(data=data)
+
+
+# ── LoopNode (ADK LoopAgent analog) ─────────────────────────────────────────
+
+class LoopNode(BaseNode):
+    """ADK LoopAgent analog — loops generate -> evaluate until PASS or max_iter.
+
+    Generalizes RefineNode with configurable exit and clearer events.
+
+    Config fields:
+        prompt_template (str): generation task with {{var}} placeholders
+        rubric (str): criteria evaluator judges against; if empty, runs
+            max_iterations unconditionally (no early exit)
+        model (str): model id for generation + evaluation (default DEFAULT_MODEL)
+        max_iterations (int): max rounds (default 3, clamped 1..10)
+        output_key (str): output port name (default "result")
+        exit_on (str): token to indicate done (default "PASS"); evaluator must
+            start with this token to signal success. Set to "" to disable
+            early exit.
+    """
+
+    node_type = "loop"
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        base_prompt = _interpolate(self.config.get("prompt_template", ""), inputs)
+        rubric = _interpolate(self.config.get("rubric", ""), inputs)
+        model_id = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        output_key = self.config.get("output_key", "result")
+        max_iters = max(1, min(10, int(self.config.get("max_iterations", 3))))
+        exit_on = str(self.config.get("exit_on", "PASS")).strip().upper() or "PASS"
+
+        eval_llm = _get_model_spec(model_id).build_llm()
+
+        draft = ""
+        feedback: str | None = None
+        passed = False
+        attempt = 0
+
+        for attempt in range(1, max_iters + 1):
+            if feedback:
+                gen_prompt = (
+                    f"{base_prompt}\n\n"
+                    f"Your previous attempt:\n{draft}\n\n"
+                    f"A reviewer judged it insufficient:\n{feedback}\n\n"
+                    "Produce an improved version that fully addresses the critique."
+                )
+                _emit(
+                    task_state,
+                    "node_token",
+                    node_id=self.node_id,
+                    text=f"\n\n— loop revising (attempt {attempt}/{max_iters}) —\n\n",
+                )
+            else:
+                gen_prompt = base_prompt
+                _emit(
+                    task_state,
+                    "node_token",
+                    node_id=self.node_id,
+                    text=f"\n\n— loop start (attempt {attempt}/{max_iters}) —\n\n",
+                )
+
+            draft = await _run_agent_text(f"{self.node_id}_loop_{attempt}", model_id, gen_prompt, task_state)
+
+            if not rubric:
+                # No rubric -> no evaluation, just iterate
+                _emit(
+                    task_state,
+                    "node_token",
+                    node_id=self.node_id,
+                    text=f"\n\n— loop iteration {attempt}/{max_iters} done (no rubric) —\n\n",
+                )
+                continue
+
+            passed, feedback = await _evaluate_draft(eval_llm, rubric, base_prompt, draft)
+            _emit(
+                task_state,
+                "node_token",
+                node_id=self.node_id,
+                text=f"\n\n— reviewer: {'PASS' if passed else 'FAIL'} (attempt {attempt}) —\n\n",
+            )
+            if passed:
+                break
+
+        return NodeOutput(
+            data={
+                output_key: draft,
+                f"{output_key}_iterations": attempt,
+                f"{output_key}_passed": passed if rubric else True,
+            }
+        )
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 NODE_REGISTRY: dict[str, type[BaseNode]] = {
@@ -507,6 +722,9 @@ NODE_REGISTRY: dict[str, type[BaseNode]] = {
     "start": StartNode,
     "router": RouterNode,
     "refine": RefineNode,
+    "sequential": SequentialNode,
+    "parallel": ParallelNode,
+    "loop": LoopNode,
 }
 
 

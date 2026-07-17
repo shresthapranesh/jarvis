@@ -375,6 +375,10 @@ async def _process_chunk(
         elif event_type == "todos_updated":
             coalescer.flush_all()
             emit_event(state, "todos_updated", todos=data.get("todos", []), source=source)
+        elif event_type in ("approval_request", "approval_resolved", "workflow_event"):
+            coalescer.flush_all()
+            payload = {k: v for k, v in data.items() if k != "type"}
+            emit_event(state, event_type, **payload)
         return False
 
     if mode == "updates":

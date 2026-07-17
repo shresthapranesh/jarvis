@@ -129,7 +129,16 @@ async def update_automation(automation_id: str, **fields) -> str:
 
 
 async def delete_automation(automation_id: str) -> str:
-    """Delete an automation by its id."""
+    """Delete an automation by its id. Requires approval."""
+    from core.approval import request_tool_approval
+
+    if not request_tool_approval(
+        "delete_automation",
+        {"automation_id": automation_id},
+        f"Delete automation {automation_id}? This cannot be undone.",
+    ):
+        return "User denied approval — not deleting automation."
+
     _remove_scheduler_job(automation_id)
     async with async_session() as session:
         deleted = await _delete(session, automation_id)

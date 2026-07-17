@@ -50,7 +50,7 @@ from tools.board import (
     create_task,
     list_tasks,
 )
-from tools.workflows import manage_workflows
+from tools.workflows import manage_workflows, run_workflow
 from tools.skills import manage_skills, use_skill
 from tools.projects import project_memory
 
@@ -438,7 +438,18 @@ def _get_sync_checkpointer() -> SqliteSaver:
 def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> CompiledStateGraph:
     spec = get_model_spec(model)
     llm = spec.build_llm()
-    use_cache = spec.provider in ("bedrock", "anthropic")
+    # Use runner's cache config if available (ADK Runner seam), else local fallback.
+    # Runner is set by entrypoint lifespan; CLI/tests have no runner.
+    try:
+        from core.runner import get_runner_or_none
+
+        runner = get_runner_or_none()
+        if runner is not None:
+            use_cache = runner.should_use_cache(model)
+        else:
+            use_cache = spec.provider in ("bedrock", "anthropic")
+    except Exception:
+        use_cache = spec.provider in ("bedrock", "anthropic")
 
     # ── Worker pool — role-typed, bound to THIS agent's model ────────────────
     # spawn_workers is built per agent (not a process-global registry) so a
@@ -506,6 +517,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         complete_task,
         block_task,
         manage_workflows,
+        run_workflow,
         manage_skills,
         use_skill,
         # Bound unconditionally, runtime-guarded like complete_task/block_task:
@@ -534,22 +546,94 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         Summarization is folded in here (was its own node) so each LLM round-trip
         costs 2 graph steps (model + tools) instead of 3. With recursion_limit=100
         the agent gets ~50 useful round-trips, which is plenty for code-first work.
+
+        ADK multi-breakpoint caching: memory+skills+project instructions are
+        placed in separate cached blocks (up to 4 breakpoints), while todos and
+        project memory (which can change mid-turn via tools) stay volatile.
         """
-        # Memory + todos change across turns, so they go in build_llm_messages'
-        # volatile suffix (after the cache breakpoint) rather than concatenated
-        # into the static prompt — otherwise every todo flip / memory edit busts
-        # the cached prefix (system prompt + tool schemas). See core/messages.py.
         raw_messages = list(state.get("messages", []))
-        volatile_parts: list[str] = await _retrieved_volatile_parts(store, raw_messages)
-        volatile_parts += await _project_volatile_parts(
+        retrieved_parts: list[str] = await _retrieved_volatile_parts(store, raw_messages)
+        project_parts: list[str] = await _project_volatile_parts(
             (config.get("configurable") or {}).get("project_id")
         )
+        all_volatile_for_cache_split = retrieved_parts + project_parts
+
+        # ── ADK context-cache classification ──────────────────────────────
+        # ADK pattern: most-stable first, most-volatile last, because Anthropic
+        # caching is prefix-based — any changed block invalidates all following.
+        # Stable: agent memory (core identity), project header/instructions.
+        # Semi-stable: skills (ranked per query, changes per turn but reusable
+        # within a turn). Per-turn varying: relevant memories (depends on latest
+        # user query). Volatile: project memory (live-edited), current tasks.
+        # Per review: string-sniffing is brittle; ideally _retrieved_ and
+        # _project_ return tagged CacheSegments directly. For now we keep
+        # sniffing but order buckets explicitly stable-first.
+        from core.context_cache import CacheSegment
+
+        # Buckets in stability order
+        bucket_core_memory: list[str] = []
+        bucket_project_header: list[str] = []
+        bucket_project_instructions: list[str] = []
+        bucket_skills: list[str] = []
+        bucket_other_stable: list[str] = []
+        volatile_non_cached: list[str] = []
+        # Per-turn varying: we leave uncached to avoid busting prefix cache
+        bucket_relevant_memories: list[str] = []
+
+        for part in all_volatile_for_cache_split:
+            if not part.strip():
+                continue
+            if "### Project Memory" in part:
+                # Live-edited — must surface immediately
+                volatile_non_cached.append(part)
+            elif "## Project:" in part and "CRITICAL" in part:
+                bucket_project_header.append(part)
+            elif "### Project Instructions" in part:
+                bucket_project_instructions.append(part)
+            elif "## Agent Memory" in part:
+                bucket_core_memory.append(part)
+            elif "## Memory" in part and "long-term memory" in part.lower():
+                # The how-to header about memory tools — stable
+                bucket_core_memory.append(part)
+            elif "## Available Skills" in part:
+                bucket_skills.append(part)
+            elif "## Relevant Memories" in part:
+                # Per-turn varying (depends on query) — leave uncached/volatile
+                # to avoid busting the stable prefix cache each turn.
+                bucket_relevant_memories.append(part)
+            else:
+                if len(part) > 50:
+                    bucket_other_stable.append(part)
+                else:
+                    volatile_non_cached.append(part)
+
+        # Assemble cache_segments in most-stable-first order
+        cache_segments: list[CacheSegment] = []
+        for p in bucket_core_memory:
+            cache_segments.append(CacheSegment(name="core_memory", content=p, cacheable=True))
+        for p in bucket_project_header:
+            cache_segments.append(CacheSegment(name="project_header", content=p, cacheable=True))
+        for p in bucket_project_instructions:
+            cache_segments.append(CacheSegment(name="project_instructions", content=p, cacheable=True))
+        for p in bucket_other_stable:
+            cache_segments.append(CacheSegment(name="other_stable", content=p, cacheable=True))
+        for p in bucket_skills:
+            cache_segments.append(CacheSegment(name="skills", content=p, cacheable=True))
+        # Relevant memories are per-turn — put last, as separate uncached or low-priority cached.
+        # We keep them uncached to preserve stable prefix hits across turns.
+        # If we do cache them, they would be the last cached block before volatile,
+        # so they bust only themselves, not the earlier stable blocks — but they
+        # still bust every turn. Better to leave uncached.
+        for p in bucket_relevant_memories:
+            volatile_non_cached.append(p)
+
         todos = _normalise_todos(state.get("todos"))
         if todos:
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
-            volatile_parts.append(f"## Current Tasks\n\n{todo_lines}")
-        volatile = "\n\n".join(volatile_parts)
+            volatile_non_cached.append(f"## Current Tasks\n\n{todo_lines}")
+
+        volatile_suffix = "\n\n".join(volatile_non_cached)
 
         # ── New compaction pipeline (MAF + ADK inspired) ─────────────────
         # maybe_compact internally does elide-first token counting (per-call view)
@@ -559,8 +643,6 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         )
         if compacted is not None:
             messages_for_llm_raw, state_update_msgs = compacted
-            # Keep cheap path on the compacted result so kept groups' old tool
-            # outputs stay collapsed per-call
             messages_for_llm = apply_per_call_compaction(messages_for_llm_raw)
         else:
             messages_for_llm = apply_per_call_compaction(raw_messages)
@@ -568,10 +650,35 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
         messages_for_llm = strip_historical_thinking(messages_for_llm)
         messages_for_llm = repair_orphan_tool_calls(messages_for_llm)
-        response = await llm_with_tools.ainvoke(
-            build_llm_messages(_SYSTEM_PROMPT, use_cache, messages_for_llm, volatile_suffix=volatile),
-            config=config,
+
+        # Build LLM messages with multi-breakpoint cache (ADK)
+        llm_messages = build_llm_messages(
+            _SYSTEM_PROMPT,
+            use_cache,
+            messages_for_llm,
+            volatile_suffix=volatile_suffix,
+            cache_segments=cache_segments if cache_segments else None,
         )
+
+        # Log cache stats for observability
+        try:
+            from core.context_cache import get_last_cache_stats
+
+            stats = get_last_cache_stats()
+            if stats:
+                logger.debug(
+                    "cache built: cached=%d/%d bp=%d/%d cached_tokens~%d volatile~%d",
+                    stats.segments_cached,
+                    stats.segments_total,
+                    stats.breakpoints_used,
+                    4,
+                    stats.cached_tokens_est,
+                    stats.volatile_tokens_est,
+                )
+        except Exception:
+            pass
+
+        response = await llm_with_tools.ainvoke(llm_messages, config=config)
         return {"messages": state_update_msgs + [response]}
 
     # ── Build graph ───────────────────────────────────────────────────────────
