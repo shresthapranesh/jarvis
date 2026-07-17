@@ -148,7 +148,12 @@ type BrowserStepEvent {
   source: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | DoneEvent | StoppedEvent | ErrorEvent
+type BudgetExceededEvent {
+  reason: String!
+  snapshot: String!
+}
+
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
   """The Globally Unique ID of this object"""

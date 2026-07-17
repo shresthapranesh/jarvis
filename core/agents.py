@@ -20,6 +20,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from .config import get_config
 from .compaction import apply_per_call_compaction, maybe_compact
+from .mcp import get_mcp_tools_sync
 from .messages import (
     build_llm_messages,
     message_text,
@@ -455,9 +456,15 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # spawn_workers is built per agent (not a process-global registry) so a
     # conversation's workers always run on the same model as its main agent.
 
+    # MCP tools — optional, loaded from env/file config
+    try:
+        _mcp_tools_for_workers = get_mcp_tools_sync()
+    except Exception:
+        _mcp_tools_for_workers = []
+
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [run_cell, read_file, write_file, list_files, write_artifact, read_artifact, artifact_list, search_documents, read_document],
-        "researcher": [run_cell, read_file, read_artifact, artifact_list, search_documents, read_document],
+        "general":    [run_cell, read_file, write_file, list_files, write_artifact, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
+        "researcher": [run_cell, read_file, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
         "coder":      [run_cell, read_file, write_file, list_files],
         "writer":     [read_file, write_file, write_artifact, read_artifact, artifact_list, search_documents, read_document],
     }
@@ -530,6 +537,12 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # advertise tools that would only ever report themselves unavailable.
     if embeddings_available():
         main_tools += [remember, search_memory_tool]
+
+    # MCP tools (ADK McpToolset analog) — loaded from env/file config via core/mcp.py.
+    # Returns [] when no MCP servers configured, so agent works without MCP.
+    if _mcp_tools_for_workers:
+        main_tools += _mcp_tools_for_workers
+        logger.info("Added %d MCP tools to main agent", len(_mcp_tools_for_workers))
 
     # Bind tools so the LLM knows their schemas and emits structured tool_calls.
     # Without this, models hallucinate function-call syntax and fail validation

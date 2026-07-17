@@ -52,6 +52,13 @@ class RunnerConfig:
     context_cache_min_chars: int = 50
     # Whether to include tool schemas in cached prefix (they are, via LLM bind)
     cache_tool_schemas: bool = True
+    # Budget defaults per kind (MAF TokenUsageTermination analog)
+    budget_max_total_tokens: int = 500_000
+    budget_max_llm_calls: int = 200
+    budget_max_tool_calls: int = 300
+    budget_max_duration_seconds: int = 1800
+    # MCP
+    mcp_enabled: bool = True
 
 
 class JarvisRunner:
@@ -117,6 +124,46 @@ class JarvisRunner:
             max_breakpoints=self.runner_config.max_cache_breakpoints,
             min_chars_for_cache=self.runner_config.context_cache_min_chars,
         )
+
+    def get_budget_limits(self, kind: str = "chat"):
+        """Build BudgetLimits, merging runner config defaults with env overrides."""
+        from core.budget import BudgetLimits
+
+        base = {
+            "chat": {
+                "max_total_tokens": self.runner_config.budget_max_total_tokens,
+                "max_llm_calls": self.runner_config.budget_max_llm_calls,
+                "max_tool_calls": self.runner_config.budget_max_tool_calls,
+                "max_duration_seconds": self.runner_config.budget_max_duration_seconds,
+            },
+            "automation": {
+                "max_total_tokens": 300_000,
+                "max_llm_calls": 100,
+                "max_tool_calls": 150,
+                "max_duration_seconds": 1200,
+            },
+            "workflow": {
+                "max_total_tokens": 400_000,
+                "max_llm_calls": 150,
+                "max_tool_calls": 200,
+                "max_duration_seconds": 1800,
+            },
+            "board_task": {
+                "max_total_tokens": 400_000,
+                "max_llm_calls": 150,
+                "max_tool_calls": 200,
+                "max_duration_seconds": 1800,
+            },
+        }
+        cfg = base.get(kind, base["chat"])
+        # env overrides
+        env_limits = BudgetLimits.from_env()
+        merged = dict(cfg)
+        for k in cfg.keys():
+            env_v = getattr(env_limits, k)
+            if env_v is not None:
+                merged[k] = env_v
+        return BudgetLimits(**merged)
 
     # ── Introspection ─────────────────────────────────────────────────────
 

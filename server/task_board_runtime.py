@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from core.agents import build_agent
+from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
 from core.log_callback import AgentLogger
 from core.queue import Job
 from db import async_session
@@ -180,6 +181,10 @@ async def _run_agent(
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
+    limits = get_budget_limits_for_task("board_task")
+    tracker = BudgetTracker(limits, task_state=state)
+    state._budget_tracker = tracker
+    budget_cb = BudgetCallbackHandler(tracker, task_state=state)
     agent = build_agent(
         model,
         checkpointer=get_async_checkpointer(),
@@ -194,7 +199,7 @@ async def _run_agent(
                 "board_task_id": task.id,
             },
             "recursion_limit": 100,
-            "callbacks": [AgentLogger()],
+            "callbacks": [AgentLogger(), budget_cb],
         },
         stream_mode=STREAM_MODES,
         subgraphs=True,
@@ -267,6 +272,19 @@ async def _run_board_task_inner(
             await add_message(session, conv_id, "user", prompt)
 
         output = await _run_agent(task, state, conv_id, prompt, model)
+
+        if state.budget_exceeded:
+            reason = state.budget_reason or "budget exceeded"
+            await _finish_task(
+                task.id, run_id, status="blocked", summary=output or None,
+                blocked_reason=f"budget exceeded: {reason}", blocked_kind="budget",
+            )
+            async with async_session() as session:
+                await add_message(session, conv_id, "assistant", output or f"[budget exceeded: {reason}]", status="blocked")
+            final_status = "blocked"
+            emit_event(state, "budget_exceeded", reason=reason, run_id=run_id)
+            emit_event(state, "stopped", output=output, run_id=run_id)
+            return
 
         if state.cancelled:
             await _finish_task(

@@ -78,6 +78,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._http_client = http
         state._queue = _build_queue()
 
+        # ── MCP (ADK McpToolset analog) ─────────────────────────────────
+        # Warm up MCP client so tools are cached before first agent build.
+        try:
+            from core.mcp import initialize_mcp
+            mcp_tools = await initialize_mcp()
+            logger.info("MCP initialized: %d tools", len(mcp_tools))
+        except Exception as exc:
+            logger.warning("MCP init failed: %s", exc)
+
         # ── Runner (ADK analog) ───────────────────────────────────────
         # Centralizes checkpointer/store/queue/config and cache config.
         try:
@@ -161,6 +170,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from core.kernels import get_kernel_registry
         with contextlib.suppress(Exception):
             await get_kernel_registry().shutdown_all()
+        # Close MCP clients
+        try:
+            from core.mcp import get_mcp_manager
+            await get_mcp_manager().close()
+        except Exception:
+            pass
 
         state._async_checkpointer = None
         state._store = None

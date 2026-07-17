@@ -182,6 +182,10 @@ const taskEventsSubscription = graphql`
         childEvent
         data
       }
+      ... on BudgetExceededEvent {
+        reason
+        snapshot
+      }
       ... on DoneEvent {
         message
         conversationId
@@ -391,6 +395,12 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             break;
           case 'WorkflowToolEvent':
             // Treat workflow sub-agent events as steps for now
+            break;
+          case 'BudgetExceededEvent':
+            setState((s) => ({
+              ...s,
+              error: `Budget exceeded: ${evt.reason}`,
+            }));
             break;
           case 'DoneEvent':
           case 'StoppedEvent':

@@ -129,6 +129,17 @@ async def _run_agent_text(
     from core.state import get_async_checkpointer, get_store
     from langchain_core.runnables import RunnableConfig
 
+    callbacks: list = [AgentLogger()]
+    # Budget tracking — if the workflow run has a tracker (set by workflow_runtime),
+    # piggyback on it so token limits are enforced per-workflow, not per-node.
+    try:
+        bt = getattr(task_state, "_budget_tracker", None)
+        if bt is not None:
+            from core.budget import BudgetCallbackHandler
+            callbacks.append(BudgetCallbackHandler(bt, task_state=task_state))
+    except Exception:
+        pass
+
     agent = build_agent(
         model=model_id,
         checkpointer=get_async_checkpointer(),
@@ -137,7 +148,7 @@ async def _run_agent_text(
     run_config: RunnableConfig = {
         "configurable": {"thread_id": str(uuid4())},
         "recursion_limit": 100,
-        "callbacks": [AgentLogger()],
+        "callbacks": callbacks,
     }
     final_text = ""
     async for raw_chunk in agent.astream(

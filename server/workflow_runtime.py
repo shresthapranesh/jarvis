@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.budget import BudgetTracker, get_budget_limits_for_task
 from core.queue import Job, JobQueue
 from db import async_session
 from db.models import Workflow, WorkflowRun
@@ -52,13 +53,23 @@ async def _run_workflow_inner(
     cleanup. Caller created the WorkflowRun row and registered `state`."""
     final_status = "error"
     try:
+        # Budget for workflow overall
+        limits = get_budget_limits_for_task("workflow")
+        tracker = BudgetTracker(limits, task_state=state)
+        state._budget_tracker = tracker
+
         definition = json.loads(wf.definition or "{}")
+        # Early abort if budget already exceeded before any node
+        if state.budget_exceeded:
+            raise RuntimeError(f"budget exceeded before start: {state.budget_reason}")
         final_outputs, node_records = await execute_workflow(
             run_id=run_id,
             definition=definition,
             inputs=inputs,
             task_state=state,
         )
+        if state.budget_exceeded:
+            raise RuntimeError(f"budget exceeded: {state.budget_reason}")
 
         async with async_session() as session:
             await finish_workflow_run(
@@ -85,6 +96,8 @@ async def _run_workflow_inner(
 
     except BaseException as exc:
         err = str(exc)
+        if state.budget_exceeded:
+            emit_event(state, "budget_exceeded", reason=state.budget_reason or err, run_id=run_id)
         async with async_session() as session:
             await finish_workflow_run(session, run_id, "error", None, None, err)
             await send_notifications(

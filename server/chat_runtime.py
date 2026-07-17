@@ -26,6 +26,7 @@ from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from core.agents import build_agent, prefetch_retrieval
+from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
 from core.config import get_config
 from core.log_callback import AgentLogger, UsageAccumulator
 from core.queue import Job, JobQueue
@@ -65,6 +66,10 @@ async def _run_agent_task(
     step_seq_ref = [0]
     coalescer = TokenCoalescer(state)
     usage = UsageAccumulator()
+    limits = get_budget_limits_for_task("chat")
+    tracker = BudgetTracker(limits, task_state=state)
+    state._budget_tracker = tracker
+    budget_cb = BudgetCallbackHandler(tracker, task_state=state)
     status = "error"
     project_id: str | None = None
 
@@ -96,7 +101,7 @@ async def _run_agent_task(
         config = {
             "configurable": configurable,
             "recursion_limit": 100,
-            "callbacks": [AgentLogger(), usage],
+            "callbacks": [AgentLogger(), usage, budget_cb],
         }
         # Reset the per-conversation plan at the start of each new turn. Todos
         # live in the checkpointer keyed by thread_id, so without this a plan
@@ -147,7 +152,17 @@ async def _run_agent_task(
 
         coalescer.flush_all()
         final_message = "".join(accumulated)
-        if state.cancelled:
+        if state.budget_exceeded:
+            reason = state.budget_reason or "budget exceeded"
+            if not final_message.strip():
+                final_message = f"Stopped: budget exceeded ({reason})"
+            else:
+                final_message = final_message + f"\n\n[Stopped: budget exceeded ({reason})]"
+            await finalize(final_message, "stopped")
+            status = "stopped"
+            emit_event(state, "budget_exceeded", reason=reason, message=final_message, conversation_id=conv_id)
+            emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
+        elif state.cancelled:
             await finalize(final_message, "stopped")
             status = "stopped"
             emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
@@ -187,6 +202,11 @@ async def _run_agent_task(
     except asyncio.CancelledError:
         coalescer.flush_all()
         final_message = "".join(accumulated)
+        if state.budget_exceeded:
+            reason = state.budget_reason or "budget exceeded"
+            if not final_message.strip():
+                final_message = f"Stopped: budget exceeded ({reason})"
+            emit_event(state, "budget_exceeded", reason=reason, message=final_message, conversation_id=conv_id)
         await finalize(final_message, "stopped")
         status = "stopped"
         emit_event(state, "stopped", message=final_message, conversation_id=conv_id)

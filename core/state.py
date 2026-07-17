@@ -96,6 +96,14 @@ class TaskState:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     _waiters: list[asyncio.Future] = field(default_factory=list)
     _stop_event: threading.Event = field(default_factory=threading.Event)
+    # ── Budget tracking (MAF TokenUsageTermination analog) ─────────────────
+    input_tokens: int = 0
+    output_tokens: int = 0
+    llm_calls: int = 0
+    tool_calls: int = 0
+    budget_exceeded: bool = False
+    budget_reason: str | None = None
+    _budget_tracker: object | None = field(default=None, repr=False)  # BudgetTracker, Any to avoid cycle
 
 
 _tasks: dict[str, TaskState] = {}

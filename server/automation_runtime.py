@@ -23,6 +23,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.agents import DEFAULT_MODEL, build_agent
+from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
 from core.log_callback import AgentLogger
 from core.queue import Job, JobQueue
 from db import async_session
@@ -71,6 +72,10 @@ async def _execute_prompt_type(
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
+    limits = get_budget_limits_for_task("automation")
+    tracker = BudgetTracker(limits, task_state=state)
+    state._budget_tracker = tracker
+    budget_cb = BudgetCallbackHandler(tracker, task_state=state)
     agent = build_agent(auto.model or DEFAULT_MODEL, checkpointer=checkpointer, store=get_store())
 
     user_content = auto.prompt_text or ""
@@ -82,7 +87,7 @@ async def _execute_prompt_type(
         config={
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 100,
-            "callbacks": [AgentLogger()],
+            "callbacks": [AgentLogger(), budget_cb],
         },
         stream_mode=STREAM_MODES,
         subgraphs=True,
@@ -312,7 +317,16 @@ async def _run_automation_inner(
         else:
             raise ValueError(f"Unknown input_type: {auto.input_type}")
 
-        if state.cancelled:
+        if state.budget_exceeded:
+            reason = state.budget_reason or "budget exceeded"
+            async with async_session() as session:
+                await finish_automation_run(session, run_id, "error", output, f"budget exceeded: {reason}")
+            if conv_id:
+                await _persist_stateful_message(conv_id, "assistant", output or f"[budget exceeded: {reason}]", "error")
+            final_status = "error"
+            emit_event(state, "budget_exceeded", reason=reason, run_id=run_id)
+            emit_event(state, "error", error=f"budget exceeded: {reason}", run_id=run_id)
+        elif state.cancelled:
             async with async_session() as session:
                 await finish_automation_run(session, run_id, "stopped", output, None)
             if conv_id:
@@ -339,12 +353,22 @@ async def _run_automation_inner(
             emit_event(state, "done", output=output, run_id=run_id)
 
     except asyncio.CancelledError:
-        async with async_session() as session:
-            await finish_automation_run(session, run_id, "stopped", None, None)
-        if conv_id:
-            await _persist_stateful_message(conv_id, "assistant", "", "stopped")
-        final_status = "stopped"
-        emit_event(state, "stopped", run_id=run_id)
+        if state.budget_exceeded:
+            reason = state.budget_reason or "budget exceeded"
+            async with async_session() as session:
+                await finish_automation_run(session, run_id, "error", None, f"budget exceeded: {reason}")
+            if conv_id:
+                await _persist_stateful_message(conv_id, "assistant", f"[budget exceeded: {reason}]", "error")
+            final_status = "error"
+            emit_event(state, "budget_exceeded", reason=reason, run_id=run_id)
+            emit_event(state, "error", error=f"budget exceeded: {reason}", run_id=run_id)
+        else:
+            async with async_session() as session:
+                await finish_automation_run(session, run_id, "stopped", None, None)
+            if conv_id:
+                await _persist_stateful_message(conv_id, "assistant", "", "stopped")
+            final_status = "stopped"
+            emit_event(state, "stopped", run_id=run_id)
 
     except BaseException as exc:
         err_text = str(exc)

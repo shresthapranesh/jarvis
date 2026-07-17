@@ -24,16 +24,22 @@ jarvis/
 │   ├── context_cache.py  # ADK ContextCacheConfig analog — CacheSegment, ContextCacheConfig,
 │   │                     #   build_cached_system_message() multi-breakpoint (max 4)
 │   ├── runner.py         # ADK Runner analog — JarvisRunner owns checkpointer/store/queue/http,
-│   │                     #   should_use_cache(), get_context_cache_config(), build_agent()
+│   │                     #   should_use_cache(), get_context_cache_config(), get_budget_limits(), build_agent()
 │   ├── approval.py       # ADK LongRunningFunctionTool analog — request_tool_approval() via interrupt,
 │   │                     #   is_affirmative_answer(), require_approval decorator
+│   ├── budget.py         # MAF TokenUsageTermination analog — BudgetLimits, BudgetTracker, BudgetCallbackHandler,
+│   │                     #   get_budget_limits_for_task() — enforces max tokens/calls/duration
+│   ├── mcp.py            # ADK McpToolset analog — MultiServerMCPClient wrapper,
+│   │                     #   load_mcp_server_configs() (env JARVIS_MCP_SERVERS + ~/.jarvis/mcp.json),
+│   │                     #   McpManager.initialize(), get_mcp_tools_sync()
 │   ├── model_catalog.py  # AVAILABLE_MODELS, DEFAULT_MODEL, is_valid_model()
 │   ├── state.py          # TaskState, _tasks, _notify(), stream_task_events(),
 │   │                     #   get_queue(), get_store(), get_async_checkpointer()
+│   │                     #   now includes input_tokens/output_tokens/llm_calls/tool_calls/budget_exceeded + _budget_tracker
 │   ├── queue/            # Durable job queue: protocol.py (Job, JobQueue ABC),
 │   │                     #   sqlite.py (SqliteJobQueue), worker.py (Worker)
 │   ├── streaming.py      # TokenCoalescer, STREAM_MODES, _process_chunk(), _finalize_message()
-│   │                     #   forwards approval_request/approval_resolved/workflow_event
+│   │                     #   forwards approval_request/approval_resolved/workflow_event/budget_exceeded
 │   ├── summarization.py  # DEPRECATED — use compaction.maybe_compact; kept for backwards compat
 │   ├── memory_consolidation.py  # AGENTS.md blob store keys + consolidate_memory() (keyless fallback)
 │   ├── memory_store.py   # discrete vector memory — load_core/search_memory/upsert_memory (Memory rows)
@@ -230,7 +236,7 @@ Conventions:
 - `running_tasks` query (`queries/task_run.py`) lists everything currently in `_tasks` for the Tasks page; finished tasks linger ~5s before being popped so the UI can show their terminal state.
 
 ### Chat events
-`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `done`, `stopped`, `error`
+`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `budget_exceeded`, `done`, `stopped`, `error`
 
 Worker lifecycle events (`worker_*`) stream live from `tools/workers.py` and — except `worker_token` — are also persisted as `Step` rows (`source="subagent"`, `subagent="<role>:<idx>"`, result capped at `WORKER_RESULT_PERSIST_CAP`), so the activity sidebar can rebuild per-worker groups after a reload.
 
@@ -314,12 +320,42 @@ Visual graph executor (`workflow/engine.py`):
   + `_project_volatile_parts` into cacheable vs volatile: agent memory,
   relevant memories, skills, project header/instructions → cached;
   project memory, current tasks → volatile suffix. Logs cache stats via
-  `get_last_cache_stats()`.
+  `get_last_cache_stats()`. Loads MCP tools via `get_mcp_tools_sync()` (ADK McpToolset)
+  and appends to both main and general/researcher worker tool lists.
 - `core/runner.py`: `JarvisRunner` (ADK Runner analog) owns checkpointer/store/
-  queue/http/config, exposes `build_agent()`, `should_use_cache(provider in
-  {bedrock, anthropic, google_genai})`, `get_context_cache_config()`. Lifespan
-  in `server/entrypoint.py` creates global runner via `set_runner()` and tears
-  down with `set_runner(None)`. Future backends (Postgres, Redis) slot in here.
+  queue/http/config, exposes `build_agent()`, `should_use_cache()` (only `bedrock, anthropic`),
+  `get_context_cache_config()`, `get_budget_limits(kind)`. Lifespan
+  in `server/entrypoint.py` initializes MCP (`initialize_mcp()` → cached tools), creates
+  global runner via `set_runner()` and tears down with `set_runner(None)` + `get_mcp_manager().close()`.
+  Future backends (Postgres, Redis) slot in here.
+
+## Budget Tracking (MAF TokenUsageTermination / BudgetTracker analog)
+- `core/budget.py`: `BudgetLimits` (max_total_tokens, max_input, max_output, max_llm_calls,
+  max_tool_calls, max_duration_seconds), `BudgetTracker` (per-run mutable, syncs to
+  `TaskState.input_tokens/output_tokens/llm_calls/tool_calls/budget_exceeded`),
+  `BudgetCallbackHandler` (LangChain callback that feeds tracker and cancels on exceed),
+  `get_budget_limits_for_task(kind)` (env overrides: `JARVIS_BUDGET_MAX_*`; tries runner first).
+- `core/state.py`: `TaskState` now holds `input_tokens`, `output_tokens`, `llm_calls`,
+  `tool_calls`, `budget_exceeded`, `budget_reason`, `_budget_tracker`.
+- Wiring: chat (`server/chat_runtime.py`), board (`task_board_runtime.py`), automation
+  (`automation_runtime.py`), workflow (`workflow_runtime.py` + `workflow/nodes.py:_run_agent_text`)
+  each create a `BudgetTracker` + `BudgetCallbackHandler` per run. On exceed emits
+  `budget_exceeded` event (`core/streaming.py` forwards) → `BudgetExceededEvent` GraphQL
+  (`server/graphql/types/events.py`) → `useTaskEvents.ts` surfaces error. Chat finalizes
+  with budget message; board sets `blocked_kind="budget"`; workflow raises to error.
+- Runner: `RunnerConfig` holds `budget_max_*` defaults, merged into `JarvisRunner.get_budget_limits()`.
+
+## MCP Tool Loader (ADK McpToolset analog)
+- `core/mcp.py`: `load_mcp_server_configs()` merges env `JARVIS_MCP_SERVERS` (JSON dict or list)
+  + file `~/.jarvis/mcp.json` / `$WORK_DIR/mcp.json` / `./mcp.json` (supports Claude Desktop's
+  `mcpServers` key, or `{servers: {...}}`). Normalized to `dict[name -> connection dict]`
+  for `langchain_mcp_adapters.client.MultiServerMCPClient`. `McpManager` singleton holds
+  cached tools, `initialize()` loads via `client.get_tools()`, `get_tools_sync()` sync accessor.
+- Lifespan: `server/entrypoint.py` calls `initialize_mcp()` early; `close()` on shutdown.
+- Agent: `core/agents.py` `_build_agent` loads via `get_mcp_tools_sync()` and appends to
+  main + general/researcher worker tools (`_ROLE_TOOLS`). If no config, returns [] (no-op).
+- Dependency: `langchain-mcp-adapters>=0.3.0` (+ `mcp` transitive). Optional — safe fallback.
+- GraphQL/events unchanged; MCP tool calls flow as normal `tool` steps.
 
 ## Memory Feature
 Agent memory has **two layers**, selected by whether an embedder is configured (`embeddings_available()`):

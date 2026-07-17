@@ -131,6 +131,12 @@ class WorkflowToolEvent:
 
 
 @strawberry.type
+class BudgetExceededEvent:
+    reason: str
+    snapshot: str  # JSON-encoded BudgetTracker snapshot
+
+
+@strawberry.type
 class ErrorEvent:
     error: str
 
@@ -152,6 +158,7 @@ ChatEvent = Annotated[
         ApprovalRequestEvent,
         ApprovalResolvedEvent,
         WorkflowToolEvent,
+        BudgetExceededEvent,
         DoneEvent,
         StoppedEvent,
         ErrorEvent,
@@ -278,6 +285,11 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
             parent_run_id=data.get("parent_run_id", ""),
             child_event=data.get("child_event", ""),
             data=_as_str({k: v for k, v in data.items() if k not in ("parent_run_id", "child_event")}),
+        )
+    if event_name == "budget_exceeded":
+        return BudgetExceededEvent(
+            reason=data.get("reason", ""),
+            snapshot=_as_str(data.get("snapshot") or {k: v for k, v in data.items() if k != "reason"}),
         )
     if event_name == "done":
         return DoneEvent(
