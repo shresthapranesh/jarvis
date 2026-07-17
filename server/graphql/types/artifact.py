@@ -3,13 +3,42 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import strawberry
 from strawberry import relay
 
 from core.config import get_config
 from db import models as db_models
-from db.ops import get_artifact
+from db.ops import get_artifact, list_artifact_versions
+
+
+@strawberry.type
+class ArtifactVersion:
+    id: str
+    artifact_id: str
+    version: int
+    title: str
+    filename: str
+    created_at: datetime
+
+    @strawberry.field
+    def content(self) -> str:
+        p = Path(self.filename)
+        if not p.exists():
+            return ""
+        return p.read_text(encoding="utf-8")
+
+    @classmethod
+    def from_db(cls, row: db_models.ArtifactVersion) -> "ArtifactVersion":
+        return cls(
+            id=row.id,
+            artifact_id=row.artifact_id,
+            version=row.version,
+            title=row.title,
+            filename=row.filename,
+            created_at=row.created_at,
+        )
 
 
 @strawberry.type
@@ -59,3 +88,19 @@ class Artifact(relay.Node):
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8")
+
+    @strawberry.field
+    async def versions(self, info: strawberry.Info) -> list[ArtifactVersion]:
+        session = info.context["session"]
+        rows = await list_artifact_versions(session, self.id)
+        return [ArtifactVersion.from_db(r) for r in rows]
+
+    @strawberry.field
+    def version_count(self) -> int:
+        # Cheap sync? We have versions field for full list; this is a helper
+        # but we can't async here easily. Use file glob as quick estimate.
+        try:
+            cfg = get_config()
+            return len(list(cfg.artifacts_dir.glob(f"{self.id}_v*.md")))
+        except Exception:
+            return 0

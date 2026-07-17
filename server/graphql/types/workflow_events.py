@@ -70,6 +70,39 @@ class WorkflowStoppedEvent:
     run_id: str
 
 
+@strawberry.type
+class WorkflowApprovalRequestEvent:
+    tool: str
+    reason: str
+    args: str
+    node_id: str
+
+
+@strawberry.type
+class WorkflowApprovalResolvedEvent:
+    tool: str
+    approved: bool
+    answer: str
+    node_id: str
+
+
+@strawberry.type
+class WorkflowInterruptEvent:
+    interrupt_id: str
+    question: str
+
+
+@strawberry.type
+class WorkflowInterruptResolvedEvent:
+    interrupt_id: str
+
+
+@strawberry.type
+class WorkflowBudgetExceededEvent:
+    reason: str
+    snapshot: str | None = None
+
+
 WorkflowEvent = Annotated[
     Union[
         WorkflowNodeStartEvent,
@@ -79,6 +112,11 @@ WorkflowEvent = Annotated[
         WorkflowNodeErrorEvent,
         WorkflowMapStartEvent,
         WorkflowMapItemDoneEvent,
+        WorkflowApprovalRequestEvent,
+        WorkflowApprovalResolvedEvent,
+        WorkflowInterruptEvent,
+        WorkflowInterruptResolvedEvent,
+        WorkflowBudgetExceededEvent,
         WorkflowDoneEvent,
         WorkflowErrorEvent,
         WorkflowStoppedEvent,
@@ -147,6 +185,32 @@ def coerce_workflow_event(raw: dict) -> WorkflowEvent | None:
         return WorkflowErrorEvent(
             error=data.get("error", ""),
             run_id=data.get("run_id", ""),
+        )
+    if event_name == "approval_request":
+        return WorkflowApprovalRequestEvent(
+            tool=data.get("tool", ""),
+            reason=data.get("reason", ""),
+            args=data.get("args", "") if isinstance(data.get("args"), str) else json.dumps(data.get("args", {})),
+            node_id=data.get("node_id") or data.get("tool", ""),
+        )
+    if event_name == "approval_resolved":
+        return WorkflowApprovalResolvedEvent(
+            tool=data.get("tool", ""),
+            approved=bool(data.get("approved", False)),
+            answer=data.get("answer", ""),
+            node_id=data.get("node_id") or data.get("tool", ""),
+        )
+    if event_name == "interrupt":
+        return WorkflowInterruptEvent(
+            interrupt_id=data.get("interrupt_id", ""),
+            question=data.get("question", ""),
+        )
+    if event_name == "interrupt_resolved":
+        return WorkflowInterruptResolvedEvent(interrupt_id=data.get("interrupt_id", ""))
+    if event_name == "budget_exceeded":
+        return WorkflowBudgetExceededEvent(
+            reason=data.get("reason", ""),
+            snapshot=data.get("snapshot") if isinstance(data.get("snapshot"), str) else json.dumps(data.get("snapshot") or {}),
         )
     if event_name == "workflow_stopped":
         return WorkflowStoppedEvent(run_id=data.get("run_id", ""))

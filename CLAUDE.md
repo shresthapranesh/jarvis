@@ -90,15 +90,18 @@ jarvis/
 │   └── routes_logs.py         # REST: GET /server-logs, GET /server-logs/stream
 ├── workflow/
 │   ├── engine.py         # BFS workflow executor — execute_workflow()
-│   └── nodes.py          # AgentNode, ConditionalNode, MapNode, StartNode, RouterNode, RefineNode,
-│                         #   SequentialNode, ParallelNode, LoopNode + _emit() — ADK Sequential/Parallel/Loop analogs
+│   └── nodes.py          # AgentNode (output_schema support), ConditionalNode, MapNode, StartNode, RouterNode,
+│                         #   RefineNode, SequentialNode (output_schema per step), ParallelNode, LoopNode,
+│                         #   ApprovalNode, HumanInputNode + _emit() — ADK Sequential/Parallel/Loop/Approval analogs
+│                         #   + structured output via output_schema
 ├── tools/                # The main agent is CODE-FIRST: it binds only the [bound] tools
 │   │                     #   below; web/finance/datetime/browser work is done by writing
 │   │                     #   Python in run_cell, NOT via dedicated tools. [unbound] files
 │   │                     #   exist but are not wired into the agent (see core/agents.py main_tools).
 │   ├── code.py           # [bound] run_cell — stateful notebook session (per-conversation IPython kernel, core/kernels.py)
 │   ├── files.py          # [bound] read_file, write_file, list_files
-│   ├── artifacts.py      # [bound] write_artifact, read_artifact, list_artifacts
+│   ├── artifacts.py      # [bound] write_artifact (versioned), read_artifact (version param),
+│                         #   list_artifacts, list_artifact_versions
 │   ├── todos.py          # [bound] write_todos, set_todo_status (per-conversation plan)
 │   ├── documents.py      # [bound] search_documents, read_document (retrieval over indexed attachments)
 │   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
@@ -277,11 +280,21 @@ A durable multi-agent kanban layered on the job queue. A `BoardTask` is one card
 Visual graph executor (`workflow/engine.py`):
 - Definitions stored as JSON (`Workflow.definition`) with `nodes` + `edges` lists.
 - `execute_workflow(run_id, definition, inputs, task_state)` runs BFS over the graph; `server/workflow_runtime.py` is the background trigger.
-- Node types: `agent` (full LangGraph loop), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults), `router` (N-way classifier), `refine` (generate+evaluate loop).
-- **ADK multi-agent analogs** (`workflow/nodes.py`): `sequential` (SequentialAgent — steps in order sharing state), `parallel` (ParallelAgent — branches concurrently), `loop` (LoopAgent — generate/evaluate until PASS or max_iter). These compose via `steps`/`branches` config lists and stream `node_token` per sub-step.
+- Node types: `agent` (full LangGraph loop, supports `output_schema`), `conditional` (LLM yes/no router), `map` (parallel sub-workflow per list item), `start` (entry point with defaults), `router` (N-way classifier), `refine` (generate+evaluate loop), `approval` (human approval gate), `human_input` (free-text human input).
+- **ADK multi-agent analogs** (`workflow/nodes.py`): `sequential` (SequentialAgent — steps in order sharing state, each step can have `output_schema`), `parallel` (ParallelAgent — branches concurrently), `loop` (LoopAgent — generate/evaluate until PASS or max_iter), `approval` (LongRunningFunctionTool analog — emits `approval_request` + `interrupt`, waits on `TaskState.resume_future`, supports `approved`/`denied` branching), `human_input` (Human-in-the-loop — emits `interrupt`, waits for free-text answer). These compose via `steps`/`branches` config lists and stream `node_token` per sub-step.
+- **Structured output**: `AgentNode` and `SequentialNode` support `output_schema` (JSON schema dict or JSON string). Prompt is augmented to request JSON, `_extract_first_json()` extracts first JSON object/array, merges dict keys as top-level outputs. `output_schema_mode="strict"` raises if no JSON.
 - **Agent-as-Tool**: `run_workflow(workflow_id, inputs_json)` (`tools/workflows.py`, bound) lets main agent invoke a saved workflow as sub-agent (ADK AgentTool). Emits `worker_start`/`worker_done` + `workflow_event` for visibility.
 - Conditional nodes prune inactive branches via `pruned_edges`; pruned nodes never execute.
-- CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`. New node types `sequential`/`parallel`/`loop`/`router`/`refine` added to `WorkflowNodeType` in `lib/types.ts` for future UI support.
+- **HITL**: workflow approval/human_input nodes pause via `TaskState.pending_interrupt_id` + `resume_future`, resumed via GraphQL `resumeWorkflowRun(runId, answer)` / `resolveWorkflowApproval(runId, approved, answer)` mutations (`mutations/workflow.py`). Events `approval_request`/`approval_resolved`/`interrupt`/`interrupt_resolved` flow via `workflowRunEvents` subscription (`WorkflowApprovalRequestEvent` etc).
+- CRUD + runs are GraphQL (`queries/workflow.py`, `mutations/workflow.py`); the editor lives in `frontend/src/components/WorkflowEditor*.tsx`. All node types including `sequential`/`parallel`/`loop`/`router`/`refine`/`approval`/`human_input` added to `WorkflowNodeType` in `lib/types.ts` for future UI support.
+
+## Artifact Versioning (ADK ArtifactService analog)
+- `db/models.py`: `ArtifactVersion` (artifact_id FK cascade, version int unique per artifact, title, filename, created_at). `Artifact.versions` relationship.
+- `db/ops.py`: `create_artifact_version()`, `list_artifact_versions()`, `get_artifact_version()`, `get_latest_artifact_version_number()`. `delete_conversation` + `delete_artifact` collect version file paths before cascade and unlink them.
+- `tools/artifacts.py`: `write_artifact()` versions: on create writes live `{id}.md` + versioned `{id}_v1.md` + DB row v1; on update migrates old file without history (saves as v1) then writes live + new version file `_v{latest+1}.md`. `read_artifact(artifact_id, version=None)` reads specific version when provided, otherwise live. `list_artifacts()` includes `versions` count, new tool `list_artifact_versions(artifact_id)`.
+- `core/agents.py`: binds `list_artifact_versions` alongside other artifact tools.
+- GraphQL: `ArtifactVersion` type with `content` resolver, `Artifact.versions` field + `version_count`, query `artifactVersions(artifactId)`. Files cleaned up on conversation/artifact delete.
+- Frontend: schema regenerated; artifact UI can show version history via `versions` field.
 
 ## Approval / Long-Running Tools (ADK LongRunningFunctionTool analog)
 `core/approval.py`: generic human-in-the-loop approval layered on LangGraph's
@@ -392,7 +405,7 @@ A **skill** is a named, reusable procedure the agent can author and later reload
 - `async_session` uses `expire_on_commit=False` — no `session.refresh()` needed after commit.
 - `update_*` functions must use ORM-level `setattr` (not raw SQL UPDATE) so `onupdate` callbacks fire.
 - All ForeignKey columns carry `index=True`; new ones must too.
-- Tables: `Conversation, Message, Step, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, NotificationChannel, Artifact, Document, DocumentChunk, Workflow, WorkflowRun, Job, Memory, Project, Skill` (`Job` = the durable queue's backing table; `DocumentChunk` = embedded passages for large-doc retrieval; `Memory` = discrete vector memory items; `Project` = conversation groups with shared instructions/memory; `Skill` = reusable agent procedures; `BoardTask`/`BoardTaskLink` = the task board's cards and dependency edges).
+- Tables: `Conversation, Message, Step, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, NotificationChannel, Artifact, ArtifactVersion, Document, DocumentChunk, Workflow, WorkflowRun, Job, Memory, Project, Skill` (`Job` = the durable queue's backing table; `DocumentChunk` = embedded passages for large-doc retrieval; `Memory` = discrete vector memory items; `Project` = conversation groups with shared instructions/memory; `Skill` = reusable agent procedures; `BoardTask`/`BoardTaskLink` = the task board's cards and dependency edges; `ArtifactVersion` = versioned snapshots of artifacts).
 - Two SQLite files live under `~/.jarvis/`: `database.db` (app state) and `checkpoints.db` (LangGraph thread state + the store, keyed by `thread_id == conversation_id`). Conversation deletion cascades both: ORM deletes app-DB rows, then `delete_conversation` calls `adelete_thread(conv_id)` on the async checkpointer.
 
 ## Default Model

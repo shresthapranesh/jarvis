@@ -21,6 +21,8 @@ type Artifact implements Node {
   createdAt: DateTime!
   updatedAt: DateTime!
   content: String!
+  versions: [ArtifactVersion!]!
+  versionCount: Int!
 }
 
 type ArtifactEvent {
@@ -28,6 +30,16 @@ type ArtifactEvent {
   title: String!
   action: String!
   preview: String
+}
+
+type ArtifactVersion {
+  id: String!
+  artifactId: String!
+  version: Int!
+  title: String!
+  filename: String!
+  createdAt: DateTime!
+  content: String!
 }
 
 type Automation implements Node {
@@ -298,6 +310,8 @@ type Mutation {
   deleteWorkflow(id: ID!): Boolean!
   runWorkflow(id: ID!, inputs: JSON = null): String!
   stopWorkflowRun(runId: String!): Boolean!
+  resumeWorkflowRun(runId: String!, answer: String!): Boolean!
+  resolveWorkflowApproval(runId: String!, approved: Boolean!, answer: String = null): Boolean!
   createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!
   updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!
   deleteNotificationChannel(id: ID!): Boolean!
@@ -396,6 +410,7 @@ type Query {
   artifacts(conversationId: String = null): [Artifact!]!
   artifact(id: ID!): Artifact
   documents(conversationId: String!): [Document!]!
+  artifactVersions(artifactId: String!): [ArtifactVersion!]!
   automations: [Automation!]!
   automation(id: ID!): Automation
   automationRuns(automationId: ID!): [AutomationRun!]!
@@ -557,6 +572,25 @@ type Workflow implements Node {
   updatedAt: DateTime!
 }
 
+type WorkflowApprovalRequestEvent {
+  tool: String!
+  reason: String!
+  args: String!
+  nodeId: String!
+}
+
+type WorkflowApprovalResolvedEvent {
+  tool: String!
+  approved: Boolean!
+  answer: String!
+  nodeId: String!
+}
+
+type WorkflowBudgetExceededEvent {
+  reason: String!
+  snapshot: String
+}
+
 input WorkflowCreateInput {
   name: String!
   description: String = null
@@ -574,7 +608,16 @@ type WorkflowErrorEvent {
   runId: String!
 }
 
-union WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent
+union WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowApprovalRequestEvent | WorkflowApprovalResolvedEvent | WorkflowInterruptEvent | WorkflowInterruptResolvedEvent | WorkflowBudgetExceededEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent
+
+type WorkflowInterruptEvent {
+  interruptId: String!
+  question: String!
+}
+
+type WorkflowInterruptResolvedEvent {
+  interruptId: String!
+}
 
 type WorkflowMapItemDoneEvent {
   nodeId: String!

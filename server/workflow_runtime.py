@@ -175,6 +175,8 @@ async def _watch_queue_cancel(
         if await queue.is_cancel_requested(job_id):
             state.cancelled = True
             state._stop_event.set()
+            if state.resume_future and not state.resume_future.done():
+                state.resume_future.cancel()
             return
         await asyncio.sleep(1.0)
 

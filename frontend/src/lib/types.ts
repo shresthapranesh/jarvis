@@ -235,7 +235,9 @@ export type WorkflowNodeType =
   | 'refine'
   | 'sequential'
   | 'parallel'
-  | 'loop';
+  | 'loop'
+  | 'approval'
+  | 'human_input';
 
 export interface WorkflowNodeData extends Record<string, unknown> {
   label: string;
@@ -244,6 +246,8 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   model?: string;
   output_key?: string;
   input_ports?: string[];
+  output_schema?: string; // JSON schema string for structured output
+  output_schema_mode?: 'auto' | 'strict';
   // conditional fields
   condition?: string;
   input_key?: string;
@@ -263,8 +267,21 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   max_iterations?: number;
   exit_on?: string;
   // sequential / parallel (ADK analogs)
-  steps?: Array<{prompt_template: string; output_key?: string; model?: string; label?: string}>;
+  steps?: Array<{
+    prompt_template: string;
+    output_key?: string;
+    model?: string;
+    label?: string;
+    output_schema?: string;
+  }>;
   branches?: Array<{prompt_template: string; output_key?: string; model?: string; label?: string}>;
+  // approval / human_input (HITL)
+  reason?: string;
+  tool?: string;
+  timeout_seconds?: number;
+  on_deny?: 'error' | 'continue';
+  prompt?: string;
+  question?: string;
 }
 
 export interface WorkflowRFNode {

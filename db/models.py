@@ -225,6 +225,35 @@ class Artifact(Base):
     conversation: Mapped[Optional["Conversation"]] = relationship(
         "Conversation", back_populates="artifacts"
     )
+    versions: Mapped[list["ArtifactVersion"]] = relationship(
+        "ArtifactVersion", back_populates="artifact", cascade="all, delete-orphan", order_by="ArtifactVersion.version"
+    )
+
+
+class ArtifactVersion(Base):
+    """Version history for an artifact — ADK ArtifactService analog.
+
+    Each overwrite of an artifact saves the previous content as a versioned file
+    under artifacts_dir/{artifact_id}_v{version}.md and a DB row here. The
+    live file {artifact_id}.md always holds the latest version.
+    """
+
+    __tablename__ = "artifact_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    artifact_id: Mapped[str] = mapped_column(
+        ForeignKey("artifacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)  # on-disk path
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    artifact: Mapped["Artifact"] = relationship("Artifact", back_populates="versions")
+
+    __table_args__ = (
+        Index("ix_artifact_versions_artifact_version", "artifact_id", "version", unique=True),
+    )
 
 
 # ── Documents (uploaded files persisted per conversation) ─────────────────────

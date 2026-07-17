@@ -11,6 +11,8 @@ export interface WorkflowStreamState {
   nodeStatuses: Record<string, NodeStatus>;
   outputs: Record<string, unknown> | null;
   error: string | null;
+  pendingApproval: {nodeId: string; tool: string; reason: string; args: string} | null;
+  pendingInterrupt: {id: string; question: string} | null;
 }
 
 const subscription = graphql`
@@ -47,6 +49,29 @@ const subscription = graphql`
         index
         result
       }
+      ... on WorkflowApprovalRequestEvent {
+        tool
+        reason
+        args
+        nodeId
+      }
+      ... on WorkflowApprovalResolvedEvent {
+        tool
+        approved
+        answer
+        nodeId
+      }
+      ... on WorkflowInterruptEvent {
+        interruptId
+        question
+      }
+      ... on WorkflowInterruptResolvedEvent {
+        interruptId
+      }
+      ... on WorkflowBudgetExceededEvent {
+        reason
+        snapshot
+      }
       ... on WorkflowDoneEvent {
         outputs
         runId
@@ -71,11 +96,13 @@ export function useWorkflowRunEvents(
     nodeStatuses: {},
     outputs: null,
     error: null,
+    pendingApproval: null,
+    pendingInterrupt: null,
   });
 
   useEffect(() => {
     if (!runId) return;
-    setState({streaming: true, nodeStatuses: {}, outputs: null, error: null});
+    setState({streaming: true, nodeStatuses: {}, outputs: null, error: null, pendingApproval: null, pendingInterrupt: null});
 
     const disposable = requestSubscription<useWorkflowRunEventsSubscription>(environment, {
       subscription,
@@ -174,20 +201,48 @@ export function useWorkflowRunEvents(
               };
             });
             break;
+          case 'WorkflowApprovalRequestEvent':
+            setState((s) => ({
+              ...s,
+              pendingApproval: {
+                nodeId: evt.nodeId ?? evt.tool,
+                tool: evt.tool,
+                reason: evt.reason,
+                args: evt.args,
+              },
+            }));
+            break;
+          case 'WorkflowApprovalResolvedEvent':
+            setState((s) => ({...s, pendingApproval: null}));
+            break;
+          case 'WorkflowInterruptEvent':
+            setState((s) => ({
+              ...s,
+              pendingInterrupt: {id: evt.interruptId, question: evt.question},
+            }));
+            break;
+          case 'WorkflowInterruptResolvedEvent':
+            setState((s) => ({...s, pendingInterrupt: null}));
+            break;
+          case 'WorkflowBudgetExceededEvent':
+            setState((s) => ({...s, error: `Budget exceeded: ${evt.reason}`}));
+            break;
           case 'WorkflowDoneEvent':
             setState((s) => ({
               ...s,
               streaming: false,
               outputs: evt.outputs as Record<string, unknown>,
+              pendingApproval: null,
+              pendingInterrupt: null,
             }));
             if (workflowId) void refreshWorkflowRuns(workflowId);
             break;
           case 'WorkflowStoppedEvent':
-            setState((s) => ({...s, streaming: false}));
+            setState((s) => ({...s, streaming: false, pendingApproval: null, pendingInterrupt: null}));
             if (workflowId) void refreshWorkflowRuns(workflowId);
             break;
           case 'WorkflowErrorEvent':
-            setState((s) => ({...s, streaming: false, error: evt.error}));
+            setState((s) => ({...s, streaming: false, error: evt.error, pendingApproval: null, pendingInterrupt: null}));
             if (workflowId) void refreshWorkflowRuns(workflowId);
             break;
         }

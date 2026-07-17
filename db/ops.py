@@ -190,6 +190,15 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
             select(Document.path).where(Document.conversation_id == conv_id)
         )).scalars()
     )
+    # Artifact versions — collect their on-disk paths before cascade
+    from db.models import ArtifactVersion
+    version_paths: list[str] = []
+    if art_ids:
+        version_paths = list(
+            (await session.execute(
+                select(ArtifactVersion.filename).where(ArtifactVersion.artifact_id.in_(art_ids))
+            )).scalars()
+        )
 
     await session.delete(conv)  # cascades messages, steps, artifacts, documents via ORM
     await session.commit()
@@ -201,6 +210,17 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
             path.unlink(missing_ok=True)
         except OSError as e:
             logger.warning("Failed to unlink artifact file %s: %s", path, e)
+        # Also any versioned files not captured via DB (fallback glob)
+        try:
+            for vf in cfg.artifacts_dir.glob(f"{aid}_v*.md"):
+                vf.unlink(missing_ok=True)
+        except OSError:
+            pass
+    for vp in version_paths:
+        try:
+            Path(vp).unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Failed to unlink artifact version file %s: %s", vp, e)
 
     for raw_path in doc_paths:
         try:
@@ -919,9 +939,86 @@ async def delete_artifact(session: AsyncSession, artifact_id: str) -> bool:
     art = await session.get(Artifact, artifact_id)
     if art is None:
         return False
+    # Collect version file paths before cascade delete
+    from db.models import ArtifactVersion
+    version_paths = list(
+        (await session.execute(
+            select(ArtifactVersion.filename).where(ArtifactVersion.artifact_id == artifact_id)
+        )).scalars()
+    )
     await session.delete(art)
     await session.commit()
+    cfg = get_config()
+    # Delete live file
+    try:
+        (cfg.artifacts_dir / f"{artifact_id}.md").unlink(missing_ok=True)
+    except OSError:
+        pass
+    for vp in version_paths:
+        try:
+            Path(vp).unlink(missing_ok=True)
+        except OSError:
+            pass
     return True
+
+
+# ── Artifact versioning (ADK ArtifactService analog) ─────────────────────────
+
+async def create_artifact_version(
+    session: AsyncSession,
+    artifact_id: str,
+    title: str,
+    filename: str,
+    version: int,
+) -> Any:
+    from db.models import ArtifactVersion
+    ver = ArtifactVersion(
+        artifact_id=artifact_id,
+        title=title,
+        filename=filename,
+        version=version,
+    )
+    session.add(ver)
+    await session.commit()
+    return ver
+
+
+async def list_artifact_versions(
+    session: AsyncSession, artifact_id: str
+) -> list[Any]:
+    from db.models import ArtifactVersion
+    result = await session.execute(
+        select(ArtifactVersion)
+        .where(ArtifactVersion.artifact_id == artifact_id)
+        .order_by(ArtifactVersion.version.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_artifact_version(
+    session: AsyncSession, artifact_id: str, version: int
+) -> Any | None:
+    from db.models import ArtifactVersion
+    result = await session.execute(
+        select(ArtifactVersion).where(
+            ArtifactVersion.artifact_id == artifact_id,
+            ArtifactVersion.version == version,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_latest_artifact_version_number(
+    session: AsyncSession, artifact_id: str
+) -> int:
+    from db.models import ArtifactVersion
+    result = await session.execute(
+        select(func.max(ArtifactVersion.version)).where(
+            ArtifactVersion.artifact_id == artifact_id
+        )
+    )
+    max_v = result.scalar()
+    return int(max_v) if max_v is not None else 0
 
 
 # ── Document CRUD ─────────────────────────────────────────────────────────────

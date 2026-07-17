@@ -37,7 +37,12 @@ from .schemas import TodoItem, _normalise_todos, reduce_todos
 from core.doc_index import embeddings_available
 from core.memory_store import load_core, search_memory
 from core.skill_store import skill_catalog
-from tools.artifacts import list_artifacts as artifact_list, read_artifact, write_artifact
+from tools.artifacts import (
+    list_artifact_versions,
+    list_artifacts as artifact_list,
+    read_artifact,
+    write_artifact,
+)
 from tools.code import run_cell
 from tools.documents import read_document, search_documents
 from tools.files import list_files, read_file, write_file
@@ -513,6 +518,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         write_artifact,
         read_artifact,
         artifact_list,
+        list_artifact_versions,
         write_todos,
         set_todo_status,
         search_documents,

@@ -193,6 +193,67 @@ def _match_category(response: str, categories: list[str]) -> str:
     return categories[0]
 
 
+def _extract_first_json(text: str) -> Any | None:
+    """Try to extract first JSON object/array from text."""
+    if not text:
+        return None
+    # Fast path: whole text is JSON
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    # Find first { or [
+    start = text.find("{")
+    bracket = text.find("[")
+    if bracket != -1 and (start == -1 or bracket < start):
+        start = bracket
+    if start == -1:
+        return None
+    # Try to parse from start, shrinking
+    for end in range(len(text), start, -1):
+        snippet = text[start:end]
+        try:
+            return json.loads(snippet)
+        except Exception:
+            continue
+    return None
+
+
+def _maybe_parse_structured_output(
+    final_text: str, output_schema: Any | None
+) -> tuple[Any, str | None]:
+    """If output_schema provided, try to parse JSON from final_text.
+
+    Returns (parsed_or_original_text, error_message_or_None).
+    If no schema, returns (final_text, None).
+    """
+    if not output_schema:
+        return final_text, None
+    # Try to extract JSON
+    parsed = _extract_first_json(final_text)
+    if parsed is None:
+        return final_text, "Failed to extract JSON matching output_schema"
+    # Optional: validate against JSON schema if jsonschema lib available — best effort
+    try:
+        if isinstance(output_schema, str):
+            schema_obj = json.loads(output_schema)
+        else:
+            schema_obj = output_schema
+        # If jsonschema is installed, validate
+        try:
+            import jsonschema  # type: ignore
+
+            jsonschema.validate(parsed, schema_obj)
+        except ImportError:
+            pass
+        except Exception as ve:
+            return parsed, f"JSON schema validation warning: {ve}"
+    except Exception:
+        # If schema itself invalid, ignore
+        pass
+    return parsed, None
+
+
 # ── AgentNode ─────────────────────────────────────────────────────────────────
 
 class AgentNode(BaseNode):
@@ -204,6 +265,12 @@ class AgentNode(BaseNode):
         model (str):            model id, defaults to DEFAULT_MODEL
         output_key (str):       name of the output port, defaults to "result"
         input_ports (list[str]): expected input port names
+        output_schema (dict | str | None): JSON schema for structured output.
+            If provided, the prompt is augmented to request JSON and the result
+            is parsed. The parsed object is returned under output_key, with raw
+            text under f"{output_key}_raw" if parsing succeeded.
+        output_schema_mode (str): "auto" (default) — try to parse JSON, fallback
+            to text; "strict" — raises if JSON not found.
     """
 
     node_type = "agent"
@@ -212,8 +279,44 @@ class AgentNode(BaseNode):
         prompt = _interpolate(self.config.get("prompt_template", ""), inputs)
         model_id = self.config.get("model", DEFAULT_MODEL)
         output_key = self.config.get("output_key", "result")
+        output_schema = self.config.get("output_schema")
+        schema_mode = self.config.get("output_schema_mode", "auto")
+
+        # Augment prompt if schema provided
+        if output_schema:
+            schema_str = output_schema if isinstance(output_schema, str) else json.dumps(output_schema, indent=2)
+            prompt = (
+                f"{prompt}\n\n"
+                f"You must output valid JSON matching this JSON schema (or shape):\n"
+                f"{schema_str}\n\n"
+                f"Output ONLY the JSON, no extra explanation, no markdown fences."
+            )
 
         final_text = await _run_agent_text(self.node_id, model_id, prompt, task_state)
+
+        if output_schema:
+            parsed, err = _maybe_parse_structured_output(final_text, output_schema)
+            if isinstance(parsed, (dict, list)):
+                data: dict[str, Any] = {output_key: parsed, f"{output_key}_raw": final_text}
+                # If parsed is dict, also merge its keys as top-level outputs for convenience
+                if isinstance(parsed, dict):
+                    for k, v in parsed.items():
+                        if k not in data:
+                            data[k] = v
+                if err:
+                    data[f"{output_key}_schema_error"] = err
+                _emit(
+                    task_state,
+                    "node_token",
+                    node_id=self.node_id,
+                    text=f"\n— structured output parsed ({type(parsed).__name__}) —\n",
+                )
+                return NodeOutput(data=data)
+            else:
+                if schema_mode == "strict":
+                    raise ValueError(f"AgentNode {self.node_id}: structured output required but no JSON found. Raw: {final_text[:500]}")
+                # Fallback to text
+                return NodeOutput(data={output_key: final_text, f"{output_key}_parse_error": err or "no json"})
         return NodeOutput(data={output_key: final_text})
 
 
@@ -549,8 +652,12 @@ class SequentialNode(BaseNode):
             output_key = step.get("output_key", f"step_{idx}")
             model_id = step.get("model", model_default) or model_default
             label = step.get("label", output_key)
+            output_schema = step.get("output_schema")
 
             prompt = _interpolate(template, data)
+            if output_schema:
+                schema_str = output_schema if isinstance(output_schema, str) else json.dumps(output_schema, indent=2)
+                prompt = f"{prompt}\n\nYou must output valid JSON matching:\n{schema_str}\nOutput ONLY JSON."
             _emit(
                 task_state,
                 "node_token",
@@ -558,10 +665,32 @@ class SequentialNode(BaseNode):
                 text=f"\n\n— sequential step {idx + 1}/{len(steps)}: {label} —\n\n",
             )
             result = await _run_agent_text(f"{self.node_id}_seq_{idx}", model_id, prompt, task_state)
-            data[output_key] = result
+            if output_schema:
+                parsed, _ = _maybe_parse_structured_output(result, output_schema)
+                data[output_key] = parsed if isinstance(parsed, (dict, list)) else result
+                if isinstance(parsed, dict):
+                    for k, v in parsed.items():
+                        if k not in data:
+                            data[k] = v
+            else:
+                data[output_key] = result
 
+        # Final structured output if requested at node level
+        final_output_schema = self.config.get("output_schema")
         if final_output_key:
-            return NodeOutput(data={final_output_key: data.get(final_output_key, "")})
+            val = data.get(final_output_key, "")
+            if final_output_schema and isinstance(val, str):
+                parsed, _ = _maybe_parse_structured_output(val, final_output_schema)
+                if isinstance(parsed, (dict, list)):
+                    return NodeOutput(data={final_output_key: parsed, f"{final_output_key}_raw": val})
+            return NodeOutput(data={final_output_key: val})
+        if final_output_schema:
+            # Try to parse entire data dict as JSON? If output_key not set, look for "result"
+            maybe_text = data.get("result") or json.dumps(data)
+            if isinstance(maybe_text, str):
+                parsed, _ = _maybe_parse_structured_output(maybe_text, final_output_schema)
+                if isinstance(parsed, (dict, list)):
+                    return NodeOutput(data=parsed if isinstance(parsed, dict) else {"result": parsed})
         return NodeOutput(data=data)
 
 
@@ -724,6 +853,191 @@ class LoopNode(BaseNode):
         )
 
 
+# ── Approval / Human Input Nodes (HITL) ────────────────────────────────────
+
+class ApprovalNode(BaseNode):
+    """Human approval gate — pauses workflow until approved/denied.
+
+    Emits approval_request and waits for resume via TaskState.resume_future
+    (resolved by GraphQL resumeWorkflowRun / resolveWorkflowApproval).
+
+    Config:
+        reason (str): approval reason with {{var}} placeholders
+        tool (str): optional tool/name label, defaults to node_id
+        timeout_seconds (int | None): auto-fail after N seconds
+        on_deny (str): "error" (default, raises) or "continue" (routes to denied)
+    """
+
+    node_type = "approval"
+
+    def output_ports(self) -> list[str]:
+        # Supports branching: approved vs denied
+        return ["approved", "denied"]
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        reason_tmpl = self.config.get("reason", "Approval required to continue")
+        tool = self.config.get("tool", self.node_id)
+        timeout = self.config.get("timeout_seconds")
+        on_deny = self.config.get("on_deny", "error")
+        reason = _interpolate(reason_tmpl, inputs)
+
+        _emit(
+            task_state,
+            "approval_request",
+            tool=tool,
+            reason=reason,
+            args=json.dumps(inputs),
+            node_id=self.node_id,
+        )
+        # Also emit interrupt for generic UI
+        _emit(
+            task_state,
+            "interrupt",
+            interrupt_id=self.node_id,
+            question=f"{tool}: {reason}",
+        )
+
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        task_state.pending_interrupt_id = self.node_id
+        task_state.resume_future = fut
+        try:
+            if timeout:
+                answer = await asyncio.wait_for(fut, timeout=float(timeout))
+            else:
+                # Poll for cancellation so queue stop works even if future not cancelled
+                while not fut.done():
+                    if task_state.cancelled:
+                        raise asyncio.CancelledError()
+                    await asyncio.sleep(0.2)
+                answer = fut.result()
+        except asyncio.TimeoutError:
+            _emit(
+                task_state,
+                "approval_resolved",
+                tool=tool,
+                approved=False,
+                answer="timeout",
+                node_id=self.node_id,
+            )
+            raise RuntimeError(f"Approval timed out for {tool}: {reason}")
+        finally:
+            task_state.pending_interrupt_id = None
+            task_state.resume_future = None
+
+        # Parse approval
+        approved = True
+        answer_str = str(answer) if answer is not None else ""
+        if isinstance(answer, bool):
+            approved = answer
+        elif isinstance(answer, dict):
+            approved = bool(answer.get("approved", True))
+            answer_str = answer.get("answer", answer_str) or json.dumps(answer)
+        else:
+            try:
+                from core.approval import is_affirmative_answer
+
+                approved = is_affirmative_answer(answer_str)
+            except Exception:
+                # Fallback: truthy string containing approve/yes
+                low = answer_str.strip().lower()
+                approved = low not in ("no", "deny", "denied", "n", "reject", "false", "0")
+
+        _emit(
+            task_state,
+            "approval_resolved",
+            tool=tool,
+            approved=approved,
+            answer=answer_str,
+            node_id=self.node_id,
+        )
+        _emit(
+            task_state,
+            "interrupt_resolved",
+            interrupt_id=self.node_id,
+        )
+
+        if approved:
+            return NodeOutput(data={**inputs, "approved": True, "answer": answer_str}, next_handles=["approved"])
+        else:
+            if on_deny == "continue":
+                return NodeOutput(data={**inputs, "approved": False, "answer": answer_str}, next_handles=["denied"])
+            raise RuntimeError(f"Approval denied for {tool}: {reason} — answer: {answer_str}")
+
+
+class HumanInputNode(BaseNode):
+    """Requests free-text human input and pauses.
+
+    Config:
+        prompt (str): question/prompt with {{var}}
+        output_key (str): output port name, default "answer"
+        timeout_seconds (int | None)
+    """
+
+    node_type = "human_input"
+
+    async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
+        prompt_tmpl = str(self.config.get("prompt", self.config.get("question", "Human input required")) or "Human input required")
+        output_key = self.config.get("output_key", "answer")
+        timeout = self.config.get("timeout_seconds")
+        prompt = _interpolate(prompt_tmpl, inputs)
+
+        _emit(
+            task_state,
+            "interrupt",
+            interrupt_id=self.node_id,
+            question=prompt,
+        )
+        _emit(
+            task_state,
+            "approval_request",
+            tool=self.node_id,
+            reason=prompt,
+            args=json.dumps(inputs),
+            node_id=self.node_id,
+        )
+
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        task_state.pending_interrupt_id = self.node_id
+        task_state.resume_future = fut
+        try:
+            if timeout:
+                answer = await asyncio.wait_for(fut, timeout=float(timeout))
+            else:
+                while not fut.done():
+                    if task_state.cancelled:
+                        raise asyncio.CancelledError()
+                    await asyncio.sleep(0.2)
+                answer = fut.result()
+        except asyncio.TimeoutError:
+            _emit(
+                task_state,
+                "interrupt_resolved",
+                interrupt_id=self.node_id,
+            )
+            raise RuntimeError(f"Human input timed out for {self.node_id}: {prompt}")
+        finally:
+            task_state.pending_interrupt_id = None
+            task_state.resume_future = None
+
+        answer_str = str(answer) if answer is not None else ""
+        _emit(
+            task_state,
+            "interrupt_resolved",
+            interrupt_id=self.node_id,
+        )
+        _emit(
+            task_state,
+            "approval_resolved",
+            tool=self.node_id,
+            approved=True,
+            answer=answer_str,
+            node_id=self.node_id,
+        )
+        return NodeOutput(data={**inputs, output_key: answer_str, "answer": answer_str})
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 NODE_REGISTRY: dict[str, type[BaseNode]] = {
@@ -736,6 +1050,8 @@ NODE_REGISTRY: dict[str, type[BaseNode]] = {
     "sequential": SequentialNode,
     "parallel": ParallelNode,
     "loop": LoopNode,
+    "approval": ApprovalNode,
+    "human_input": HumanInputNode,
 }
 
 

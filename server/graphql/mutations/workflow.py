@@ -121,3 +121,45 @@ class WorkflowMutation:
         from core.state import get_queue
         await get_queue().cancel(run_id)
         return True
+
+    @strawberry.mutation
+    async def resume_workflow_run(self, run_id: str, answer: str) -> bool:
+        """Resume a workflow paused at an approval/human_input node.
+
+        The answer is delivered to the pending node: for approval nodes,
+        "approve"/"yes" or "deny"/"no" are interpreted; for human_input nodes,
+        any free text is the answer.
+        """
+        from core.state import emit_event
+
+        state = _tasks.get(run_id)
+        if state is None:
+            raise ValueError("run not found or not running")
+        if state.resume_future is None or state.resume_future.done():
+            raise ValueError("no pending human input for this run")
+        pending_id = state.pending_interrupt_id
+        state.resume_future.set_result(answer)
+        emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
+        return True
+
+    @strawberry.mutation
+    async def resolve_workflow_approval(
+        self,
+        run_id: str,
+        approved: bool,
+        answer: str | None = None,
+    ) -> bool:
+        """Resolve a pending approval node with an explicit approved bool."""
+        from core.state import emit_event
+
+        state = _tasks.get(run_id)
+        if state is None:
+            raise ValueError("run not found or not running")
+        if state.resume_future is None or state.resume_future.done():
+            raise ValueError("no pending approval for this run")
+        pending_id = state.pending_interrupt_id
+        # Deliver as dict so ApprovalNode can distinguish
+        payload = {"approved": approved, "answer": answer or ("approved" if approved else "denied")}
+        state.resume_future.set_result(payload)
+        emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
+        return True
