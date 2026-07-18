@@ -23,6 +23,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.agents import DEFAULT_MODEL, build_agent
+from core.invocation_context import InvocationContext
 from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
 from core.log_callback import AgentLogger
 from core.queue import Job, JobQueue
@@ -69,6 +70,7 @@ def _compute_next_run_at(auto: Automation) -> str | None:
 
 async def _execute_prompt_type(
     auto: Automation, state: TaskState, checkpointer, thread_id: str,
+    invocation_context: InvocationContext | None = None,
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
@@ -76,7 +78,8 @@ async def _execute_prompt_type(
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
     budget_cb = BudgetCallbackHandler(tracker, task_state=state)
-    agent = build_agent(auto.model or DEFAULT_MODEL, checkpointer=checkpointer, store=get_store())
+    _store = invocation_context.store if invocation_context and invocation_context.store else get_store()
+    agent = build_agent(auto.model or DEFAULT_MODEL, checkpointer=checkpointer, store=_store, invocation_context=invocation_context)
 
     user_content = auto.prompt_text or ""
     if auto.input_type == "monitor":
@@ -278,6 +281,7 @@ async def _run_automation_inner(
     auto: Automation,
     state: TaskState,
     run_id: str,
+    invocation_context=None,
 ) -> None:
     """Execute the work for a single automation run: dispatch by input_type,
     write events to `state`, persist outcome to AutomationRun, send notifications,
@@ -309,7 +313,7 @@ async def _run_automation_inner(
 
         if auto.input_type in ("prompt", "monitor"):
             thread_id = conv_id or f"automation_{run_id}"
-            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id)
+            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id, invocation_context=invocation_context)
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":
@@ -387,6 +391,11 @@ async def _run_automation_inner(
             raise
 
     finally:
+        if invocation_context is not None:
+            try:
+                await invocation_context.persist_state_deltas()
+            except Exception:
+                pass
         log_task_complete(run_id, state, final_status)
         state.done = True
         _notify(state)
@@ -408,6 +417,19 @@ async def automation_job_handler(job: Job) -> None:
     automation_id: str = payload["automation_id"]
     triggered_by: str = payload.get("triggered_by", "manual")
     run_id = job.id
+    invocation_context = None
+    try:
+        from core.runner import get_runner_or_none
+        _r = get_runner_or_none()
+        if _r is not None:
+            invocation_context = _r.new_invocation_context(
+                session_id=automation_id,
+                kind="automation",
+                initial_state={"automation_id": automation_id},
+            )
+            invocation_context.invocation_id = run_id
+    except Exception:
+        invocation_context = None
 
     async with async_session() as session:
         auto = await get_automation(session, automation_id)
@@ -440,7 +462,7 @@ async def automation_job_handler(job: Job) -> None:
     queue = get_queue()
     cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
     try:
-        await _run_automation_inner(auto, state, run_id)
+        await _run_automation_inner(auto, state, run_id, invocation_context)
     finally:
         cancel_watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):

@@ -146,6 +146,21 @@ async def workflow_job_handler(job: Job) -> None:
             existing.status = "running"
             await session.commit()
 
+    invocation_context = None
+    try:
+        from core.runner import get_runner_or_none
+        from core.invocation_context import InvocationContext
+        r = get_runner_or_none()
+        if r is not None:
+            invocation_context = r.new_invocation_context(
+                session_id=run_id,
+                kind="workflow",
+                initial_state={"workflow_id": workflow_id},
+            )
+            invocation_context.invocation_id = run_id
+    except Exception:
+        invocation_context = None
+
     state = _tasks.get(run_id)
     if state is None:
         state = TaskState(

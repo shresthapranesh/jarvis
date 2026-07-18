@@ -93,12 +93,69 @@ class JarvisRunner:
         self.http_client = http_client
         self.runner_config = runner_config or RunnerConfig()
 
+    # ── InvocationContext factory (ADK InvocationContext analog) ───────
+
+    def new_invocation_context(
+        self,
+        session_id: str,
+        user_id: str = "default",
+        kind: str = "chat",
+        model: str | None = None,
+        branch: str | None = None,
+        initial_state: dict | None = None,
+    ):
+        from core.invocation_context import InvocationContext, InvocationState, RunConfig
+
+        return InvocationContext(
+            session_id=session_id,
+            user_id=user_id,
+            kind=kind,  # type: ignore
+            branch=branch,
+            state=InvocationState(initial=initial_state),
+            run_config=RunConfig(model=model),
+            checkpointer=self.checkpointer,
+            store=self.store,
+            queue=self.queue,
+            http_client=self.http_client,
+        )
+
+    async def new_invocation_context_async(
+        self,
+        session_id: str,
+        user_id: str = "default",
+        kind: str = "chat",
+        model: str | None = None,
+        branch: str | None = None,
+        initial_state: dict | None = None,
+    ):
+        ctx = self.new_invocation_context(
+            session_id=session_id,
+            user_id=user_id,
+            kind=kind,
+            model=model,
+            branch=branch,
+            initial_state=initial_state,
+        )
+        try:
+            await ctx.load_persisted_state()
+        except Exception:
+            pass
+        return ctx
+
+    def get_session_service(self):
+        from core.session_service import SessionService
+
+        return SessionService(self.store)
+
     # ── Agent factory ─────────────────────────────────────────────────────
 
-    def build_agent(self, model: str, checkpointer=None, store=None):
+    def build_agent(self, model: str, checkpointer=None, store=None, invocation_context=None):
         """Delegate to core.agents.build_agent with runner's defaults."""
         from core.agents import build_agent as _build_agent
 
+        if invocation_context is not None:
+            checkpointer = getattr(invocation_context, 'checkpointer', None) or checkpointer
+            store = getattr(invocation_context, 'store', None) or store
         return _build_agent(
             model=model,
             checkpointer=checkpointer or self.checkpointer,

@@ -28,6 +28,7 @@ from langgraph.types import Command
 from core.agents import build_agent, prefetch_retrieval
 from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
 from core.config import get_config
+from core.invocation_context import InvocationContext
 from core.log_callback import AgentLogger, UsageAccumulator
 from core.queue import Job, JobQueue
 from core.schemas import AttachmentIn
@@ -59,8 +60,10 @@ from db.ops import (
 async def _run_agent_task(
     task_id: str, query: str, model: str, conv_id: str,
     attachments: list | None = None,
+    invocation_context: InvocationContext | None = None,
 ) -> None:
     state = _tasks[task_id]
+    ctx = invocation_context
 
     accumulated: list[str] = []
     step_seq_ref = [0]
@@ -86,14 +89,25 @@ async def _run_agent_task(
         # independent of each other, so they run concurrently instead of
         # stacking their latencies.
         user_msg_id = str(uuid4())
-        store = get_store()
+        # ADK-style: prefer InvocationContext infra refs over globals
+        if ctx is not None and ctx.store is not None:
+            store = ctx.store
+            checkpointer = ctx.checkpointer
+        else:
+            store = get_store()
+            checkpointer = get_async_checkpointer()
+        # record session_id into ctx for state scoping
+        if ctx is not None:
+            if not ctx.session_id:
+                ctx.session_id = conv_id
+            ctx.state.set(f"session:{conv_id}:last_query", query[:200])
         prefetch_retrieval(store, query, user_msg_id)
         content_task = asyncio.create_task(_build_message_content(query, attachments, model))
         project_task = asyncio.create_task(_resolve_project_id(conv_id))
 
         content = await content_task
 
-        agent = build_agent(model, checkpointer=get_async_checkpointer(), store=store)
+        agent = build_agent(model, checkpointer=checkpointer, store=store, invocation_context=ctx)
         project_id = await project_task
         configurable: dict[str, Any] = {"thread_id": conv_id, "conversation_id": conv_id}
         if project_id:
@@ -249,6 +263,11 @@ async def _run_agent_task(
     finally:
         if state.resume_future and not state.resume_future.done():
             state.resume_future.cancel()
+        if ctx is not None:
+            try:
+                await ctx.persist_state_deltas()
+            except Exception:
+                pass
         log_task_complete(task_id, state, status)
         state.done = True
         _notify(state)
@@ -293,6 +312,27 @@ async def chat_job_handler(job: Job) -> None:
     # trigger is gone (post-restart resume path). Otherwise reuse the entry the
     # trigger pre-created so SSE subscribers connected before the worker
     # claimed see the live stream.
+    # Build InvocationContext from runner (ADK Runner -> InvocationContext)
+    invocation_context: InvocationContext | None = None
+    try:
+        from core.runner import get_runner_or_none
+
+        runner = get_runner_or_none()
+        if runner is not None:
+            invocation_context = runner.new_invocation_context(
+                session_id=conv_id,
+                kind="chat",
+                model=model,
+                initial_state={"query": query[:500]},
+            )
+            invocation_context.invocation_id = task_id
+            try:
+                await invocation_context.load_persisted_state()
+            except Exception:
+                pass
+    except Exception:
+        invocation_context = None
+
     state = _tasks.get(task_id)
     if state is None:
         async with async_session() as session:
@@ -307,7 +347,7 @@ async def chat_job_handler(job: Job) -> None:
     queue = get_queue()
     cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, task_id, state))
     try:
-        await _run_agent_task(task_id, query, model, conv_id, attachments)
+        await _run_agent_task(task_id, query, model, conv_id, attachments, invocation_context=invocation_context)
     finally:
         cancel_watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):

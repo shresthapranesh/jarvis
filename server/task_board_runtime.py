@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from core.agents import build_agent
+from core.invocation_context import InvocationContext
 from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
 from core.log_callback import AgentLogger
 from core.queue import Job
@@ -178,6 +179,7 @@ def _compose_task_prompt(task: BoardTask, parents: list[BoardTask]) -> str:
 
 async def _run_agent(
     task: BoardTask, state: TaskState, conv_id: str, prompt: str, model: str,
+    invocation_context: InvocationContext | None = None,
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
@@ -185,10 +187,17 @@ async def _run_agent(
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
     budget_cb = BudgetCallbackHandler(tracker, task_state=state)
+    if invocation_context is not None and invocation_context.store is not None:
+        cp = invocation_context.checkpointer
+        st = invocation_context.store
+    else:
+        cp = get_async_checkpointer()
+        st = get_store()
     agent = build_agent(
         model,
-        checkpointer=get_async_checkpointer(),
-        store=get_store(),
+        checkpointer=cp,
+        store=st,
+        invocation_context=invocation_context,
     )
     async for raw_chunk in agent.astream(
         {"messages": [{"role": "user", "content": prompt}]},
@@ -253,12 +262,16 @@ async def _finish_task(
 async def _run_board_task_inner(
     task: BoardTask, state: TaskState, run_id: str,
     pending_answer: str | None = None,
+    invocation_context=None,
 ) -> None:
     final_status = "error"
     conv_id = board_task_conversation_id(task.id)
     try:
         async with async_session() as session:
             model = task.model or await get_default_model(session)
+            if invocation_context is not None:
+                invocation_context.run_config.model = model
+                invocation_context.session_id = conv_id or task.id
             parents = await get_board_task_parents(session, task.id)
             await get_or_create_conversation(
                 session, conv_id, model, task.title, surface="task",
@@ -271,7 +284,12 @@ async def _run_board_task_inner(
         async with async_session() as session:
             await add_message(session, conv_id, "user", prompt)
 
-        output = await _run_agent(task, state, conv_id, prompt, model)
+        output = await _run_agent(task, state, conv_id, prompt, model, invocation_context=invocation_context)
+        if invocation_context is not None:
+            try:
+                await invocation_context.persist_state_deltas()
+            except Exception:
+                pass
 
         if state.budget_exceeded:
             reason = state.budget_reason or "budget exceeded"
@@ -489,6 +507,19 @@ async def board_task_job_handler(job: Job) -> None:
     run id (== BoardTask.job_id at dispatch time)."""
     task_id: str = job.payload["task_id"]
     run_id = job.id
+    invocation_context = None
+    try:
+        from core.runner import get_runner_or_none
+        _r = get_runner_or_none()
+        if _r is not None:
+            invocation_context = _r.new_invocation_context(
+                session_id=task_id,
+                kind="board_task",
+                initial_state={"board_task_id": task_id},
+            )
+            invocation_context.invocation_id = run_id
+    except Exception:
+        invocation_context = None
 
     async with async_session() as session:
         task = await get_board_task(session, task_id)
@@ -515,7 +546,7 @@ async def board_task_job_handler(job: Job) -> None:
     queue = get_queue()
     cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
     try:
-        await _run_board_task_inner(task, state, run_id, pending_answer)
+        await _run_board_task_inner(task, state, run_id, pending_answer, invocation_context=invocation_context)
     finally:
         cancel_watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):

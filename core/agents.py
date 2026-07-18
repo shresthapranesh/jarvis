@@ -740,7 +740,7 @@ def _build_cached(model: str, checkpointer, store) -> CompiledStateGraph:
     return _cache[key]
 
 
-def build_agent(model: str = DEFAULT_MODEL, checkpointer=None, store: AsyncSqliteStore | None = None) -> CompiledStateGraph:
+def build_agent(model: str = DEFAULT_MODEL, checkpointer=None, store: AsyncSqliteStore | None = None, invocation_context=None) -> CompiledStateGraph:
     """Build the agent. Defaults to sync SqliteSaver for CLI; server passes async variants."""
     if checkpointer is None:
         checkpointer = _get_sync_checkpointer()
