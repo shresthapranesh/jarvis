@@ -1,7 +1,4 @@
-"""SessionService — ADK-Go session.Service analog.
-
-Provides app:/user:/temp: scoping with persistent backing via LangGraph AsyncSqliteStore.
-"""
+"""Typed accessors over persistent app/user state."""
 
 from __future__ import annotations
 
@@ -11,9 +8,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 
 class SessionService:
-    """ADK session.Service analog.
-
-    Thin wrapper over AsyncSqliteStore providing typed get/set for
+    """Typed wrapper over AsyncSqliteStore providing typed get/set for
     app, user, session, temp scopes.
 
     Usage:

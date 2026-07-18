@@ -1,8 +1,4 @@
-"""Upload staging — POST /uploads accepts a multipart file, stores bytes in the
-staging dir, and returns an opaque uploadId the client passes back to startTask.
-
-This decouples bulk uploads from the chat mutation so large files don't bloat
-GraphQL request bodies. Stale staged files are GC'd by a periodic scheduler job."""
+"""Upload staging — POST /uploads accepts a multipart file, stores bytes in the."""
 
 from __future__ import annotations
 

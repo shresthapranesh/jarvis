@@ -1,19 +1,4 @@
-"""Model catalog — source of truth for available LLM models.
-
-The catalog has two layers:
-
-* **Built-in models** (`BUILTIN_MODELS`) — compiled-in defaults / seed list.
-* **Custom models** — added at runtime via `main.py model add` (or the GraphQL
-  `models` query path), persisted in the DB (`config_settings`, key
-  `models.custom`) and hydrated into the in-memory `_custom_models` cache.
-  This lets new models be added without a code change or redeploy.
-
-`build_llm()` switches only on `provider`, never on a specific model id — the
-id is `provider:model_name`, so any model offered by a `KNOWN_PROVIDERS`
-backend works with zero new code. The backend rejects writes whose `model` is
-not in the catalog (`is_valid_model`); the frontend reads the catalog via the
-GraphQL `models` query and populates all selectors from the response.
-"""
+"""Model catalog — source of truth for available LLM models."""
 
 from collections.abc import Iterable
 from dataclasses import dataclass

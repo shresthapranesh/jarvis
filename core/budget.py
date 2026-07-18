@@ -1,21 +1,4 @@
-"""Token budget tracker — MAF TokenUsageTermination + BudgetTracker analog.
-
-ADK has no formal BudgetTracker, but MAF defines MaxMessagesTermination,
-TokenUsageTermination, etc. This module brings that to Jarvis's durable
-TaskState.
-
-Two pieces:
-* BudgetLimits — configured ceilings (env-driven, optional, no limit = None)
-* BudgetTracker — per-run mutable tracker tied to a TaskState, updated via
-  callbacks (LLM token usage, tool calls, duration).
-
-Usage:
-    tracker = BudgetTracker(limits=BudgetLimits.from_env(), task_state=state)
-    # in callbacks:
-    tracker.record_llm(input_tokens, output_tokens)
-    if tracker.is_exceeded():
-        state.cancelled = True  # or emit budget_exceeded
-"""
+"""Token budget tracker."""
 
 from __future__ import annotations
 

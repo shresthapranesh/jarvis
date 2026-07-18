@@ -1,34 +1,4 @@
-"""Context caching formalization — ADK ContextCacheConfig analog.
-
-ADK has explicit ContextCacheConfig that marks which parts of the prompt
-are cacheable (system, tools, memory, skills) and manages breakpoints.
-
-Jarvis previously had a single cache breakpoint (system prompt cached,
-everything else volatile). This module formalizes multi-breakpoint caching:
-
-- Up to 4 cache breakpoints (Anthropic/Bedrock limit).
-- Segments are ordered by mutability: static -> semi-static -> volatile.
-- Each cacheable segment gets its own ephemeral cache_control block.
-- Volatile suffix (todos, live summaries) never cached.
-
-Token savings: with 3 cached segments (system + core_memory + skills),
-a 5-turn conversation saves ~ (turns-1) * cached_tokens input tokens.
-
-Usage:
-    from core.context_cache import build_cached_system_message, CacheSegment
-
-    segments = [
-        CacheSegment("core_memory", core_text, cacheable=True),
-        CacheSegment("skills", skills_text, cacheable=True),
-        CacheSegment("project_instructions", proj_text, cacheable=True),
-    ]
-    sys_msg = build_cached_system_message(
-        static_prompt=_SYSTEM_PROMPT,
-        segments=segments,
-        volatile_suffix=todos_text,
-        use_cache=True,
-    )
-"""
+"""Context caching config and helpers."""
 
 from __future__ import annotations
 
@@ -67,7 +37,7 @@ class CacheSegment:
 
 @dataclass
 class ContextCacheConfig:
-    """ADK-like config for how caching is applied.
+    """Jarvis-like config for how caching is applied.
 
     enabled: whether caching is on (model provider supports it)
     max_breakpoints: max cache_control blocks (Anthropic limit 4)
@@ -105,7 +75,7 @@ def build_cached_system_message(
     use_cache: bool = False,
     config: ContextCacheConfig | None = None,
 ) -> tuple[SystemMessage, CacheStats]:
-    """Build a SystemMessage with explicit cache breakpoints (ADK pattern).
+    """Build a SystemMessage with explicit cache breakpoints (caching pattern).
 
     Layout when use_cache=True:
         [0] static_prompt (cached)

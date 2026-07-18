@@ -1,4 +1,4 @@
-"""MCP server management mutations — add/update/remove/reload."""
+"""MCP tool loader."""
 
 from __future__ import annotations
 

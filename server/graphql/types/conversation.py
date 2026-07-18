@@ -1,8 +1,4 @@
-"""Conversation, Message, and Step GraphQL types.
-
-Conversation and Message implement relay.Node so the frontend can refetch them
-by global ID. Step is inlined under Message and doesn't need Node.
-"""
+"""Conversation, Message, and Step GraphQL types."""
 
 from __future__ import annotations
 

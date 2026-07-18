@@ -1,13 +1,5 @@
-"""LangChain callback handler that logs tool calls, LLM calls, and graph nodes.
+"""LangChain callback handler that logs tool calls, LLM calls, and graph nodes."""
 
-Attach a fresh ``AgentLogger`` instance to every agent invocation via the
-``callbacks`` field of the run config — LangChain propagates it to all child
-runnables (the model node calls the LLM; the LLM may call tools; tools may
-spawn worker agents; everything is covered by one handler).
-
-Per-request instances avoid cross-request state. Inside one request the
-handler is read sequentially, so no locking is required.
-"""
 from __future__ import annotations
 
 import logging

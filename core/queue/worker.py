@@ -1,19 +1,4 @@
-"""Job-queue worker: consume loop + lock heartbeat.
-
-Deliberately minimal. The worker:
-- claims jobs from the queue via `queue.stream`,
-- runs an async `handler(job)` for each — up to `max_concurrent` at a time
-  as tasks on the event loop (handlers are I/O-bound: they spend their time
-  awaiting LLM/network/DB, so concurrent runs interleave at await points),
-- keeps each job's lock alive with a per-job `extend_lock` heartbeat,
-- if a lock is lost (reaper reclaimed because heartbeat starved), cancels
-  that handler — letting whichever worker now owns the job run it instead.
-
-What the worker does NOT do: bridge `queue.is_cancel_requested` to any
-runtime-specific flag (e.g. TaskState.cancelled). Each runtime has different
-cancel semantics (`state.cancelled`, `state._stop_event`, per-node workflow
-state); the handler is the right place to spawn that watcher.
-"""
+"""Job-queue worker: consume loop + lock heartbeat."""
 
 from __future__ import annotations
 

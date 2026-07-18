@@ -1,4 +1,4 @@
-"""MCP server GraphQL types — ADK McpToolset dynamic management."""
+"""MCP tool loader."""
 
 from __future__ import annotations
 

@@ -1,17 +1,4 @@
-"""Discrete agent-memory items: vector retrieval + dedup-on-insert.
-
-Replaces the single ``AGENTS.md`` blob with many embedded ``Memory`` rows
-(``db/models.Memory``). ``core`` items load on every turn; ``fact`` items are
-retrieved by cosine similarity per turn. Reuses the embedder from
-``core/doc_index.py`` (Gemini, ``GOOGLE_API_KEY``); when no embedder is
-available the whole split system is bypassed and callers fall back to the blob.
-
-Search is brute-force numpy cosine over the (small) global memory set — same
-rationale as ``doc_index``: at memory scale exact search beats any index, and
-the embedding lives in an ordinary ``LargeBinary`` column, so no vector DB is
-needed. Memory text is embedded as a *document* (``aembed_documents``) and the
-retrieval query as a *query* (``aembed_query``), matching ``doc_index``.
-"""
+"""Discrete agent-memory items: vector retrieval + dedup-on-insert."""
 
 from __future__ import annotations
 

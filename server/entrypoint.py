@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._http_client = http
         state._queue = _build_queue()
 
-        # ── MCP (ADK McpToolset analog) ─────────────────────────────────
+        # ── MCP (MCP toolset) ─────────────────────────────────
         # Warm up MCP client so tools are cached before first agent build.
         # Merge env + file + DB (DB wins) so runtime-added servers are active on boot.
         try:
@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             logger.warning("MCP init failed: %s", exc, exc_info=True)
 
-        # ── Runner (ADK analog) ───────────────────────────────────────
+        # ── Runner (Jarvis analog) ───────────────────────────────────────
         # Centralizes checkpointer/store/queue/config and cache config.
         try:
             set_runner(

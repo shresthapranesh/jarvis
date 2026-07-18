@@ -1,4 +1,4 @@
-"""MCP servers query — dynamic management."""
+"""MCP tool loader."""
 
 from __future__ import annotations
 

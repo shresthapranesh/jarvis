@@ -1,10 +1,4 @@
-"""DEPRECATED - use core.compaction.maybe_compact.
-
-Kept for backwards compatibility; now proxies to compaction module.
-Original implementation kept 10 messages and summarized everything each time,
-which was wasteful. New implementation keeps last 2 groups, caches summary,
-and only summarizes delta (see core/compaction.py).
-"""
+"""DEPRECATED - use core.compaction.maybe_compact."""
 
 from __future__ import annotations
 

@@ -1,8 +1,4 @@
-"""Print the GraphQL SDL to stdout.
-
-Usage:
-    uv run python -m server.graphql.export_schema > schema.graphql
-"""
+"""Print the GraphQL SDL to stdout."""
 
 from __future__ import annotations
 

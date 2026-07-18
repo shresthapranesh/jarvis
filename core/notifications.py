@@ -1,13 +1,4 @@
-"""Outbound notifications for automation/workflow run completion.
-
-Notifications on a run reference centrally-defined channels by id:
-`[{"id": "<channel-uuid>", "on": "both"|"done"|"error"}, ...]`. The channel
-record (`NotificationChannel`) carries `type` and `target`. The dispatcher
-resolves refs → channel records → platform sender.
-
-Failures inside the dispatcher are caught and logged — they must never propagate,
-so a broken notification setup cannot fail an otherwise successful run.
-"""
+"""Outbound notifications for automation/workflow run completion."""
 
 from __future__ import annotations
 

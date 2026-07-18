@@ -1,4 +1,4 @@
-"""InvocationContext — ADK-Go InvocationContext analog."""
+"""Per-request invocation context with scoped state."""
 
 from __future__ import annotations
 
@@ -11,20 +11,8 @@ TaskKind = Literal["chat", "automation", "workflow", "board_task"]
 
 
 class InvocationState:
-    """ADK session.State analog with prefix scoping.
+    """Scoped state with app:/user:/temp: prefixes."""
 
-    ADK-Go behavior:
-      app:  - app-scoped, shared across all users/sessions, persisted in session service
-      user: - per-user, persists across sessions
-      temp: - ephemeral, lives only for this invocation (not persisted)
-      (no prefix) - session-scoped (conversation/run)
-
-    Jarvis mapping:
-      app:  -> LangGraph store namespace ("app_state",) key="state"
-      user: -> LangGraph store namespace ("user_state", user_id) key="state"
-      temp: -> in-memory dict, dropped after invocation
-      session -> checkpointer / TaskState + delta for Event.Actions.StateDelta
-    """
 
     def __init__(
         self,
@@ -134,7 +122,7 @@ class InvocationContext:
         return InvocationActions(state_delta=self.state.delta)
 
     async def load_persisted_state(self) -> None:
-        """Load app: and user: state from LangGraph store (ADK session service behavior).
+        """Load app: and user: state from LangGraph store (session service behavior).
 
         Called automatically by runner factory if store present, or manually.
         """
@@ -153,7 +141,7 @@ class InvocationContext:
         self.state.mark_loaded(app_state=app_data, user_state=user_data)
 
     async def persist_state_deltas(self) -> None:
-        """Persist app: and user: deltas to store (ADK Event.Actions.StateDelta commit).
+        """Persist app: and user: deltas to store (state delta commit).
 
         Call at end of invocation. temp: and session-scoped are intentionally NOT persisted.
         """

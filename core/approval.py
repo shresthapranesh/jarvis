@@ -1,30 +1,4 @@
-"""Long-running tool approval (ADK LongRunningFunctionTool analog).
-
-Implements a generic approval flow layered on LangGraph's existing
-interrupt/resume mechanism (used by browser tool). Tools that would perform
-destructive or sensitive actions call `request_tool_approval` — this emits a
-custom `approval_request` SSE event (so the UI can render a rich card) and
-then suspends the run via `interrupt`. On resume the user's answer is parsed;
-True = proceed, False = abort.
-
-Frontend: reuses the existing `interrupt` -> `InterruptPrompt` path. The
-approval_request custom event is optional — if the UI ignores it, the user
-still sees the interrupt question. Tasks page already shows pending interrupts.
-
-This is the minimal ADK-compatible long-running tool primitive: a tool that
-pauses, waits for human, then continues with the human's input as its result.
-
-Usage in a tool:
-
-    from core.approval import request_tool_approval
-
-    if not request_tool_approval("write_file", {"filepath": path}, f"Overwrite {path}?"):
-        return "User denied approval — aborting write."
-
-No async — request_input raises to pause the graph, resume returns the value
-synchronously from the tool's perspective (LangGraph re-invokes the node
-with the resumed value).
-"""
+"""Long-running tool approval."""
 
 from __future__ import annotations
 
@@ -254,7 +228,7 @@ def request_tool_approval(tool_name: str, args: dict[str, Any], reason: str) -> 
         return False
 
     # Ambiguous — if user wrote explanatory text that doesn't match keywords,
-    # treat as approval with note (ADK pattern: tool continues, human's input
+    # treat as approval with note (caching pattern: tool continues, human's input
     # becomes part of context). We treat long answers as approval + instruction.
     if len(answer_str.strip()) > 20:
         logger.info("approval ambiguous but long — treating as approved with instruction: %s", answer_str[:100])

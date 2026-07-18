@@ -1,9 +1,4 @@
-"""Chat subscription event types — discriminated union of everything that flows
-through `core.state.stream_task_events` for a chat task.
-
-Each variant mirrors the corresponding REST SSE event payload (see CLAUDE.md
-§ Chat SSE events). Relay clients narrow via `__typename`.
-"""
+"""Chat subscription event types — discriminated union of everything that flows."""
 
 from __future__ import annotations
 

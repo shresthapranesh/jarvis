@@ -1,8 +1,4 @@
-"""Streaming pipeline — step extraction, token coalescing, and chunk processing.
-
-Shared between the chat path (_run_agent_task in chat_runtime) and the
-automation prompt path (_execute_prompt_type in automation_runtime).
-"""
+"""Streaming pipeline — step extraction, token coalescing, and chunk processing."""
 
 from __future__ import annotations
 

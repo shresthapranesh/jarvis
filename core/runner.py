@@ -1,25 +1,4 @@
-"""Runner abstraction — ADK Runner analog.
-
-ADK composes: session_service + artifact_service + memory_service + plugins
-into a Runner that owns the LLM invocation lifecycle.
-
-Jarvis equivalent before this was scattered across server/entrypoint.py
-(lifespan builds checkpointer, store, queue, http client) and core/agents.py
-(build_agent). This module formalizes it:
-
-- JarvisRunner: holds infrastructure handles and exposes high-level methods:
-  - build_agent(model, checkpointer?, store?) — delegates to core/agents
-  - get_cache_config(model) — whether provider supports prompt caching
-  - get_context_cache_config() — returns ContextCacheConfig
-
-- Global accessor get_runner() / set_runner() for lifespan wiring.
-
-Future backends (Postgres checkpointer, Redis queue) slot in here, similar
-to ADK's BaseSessionService / BaseArtifactService interfaces.
-
-No behavior change yet — just a seam so entrypoint doesn't directly poke
-core.state globals everywhere, and cache config is centralized.
-"""
+"""Jarvis runner — owns checkpointer, store, queue, and plugin manager."""
 
 from __future__ import annotations
 
@@ -41,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RunnerConfig:
-    """Configuration for the runner — mirrors ADK Runner's Tunables."""
+    """Runner tunables."""
 
     # Only providers that honor Anthropic-style cache_control blocks.
     # google_genai has its own implicit caching, not the ephemeral blocks we emit.
@@ -59,20 +38,20 @@ class RunnerConfig:
     budget_max_duration_seconds: int = 1800
     # MCP
     mcp_enabled: bool = True
-    # Plugins (ADK plugin.Config analog) - list of plugin names to enable by default
+    # Plugins (Jarvis plugin.Config analog) - list of plugin names to enable by default
     # Actual instances are built in JarvisRunner
     enable_logging_plugin: bool = True
     enable_telemetry_plugin: bool = False
 
 
 class JarvisRunner:
-    """ADK Runner analog for Jarvis.
+    """Jarvis runner analog for Jarvis.
 
     Owns the process-wide infrastructure (checkpointer, store, queue, http,
     config) and provides a uniform entrypoint for agent construction and
     caching decisions.
 
-    In ADK you do:
+    In Jarvis you do:
         runner = Runner(agent=root_agent, session_service=..., artifact_service=..., memory_service=...)
         await runner.run(...)
 
@@ -98,7 +77,7 @@ class JarvisRunner:
         self.runner_config = runner_config or RunnerConfig()
         self._plugin_manager: Any | None = None
 
-    # ── InvocationContext factory (ADK InvocationContext analog) ───────
+    # ── InvocationContext factory (invocation context) ───────
 
     def new_invocation_context(
         self,
@@ -184,7 +163,7 @@ class JarvisRunner:
             store=store or self.store,
         )
 
-    # ── Cache config (ADK ContextCacheConfig analog) ──────────────────────
+    # ── Cache config (ContextCacheConfig analog) ──────────────────────
 
     def should_use_cache(self, model: str) -> bool:
         """Whether this model/provider benefits from prompt caching."""

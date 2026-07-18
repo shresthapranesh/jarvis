@@ -1,8 +1,4 @@
-"""Document raw download — the only document endpoint not migrated to GraphQL.
-
-Document list/delete moved to GraphQL. Raw download stays REST because it
-returns binary content with mime type + filename headers.
-"""
+"""Document raw download — the only document endpoint not migrated to GraphQL."""
 
 from __future__ import annotations
 

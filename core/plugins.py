@@ -1,29 +1,4 @@
-"""Plugin system — ADK-Go plugin.Config 12-hooks analog.
-
-ADK-Go:
-  type Config struct {
-    Name string
-    OnUserMessage func(...)
-    OnEvent func(...)
-    BeforeRun func(...)
-    AfterRun func(...)
-    BeforeAgent func(...)
-    AfterAgent func(...)
-    BeforeModel func(...)
-    AfterModel func(...)
-    OnModelError func(...)
-    BeforeTool func(...)
-    AfterTool func(...)
-    OnToolError func(...)
-  }
-
-Jarvis Python version:
-  Uses Protocol + dataclass for plugins, plus LangChain BaseCallbackHandler bridge
-  so existing AgentLogger, BudgetCallbackHandler, UsageAccumulator can be plugins
-  without rewriting.
-
-  Runner owns plugins list; each runtime calls plugin_manager hooks at right place.
-"""
+"""Plugin lifecycle hooks."""
 
 from __future__ import annotations
 
@@ -101,7 +76,7 @@ class BasePlugin:
 
 
 class LoggingPlugin(BasePlugin):
-    """ADK loggingplugin analog — logs via AgentLogger bridge."""
+    """Jarvis loggingplugin analog — logs via AgentLogger bridge."""
 
     name: str = "logging"
 
@@ -178,7 +153,7 @@ class UsagePlugin(BasePlugin):
 
 @dataclass
 class PluginManager:
-    """Owns list of plugins, mirrors ADK runner's plugin chaining."""
+    """Owns list of plugins, mirrors Jarvis runner's plugin chaining."""
 
     plugins: list[BasePlugin] = field(default_factory=list)
 

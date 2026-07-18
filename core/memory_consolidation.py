@@ -1,13 +1,4 @@
-"""Memory consolidation.
-
-Two write paths, dispatched on whether an embedder is configured:
-
-* **Embedder present** — extract discrete atomic memory items from recent
-  conversations and upsert them into the ``Memory`` table (``core/memory_store.py``),
-  deduping on insert. A one-time seed splits any legacy ``AGENTS.md`` blob into items.
-* **No embedder (keyless/Ollama)** — the original behavior: rewrite a single
-  free-text ``AGENTS.md`` blob in the LangGraph store.
-"""
+"""Memory consolidation."""
 
 from __future__ import annotations
 

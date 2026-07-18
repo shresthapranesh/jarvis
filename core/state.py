@@ -1,10 +1,4 @@
-"""Shared mutable state — globals, task registry, and notify helper.
-
-This module is the dependency root: nothing it imports can import it back.
-Other modules (routes, streaming, scheduler) read/write these globals; only
-the lifespan context manager in server.py sets the infrastructure globals
-(_async_checkpointer, _main_loop, _http_client).
-"""
+"""Shared mutable state — globals, task registry, and notify helper."""
 
 from __future__ import annotations
 

@@ -1,7 +1,4 @@
-"""App-level configuration — loaded from environment variables once per process.
-
-Priority: CLI args (configure()) > env vars > .env file > hardcoded defaults
-"""
+"""App-level configuration — loaded from environment variables once per process."""
 
 from __future__ import annotations
 

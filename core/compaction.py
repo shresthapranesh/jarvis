@@ -1,13 +1,4 @@
-"""Compaction pipeline inspired by MAF and ADK.
-
-Fixes applied from external review (scratchpad/compaction-review.md):
-- Token estimate over per-call-compacted messages (elide-first restored)
-- group_messages recognizes HumanMessage-carried tool_results via _is_tool_result_carrier
-- Most recent user group pinned; kept window forced to start with user if possible
-- Per-call tool collapse keeps 4 groups (aligned with elide's 4-AI-turn horizon)
-- Summary merging merges ALL prior summaries
-- Hot-path debug no longer calls group_messages()
-"""
+"""History compaction helpers."""
 
 from __future__ import annotations
 

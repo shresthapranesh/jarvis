@@ -1,10 +1,4 @@
-"""Automation runtime — execution helpers + run registration.
-
-Both manual triggers (``triggerAutomation``) and cron triggers
-(``_run_scheduled_automation`` in core.scheduler) enqueue a queue job; the
-``automation_job_handler`` defined here consumes those jobs. The GraphQL
-``Automation.nextRunAt`` resolver uses ``_compute_next_run_at``.
-"""
+"""Automation runtime — execution helpers + run registration."""
 
 from __future__ import annotations
 

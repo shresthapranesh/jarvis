@@ -1,15 +1,4 @@
-"""Message-shape utilities for LLM calls.
-
-Pure helpers that sanitize, repair, and shape `langchain_core.messages` lists
-before `.ainvoke`. Kept out of `core/agents.py` because they have no
-LangGraph/agent dependency and are reused across every agent-loop node.
-
-Required pre-`.ainvoke` pipeline for any new agent-loop node:
-    history = elide_stale_tool_results(history)   # token hygiene (optional but recommended)
-    history = strip_historical_thinking(history)
-    history = repair_orphan_tool_calls(history)
-    msgs = build_llm_messages(system_prompt, use_cache, history)
-"""
+"""Message shaping utilities."""
 
 from __future__ import annotations
 
@@ -274,7 +263,7 @@ def _make_system_message(static_text: str, volatile_text: str, cache: bool) -> S
     suffix never invalidates the cached static prefix (system prompt + tool
     schemas). When ``cache`` is off, both are concatenated into one plain
     string (some non-Anthropic providers dislike multi-block system content).
-    For multi-breakpoint (ADK-style) use `build_llm_messages` with cache_segments.
+    For multi-breakpoint (Jarvis-style) use `build_llm_messages` with cache_segments.
     """
     if cache:
         blocks: list[dict[str, Any] | str] = [
@@ -293,7 +282,7 @@ def _make_system_message_multi(
     volatile_text: str,
     cache: bool,
 ) -> SystemMessage:
-    """ADK multi-breakpoint builder — delegates to context_cache module.
+    """multi-breakpoint builder — delegates to context_cache module.
 
     segments is list[CacheSegment]; if None, falls back to legacy builder.
     Even when cache=False we delegate to build_cached_system_message because
@@ -354,7 +343,7 @@ def build_llm_messages(
     volatile region, which is placed after the cache breakpoint so it can
     change every turn without busting the cached prefix.
 
-    ADK multi-breakpoint: if ``cache_segments`` (list[CacheSegment]) is
+    multi-breakpoint: if ``cache_segments`` (list[CacheSegment]) is
     provided and cache=True, builds up to 4 cache-controlled blocks
     (system + core_memory + skills + project_instructions), keeping volatile
     suffix (todos, summaries) uncached. See core/context_cache.py.

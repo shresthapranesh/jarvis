@@ -1,9 +1,4 @@
-"""Workflow runtime — execution + run registration.
-
-Used by GraphQL ``runWorkflow`` mutation. Both manual triggers and any
-future scheduled triggers flow through the durable JobQueue; the
-``workflow_job_handler`` defined here consumes those jobs.
-"""
+"""Workflow runtime — execution + run registration."""
 
 from __future__ import annotations
 

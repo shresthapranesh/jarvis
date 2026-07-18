@@ -1,4 +1,4 @@
-"""Agent builder — raw LangGraph StateGraph, code-first architecture."""
+"""Agent builder."""
 
 from __future__ import annotations
 
@@ -444,7 +444,7 @@ def _get_sync_checkpointer() -> SqliteSaver:
 def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> CompiledStateGraph:
     spec = get_model_spec(model)
     llm = spec.build_llm()
-    # Use runner's cache config if available (ADK Runner seam), else local fallback.
+    # Use runner's cache config if available (Jarvis runner seam), else local fallback.
     # Runner is set by entrypoint lifespan; CLI/tests have no runner.
     try:
         from core.runner import get_runner_or_none
@@ -544,7 +544,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     if embeddings_available():
         main_tools += [remember, search_memory_tool]
 
-    # MCP tools (ADK McpToolset analog) — loaded from env/file config via core/mcp.py.
+    # MCP tools (MCP toolset) — loaded from env/file config via core/mcp.py.
     # Returns [] when no MCP servers configured, so agent works without MCP.
     if _mcp_tools_for_workers:
         main_tools += _mcp_tools_for_workers
@@ -566,7 +566,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         costs 2 graph steps (model + tools) instead of 3. With recursion_limit=100
         the agent gets ~50 useful round-trips, which is plenty for code-first work.
 
-        ADK multi-breakpoint caching: memory+skills+project instructions are
+        multi-breakpoint caching: memory+skills+project instructions are
         placed in separate cached blocks (up to 4 breakpoints), while todos and
         project memory (which can change mid-turn via tools) stay volatile.
         """
@@ -577,8 +577,8 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         )
         all_volatile_for_cache_split = retrieved_parts + project_parts
 
-        # ── ADK context-cache classification ──────────────────────────────
-        # ADK pattern: most-stable first, most-volatile last, because Anthropic
+        # ── Jarvis context-cache classification ──────────────────────────────
+        # caching pattern: most-stable first, most-volatile last, because Anthropic
         # caching is prefix-based — any changed block invalidates all following.
         # Stable: agent memory (core identity), project header/instructions.
         # Semi-stable: skills (ranked per query, changes per turn but reusable
@@ -652,7 +652,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
             volatile_non_cached.append(f"## Current Tasks\n\n{todo_lines}")
         else:
-            # ── Planning mode injection (ADK planning analog) ──────────────
+            # ── Planning mode injection (planning mode) ──────────────
             # If no todos yet and query looks complex, inject a strong directive
             # forcing the model to call write_todos first. This is the cheapest
             # planning path (no extra LLM call) and is gated by
@@ -669,7 +669,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 
         volatile_suffix = "\n\n".join(volatile_non_cached)
 
-        # ── New compaction pipeline (MAF + ADK inspired) ─────────────────
+        # ── New compaction pipeline (MAF + Jarvis inspired) ─────────────────
         # maybe_compact internally does elide-first token counting (per-call view)
         # but groups/removes against raw_messages. See core/compaction.py.
         compacted = await maybe_compact(
@@ -685,7 +685,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         messages_for_llm = strip_historical_thinking(messages_for_llm)
         messages_for_llm = repair_orphan_tool_calls(messages_for_llm)
 
-        # Build LLM messages with multi-breakpoint cache (ADK)
+        # Build LLM messages with multi-breakpoint cache (Jarvis)
         llm_messages = build_llm_messages(
             _SYSTEM_PROMPT,
             use_cache,

@@ -1,8 +1,4 @@
-"""Board-task run subscription — wraps stream_task_events for board tasks.
-
-Board-task runs emit the same wire events as automation runs (token, step,
-done, stopped, error, safety_*), so the AutomationEvent union is reused
-verbatim rather than duplicated."""
+"""Board-task run subscription — wraps stream_task_events for board tasks."""
 
 from __future__ import annotations
 

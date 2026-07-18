@@ -1,9 +1,4 @@
-"""Pydantic / TypedDict shapes shared across runtime modules.
-
-The REST request/response models that used to live here were removed when
-the API surface moved to GraphQL. What remains is the cross-cutting state
-shapes still consumed by the agent runtime, bots, and GraphQL resolvers.
-"""
+"""Pydantic / TypedDict shapes shared across runtime modules."""
 
 from __future__ import annotations
 

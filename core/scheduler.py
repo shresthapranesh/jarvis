@@ -1,8 +1,4 @@
-"""APScheduler integration for scheduled automations.
-
-Owns the BackgroundScheduler instance and the helpers to register/remove
-cron jobs. The lifespan in server.py starts and stops the scheduler.
-"""
+"""APScheduler integration for scheduled automations."""
 
 from __future__ import annotations
 

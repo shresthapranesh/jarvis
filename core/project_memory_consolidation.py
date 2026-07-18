@@ -1,25 +1,4 @@
-"""Project memory auto-maintenance — safety net when agent skips project_memory.
-
-Two-layer guarantee:
-- **Layer 1 (Phase 1):** Strong prompts in system_prompt.md + volatile header
-  tell the agent to actively maintain memory.
-- **Layer 2 (Phase 2 — this module):** Best-effort background LLM that
-  guarantees memory gets initialized on first substantial conversation
-  and refreshed when stale, even if the main agent forgets.
-
-It mirrors the pattern in core/memory_consolidation.py but is:
-- scoped to a single Project (not global)
-- triggered for empty OR stale memory
-- fire-and-forget from chat_runtime (asyncio.create_task) so it never
-  blocks the user-visible response
-
-Trigger: server/chat_runtime.py after a successful chat run (status=done)
-when project_id is set. Init when empty, refresh when older than
-_STALE_DAYS and new transcript is substantive.
-
-LLM calls are single-shot (no agent loop), capped, and best-effort —
-any failure is logged but does not affect the chat run.
-"""
+"""Project memory auto-maintenance — safety net when agent skips project_memory."""
 
 from __future__ import annotations
 

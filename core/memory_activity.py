@@ -1,11 +1,4 @@
-"""Memory activity audit log — tracks when memories were surfaced.
-
-Separate table (memory_activities) keeps history, avoids bumping Memory.updated_at
-on every read, and can be pruned independently.
-
-Fact-only for v1 to avoid noise from core memories injected every turn.
-Fire-and-forget from search_memory path — never blocks retrieval.
-"""
+"""Memory activity audit log — tracks when memories were surfaced."""
 
 from __future__ import annotations
 

@@ -1,26 +1,4 @@
-"""Stateful per-session IPython kernels — a Jupyter-notebook-like coding session.
-
-Backs the `run_cell` tool (`tools/code.py`) — the agent's sole code surface.
-Each session gets ONE long-lived IPython kernel, so variables, imports, and
-in-memory data persist across cells the way a notebook does.
-
-A "session" is keyed by conversation_id (or, for CLI/automation/workflow runs
-that have no conversation, the LangGraph thread_id). One kernel per key.
-
-Lifecycle:
-  - lazily started on the first cell for a key
-  - serialized per session (one cell at a time) via an ``asyncio.Lock`` —
-    concurrent cells on a single kernel would interleave
-  - idle-reaped by a scheduler job (``core/scheduler.register_kernel_reaper_job``)
-  - LRU-evicted once more than ``MAX_KERNELS`` are live
-  - shut down on conversation delete (``db/ops.delete_conversation``) and on
-    server shutdown (``server/entrypoint`` lifespan)
-
-The kernel is launched from the current interpreter (``sys.executable -m
-ipykernel_launcher``) so it sees exactly the packages in this venv (httpx,
-pandas, yfinance, …), and over IPC transport so nothing crosses TCP in plain
-text.
-"""
+"""Stateful per-session IPython kernels — a Jupyter-notebook-like coding session."""
 
 from __future__ import annotations
 

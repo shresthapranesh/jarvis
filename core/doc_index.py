@@ -1,21 +1,4 @@
-"""Document chunk indexing + semantic search for large attachments.
-
-Small attached documents are inlined into the message as before; documents
-over `INLINE_THRESHOLD` characters are chunked, embedded, and stored as
-`DocumentChunk` rows instead, with a short stub left in the message telling
-the agent to use the `search_documents` / `read_document` tools
-(tools/documents.py). This keeps a 300-page PDF out of the per-turn token
-bill — and out of the summarizer's jaws — while making all of it queryable.
-
-Embeddings come from a Gemini embedding model (default
-`models/gemini-embedding-001`, override with
-`config set embedding.model <id>`; requires GOOGLE_API_KEY). When no
-embedder is available the caller falls back to inlining (or Ollama
-nomic-embed-text if available), so Ollama-only / keyless setups keep
-working. Search is brute-force cosine over a conversation's chunks via
-numpy — a conversation holds at most a few thousand chunks, where exact
-search beats any index.
-"""
+"""Document chunk indexing + semantic search for large attachments."""
 
 from __future__ import annotations
 

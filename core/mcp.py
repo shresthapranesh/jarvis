@@ -1,45 +1,4 @@
-"""MCP tool loader — ADK McpToolset analog.
-
-ADK supports Model Context Protocol via McpToolset that loads tools from MCP
-servers (stdio, SSE, streamable-http). This module brings the same to Jarvis:
-
-- Reads server configs from multiple sources (env, file, work_dir)
-- Manages a MultiServerMCPClient (langchain-mcp-adapters)
-- Exposes cached LangChain tools for the main agent (and potentially board/automation)
-
-Config sources (merged, file wins over env, env JSON wins over nothing):
-1. Env var JARVIS_MCP_SERVERS: JSON object mapping name -> connection dict, or JSON list
-   Example (object):
-     {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "transport": "stdio", "env": {"GITHUB_TOKEN": "..."} },
-      "filesystem": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"], "transport": "stdio"}}
-   Example (list):
-     [{"name": "github", "command": "npx", ...}]
-
-2. File ~/.jarvis/mcp.json or $WORK_DIR/mcp.json:
-   {
-     "mcpServers": {
-       "github": {"command": "npx", "args": [...], "transport": "stdio"},
-       ...
-     }
-   }
-   or {"servers": {...}} or top-level dict of servers.
-
- 3. DB config_settings key "mcp.servers" — JSON object for runtime-managed servers
-    added via GraphQL mutations. DB wins over file wins over env.
-
-If no config, returns empty — agent works without MCP.
-
-Lifespan integration:
-    from core.mcp import get_mcp_manager
-    await get_mcp_manager().initialize()
-
-Agent integration:
-    from core.mcp import get_mcp_tools_sync
-    main_tools += get_mcp_tools_sync()
-
-Design: mirrors ADK Runner's toolset loading but keeps it optional.
-Dynamic reload via reload_mcp_servers GraphQL mutation.
-"""
+"""MCP tool loader."""
 
 from __future__ import annotations
 

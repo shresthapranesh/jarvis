@@ -1,9 +1,5 @@
-"""Process-wide logging setup, shared by the CLI and the server.
+"""Process-wide logging setup, shared by the CLI and the server."""
 
-Always writes to ``<work_dir>/jarvis.log`` with rotation. Optionally mirrors
-to stderr. Silences noisy third-party loggers (SQLAlchemy/SQLite internals,
-HTTP transport debug, etc.) so the agent/tool/graph activity stands out.
-"""
 from __future__ import annotations
 
 import asyncio

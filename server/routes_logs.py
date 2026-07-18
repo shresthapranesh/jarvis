@@ -1,33 +1,4 @@
-"""In-app server log viewer.
-
-Two localhost-only endpoints back the ``/logs`` page in the web UI:
-
-* ``GET /server-logs`` returns a snapshot of the recent in-memory log buffer.
-* ``GET /server-logs/stream`` streams every new log record over SSE,
-  prefixed by one ``backfill`` event that carries the current snapshot.
-
-The path is ``/server-logs`` (not ``/logs``) so it doesn't collide with
-the SPA route at ``/logs`` — same disambiguation as ``/task-runs`` vs
-the frontend ``/tasks`` page.
-
-Records are produced by ``core.log_setup.BroadcastHandler``, which is
-attached to the root logger by ``setup_logging``. Each record carries
-``{ts, level, logger, message}``.
-
-Access is gated by two checks:
-
-1. ``request.client.host`` must be a loopback IP. This rejects anyone
-   connecting from another machine when the server binds to a non-loopback
-   interface. **Caveat:** if the server is ever deployed behind a reverse
-   proxy (nginx, Caddy, Traefik), the TCP peer becomes the proxy itself
-   and this check admits the world. Re-evaluate before that deployment.
-2. If an ``Origin`` header is present (i.e. the request is a CORS fetch
-   from a webpage), it must be a loopback origin. The app's global
-   ``CORSMiddleware`` uses ``allow_origins=["*"]``, which by itself would
-   let any visited website ``fetch('http://localhost:8000/server-logs')``
-   from the user's browser and exfiltrate the buffer. This second check
-   blocks that vector without touching the global CORS config.
-"""
+"""In-app server log viewer."""
 
 from __future__ import annotations
 

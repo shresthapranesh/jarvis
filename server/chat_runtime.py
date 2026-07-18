@@ -1,10 +1,4 @@
-"""Chat runtime — agent task execution + task registration.
-
-Both GraphQL ``startTask`` and the Telegram/Discord bot dispatchers enqueue
-a queue job; the ``chat_job_handler`` here consumes them. Convention:
-``job.id == Message.id`` (the assistant Message UUID), so cancellation
-through ``stopRunningTask`` is a one-line ``queue.cancel(task_id)``.
-"""
+"""Chat runtime — agent task execution + task registration."""
 
 from __future__ import annotations
 
@@ -72,7 +66,7 @@ async def _run_agent_task(
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
 
-    # ADK plugin system: runner provides callbacks via PluginManager
+    # plugin system: runner provides callbacks via PluginManager
     try:
         from core.runner import get_runner_or_none
 
@@ -118,7 +112,7 @@ async def _run_agent_task(
         # independent of each other, so they run concurrently instead of
         # stacking their latencies.
         user_msg_id = str(uuid4())
-        # ADK-style: prefer InvocationContext infra refs over globals
+        # Jarvis-style: prefer InvocationContext infra refs over globals
         if ctx is not None and ctx.store is not None:
             store = ctx.store
             checkpointer = ctx.checkpointer
@@ -341,7 +335,7 @@ async def chat_job_handler(job: Job) -> None:
     # trigger is gone (post-restart resume path). Otherwise reuse the entry the
     # trigger pre-created so SSE subscribers connected before the worker
     # claimed see the live stream.
-    # Build InvocationContext from runner (ADK Runner -> InvocationContext)
+    # Build InvocationContext from runner (Jarvis runner -> InvocationContext)
     invocation_context: InvocationContext | None = None
     try:
         from core.runner import get_runner_or_none

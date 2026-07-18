@@ -1,9 +1,4 @@
-"""Automation-run subscription event types — discriminated union for
-`stream_task_events` output on automation runs.
-
-Reuses TokenEvent and ErrorEvent from chat events since the wire shape is
-identical. Other events differ from chat (run_id vs conversation_id, output
-vs message), so they get their own types."""
+"""Automation-run subscription event types — discriminated union for."""
 
 from __future__ import annotations
 

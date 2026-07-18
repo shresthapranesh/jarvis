@@ -1,27 +1,4 @@
-"""Planning mode — ADK planning analog.
-
-ADK's LlmAgent can operate in planning mode: before acting, it produces an
-explicit step-by-step plan (todos) that guides execution and is visible to
-the user. This module brings that to Jarvis.
-
-Two layers:
-
-1. Chat agent planning (auto/always/off):
-   - Enabled via config key `planning.mode` (auto/always/off) or env
-     JARVIS_PLANNING_MODE. Default "auto".
-   - In auto mode, we heuristic-detect complex tasks (long prompt, multi-step
-     cues) and inject a strong planning directive into the volatile system
-     prompt suffix, forcing the model to call write_todos first.
-   - Optionally, a cheap LLM can pre-generate todos (fast path) — disabled by
-     default to avoid extra latency; enable via JARVIS_PLANNING_PREFILL=1.
-
-2. Workflow PlannerNode:
-   - Workflow node type "planner" that uses a single-turn LLM to produce a
-     structured plan (list of steps) from a goal. Useful as first node in a
-     workflow to make execution observable.
-
-This file also exposes helpers for the agent's model_request_node.
-"""
+"""Planning mode helpers."""
 
 from __future__ import annotations
 

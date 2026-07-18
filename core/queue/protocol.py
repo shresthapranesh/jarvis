@@ -1,13 +1,4 @@
-"""JobQueue abstract base + Job dataclass.
-
-A backend implementation provides the five abstract storage operations
-(`enqueue`, `claim`, `extend_lock`, `complete`, `fail`, `cancel`,
-`is_cancel_requested`, `reap_expired_locks`). The base class composes them
-into a `stream()` async-iterator that workers consume.
-
-Backends with real wake-up primitives (Redis pub/sub, BLPOP) override
-`_wait_for_signal`; the default just sleeps for the poll interval.
-"""
+"""JobQueue abstract base + Job dataclass."""
 
 from __future__ import annotations
 

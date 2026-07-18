@@ -1,13 +1,4 @@
-"""Task board runtime — dispatcher + board_task job handler.
-
-The board (db.models.BoardTask) is a durable kanban layer on top of the job
-queue: tasks move todo → ready → running → done/blocked. `dispatch_board_tasks`
-is the single scheduling entrypoint — the APScheduler interval job ticks it,
-and mutations / agent tools call it directly after creating or readying a task
-so dispatch doesn't wait for the next tick. Each dispatch enqueues one
-"board_task" job (job.id == BoardTask.job_id, a fresh UUID per run so re-runs
-don't collide with finished job rows); `board_task_job_handler` consumes it.
-"""
+"""Task board runtime — dispatcher + board_task job handler."""
 
 from __future__ import annotations
 

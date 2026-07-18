@@ -1,9 +1,4 @@
-"""Artifact raw download — the only artifact endpoint not migrated to GraphQL.
-
-Artifact CRUD/list/get moved to GraphQL (queries/artifact.py, mutations/artifact.py).
-Raw download stays REST because it returns binary content (.md text) with a
-content-disposition header, which doesn't fit cleanly into GraphQL.
-"""
+"""Artifact raw download — the only artifact endpoint not migrated to GraphQL."""
 
 from __future__ import annotations
 

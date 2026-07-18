@@ -1,14 +1,4 @@
-"""SQLite-backed JobQueue.
-
-Same DB as the app (`database.db`), so `enqueue(..., session=open_session)`
-rides the caller's transaction — the queue row only becomes visible if and
-when the caller commits, and the wake signal fires only after that commit.
-
-Wake-up: in-process `asyncio.Event` set by `enqueue()` (or after_commit when
-a session was passed in). Workers in the same process get sub-millisecond
-pickup. Across processes the same SQLite file would still work but only via
-the poll fallback.
-"""
+"""SQLite-backed JobQueue."""
 
 from __future__ import annotations
 

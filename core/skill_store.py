@@ -1,16 +1,4 @@
-"""Skill persistence helpers: embed the description, then CRUD.
-
-A skill's *description* is its routing key — embedded for intent retrieval the
-same way agent memory and document chunks are (Gemini, ``GOOGLE_API_KEY``; see
-``core/doc_index.py``). The *body* is never embedded; it is the on-demand payload
-loaded only when the skill is actually invoked (progressive disclosure). When no
-embedder is available the embedding is stored as null and Phase-2 retrieval falls
-back to surfacing every enabled skill's description.
-
-Both the user-facing GraphQL mutations and the agent tools go through here so the
-description-embedding lives in exactly one place. Re-embedding happens only when
-the description actually changes.
-"""
+"""Skill persistence helpers: embed the description, then CRUD."""
 
 from __future__ import annotations
 

@@ -1,36 +1,4 @@
-"""Expression / template engine for workflows — ADK prompt template analog.
-
-Provides Jinja2-backed rendering with graceful fallback when jinja2 isn't installed.
-
-Supported context (available inside {{ }}):
-- Direct input vars: {{topic}} == {{inputs.topic}}
-- Inputs namespace: {{inputs.foo}}
-- Nodes namespace: {{nodes.node_id.output_key}} or {{nodes.node_id}} (whole output dict)
-- Workflow namespace: {{workflow.foo}} (top-level workflow inputs)
-- Any custom extra merged in
-
-Legacy {{var}} placeholders still work (mapped to inputs[var]).
-
-Filters available when Jinja2 is used:
-- tojson, fromjson, upper, lower, trim, default, etc. (builtin Jinja + custom)
-- json alias for tojson
-- We also register json filter for convenience.
-
-If Jinja2 missing, we fallback to regex that supports:
-- {{var}} -> inputs[var]
-- {{inputs.key}} -> inputs[key]
-- {{nodes.id.port}} -> completed[id][port] or completed[id] as repr
-- {{workflow.key}} -> workflow_inputs[key]
-- Nested via dot splitting, with optional default via {{var | default("...")}} not supported in fallback (fallback keeps simple).
-
-ContextVar _template_ctx holds the current workflow completed + workflow_inputs
-so older call sites that only pass (template, inputs) can still resolve nodes.
-
-Usage:
-    from core.workflow_template import render_template, set_template_context
-
-    rendered = render_template("Research {{topic}} {{nodes.n1.result}}", inputs, completed, workflow_inputs)
-"""
+"""Workflow template rendering."""
 
 from __future__ import annotations
 
