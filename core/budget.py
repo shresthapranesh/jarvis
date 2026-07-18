@@ -318,7 +318,7 @@ def get_budget_limits_for_task(kind: str = "chat") -> BudgetLimits:
 
     defaults: dict[str, dict[str, Any]] = {
         "chat": {"max_total_tokens": 500_000, "max_llm_calls": 200, "max_tool_calls": 300, "max_duration_seconds": 1800},
-        "automation": {"max_total_tokens": 300_000, "max_llm_calls": 100, "max_tool_calls": 150, "max_duration_seconds": 1200},
+        "automation": {"max_total_tokens": 600_000, "max_llm_calls": 200, "max_tool_calls": 300, "max_duration_seconds": 1800},
         "workflow": {"max_total_tokens": 400_000, "max_llm_calls": 150, "max_tool_calls": 200, "max_duration_seconds": 1800},
         "board_task": {"max_total_tokens": 400_000, "max_llm_calls": 150, "max_tool_calls": 200, "max_duration_seconds": 1800},
     }

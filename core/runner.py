@@ -137,10 +137,10 @@ class JarvisRunner:
                 "max_duration_seconds": self.runner_config.budget_max_duration_seconds,
             },
             "automation": {
-                "max_total_tokens": 300_000,
-                "max_llm_calls": 100,
-                "max_tool_calls": 150,
-                "max_duration_seconds": 1200,
+                "max_total_tokens": 600_000,
+                "max_llm_calls": 200,
+                "max_tool_calls": 300,
+                "max_duration_seconds": 1800,
             },
             "workflow": {
                 "max_total_tokens": 400_000,
