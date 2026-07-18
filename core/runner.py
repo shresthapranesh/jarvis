@@ -59,6 +59,10 @@ class RunnerConfig:
     budget_max_duration_seconds: int = 1800
     # MCP
     mcp_enabled: bool = True
+    # Plugins (ADK plugin.Config analog) - list of plugin names to enable by default
+    # Actual instances are built in JarvisRunner
+    enable_logging_plugin: bool = True
+    enable_telemetry_plugin: bool = False
 
 
 class JarvisRunner:
@@ -92,6 +96,7 @@ class JarvisRunner:
         self.queue = queue
         self.http_client = http_client
         self.runner_config = runner_config or RunnerConfig()
+        self._plugin_manager: Any | None = None
 
     # ── InvocationContext factory (ADK InvocationContext analog) ───────
 
@@ -146,6 +151,23 @@ class JarvisRunner:
         from core.session_service import SessionService
 
         return SessionService(self.store)
+
+    def get_plugin_manager(self, tracker: Any | None = None, task_state: Any | None = None):
+        from core.plugins import PluginManager, LoggingPlugin, BudgetPlugin, UsagePlugin
+
+        pm = PluginManager()
+        if self.runner_config.enable_logging_plugin:
+            pm.add(LoggingPlugin())
+        # Usage always useful
+        pm.add(UsagePlugin())
+        if tracker is not None:
+            pm.add(BudgetPlugin(tracker=tracker, task_state=task_state))
+        return pm
+
+    def get_default_callbacks(self, tracker: Any | None = None, task_state: Any | None = None):
+        """Back-compat: return list of callback handlers (AgentLogger, Usage, Budget)."""
+        pm = self.get_plugin_manager(tracker=tracker, task_state=task_state)
+        return pm.get_callback_handlers()
 
     # ── Agent factory ─────────────────────────────────────────────────────
 

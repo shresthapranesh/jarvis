@@ -68,13 +68,42 @@ async def _run_agent_task(
     accumulated: list[str] = []
     step_seq_ref = [0]
     coalescer = TokenCoalescer(state)
-    usage = UsageAccumulator()
     limits = get_budget_limits_for_task("chat")
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
-    budget_cb = BudgetCallbackHandler(tracker, task_state=state)
+
+    # ADK plugin system: runner provides callbacks via PluginManager
+    try:
+        from core.runner import get_runner_or_none
+
+        _r = get_runner_or_none()
+        if _r is not None:
+            _pm = _r.get_plugin_manager(tracker=tracker, task_state=state)
+            callbacks = _pm.get_callback_handlers()
+            # extract UsageAccumulator and Budget handlers from plugin list for backwards compat references
+            usage = next((h for h in callbacks if h.__class__.__name__ == "UsageAccumulator"), None)
+            if usage is None:
+                from core.log_callback import UsageAccumulator as _UA
+                usage = _UA()
+                callbacks.append(usage)
+            budget_cb = next((h for h in callbacks if h.__class__.__name__ == "BudgetCallbackHandler"), None)
+            if budget_cb is None:
+                from core.budget import BudgetCallbackHandler as _BC
+                budget_cb = _BC(tracker, task_state=state)
+                callbacks.append(budget_cb)
+        else:
+            raise RuntimeError("no runner")
+    except Exception:
+        from core.budget import BudgetCallbackHandler as _BC
+        from core.log_callback import AgentLogger as _AL, UsageAccumulator as _UA
+
+        usage = _UA()
+        budget_cb = _BC(tracker, task_state=state)
+        callbacks = [_AL(), usage, budget_cb]
+
     status = "error"
     project_id: str | None = None
+    _plugin_manager = locals().get("_pm", None)
 
     async def finalize(content: str, final_status: str) -> None:
         await _finalize_message(
@@ -115,7 +144,7 @@ async def _run_agent_task(
         config = {
             "configurable": configurable,
             "recursion_limit": 100,
-            "callbacks": [AgentLogger(), usage, budget_cb],
+            "callbacks": callbacks,
         }
         # Reset the per-conversation plan at the start of each new turn. Todos
         # live in the checkpointer keyed by thread_id, so without this a plan

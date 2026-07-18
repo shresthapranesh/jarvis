@@ -186,7 +186,22 @@ async def _run_agent(
     limits = get_budget_limits_for_task("board_task")
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
-    budget_cb = BudgetCallbackHandler(tracker, task_state=state)
+
+    try:
+        from core.runner import get_runner_or_none
+
+        _r = get_runner_or_none()
+        if _r is not None:
+            _pm = _r.get_plugin_manager(tracker=tracker, task_state=state)
+            callbacks = _pm.get_callback_handlers()
+        else:
+            raise RuntimeError("no runner")
+    except Exception:
+        from core.budget import BudgetCallbackHandler as _BC
+        from core.log_callback import AgentLogger as _AL
+
+        callbacks = [_AL(), _BC(tracker, task_state=state)]
+
     if invocation_context is not None and invocation_context.store is not None:
         cp = invocation_context.checkpointer
         st = invocation_context.store
@@ -208,7 +223,7 @@ async def _run_agent(
                 "board_task_id": task.id,
             },
             "recursion_limit": 100,
-            "callbacks": [AgentLogger(), budget_cb],
+            "callbacks": callbacks,
         },
         stream_mode=STREAM_MODES,
         subgraphs=True,
