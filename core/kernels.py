@@ -6,8 +6,10 @@ import asyncio
 import logging
 import re
 import sys
+import tempfile
 import time
 from pathlib import Path
+from uuid import uuid4
 
 from jupyter_client.manager import AsyncKernelManager
 
@@ -62,6 +64,13 @@ class KernelSession:
             await self._teardown()
         km = AsyncKernelManager()
         km.transport = "ipc"  # unix-socket endpoints; no plaintext TCP, no warning
+        # Unique per-kernel socket base path. Without this every kernel shares the
+        # relative "kernel-ipc" prefix in CWD, and jupyter_client's IPC "port"
+        # allocation (os.path.exists checks against files that only appear once
+        # the kernel binds) races: concurrently-starting kernels grab the same
+        # endpoints, clients cross-connect, and the wrong kernel logs
+        # "Invalid Signature". Keep it short — unix socket paths cap at ~104 bytes.
+        km.ip = str(Path(tempfile.gettempdir()) / f"jarvis-kernel-{uuid4().hex[:12]}")
         # Launch from THIS interpreter so the kernel sees the venv's packages.
         # kernel_cmd is a valid (non-deprecated) traitlets attr here; just absent
         # from the type stubs.
