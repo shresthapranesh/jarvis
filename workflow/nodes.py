@@ -141,20 +141,14 @@ async def _run_agent_text(
     thread so independent invocations never share history; history hygiene is
     handled inside ``build_agent``'s model node.
     """
-    from core.log_callback import AgentLogger
+    from core.runner import build_callbacks
     from core.state import get_async_checkpointer, get_store
     from langchain_core.runnables import RunnableConfig
 
-    callbacks: list = [AgentLogger()]
     # Budget tracking — if the workflow run has a tracker (set by workflow_runtime),
     # piggyback on it so token limits are enforced per-workflow, not per-node.
-    try:
-        bt = getattr(task_state, "_budget_tracker", None)
-        if bt is not None:
-            from core.budget import BudgetCallbackHandler
-            callbacks.append(BudgetCallbackHandler(bt, task_state=task_state))
-    except Exception:
-        pass
+    bt = getattr(task_state, "_budget_tracker", None)
+    callbacks: list = build_callbacks(bt, task_state=task_state)
 
     agent = build_agent(
         model=model_id,

@@ -733,6 +733,16 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
 _cache: dict[tuple, CompiledStateGraph] = {}
 
 
+def invalidate_agent_cache() -> None:
+    """Drop all compiled agents so the next build_agent rebuilds them.
+
+    Needed when the bound toolset changes at runtime (MCP server reload) —
+    tools are baked in via bind_tools, so cached graphs keep the old set.
+    In-flight runs keep their already-built graph; only new runs rebuild.
+    """
+    _cache.clear()
+
+
 def _build_cached(model: str, checkpointer, store) -> CompiledStateGraph:
     key = (model, id(checkpointer), id(store))
     if key not in _cache:

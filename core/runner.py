@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 from httpx import AsyncClient
@@ -122,8 +122,8 @@ class JarvisRunner:
         )
         try:
             await ctx.load_persisted_state()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("could not load persisted invocation state for %s: %s", session_id, exc)
         return ctx
 
     def get_session_service(self):
@@ -185,42 +185,25 @@ class JarvisRunner:
 
     def get_budget_limits(self, kind: str = "chat"):
         """Build BudgetLimits, merging runner config defaults with env overrides."""
-        from core.budget import BudgetLimits
+        from core.budget import KIND_BUDGET_DEFAULTS, BudgetLimits
 
-        base = {
-            "chat": {
-                "max_total_tokens": self.runner_config.budget_max_total_tokens,
-                "max_llm_calls": self.runner_config.budget_max_llm_calls,
-                "max_tool_calls": self.runner_config.budget_max_tool_calls,
-                "max_duration_seconds": self.runner_config.budget_max_duration_seconds,
-            },
-            "automation": {
-                "max_total_tokens": 600_000,
-                "max_llm_calls": 200,
-                "max_tool_calls": 300,
-                "max_duration_seconds": 1800,
-            },
-            "workflow": {
-                "max_total_tokens": 400_000,
-                "max_llm_calls": 150,
-                "max_tool_calls": 200,
-                "max_duration_seconds": 1800,
-            },
-            "board_task": {
-                "max_total_tokens": 400_000,
-                "max_llm_calls": 150,
-                "max_tool_calls": 200,
-                "max_duration_seconds": 1800,
-            },
-        }
-        cfg = base.get(kind, base["chat"])
-        # env overrides
+        cfg = dict(KIND_BUDGET_DEFAULTS.get(kind, KIND_BUDGET_DEFAULTS["chat"]))
+        if kind == "chat":
+            # Chat ceilings are runner-tunable; other kinds use the shared table.
+            cfg.update(
+                max_total_tokens=self.runner_config.budget_max_total_tokens,
+                max_llm_calls=self.runner_config.budget_max_llm_calls,
+                max_tool_calls=self.runner_config.budget_max_tool_calls,
+                max_duration_seconds=self.runner_config.budget_max_duration_seconds,
+            )
+        # env overrides — iterate every BudgetLimits field, not just the keys in
+        # the per-kind table, so max_input/output_tokens/max_messages env vars apply.
         env_limits = BudgetLimits.from_env()
         merged = dict(cfg)
-        for k in cfg.keys():
-            env_v = getattr(env_limits, k)
+        for f in fields(env_limits):
+            env_v = getattr(env_limits, f.name)
             if env_v is not None:
-                merged[k] = env_v
+                merged[f.name] = env_v
         return BudgetLimits(**merged)
 
     # ── Introspection ─────────────────────────────────────────────────────
@@ -236,6 +219,32 @@ class JarvisRunner:
                 "min_chars_for_cache": self.runner_config.context_cache_min_chars,
             },
         }
+
+
+def build_callbacks(tracker: Any | None = None, task_state: Any | None = None) -> list[Any]:
+    """Callback handlers for a run — the one entrypoint all runtimes share.
+
+    Goes through the active runner's PluginManager when there is one, else
+    falls back to the direct AgentLogger/Usage/Budget trio (CLI, tests).
+    """
+    runner = get_runner_or_none()
+    if runner is not None:
+        try:
+            return runner.get_default_callbacks(tracker=tracker, task_state=task_state)
+        except Exception as exc:
+            logger.warning("plugin callback build failed — using direct handlers: %s", exc)
+    handlers: list[Any] = []
+    try:
+        from core.log_callback import AgentLogger, UsageAccumulator
+
+        handlers += [AgentLogger(), UsageAccumulator()]
+    except Exception:
+        pass
+    if tracker is not None:
+        from core.budget import BudgetCallbackHandler
+
+        handlers.append(BudgetCallbackHandler(tracker, task_state=task_state))
+    return handlers
 
 
 # ── Global accessor (set by lifespan, read elsewhere) ───────────────────────

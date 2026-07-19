@@ -89,6 +89,8 @@ def _load_from_env() -> dict[str, dict[str, Any]]:
 
 
 def _load_from_files(work_dir: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Return the FIRST candidate file that yields a non-empty config —
+    candidate files are alternatives, not layers; they are never merged."""
     candidates: list[Path] = []
     # Work dir candidate (explicit)
     if work_dir:
@@ -114,6 +116,19 @@ def _load_from_files(work_dir: Path | None = None) -> dict[str, dict[str, Any]]:
 MCP_DB_KEY = "mcp.servers"
 
 
+def _invalidate_agent_graphs() -> None:
+    """Drop compiled agent graphs after an MCP toolset change.
+
+    Lazy import — core.agents imports this module at load time.
+    """
+    try:
+        from core.agents import invalidate_agent_cache
+
+        invalidate_agent_cache()
+    except Exception as exc:
+        logger.warning("could not invalidate agent cache after MCP reload: %s", exc)
+
+
 def _parse_db_raw(raw: str | None) -> dict[str, dict[str, Any]]:
     if not raw:
         return {}
@@ -126,7 +141,8 @@ def _parse_db_raw(raw: str | None) -> dict[str, dict[str, Any]]:
 
 
 def load_mcp_server_configs(work_dir: Path | None = None) -> dict[str, dict[str, Any]]:
-    """Load and merge MCP server configs from env + files. File wins over env."""
+    """Load and merge MCP server configs from env + the first config file found.
+    Per-server, file wins over env; only one file is read (no cross-file merge)."""
     env_cfg = _load_from_env()
     file_cfg = _load_from_files(work_dir)
     # Merge: file overrides env (same name -> file wins)
@@ -223,41 +239,49 @@ class McpManager:
     async def initialize(self, connections: dict[str, dict[str, Any]] | None = None) -> list[Any]:
         """Initialize client and load tools. Returns tools list (may be empty on failure)."""
         async with self._lock:
-            if connections is not None:
-                self.connections = connections
-            if not self.connections:
-                # Try lazy load if empty
-                self.connections = load_mcp_server_configs()
-            if not self.connections:
-                self._initialized = True
+            return await self._initialize_locked(connections)
+
+    async def _initialize_locked(self, connections: dict[str, dict[str, Any]] | None) -> list[Any]:
+        if connections is not None:
+            if connections != self.connections:
+                # New connection set — drop the stale client/tools and reconnect.
+                self._client = None
                 self._tools = []
-                return []
+                self._initialized = False
+            self.connections = connections
+        if not self.connections:
+            # Try lazy load if empty
+            self.connections = load_mcp_server_configs()
+        if not self.connections:
+            self._initialized = True
+            self._tools = []
+            return []
 
-            # Already initialized with same connections? Return cached
-            if self._initialized and self._tools:
-                return self._tools
+        # Already initialized with same connections? Return cached
+        if self._initialized and self._tools:
+            return self._tools
 
-            try:
-                from langchain_mcp_adapters.client import MultiServerMCPClient
+        try:
+            from langchain_mcp_adapters.client import MultiServerMCPClient
 
-                # MultiServerMCPClient accepts dict[name -> connection dict]
-                # Example: {"math": {"command": "python", "args": ["/path/to/math_server.py"], "transport": "stdio"}}
-                self._client = MultiServerMCPClient(self.connections)  # type: ignore[arg-type]
-                tools = await self._client.get_tools()
-                self._tools = tools
-                self._initialized = True
-                logger.info("MCP tools loaded: %d tools from %d servers", len(tools), len(self.connections))
-                for t in tools:
-                    try:
-                        logger.debug("MCP tool: %s - %s", getattr(t, "name", "?"), getattr(t, "description", "")[:120])
-                    except Exception:
-                        pass
-                return tools
-            except Exception as exc:
-                logger.warning("Failed to initialize MCP clients %s: %s", list(self.connections.keys()), exc, exc_info=True)
-                self._tools = []
-                self._initialized = True
-                return []
+            # MultiServerMCPClient accepts dict[name -> connection dict]
+            # Example: {"math": {"command": "python", "args": ["/path/to/math_server.py"], "transport": "stdio"}}
+            self._client = MultiServerMCPClient(self.connections)  # type: ignore[arg-type]
+            tools = await self._client.get_tools()
+            self._tools = tools
+            self._initialized = True
+            logger.info("MCP tools loaded: %d tools from %d servers", len(tools), len(self.connections))
+            for t in tools:
+                try:
+                    logger.debug("MCP tool: %s - %s", getattr(t, "name", "?"), getattr(t, "description", "")[:120])
+                except Exception:
+                    pass
+            return tools
+        except Exception as exc:
+            logger.warning("Failed to initialize MCP clients %s: %s", list(self.connections.keys()), exc, exc_info=True)
+            self._tools = []
+            self._initialized = True
+            return []
 
     def get_tools_sync(self) -> list[Any]:
         """Sync accessor for agent builder — returns cached tools or empty."""
@@ -272,17 +296,14 @@ class McpManager:
     async def reload(self, connections: dict[str, dict[str, Any]] | None = None) -> list[Any]:
         """Force reload — clears cache and re-initializes with new connections (or existing)."""
         async with self._lock:
-            if connections is not None:
-                self.connections = connections
-            # Clear old client
             self._client = None
             self._tools = []
             self._initialized = False
-
-        # Re-init outside lock? initialize takes its own lock, so need to avoid deadlock
-        # We'll call initialize which acquires lock again after clearing.
-        # To avoid holding lock twice, we already cleared inside first lock, now re-acquire via initialize.
-        return await self.initialize(self.connections if connections is None else connections)
+            tools = await self._initialize_locked(connections)
+        # Compiled agents bake the MCP toolset in via bind_tools at build time,
+        # so a reload must also drop them or it never takes effect.
+        _invalidate_agent_graphs()
+        return tools
 
     async def close(self) -> None:
         async with self._lock:

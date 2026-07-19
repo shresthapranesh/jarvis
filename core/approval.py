@@ -73,7 +73,7 @@ def is_affirmative_answer(text: str) -> bool | None:
                 return True
             # Also handle "don't" where tokenization splits -> check substring
             # for known contractions
-            if "'" in phrase or phrase in ("dont", "dont"):
+            if "'" in phrase or phrase == "dont":
                 return phrase in norm or phrase.replace("'", "") in norm
             # Fallback regex with boundaries to avoid "no" in "known"
             return bool(re.search(rf"\b{re.escape(phrase)}\b", norm))
@@ -227,19 +227,11 @@ def request_tool_approval(tool_name: str, args: dict[str, Any], reason: str) -> 
             pass
         return False
 
-    # Ambiguous — if user wrote explanatory text that doesn't match keywords,
-    # treat as approval with note (caching pattern: tool continues, human's input
-    # becomes part of context). We treat long answers as approval + instruction.
-    if len(answer_str.strip()) > 20:
-        logger.info("approval ambiguous but long — treating as approved with instruction: %s", answer_str[:100])
-        try:
-            ctx.emit("approval_resolved", tool=tool_name, approved=True, answer=answer_str[:500], ambiguous=True)
-        except Exception:
-            pass
-        return True
-
-    # Truly ambiguous short answer — deny conservatively but surface the text
-    logger.info("approval ambiguous — denying: %r", answer_str)
+    # Ambiguous — deny conservatively, whatever the length. A reply that
+    # matches no approve/deny keyword is usually a question or an alternative
+    # instruction; running the original destructive action on that basis is
+    # the wrong default. The denial surfaces the text so the agent can adapt.
+    logger.info("approval ambiguous — denying: %r", answer_str[:100])
     try:
         ctx.emit("approval_resolved", tool=tool_name, approved=False, answer=answer_str[:500], ambiguous=True)
     except Exception:
@@ -263,16 +255,32 @@ def require_approval(reason_template: str = "This action requires approval"):
         import functools
         import inspect
 
+        sig = inspect.signature(fn)
+
+        def _bound_args(args, kwargs) -> dict[str, Any]:
+            # Map positional args onto parameter names so the reason template
+            # and the approval UI's Args display see them (a positional call
+            # would otherwise show `Args: {}` for the action being approved).
+            try:
+                return dict(sig.bind_partial(*args, **kwargs).arguments)
+            except TypeError:
+                return dict(kwargs)
+
+        def _reason_and_args(args, kwargs) -> tuple[str, dict[str, Any]]:
+            bound = _bound_args(args, kwargs)
+            try:
+                reason = reason_template.format(**bound)
+            except Exception:
+                reason = reason_template
+            return reason, bound
+
         if inspect.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
             async def async_wrapper(*args, **kwargs):
-                try:
-                    reason = reason_template.format(*args, **kwargs)
-                except Exception:
-                    reason = reason_template
+                reason, bound = _reason_and_args(args, kwargs)
                 tool_name = getattr(fn, "__name__", "tool")
-                if not request_tool_approval(tool_name, kwargs, reason):
+                if not request_tool_approval(tool_name, bound, reason):
                     return "User denied approval — action cancelled."
                 return await fn(*args, **kwargs)
 
@@ -281,12 +289,9 @@ def require_approval(reason_template: str = "This action requires approval"):
 
             @functools.wraps(fn)
             def sync_wrapper(*args, **kwargs):
-                try:
-                    reason = reason_template.format(*args, **kwargs)
-                except Exception:
-                    reason = reason_template
+                reason, bound = _reason_and_args(args, kwargs)
                 tool_name = getattr(fn, "__name__", "tool")
-                if not request_tool_approval(tool_name, kwargs, reason):
+                if not request_tool_approval(tool_name, bound, reason):
                     return "User denied approval — action cancelled."
                 return fn(*args, **kwargs)
 

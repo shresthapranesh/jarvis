@@ -58,31 +58,40 @@ def get_planning_mode() -> str:
     return raw
 
 
+def _keyword_hits(low: str) -> int:
+    """Whole-word keyword count — substring matching over-triggers ("fix" in
+    "prefix", "test" in "latest")."""
+    return sum(1 for kw in _COMPLEXITY_KEYWORDS if re.search(rf"\b{kw}\b", low))
+
+
 def should_auto_plan(query: str) -> bool:
-    """Heuristic: does query look like multi-step work needing todos?"""
+    """Heuristic: does query look like multi-step work needing todos?
+
+    Deliberately conservative — a single verb like "fix" or "review" in an
+    ordinary question is not multi-step work; forcing write_todos on it hijacks
+    simple requests. Requires 2+ keywords, an explicit list, sequencing
+    language, 3+ lines, or a genuinely long prompt.
+    """
     if not query:
         return False
     q = query.strip()
+    low = q.lower()
     if len(q) < _AUTO_MIN_CHARS and "\n" not in q:
         # Short single-line query -> not complex unless keyword heavy
-        low = q.lower()
-        keyword_hits = sum(1 for kw in _COMPLEXITY_KEYWORDS if kw in low)
-        return keyword_hits >= 2
+        return _keyword_hits(low) >= 2
     # Multi-line or long
     lines = [line for line in q.split("\n") if line.strip()]
     if len(lines) >= _AUTO_MIN_LINES:
         return True
-    # Keyword scan
-    low = q.lower()
     # If contains numbered list or bullet list, likely multi-step
     if re.search(r"(^|\n)\s*(?:\d+\.\s+|[-*]\s+)", q):
         return True
-    if any(kw in low for kw in _COMPLEXITY_KEYWORDS):
+    if _keyword_hits(low) >= 2:
         return True
     # Contains "and then", "after that", "step", "first", "then"
     if re.search(r"\b(and then|after that|first|then|step \d|phase)\b", low):
         return True
-    return len(q) >= 200
+    return len(q) >= 300
 
 
 def should_plan_for_query(query: str, mode: str | None = None) -> bool:

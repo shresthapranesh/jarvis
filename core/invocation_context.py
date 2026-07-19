@@ -49,7 +49,7 @@ class InvocationState:
         if key.startswith("app:"):
             self._app[key[4:]] = value
         elif key.startswith("user:"):
-            self._user[key[4:]] = value
+            self._user[key[5:]] = value
         elif key.startswith("temp:"):
             self._temp[key[5:]] = value
         else:

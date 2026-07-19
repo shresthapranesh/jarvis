@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.agents import DEFAULT_MODEL, build_agent
 from core.invocation_context import InvocationContext
-from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
-from core.log_callback import AgentLogger
+from core.budget import BudgetTracker, get_budget_limits_for_task
+from core.runner import build_callbacks
 from core.queue import Job, JobQueue
 from db import async_session
 from db.models import Automation, AutomationRun
@@ -71,7 +71,7 @@ async def _execute_prompt_type(
     limits = get_budget_limits_for_task("automation")
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
-    budget_cb = BudgetCallbackHandler(tracker, task_state=state)
+    callbacks = build_callbacks(tracker, task_state=state)
     _store = invocation_context.store if invocation_context and invocation_context.store else get_store()
     agent = build_agent(auto.model or DEFAULT_MODEL, checkpointer=checkpointer, store=_store, invocation_context=invocation_context)
 
@@ -84,7 +84,7 @@ async def _execute_prompt_type(
         config={
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 100,
-            "callbacks": [AgentLogger(), budget_cb],
+            "callbacks": callbacks,
         },
         stream_mode=STREAM_MODES,
         subgraphs=True,

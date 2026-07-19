@@ -103,12 +103,30 @@ class TaskState:
 _tasks: dict[str, TaskState] = {}
 
 
-def _notify(state: TaskState) -> None:
-    """Wake all subscription waiters that are blocked on this task."""
+def _resolve_waiters(state: TaskState) -> None:
     for fut in state._waiters:
         if not fut.done():
             fut.set_result(None)
     state._waiters.clear()
+
+
+def _notify(state: TaskState) -> None:
+    """Wake all subscription waiters that are blocked on this task.
+
+    Safe to call from any thread: sync LangChain callbacks (budget, logging)
+    run in an executor thread during async LLM calls, and asyncio futures may
+    only be resolved on the loop that created them, so off-loop calls are
+    marshalled via call_soon_threadsafe.
+    """
+    if _main_loop is not None:
+        try:
+            on_loop = asyncio.get_running_loop() is _main_loop
+        except RuntimeError:
+            on_loop = False
+        if not on_loop:
+            _main_loop.call_soon_threadsafe(_resolve_waiters, state)
+            return
+    _resolve_waiters(state)
 
 
 def emit_event(state: TaskState, event: str, **payload) -> None:

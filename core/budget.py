@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,38 +50,24 @@ class BudgetLimits:
             max_messages=_int_env("JARVIS_BUDGET_MAX_MESSAGES"),
         )
 
-    @classmethod
-    def with_defaults(cls, **overrides: Any) -> BudgetLimits:
-        """Construct with sane defaults for unset fields, overridable via kwargs."""
-        base = cls.from_env()
-        # Sensible per-run defaults if nothing in env — generous, not restrictive.
-        # Env wins over defaults; explicit kwargs win over both.
-        defaults = {
-            "max_total_tokens": 500_000,
-            "max_input_tokens": None,  # 400k,
-            "max_output_tokens": None,  # 100k,
-            "max_llm_calls": 200,
-            "max_tool_calls": 300,
-            "max_duration_seconds": 1800,  # 30min
-        }
-        merged: dict[str, Any] = {}
-        for k, default in defaults.items():
-            env_val = getattr(base, k)
-            merged[k] = env_val if env_val is not None else default
-        # Explicit overrides win
-        merged.update({k: v for k, v in overrides.items() if v is not None})
-        # If env explicitly set None, respect that? No — defaults above already handle None fallback.
-        # But if user wants unlimited, they can set env to "0" (interpreted as unlimited) — we treat 0 as None? Simpler: explicit 0 => None
-        for k in list(merged.keys()):
-            if merged[k] == 0:
-                merged[k] = None
-        # Preserve max_messages from env if set
-        if base.max_messages is not None:
-            merged["max_messages"] = base.max_messages
-        return cls(**merged)
-
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in self.__dict__.items() if v is not None}
+
+
+# Per-kind budget defaults — single source of truth, also used by
+# JarvisRunner.get_budget_limits (chat is overridable via RunnerConfig).
+KIND_BUDGET_DEFAULTS: dict[str, dict[str, Any]] = {
+    "chat": {"max_total_tokens": 500_000, "max_llm_calls": 200, "max_tool_calls": 300, "max_duration_seconds": 1800},
+    "automation": {"max_total_tokens": 600_000, "max_llm_calls": 200, "max_tool_calls": 300, "max_duration_seconds": 1800},
+    "workflow": {"max_total_tokens": 400_000, "max_llm_calls": 150, "max_tool_calls": 200, "max_duration_seconds": 1800},
+    "board_task": {"max_total_tokens": 400_000, "max_llm_calls": 150, "max_tool_calls": 200, "max_duration_seconds": 1800},
+}
+
+# Emit a budget_update event only when totals moved meaningfully — every event
+# persists in TaskState.events for the run's lifetime and replays to late
+# subscribers, so per-call emission roughly doubles the event count on long runs.
+_BUDGET_EMIT_MIN_TOKEN_DELTA = 1000
+_BUDGET_EMIT_MIN_CALL_DELTA = 10
 
 
 class BudgetTracker:
@@ -104,6 +90,8 @@ class BudgetTracker:
         self.started_at: datetime = datetime.now(timezone.utc)
         self._task_state = task_state
         self._exceeded_reason: str | None = None
+        self._last_emitted_tokens: int = -1
+        self._last_emitted_calls: int = -1
 
     @property
     def total_tokens(self) -> int:
@@ -140,8 +128,19 @@ class BudgetTracker:
             if self._exceeded_reason:
                 self._task_state.budget_exceeded = True
                 self._task_state.budget_reason = self._exceeded_reason
-            # Emit live budget update for UI progress bars — throttled by caller
-            # (record_llm/record_tool call per LLM/tool, which is already low freq)
+            # Emit live budget update for UI progress bars — throttled so long
+            # runs don't accumulate a per-call event in TaskState.events.
+            calls = self.llm_calls + self.tool_calls
+            emit_now = (
+                self._last_emitted_tokens < 0
+                or self.total_tokens - self._last_emitted_tokens >= _BUDGET_EMIT_MIN_TOKEN_DELTA
+                or calls - self._last_emitted_calls >= _BUDGET_EMIT_MIN_CALL_DELTA
+                or bool(self._exceeded_reason)
+            )
+            if not emit_now:
+                return
+            self._last_emitted_tokens = self.total_tokens
+            self._last_emitted_calls = calls
             try:
                 from core.state import emit_event
 
@@ -185,6 +184,10 @@ class BudgetTracker:
                 try:
                     self._task_state.budget_exceeded = True
                     self._task_state.budget_reason = reason
+                    # Cancel here, not only in BudgetCallbackHandler — trackers
+                    # used without the handler must still stop the run.
+                    self._task_state.cancelled = True
+                    self._task_state._stop_event.set()
                     # Lazy emit — avoid import cycle: core.state.emit_event reads task_state only
                     from core.state import emit_event
 
@@ -225,6 +228,10 @@ class BudgetCallbackHandler(BaseCallbackHandler):
     If budget is exceeded, it sets task_state.cancelled and flag so the
     outer astream loop can stop gracefully.
     """
+
+    # Run on the event loop, not in an executor thread — the tracker emits
+    # TaskState events and flips cancellation flags that the stream loop reads.
+    run_inline = True
 
     def __init__(self, tracker: BudgetTracker, task_state: Any | None = None) -> None:
         self.tracker = tracker
@@ -299,18 +306,13 @@ def get_budget_limits_for_task(kind: str = "chat") -> BudgetLimits:
     except Exception:
         pass
 
-    defaults: dict[str, dict[str, Any]] = {
-        "chat": {"max_total_tokens": 500_000, "max_llm_calls": 200, "max_tool_calls": 300, "max_duration_seconds": 1800},
-        "automation": {"max_total_tokens": 600_000, "max_llm_calls": 200, "max_tool_calls": 300, "max_duration_seconds": 1800},
-        "workflow": {"max_total_tokens": 400_000, "max_llm_calls": 150, "max_tool_calls": 200, "max_duration_seconds": 1800},
-        "board_task": {"max_total_tokens": 400_000, "max_llm_calls": 150, "max_tool_calls": 200, "max_duration_seconds": 1800},
-    }
-    base = defaults.get(kind, defaults["chat"])
-    # from_env overrides defaults
+    base = KIND_BUDGET_DEFAULTS.get(kind, KIND_BUDGET_DEFAULTS["chat"])
+    # from_env overrides defaults — iterate every BudgetLimits field, not just
+    # the keys in the defaults table, so max_input/output_tokens/max_messages apply.
     env_limits = BudgetLimits.from_env()
     merged = dict(base)
-    for k in base.keys():
-        env_v = getattr(env_limits, k)
+    for f in fields(env_limits):
+        env_v = getattr(env_limits, f.name)
         if env_v is not None:
-            merged[k] = env_v
+            merged[f.name] = env_v
     return BudgetLimits(**merged)

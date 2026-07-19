@@ -138,10 +138,9 @@ def build_cached_system_message(
             cached_parts.append(seg)
             cache_budget -= 1
         else:
-            # Goes to volatile concatenation (or non-cached block if not cacheable)
+            # Goes to volatile concatenation — counted below via the joined
+            # volatile block, so no per-segment increment here (would double-count).
             non_cached_parts.append(seg.content)
-            if not seg.cacheable:
-                stats.volatile_tokens_est += seg.tokens_estimate or 0
 
     # Emit cached segments as individual blocks
     for seg in cached_parts:
