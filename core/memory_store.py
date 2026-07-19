@@ -10,7 +10,7 @@ import numpy as np
 
 from core.doc_index import get_embedder
 from db import async_session
-from db.ops import create_memory, list_memories, update_memory_item
+from db.ops import create_memory, delete_memory, list_memories, update_memory_item
 
 logger = logging.getLogger(__name__)
 
@@ -185,3 +185,33 @@ async def upsert_memory(text: str, kind: str = "fact") -> str | None:
             return best_id
         mem = await create_memory(session, text=text, kind=kind, embedding=emb)
         return mem.id
+
+
+async def delete_memory_by_id(memory_id: str) -> bool:
+    """Delete a Memory row by id. Returns True if deleted."""
+    try:
+        async with async_session() as session:
+            return await delete_memory(session, memory_id)
+    except Exception as exc:
+        logger.warning("memory delete failed %s: %s", memory_id, exc)
+        return False
+
+
+async def update_memory_with_embedding(memory_id: str, text: str, kind: str = "fact") -> bool:
+    """Update text+kind+embedding for an existing memory.
+
+    Used by consolidation's update op — replaces the old text with corrected version.
+    """
+    text = text.strip()
+    if not text:
+        return False
+    emb = await embed_for_storage(text)
+    try:
+        async with async_session() as session:
+            row = await update_memory_item(
+                session, memory_id, text=text, kind=kind, embedding=emb
+            )
+            return row is not None
+    except Exception as exc:
+        logger.warning("memory update failed %s: %s", memory_id, exc)
+        return False

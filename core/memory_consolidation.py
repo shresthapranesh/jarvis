@@ -42,22 +42,38 @@ async def _migrate_legacy_key(store: AsyncSqliteStore) -> None:
 
 # ── Item-extraction path (embedder present) ────────────────────────────────────
 
-_EXTRACT_SYSTEM_PROMPT = """You extract durable memory items about the user from recent
+_EXTRACT_SYSTEM_PROMPT = """You maintain durable memory items about the user from recent
 conversations, so an AI assistant can remember them across sessions.
 
-Output ONLY a JSON array. Each element is an object:
-  {"text": "<one atomic, self-contained fact>", "kind": "core" | "fact"}
+You are given existing memory items with IDs. You must decide which to ADD, UPDATE, or DELETE
+based on the recent transcript.
+
+Output ONLY a JSON array. Each element is an operation:
+  {"op": "add", "text": "<one atomic self-contained fact>", "kind": "core" | "fact"}
+  {"op": "update", "id": "<existing_id>", "text": "<corrected version>", "kind": "core" | "fact"}
+  {"op": "delete", "id": "<existing_id>", "reason": "<why — contradicted|temporary_expired|user_requested|outdated>"}
 
 - "core": durable identity and strong preferences that should ALWAYS be in mind —
   who the user is, their role/expertise, hard preferences, how they want the assistant to behave.
 - "fact": everything else worth remembering — project details, decisions, context, one-off facts.
 
-Rules:
+Rules for ADD / UPDATE:
 - One atomic fact per item. Keep each short and self-contained (no pronouns pointing outside the item).
-- Only include NEW information not already covered by the existing memory items shown.
-- If a conversation contradicts an existing item, emit the corrected version (it replaces the old one).
-- Emit [] if there is nothing new worth remembering.
-- Output ONLY the JSON array — no prose, no markdown fences.
+- Only ADD information not already covered by existing items.
+- If transcript contradicts an existing item, emit UPDATE with corrected version pointing to its id.
+- DO NOT ADD temporary facts: if user says "for today only", "this week only", "temporarily", "just for now",
+  "until Friday", "for this session", don't create a durable memory. If such a temporary fact already
+  exists, DELETE it with reason temporary_expired.
+- If user says "forget that", "don't remember X", "remove that memory", DELETE the matching id with reason user_requested.
+
+Rules for DELETE:
+- Delete when: contradicted by newer info, is temporary and no longer relevant, user explicitly asked to forget,
+  or clearly outdated (e.g., job changed, moved, preference reversed).
+- Be conservative: only delete when transcript explicitly contradicts or user requested. Don't mass-delete.
+- Include reason: contradicted | temporary_expired | user_requested | outdated
+
+If nothing to do, emit [].
+Output ONLY the JSON array — no prose, no markdown fences.
 """
 
 _SPLIT_SYSTEM_PROMPT = """You convert an existing free-text memory document into discrete
@@ -80,10 +96,11 @@ def _flatten(content: Any) -> str:
 
 
 def _coerce_items(raw: Any) -> list[dict]:
-    """Tolerantly parse a JSON array of {text, kind} from an LLM response.
+    """Tolerantly parse a JSON array of {text, kind} / {op,...} from an LLM response.
 
+    Supports both legacy format (no op) and new format (add/update/delete ops).
     Extracts the outermost [...] span so surrounding prose / markdown fences
-    don't break parsing; drops malformed elements and normalizes `kind`.
+    don't break parsing; drops malformed elements and normalizes fields.
     """
     text = _flatten(raw)
     start, end = text.find("["), text.rfind("]")
@@ -101,10 +118,30 @@ def _coerce_items(raw: Any) -> list[dict]:
     for el in data:
         if not isinstance(el, dict):
             continue
-        t = str(el.get("text", "")).strip()
-        k = el.get("kind", "fact")
-        out.append({"text": t, "kind": k if k in ("core", "fact") else "fact"})
-    return [it for it in out if it["text"]]
+        op = el.get("op", "add")
+        if op not in ("add", "update", "delete"):
+            # legacy: no op field, just {text, kind}
+            op = "add"
+        if op == "delete":
+            did = str(el.get("id", "")).strip()
+            reason = str(el.get("reason", "")).strip() or "unknown"
+            if not did:
+                continue
+            out.append({"op": "delete", "id": did, "reason": reason})
+        elif op == "update":
+            did = str(el.get("id", "")).strip()
+            t = str(el.get("text", "")).strip()
+            if not did or not t:
+                continue
+            k = el.get("kind", "fact")
+            out.append({"op": "update", "id": did, "text": t, "kind": k if k in ("core", "fact") else "fact"})
+        else:  # add
+            t = str(el.get("text", "")).strip()
+            if not t:
+                continue
+            k = el.get("kind", "fact")
+            out.append({"op": "add", "text": t, "kind": k if k in ("core", "fact") else "fact"})
+    return out
 
 
 async def _llm_json_items(model_id: str, system_prompt: str, human_content: str) -> list[dict]:
@@ -119,7 +156,8 @@ async def _llm_json_items(model_id: str, system_prompt: str, human_content: str)
 def _existing_block(existing: list) -> str:
     if not existing:
         return "(none yet)"
-    return "\n".join(f"- [{m.kind}] {m.text}" for m in existing)
+    # Include id so LLM can reference for update/delete; truncate id display to full but keep short text
+    return "\n".join(f'- id={m.id} [{m.kind}] {m.text}' for m in existing)
 
 
 def _transcript_block(messages: list[dict], cap: int = 16_384) -> str:
@@ -153,14 +191,22 @@ async def _seed_from_blob(store: AsyncSqliteStore, model_id: str) -> int:
     )
     written = 0
     for it in items:
-        if await upsert_memory(it["text"], it["kind"]):
+        txt = it.get("text", "")
+        kind = it.get("kind", "fact")
+        if txt and await upsert_memory(txt, kind):
             written += 1
     logger.info("memory: seeded %d items from legacy AGENTS.md blob", written)
     return written
 
 
 async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> str:
-    """Extract atomic items from recent conversations into the Memory table."""
+    """Extract, update, and delete atomic items based on recent conversations.
+
+    The LLM now emits explicit ops: add / update / delete.
+    Temporary memories (e.g. 'for today only') are actively removed.
+    """
+    from core.memory_store import delete_memory_by_id, update_memory_with_embedding
+
     meta = await store.aget(_META_NS, _META_KEY)
     last_run_at: datetime | None = None
     if meta is not None:
@@ -176,13 +222,13 @@ async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> s
 
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    # One-time migration: split the legacy blob into items on first run.
     seeded = 0
     if mem_count == 0:
         seeded = await _seed_from_blob(store, model_id)
 
     async with async_session() as session:
         existing = await list_memories(session)
+    existing_ids = {m.id for m in existing}
 
     if not messages:
         await store.aput(_META_NS, _META_KEY, {"last_run_at": now_iso})
@@ -192,24 +238,80 @@ async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> s
             else "skipped: no new messages since last run"
         )
 
-    items = await _llm_json_items(
+    ops = await _llm_json_items(
         model_id,
         _EXTRACT_SYSTEM_PROMPT,
         f"Existing memory items:\n---\n{_existing_block(existing)}\n---\n\n"
         f"Recent conversations ({len(messages)} messages):\n---\n"
-        f"{_transcript_block(messages)}\n---\n\nExtract new memory items:",
+        f"{_transcript_block(messages)}\n---\n\n"
+        f"Decide add/update/delete operations:",
     )
-    written = 0
-    for it in items:
-        if await upsert_memory(it["text"], it["kind"]):
-            written += 1
+
+    # Safety: cap deletions per run to avoid catastrophic hallucinated wipe
+    max_delete = max(5, int(len(existing_ids) * 0.3))
+    if len([o for o in ops if o.get("op") == "delete"]) > max_delete:
+        logger.warning(
+            "memory_consolidation: LLM wants to delete %d > cap %d, truncating",
+            len([o for o in ops if o.get("op") == "delete"]),
+            max_delete,
+        )
+        # Keep only first max_delete deletes
+        seen_del = 0
+        filtered: list[dict] = []
+        for o in ops:
+            if o.get("op") == "delete":
+                if seen_del >= max_delete:
+                    continue
+                seen_del += 1
+            filtered.append(o)
+        ops = filtered
+
+    added = 0
+    updated = 0
+    deleted = 0
+
+    for it in ops:
+        op = it.get("op", "add")
+        if op == "delete":
+            did = it.get("id")
+            if did not in existing_ids:
+                logger.debug("memory_consolidation: skip delete id=%s not in existing", did)
+                continue
+            reason = it.get("reason", "unknown")
+            if await delete_memory_by_id(did):
+                deleted += 1
+                existing_ids.discard(did)
+                logger.info("memory_consolidation: deleted %s reason=%s", did, reason)
+            continue
+        if op == "update":
+            did = it.get("id")
+            if did not in existing_ids:
+                # id not found — treat as add
+                text = it.get("text", "")
+                kind = it.get("kind", "fact")
+                if text and await upsert_memory(text, kind):
+                    added += 1
+                continue
+            if await update_memory_with_embedding(did, it["text"], it.get("kind", "fact")):
+                updated += 1
+            continue
+        # add
+        text = it.get("text", "")
+        kind = it.get("kind", "fact")
+        if not text:
+            continue
+        if await upsert_memory(text, kind):
+            added += 1
 
     await store.aput(_META_NS, _META_KEY, {"last_run_at": now_iso})
     logger.info(
-        "memory_consolidation: %d messages → %d items written (+%d seeded)",
-        len(messages), written, seeded,
+        "memory_consolidation: %d messages → +%d ~%d -%d (+%d seeded)",
+        len(messages), added, updated, deleted, seeded,
     )
-    return f"consolidated {len(messages)} messages → {written} memory items written (+{seeded} seeded)"
+    return (
+        f"consolidated {len(messages)} messages → +{added} ~{updated} -{deleted} "
+        f"(+{seeded} seeded)"
+    )
 
 
 # ── Blob path (no embedder — original behavior) ────────────────────────────────
@@ -222,6 +324,9 @@ Rules:
 - Keep the document under 200 lines of markdown
 - Organize with headers: ## User Preferences, ## Ongoing Projects, ## Key Facts, ## Context
 - Merge new information with existing memory; preserve prior facts unless clearly contradicted
+- DELETE when: contradicted by newer info, user said "forget that", or fact is temporary ("for today only", "this week only", "temporarily", "just for now", "until X", "for this session") and no longer relevant
+- DO NOT persist temporary facts — if user says "for today only", don't add it; if such exists, remove it
+- When user explicitly asks to forget, remove matching lines
 - Be concise — bullet points of facts, not prose
 - Output ONLY the updated markdown document — no preamble, no explanation
 """
