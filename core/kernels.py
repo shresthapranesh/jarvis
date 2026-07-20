@@ -59,9 +59,9 @@ class KernelSession:
         self.kc = None
         self.lock = asyncio.Lock()
         self.last_used = time.monotonic()
-        # Conversation id last injected into the jarvis SDK (tools/sdk.py) —
-        # reset on every (re)start so a restarted kernel gets re-scoped.
-        self._sdk_conversation: str | None = None
+        # Scope last injected into the jarvis SDK (tools/sdk.py) — reset on
+        # every (re)start so a restarted kernel gets re-scoped.
+        self._sdk_scope: tuple[str | None, str | None] | None = None
 
     async def _ensure_started(self) -> None:
         """Start the kernel if it isn't running (also restarts a dead one)."""
@@ -97,7 +97,7 @@ class KernelSession:
         # msg_id, so _drain_until_idle for real cells ignores it.
         kc.execute(_BOOTSTRAP_CODE, silent=True, store_history=False)
         self.km, self.kc = km, kc
-        self._sdk_conversation = None
+        self._sdk_scope = None
         logger.info("kernel started for session %s", self.key)
 
     async def _drain_until_idle(self, msg_id: str, out: list[str]) -> None:
@@ -138,6 +138,7 @@ class KernelSession:
         code: str,
         timeout: float = DEFAULT_CELL_TIMEOUT,
         conversation_id: str | None = None,
+        project_id: str | None = None,
     ) -> str:
         """Execute one cell, returning combined stdout/stderr/result/traceback text.
 
@@ -150,20 +151,22 @@ class KernelSession:
             self.last_used = time.monotonic()
             kc, km = self.kc, self.km
             assert kc is not None and km is not None
-            if conversation_id and conversation_id != self._sdk_conversation:
-                # Scope the jarvis read SDK to this run's conversation. Silent
-                # execute like the bootstrap; per-kernel the id is stable, so
-                # this fires once per (re)start.
+            scope = (conversation_id, project_id)
+            if any(scope) and scope != self._sdk_scope:
+                # Scope the jarvis SDK to this run. Silent execute like the
+                # bootstrap; per-kernel the scope is stable, so this fires once
+                # per (re)start — or again if the conversation joins a project.
                 kc.execute(
                     "try:\n"
                     "    import tools.sdk as _jarvis_sdk\n"
                     f"    _jarvis_sdk.set_conversation({conversation_id!r})\n"
+                    f"    _jarvis_sdk.set_project({project_id!r})\n"
                     "except Exception:\n"
                     "    pass\n",
                     silent=True,
                     store_history=False,
                 )
-                self._sdk_conversation = conversation_id
+                self._sdk_scope = scope
             msg_id = kc.execute(code)
             out: list[str] = []
             interrupted = False
@@ -246,9 +249,15 @@ class KernelRegistry:
         code: str,
         timeout: float = DEFAULT_CELL_TIMEOUT,
         conversation_id: str | None = None,
+        project_id: str | None = None,
     ) -> str:
         session = await self._get_or_create(key)
-        return await session.run(code, timeout=timeout, conversation_id=conversation_id)
+        return await session.run(
+            code,
+            timeout=timeout,
+            conversation_id=conversation_id,
+            project_id=project_id,
+        )
 
     async def shutdown(self, key: str) -> None:
         async with self._lock:

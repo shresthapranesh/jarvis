@@ -1,33 +1,57 @@
-"""Kernel-side read SDK — preloaded into every run_cell kernel as `jarvis`.
+"""Kernel-side SDK — preloaded into every run_cell kernel as `jarvis`.
 
 These are plain sync functions the agent calls from Python code, NOT bound
-LLM tools: moving the read-only surface (artifacts, indexed documents, board
-listing, memory search) out of the tool schemas keeps the per-call prompt
-small (see core/agents.py `main_tools`). Write paths (write_artifact,
-create_task, remember, …) stay bound tools because they need the server
-process: live stream events, scheduler registration, approval interrupts.
+LLM tools. Keeping them out of the tool schemas is what keeps the per-call
+prompt small (see core/agents.py `main_tools`); the agent discovers them with
+`jarvis.help()` instead of paying for their schemas on every call.
 
-The kernel is a separate process, so everything here reads the app database
-directly over a read-only sqlite3 connection (`mode=ro` — cannot take write
-locks against the server) and reuses `core.doc_index.get_embedder()` for the
-two semantic searches. Conversation scope is injected per kernel by
-core/kernels.py via `set_conversation()`.
+Two transports, chosen by what the operation needs:
+
+* **Reads** go straight to the app database over a read-only sqlite3
+  connection (`mode=ro` — cannot take write locks against the server), plus
+  `core.doc_index.get_embedder()` for the semantic searches.
+* **Writes** go through the server's own GraphQL API over HTTP. The kernel is
+  a separate process, so a direct DB write would miss the in-process side
+  effects that make a write actually take effect — `_register_scheduler_job`
+  for automations (a missed registration means the cron silently never fires)
+  and `dispatch_board_tasks()` for board tasks. Routing through the mutation
+  runs that code in the server where it belongs, and gets the mutation's own
+  argument validation for free.
+
+What deliberately stays a bound tool: anything coupled to the agent graph —
+todos (`Command` state deltas), complete/block_task (current-run lifecycle),
+spawn_workers/run_workflow (subgraphs on the parent's LLM), write_artifact
+(its live side-panel event is tied to this run's stream writer), and
+`remember` (there is no createMemory mutation to route to).
+
+Conversation and project scope are injected per kernel by core/kernels.py via
+`set_conversation()` / `set_project()`.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from typing import Any
 
 _conversation_id: str | None = None
+_project_id: str | None = None
 _embedding_override_applied = False
+
+DEFAULT_API_URL = "http://127.0.0.1:8000/graphql"
 
 
 def set_conversation(conversation_id: str | None) -> None:
     """Scope subsequent calls to a conversation. Called by the kernel bootstrap."""
     global _conversation_id
     _conversation_id = conversation_id
+
+
+def set_project(project_id: str | None) -> None:
+    """Scope project_memory to a project. Called by the kernel bootstrap."""
+    global _project_id
+    _project_id = project_id
 
 
 def _db_path() -> str:
@@ -255,3 +279,409 @@ def search_memory(query: str, k: int = 5) -> list[dict]:
         ).fetchall()
     hits = _cosine_top_k(qvec, [(r["embedding"], r) for r in rows], k)
     return [{"id": r["id"], "text": r["text"], "score": round(score, 4)} for score, r in hits]
+
+
+# ── GraphQL transport (write paths) ───────────────────────────────────────────
+
+def _global_id(type_name: str, raw_id: str) -> str:
+    """Relay GlobalID — base64("TypeName:rawId"), what the mutations expect."""
+    import base64
+
+    return base64.b64encode(f"{type_name}:{raw_id}".encode()).decode()
+
+
+def api(query: str, variables: dict | None = None) -> dict:
+    """POST a GraphQL query/mutation to the local server and return `data`.
+
+    The endpoint comes from $JARVIS_API_URL (default http://127.0.0.1:8000/graphql).
+    Raises RuntimeError carrying the server's message on a GraphQL error.
+    """
+    import httpx
+
+    url = os.environ.get("JARVIS_API_URL") or DEFAULT_API_URL
+    try:
+        resp = httpx.post(
+            url, json={"query": query, "variables": variables or {}}, timeout=30.0
+        )
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Could not reach the Jarvis API at {url}: {exc}") from exc
+    resp.raise_for_status()
+    payload = resp.json()
+    if payload.get("errors"):
+        messages = "; ".join(e.get("message", str(e)) for e in payload["errors"])
+        raise RuntimeError(f"GraphQL error: {messages}")
+    return payload.get("data") or {}
+
+
+def _camel(payload: dict) -> dict:
+    """snake_case kwargs -> camelCase GraphQL input keys, dropping Nones."""
+    out = {}
+    for key, value in payload.items():
+        if value is None:
+            continue
+        head, *rest = key.split("_")
+        out[head + "".join(p.title() for p in rest)] = value
+    return out
+
+
+# ── Automations ───────────────────────────────────────────────────────────────
+
+def list_automations() -> list[dict]:
+    """All automations with id, name, input_type, schedule, enabled."""
+    with _connect() as conn:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT id, name, description, input_type, schedule, enabled, stateful"
+                " FROM automations ORDER BY name"
+            )
+        ]
+
+
+def create_automation(
+    name: str,
+    input_type: str,
+    prompt_text: str | None = None,
+    schedule: str | None = None,
+    model: str | None = None,
+    code_text: str | None = None,
+    webhook_url: str | None = None,
+    webhook_method: str | None = None,
+    webhook_headers: str | None = None,
+    webhook_body: str | None = None,
+    description: str | None = None,
+    enabled: bool = True,
+    stateful: bool = False,
+) -> dict:
+    """Create an automation — a task that runs on a cron schedule or on demand.
+
+    input_type:
+      "prompt"  — an agent run; set prompt_text (+ optional model, stateful=True
+                  to share one conversation across runs).
+      "code"    — set code_text; runs as a Python subprocess.
+      "webhook" — set webhook_url (+ method / headers-JSON / body).
+      "monitor" — always-stateful prompt run that watches prompt_text's target
+                  (e.g. "NVDA close; alert below 150") and notifies only on change.
+    schedule is a cron expression ("0 9 * * *" = daily 9am); None = manual only.
+    """
+    data = api(
+        "mutation($input: AutomationInput!) { createAutomation(input: $input)"
+        " { id name inputType schedule enabled } }",
+        {
+            "input": _camel(
+                dict(
+                    name=name,
+                    input_type=input_type,
+                    prompt_text=prompt_text,
+                    schedule=schedule,
+                    model=model,
+                    code_text=code_text,
+                    webhook_url=webhook_url,
+                    webhook_method=webhook_method,
+                    webhook_headers=webhook_headers,
+                    webhook_body=webhook_body,
+                    description=description,
+                    enabled=enabled,
+                    stateful=stateful,
+                )
+            )
+        },
+    )
+    return data["createAutomation"]
+
+
+def update_automation(automation_id: str, **fields) -> dict:
+    """Update an automation. Pass only the fields to change.
+
+    The mutation takes a whole AutomationInput, so current values are read
+    first and merged with `fields`. Keys are the create_automation arg names.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT name, description, input_type, prompt_text, model, code_text,"
+            " webhook_url, webhook_method, webhook_headers, webhook_body,"
+            " schedule, enabled, stateful FROM automations WHERE id = ?",
+            (automation_id,),
+        ).fetchone()
+    if row is None:
+        raise LookupError(f"Automation not found: {automation_id}")
+    merged = dict(row)
+    merged.update(fields)
+    merged["enabled"] = bool(merged["enabled"])
+    merged["stateful"] = bool(merged["stateful"])
+    data = api(
+        "mutation($id: ID!, $input: AutomationInput!) {"
+        " updateAutomation(id: $id, input: $input) { id name schedule enabled } }",
+        {"id": _global_id("Automation", automation_id), "input": _camel(merged)},
+    )
+    return data["updateAutomation"]
+
+
+def delete_automation(automation_id: str) -> bool:
+    """Delete an automation by id."""
+    data = api(
+        "mutation($id: ID!) { deleteAutomation(id: $id) }",
+        {"id": _global_id("Automation", automation_id)},
+    )
+    return bool(data["deleteAutomation"])
+
+
+# ── Task board (create; complete/block stay bound tools) ──────────────────────
+
+def create_task(
+    title: str,
+    body: str,
+    priority: int = 0,
+    depends_on: list[str] | None = None,
+    model: str | None = None,
+    skill: str | None = None,
+    start: bool = True,
+    decompose: bool = False,
+) -> dict:
+    """Create a durable board task that runs in the background on its own agent.
+
+    depends_on: ids of tasks that must finish first; their completion summaries
+    are handed to this task as context. start=False parks it in todo.
+    decompose=True has a planner split it into parallel subtasks, with this
+    task running last as the synthesis step (cannot combine with depends_on).
+    For an in-conversation checklist use the write_todos tool instead.
+    """
+    if decompose and depends_on:
+        raise ValueError("decompose cannot be combined with depends_on")
+    data = api(
+        "mutation($input: BoardTaskInput!) { createBoardTask(input: $input)"
+        " { id title status } }",
+        {
+            "input": _camel(
+                dict(
+                    title=title,
+                    body=body,
+                    priority=priority,
+                    parent_ids=[_global_id("BoardTask", p) for p in (depends_on or [])] or None,
+                    model=model,
+                    skill=skill,
+                    start=False if decompose else start,
+                )
+            )
+        },
+    )
+    task = data["createBoardTask"]
+    if decompose:
+        api(
+            "mutation($id: ID!) { decomposeBoardTask(id: $id) { id title } }",
+            {"id": task["id"]},
+        )
+    return task
+
+
+# ── Workflows (run_workflow stays a bound tool) ───────────────────────────────
+
+def list_workflows() -> list[dict]:
+    """All saved workflows with id, name, description."""
+    with _connect() as conn:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT id, name, description FROM workflows ORDER BY name"
+            )
+        ]
+
+
+def read_workflow(workflow_id: str) -> dict:
+    """A workflow including its full `definition` JSON (nodes + edges)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, name, description, definition FROM workflows WHERE id = ?",
+            (workflow_id,),
+        ).fetchone()
+    if row is None:
+        raise LookupError(f"Workflow not found: {workflow_id}")
+    return dict(row)
+
+
+def create_workflow(name: str, definition: str | dict, description: str | None = None) -> dict:
+    """Create a workflow — a graph of nodes for multi-step pipelines.
+
+    definition is JSON (dict or string) with `nodes` + `edges` lists. Node
+    types include agent / conditional / map / start / router / sequential /
+    parallel / loop / approval / planner.
+    """
+    if isinstance(definition, dict):
+        definition = json.dumps(definition)
+    data = api(
+        "mutation($input: WorkflowCreateInput!) { createWorkflow(input: $input)"
+        " { id name } }",
+        {"input": _camel(dict(name=name, definition=definition, description=description))},
+    )
+    return data["createWorkflow"]
+
+
+def update_workflow(workflow_id: str, **fields) -> dict:
+    """Update a workflow. Pass only what changes: name, description, definition."""
+    if isinstance(fields.get("definition"), dict):
+        fields["definition"] = json.dumps(fields["definition"])
+    data = api(
+        "mutation($id: ID!, $input: WorkflowUpdateInput!) {"
+        " updateWorkflow(id: $id, input: $input) { id name } }",
+        {"id": _global_id("Workflow", workflow_id), "input": _camel(fields)},
+    )
+    return data["updateWorkflow"]
+
+
+def delete_workflow(workflow_id: str) -> bool:
+    """Delete a workflow by id."""
+    data = api(
+        "mutation($id: ID!) { deleteWorkflow(id: $id) }",
+        {"id": _global_id("Workflow", workflow_id)},
+    )
+    return bool(data["deleteWorkflow"])
+
+
+# ── Skills ────────────────────────────────────────────────────────────────────
+
+def list_skills() -> list[dict]:
+    """All skills with id, name, description, enabled (bodies not included)."""
+    with _connect() as conn:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT id, name, description, enabled FROM skills ORDER BY name"
+            )
+        ]
+
+
+def use_skill(name: str) -> str:
+    """Load a saved skill's full body — the procedure to follow."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT body, enabled FROM skills WHERE name = ?", (name,)
+        ).fetchone()
+    if row is None:
+        raise LookupError(f"Skill not found: {name}. Use jarvis.list_skills() to see them.")
+    return row["body"]
+
+
+def create_skill(name: str, description: str, body: str, enabled: bool = True) -> dict:
+    """Save a reusable procedure you can reload later with use_skill(name).
+
+    name: unique kebab-case handle. description: one line on WHEN to use it —
+    the routing key matched against future intent, so make it trigger-oriented.
+    body: the full markdown procedure; only loaded on use, so be detailed.
+    """
+    data = api(
+        "mutation($input: SkillCreateInput!) { createSkill(input: $input) { id name } }",
+        {"input": _camel(dict(name=name, description=description, body=body, enabled=enabled))},
+    )
+    return data["createSkill"]
+
+
+def update_skill(skill_id: str, **fields) -> dict:
+    """Update a skill. Pass only what changes: name, description, body, enabled.
+
+    Changing the description re-embeds it for intent retrieval.
+    """
+    data = api(
+        "mutation($id: ID!, $input: SkillUpdateInput!) {"
+        " updateSkill(id: $id, input: $input) { id name } }",
+        {"id": _global_id("Skill", skill_id), "input": _camel(fields)},
+    )
+    return data["updateSkill"]
+
+
+def delete_skill(skill_id: str) -> bool:
+    """Delete a skill by id."""
+    data = api(
+        "mutation($id: ID!) { deleteSkill(id: $id) }",
+        {"id": _global_id("Skill", skill_id)},
+    )
+    return bool(data["deleteSkill"])
+
+
+# ── Project memory ────────────────────────────────────────────────────────────
+
+def project_memory(action: str = "read", content: str | None = None) -> str:
+    """Read or update the shared memory of this conversation's project.
+
+    A free-text notepad shared by every conversation in the project, injected
+    into your context each turn. Store ONLY facts tied to THIS project — its
+    stack, architecture decisions, conventions, key paths, goals. Global facts
+    (user info, general prefs) belong in the `remember` tool instead.
+
+    action: "read" | "append" (add a note) | "write" (replace the whole memory).
+    """
+    if not _project_id:
+        return "This conversation does not belong to a project — project memory is unavailable."
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT memory FROM projects WHERE id = ?", (_project_id,)
+        ).fetchone()
+    current = (row["memory"] if row else "") or ""
+    if action == "read":
+        return current or "(project memory is empty)"
+    if action not in ("append", "write"):
+        raise ValueError(f"unknown action {action!r}; use read, append, or write")
+    if not content:
+        raise ValueError(f"{action} requires content")
+    new = f"{current.rstrip()}\n\n{content}".strip() if action == "append" else content
+    api(
+        "mutation($id: ID!, $input: ProjectUpdateInput!) {"
+        " updateProject(id: $id, input: $input) { id } }",
+        {"id": _global_id("Project", _project_id), "input": {"memory": new}},
+    )
+    return f"Project memory updated ({len(new)} chars)."
+
+
+# ── Discovery ─────────────────────────────────────────────────────────────────
+
+_CATEGORIES: dict[str, tuple[str, list]] = {
+    "artifacts": (
+        "read/list saved deliverables (write_artifact stays a tool)",
+        [list_artifacts, read_artifact, list_artifact_versions],
+    ),
+    "documents": (
+        "search/read large attached documents that were indexed",
+        [search_documents, read_document],
+    ),
+    "automations": (
+        "scheduled or on-demand tasks (cron, code, webhook, monitor)",
+        [list_automations, create_automation, update_automation, delete_automation],
+    ),
+    "board": (
+        "durable background tasks that run on their own agent",
+        [list_tasks, create_task],
+    ),
+    "workflows": (
+        "multi-step node graphs (run_workflow stays a tool)",
+        [list_workflows, read_workflow, create_workflow, update_workflow, delete_workflow],
+    ),
+    "skills": (
+        "saved reusable procedures you can author and reload",
+        [list_skills, use_skill, create_skill, update_skill, delete_skill],
+    ),
+    "memory": (
+        "long-term facts and per-project shared memory",
+        [search_memory, project_memory],
+    ),
+}
+
+
+def help(category: str | None = None) -> str:  # noqa: A001 — deliberate `jarvis.help`
+    """List what the jarvis SDK can do. Call with a category name for signatures."""
+    import inspect
+
+    if category is None:
+        lines = ["jarvis SDK — call jarvis.help('<category>') for full signatures.", ""]
+        lines += [f"  {name:<12} {blurb}" for name, (blurb, _) in _CATEGORIES.items()]
+        return "\n".join(lines)
+
+    key = category.strip().lower()
+    if key not in _CATEGORIES:
+        return f"Unknown category {category!r}. Available: {', '.join(_CATEGORIES)}"
+    blurb, funcs = _CATEGORIES[key]
+    out = [f"jarvis.{key} — {blurb}", ""]
+    for fn in funcs:
+        out.append(f"jarvis.{fn.__name__}{inspect.signature(fn)}")
+        doc = inspect.getdoc(fn) or ""
+        out += [f"    {line}" for line in doc.splitlines()]
+        out.append("")
+    return "\n".join(out).rstrip()

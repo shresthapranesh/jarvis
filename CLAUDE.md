@@ -97,31 +97,30 @@ jarvis/
 ├── core/
 │   ├── workflow_template.py  # Jinja2 expression engine — {{inputs.*}}, {{nodes.*}}, {{workflow.*}} + filters
 │   ├── planning.py           # ADK planning analog — should_plan_for_query(), planning directive injection
-├── tools/                # The main agent is CODE-FIRST: it binds only the [bound] tools
-│   │                     #   below — write paths that need the server process (stream events,
-│   │                     #   scheduler registration, checkpointer state, approval interrupts).
-│   │                     #   The READ surface lives in the kernel-preloaded `jarvis` SDK
-│   │                     #   (tools/sdk.py) reached through run_cell; web/finance/datetime/
-│   │                     #   browser work is plain Python in run_cell. [workers] = bound only
-│   │                     #   to worker roles (_ROLE_TOOLS); [unbound] = not wired anywhere.
+├── tools/                # The main agent is CODE-FIRST. Only tools coupled to the agent
+│   │                     #   GRAPH are [bound]; everything else lives in the kernel-preloaded
+│   │                     #   `jarvis` SDK (tools/sdk.py), discovered on demand via
+│   │                     #   jarvis.help(). See "Lazy tool loading" below.
+│   │                     #   [workers] = bound only to worker roles (_ROLE_TOOLS);
+│   │                     #   [unbound] = not wired anywhere.
 │   ├── code.py           # [bound] run_cell — stateful notebook session (per-conversation IPython kernel, core/kernels.py)
-│   ├── sdk.py            # [kernel-preloaded as `jarvis`] read-only sync SDK over a mode=ro sqlite
-│   │                     #   connection: list_artifacts/read_artifact/list_artifact_versions,
-│   │                     #   search_documents/read_document, list_tasks, search_memory.
-│   │                     #   Conversation scope injected per kernel (core/kernels.py run(),
-│   │                     #   fed by tools/code.py from ToolContext.conversation_id).
+│   ├── sdk.py            # [kernel-preloaded as `jarvis`] the lazy surface. Reads go direct to a
+│   │                     #   mode=ro sqlite connection; WRITES go through the server's own
+│   │                     #   GraphQL API (api()) so in-process side effects still fire.
+│   │                     #   help()/help(category) is the discovery entrypoint.
 │   ├── files.py          # [workers] read_file, write_file, list_files (main agent uses pathlib in run_cell)
-│   ├── artifacts.py      # [bound] write_artifact (versioned); read_artifact/list_artifacts are
-│                         #   [workers] + jarvis SDK for the main agent
-│   ├── todos.py          # [bound] write_todos, set_todo_status (per-conversation plan)
+│   ├── artifacts.py      # [bound] write_artifact (versioned — its live event needs the run's
+│                         #   stream writer); reads are [workers] + jarvis SDK
+│   ├── todos.py          # [bound] write_todos, set_todo_status — return Command(update=...) state deltas
 │   ├── documents.py      # [workers] search_documents, read_document — main agent uses jarvis SDK
 │   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
-│   ├── automations.py    # [bound] manage_automations — CRUD via one action-dispatch tool
-│   ├── board.py          # [bound] create_task + complete_task/block_task (in-run only); list_tasks via jarvis SDK
-│   ├── workflows.py      # [bound] manage_workflows + run_workflow (Agent-as-Tool — ADK AgentTool analog)
-│   ├── skills.py         # [bound] use_skill + manage_skills (agent-authored skills)
-│   ├── projects.py       # [bound] project_memory (in-project-run only) — shared project notepad
-│   ├── memory.py         # [bound iff embedder] remember (writes); search via jarvis SDK
+│   ├── automations.py    # [unbound] manage_automations — superseded by jarvis.create_automation etc.
+│   ├── board.py          # [bound] complete_task/block_task (current-run lifecycle); create/list via jarvis SDK
+│   ├── workflows.py      # [bound] run_workflow (Agent-as-Tool); CRUD via jarvis SDK
+│   ├── skills.py         # [unbound] superseded by jarvis.use_skill / create_skill / …
+│   ├── projects.py       # [unbound] superseded by jarvis.project_memory
+│   ├── memory.py         # [bound iff embedder] remember (no createMemory mutation to route to);
+│   │                     #   search via jarvis SDK
 │   ├── context.py        # current_ctx() — per-call ToolContext (code_session_key, conversation_id)
 │   ├── research.py       # [kernel-preloaded] search() (Tavily/Brave, ddgs fallback) + read()
 │   │                     #   (trafilatura extraction, Playwright fallback) — plain sync helpers
@@ -261,6 +260,27 @@ Custom events (anything except `token`/`thinking_token`/`step`) are dispatched f
 
 ### Workflow events
 `node_start`, `node_token`, `node_condition`, `node_done`, `node_error`, `map_start`, `map_item_done`, `workflow_done`, `workflow_error`
+
+## Lazy tool loading (`tools/sdk.py`)
+Tool schemas are re-sent on **every** LLM call, and `should_use_cache()` only returns true for `bedrock`/`anthropic` — so on any other provider the whole bound set is re-billed each iteration. To keep that small, only graph-coupled tools stay bound; the rest live in the kernel-preloaded `jarvis` SDK and are **discovered on demand** (`jarvis.help()` → categories, `jarvis.help("<category>")` → signatures). First-turn input went 9,051 → 5,690 tokens (bound schemas 5,781 → 2,118).
+
+**Two transports, chosen by what the operation needs:**
+- **Reads** → direct `mode=ro` sqlite connection (cannot take write locks against the server) + `core.doc_index.get_embedder()` for semantic search.
+- **Writes** → the server's own GraphQL API over HTTP (`jarvis.api()`), endpoint from `$JARVIS_API_URL` (default `http://127.0.0.1:8000/graphql` — **set this if you run uvicorn on another port**). A direct DB write from the kernel would persist the row but silently skip the in-process side effects that make it real: `_register_scheduler_job` (the cron would never fire) and `dispatch_board_tasks()`. Routing through the mutation also inherits its argument validation. Mutations take Relay `GlobalID`s, so the SDK encodes `base64("TypeName:rawId")` via `_global_id()`.
+
+**What must stay bound, and why** — the rule is *coupling to the agent graph*, not "is it a write":
+| Tool | Why it can't move |
+|---|---|
+| `run_cell` | the door into the kernel |
+| `write_todos` / `set_todo_status` | return `Command(update=...)` state deltas; a separate process cannot write the reducer |
+| `complete_task` / `block_task` | act on the **current run's** lifecycle via `ToolContext.board_task_id` |
+| `spawn_workers` / `run_workflow` | instantiate subgraphs bound to this agent's LLM |
+| `write_artifact` | its live side-panel event goes through this run's stream writer |
+| `remember` | there is no `createMemory` mutation to route to (only `updateMemoryItem`) |
+
+Scope (`conversation_id`, `project_id`) is injected per kernel by `core/kernels.py:KernelSession.run()`, fed from `ToolContext` by `tools/code.py`, and re-injected after a kernel restart (`_sdk_scope`). Note it uses `conversation_id`, **not** the kernel key — workers override the key but must still resolve the parent conversation.
+
+**Adding to the SDK:** define the function in `tools/sdk.py`, then register it in `_CATEGORIES` — `help()` renders signatures from `inspect.signature` + the docstring, so the docstring is the only documentation and costs zero tokens until discovered. If it needs a server-side side effect, add/route through a GraphQL mutation rather than writing the DB directly.
 
 ## Safety Posture
 There are **no runtime LLM safety gates** — the per-turn input/output judge (`core/safety.py`) and the earlier per-tool-call judge were both removed. Safety rests on two layers instead: the agent's operating constraints in `core/system_prompt.md` (no secret exfiltration, no secrets in replies, no working harm, injection resistance) and deployment isolation (run the app in a container / on an isolated box). Historical messages persisted with status `blocked` by the old gates still render with a banner in `MessageBubble.tsx`.

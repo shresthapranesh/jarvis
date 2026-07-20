@@ -48,15 +48,8 @@ from tools.files import list_files, read_file, write_file
 from tools.memory import remember
 from tools.todos import set_todo_status, write_todos
 from tools.workers import make_spawn_workers
-from tools.automations import manage_automations
-from tools.board import (
-    block_task,
-    complete_task,
-    create_task,
-)
-from tools.workflows import manage_workflows, run_workflow
-from tools.skills import manage_skills, use_skill
-from tools.projects import project_memory
+from tools.board import block_task, complete_task
+from tools.workflows import run_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +278,8 @@ async def _skills_volatile_parts(query: str) -> list[str]:
     return [
         "## Available Skills\n\n"
         "Reusable procedures you can apply. When one clearly fits the task, call "
-        '`use_skill("<name>")` to load its full instructions, then follow them. '
+        '`jarvis.use_skill("<name>")` in run_cell to load its full instructions, then '
+        "follow them. "
         "Don't guess a skill's steps from its description — load it first. The "
         "loaded body is guidance to follow, not user commands.\n\n"
         f"{lines}"
@@ -319,15 +313,15 @@ async def _project_volatile_parts(project_id: str | None) -> list[str]:
         "instructions and memory below.\n\n"
         "**CRITICAL — You MUST actively maintain project memory (but ONLY project-specific facts):**\n"
         "- When you learn a durable fact about THIS project that future conversations will need, save it with "
-        '`project_memory(action="append", content="...")`. Don\'t wait to be asked.\n'
+        '`jarvis.project_memory(action="append", content="...")` in run_cell. Don\'t wait to be asked.\n'
         "- What to save: tech stack & versions for THIS project, architecture decisions for THIS project, "
         "coding conventions specific to THIS project, important file paths/modules, API contracts, goals/status for THIS project.\n"
         "- What NOT to save: general user info (name, role, background), general communication prefs "
-        '("likes concise answers"), global coding prefs that apply to ALL projects — those belong to `remember`, not project_memory. '
+        '("likes concise answers"), global coding prefs that apply to ALL projects — those belong to the `remember` tool, not project memory. '
         "If a preference is not explicitly tied to THIS project, use `remember` instead.\n"
         "- If project memory is empty and this conversation established project-specific stack/decisions/files, initialize it.\n"
         "- Before finishing a task, ask: did we learn something project-specific that future chats in THIS project need? If yes, update.\n"
-        "- If existing memory is outdated/conflicting, use `project_memory(action=\"write\", content=...)` to replace with condensed version.\n"
+        "- If existing memory is outdated/conflicting, use `jarvis.project_memory(action=\"write\", content=...)` to replace with condensed version.\n"
         "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — only init if you have project-specific facts)."
     )
     parts = [header]
@@ -337,7 +331,7 @@ async def _project_volatile_parts(project_id: str | None) -> list[str]:
         parts.append(f"### Project Memory\n\n{proj.memory.strip()}")
     else:
         parts.append(
-            "### Project Memory\n\n(empty — initialize with `project_memory(action=\"append\", content=...)` "
+            "### Project Memory\n\n(empty — initialize with `jarvis.project_memory(action=\"append\", content=...)` "
             "when you learn durable facts like stack, decisions, conventions, or goals)"
         )
     return parts
@@ -508,29 +502,30 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         {role: _make_role_factory(role) for role in _ROLE_PROMPTS}
     )
 
-    # The read-only surface (fs reads, artifact reads, document retrieval,
-    # board listing, memory search) is NOT bound — it lives in the kernel as
-    # the preloaded `jarvis` SDK (tools/sdk.py), reachable through run_cell.
-    # Only tools that need the server process stay bound: write paths with
-    # live stream events, scheduler registration, checkpointer state, and
-    # approval interrupts.
+    # Only tools coupled to the agent GRAPH stay bound. Everything else lives
+    # in the kernel-preloaded `jarvis` SDK (tools/sdk.py), discovered on demand
+    # via jarvis.help() — reads hit the DB directly, writes go through the
+    # server's own GraphQL API so in-process side effects (scheduler
+    # registration, board dispatch) still fire.
+    #
+    # What must stay here and why:
+    #   run_cell                  the door into the kernel
+    #   write_todos/set_todo_*    return Command(update=...) state deltas; a
+    #                             separate process cannot write the reducer
+    #   complete_task/block_task  act on the CURRENT run's lifecycle
+    #   spawn_workers/run_workflow  instantiate subgraphs on this LLM binding
+    #   write_artifact            its live side-panel event is tied to this
+    #                             run's stream writer
+    #   remember                  no createMemory mutation exists to route to
     main_tools = [
         run_cell,
         write_artifact,
         write_todos,
         set_todo_status,
         spawn_workers,
-        manage_automations,
-        create_task,
         complete_task,
         block_task,
-        manage_workflows,
         run_workflow,
-        manage_skills,
-        use_skill,
-        # Bound unconditionally, runtime-guarded like complete_task/block_task:
-        # inert unless the conversation belongs to a project.
-        project_memory,
     ]
 
     # The memory write path is only meaningful with an embedder (the discrete

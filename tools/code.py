@@ -48,11 +48,10 @@ async def run_cell(code: str) -> str:
     Timeout: 60s per cell. On timeout the kernel is interrupted but your
     session state (variables, imports) is preserved, so you can continue.
 
-    Preloaded: search(query) / read(url) for the web, plus the `jarvis` read
-    SDK — jarvis.list_artifacts() / read_artifact(id, version=None) /
-    list_artifact_versions(id) / search_documents(query) /
-    read_document(id, offset=0) / list_tasks(status=None) /
-    search_memory(query).
+    Preloaded: search(query) / read(url) for the web, plus the `jarvis` SDK
+    for platform work — artifacts, documents, automations, board tasks,
+    workflows, skills, memory. Run `jarvis.help()` to see the categories and
+    `jarvis.help("<category>")` for full signatures.
     """
     ctx = current_ctx()
     key = ctx.code_session_key
@@ -61,9 +60,14 @@ async def run_cell(code: str) -> str:
     start = time.monotonic()
     logger.info("→ run_cell [%s] (%d chars)", key, len(code))
     # conversation_id (not the kernel key — workers override that) scopes the
-    # kernel-preloaded `jarvis` read SDK to this conversation.
+    # kernel-preloaded `jarvis` SDK to this conversation; project_id gates its
+    # project_memory the same way the bound tool was gated.
     result = await get_kernel_registry().run_cell(
-        key, code, timeout=DEFAULT_CELL_TIMEOUT, conversation_id=ctx.conversation_id
+        key,
+        code,
+        timeout=DEFAULT_CELL_TIMEOUT,
+        conversation_id=ctx.conversation_id,
+        project_id=ctx.project_id,
     )
     logger.info("← run_cell [%s] (%d chars, %.0fms)", key, len(result), (time.monotonic() - start) * 1000)
     return result
