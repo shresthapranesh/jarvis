@@ -38,7 +38,6 @@ from core.doc_index import embeddings_available
 from core.memory_store import load_core, search_memory
 from core.skill_store import skill_catalog
 from tools.artifacts import (
-    list_artifact_versions,
     list_artifacts as artifact_list,
     read_artifact,
     write_artifact,
@@ -46,7 +45,7 @@ from tools.artifacts import (
 from tools.code import run_cell
 from tools.documents import read_document, search_documents
 from tools.files import list_files, read_file, write_file
-from tools.memory import remember, search_memory as search_memory_tool
+from tools.memory import remember
 from tools.todos import set_todo_status, write_todos
 from tools.workers import make_spawn_workers
 from tools.automations import manage_automations
@@ -54,7 +53,6 @@ from tools.board import (
     block_task,
     complete_task,
     create_task,
-    list_tasks,
 )
 from tools.workflows import manage_workflows, run_workflow
 from tools.skills import manage_skills, use_skill
@@ -241,16 +239,16 @@ async def _memory_volatile_parts(store, query: str) -> list[str]:
 
     # Lead with a short how-to so the agent knows it can WRITE memory, not just
     # read the items injected below. Gated on embeddings_available() (same
-    # condition as the remember/search_memory tool binding in _build_agent) so
-    # we never advertise tools that aren't bound on keyless setups.
+    # condition as the remember tool binding in _build_agent) so we never
+    # advertise tools that aren't bound on keyless setups.
     parts: list[str] = [
         "## Memory\n\n"
         "You have long-term memory that persists across conversations. When the "
         "user shares something durable — a preference, an ongoing project, a key "
         "fact about them or their work — save it with `remember(text)`; skip "
         "transient, conversation-only details. The most relevant memories are "
-        "injected below automatically; call `search_memory(query)` to dig for "
-        "something specific that hasn't surfaced."
+        "injected below automatically; run `jarvis.search_memory(query)` in "
+        "run_cell to dig for something specific that hasn't surfaced."
     ]
     if core:
         parts.append(f"## Agent Memory\n\n{core}")
@@ -510,23 +508,20 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         {role: _make_role_factory(role) for role in _ROLE_PROMPTS}
     )
 
+    # The read-only surface (fs reads, artifact reads, document retrieval,
+    # board listing, memory search) is NOT bound — it lives in the kernel as
+    # the preloaded `jarvis` SDK (tools/sdk.py), reachable through run_cell.
+    # Only tools that need the server process stay bound: write paths with
+    # live stream events, scheduler registration, checkpointer state, and
+    # approval interrupts.
     main_tools = [
         run_cell,
-        read_file,
-        write_file,
-        list_files,
         write_artifact,
-        read_artifact,
-        artifact_list,
-        list_artifact_versions,
         write_todos,
         set_todo_status,
-        search_documents,
-        read_document,
         spawn_workers,
         manage_automations,
         create_task,
-        list_tasks,
         complete_task,
         block_task,
         manage_workflows,
@@ -538,11 +533,12 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         project_memory,
     ]
 
-    # Long-term memory tools are only meaningful with an embedder (the discrete
+    # The memory write path is only meaningful with an embedder (the discrete
     # Memory store); keyless setups fall back to the AGENTS.md blob, so don't
-    # advertise tools that would only ever report themselves unavailable.
+    # advertise a tool that would only ever report itself unavailable.
+    # (search_memory moved into the kernel SDK.)
     if embeddings_available():
-        main_tools += [remember, search_memory_tool]
+        main_tools.append(remember)
 
     # MCP tools (MCP toolset) — loaded from env/file config via core/mcp.py.
     # Returns [] when no MCP servers configured, so agent works without MCP.

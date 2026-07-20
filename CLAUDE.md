@@ -98,22 +98,30 @@ jarvis/
 │   ├── workflow_template.py  # Jinja2 expression engine — {{inputs.*}}, {{nodes.*}}, {{workflow.*}} + filters
 │   ├── planning.py           # ADK planning analog — should_plan_for_query(), planning directive injection
 ├── tools/                # The main agent is CODE-FIRST: it binds only the [bound] tools
-│   │                     #   below; web/finance/datetime/browser work is done by writing
-│   │                     #   Python in run_cell, NOT via dedicated tools. [unbound] files
-│   │                     #   exist but are not wired into the agent (see core/agents.py main_tools).
+│   │                     #   below — write paths that need the server process (stream events,
+│   │                     #   scheduler registration, checkpointer state, approval interrupts).
+│   │                     #   The READ surface lives in the kernel-preloaded `jarvis` SDK
+│   │                     #   (tools/sdk.py) reached through run_cell; web/finance/datetime/
+│   │                     #   browser work is plain Python in run_cell. [workers] = bound only
+│   │                     #   to worker roles (_ROLE_TOOLS); [unbound] = not wired anywhere.
 │   ├── code.py           # [bound] run_cell — stateful notebook session (per-conversation IPython kernel, core/kernels.py)
-│   ├── files.py          # [bound] read_file, write_file, list_files
-│   ├── artifacts.py      # [bound] write_artifact (versioned), read_artifact (version param),
-│                         #   list_artifacts, list_artifact_versions
+│   ├── sdk.py            # [kernel-preloaded as `jarvis`] read-only sync SDK over a mode=ro sqlite
+│   │                     #   connection: list_artifacts/read_artifact/list_artifact_versions,
+│   │                     #   search_documents/read_document, list_tasks, search_memory.
+│   │                     #   Conversation scope injected per kernel (core/kernels.py run(),
+│   │                     #   fed by tools/code.py from ToolContext.conversation_id).
+│   ├── files.py          # [workers] read_file, write_file, list_files (main agent uses pathlib in run_cell)
+│   ├── artifacts.py      # [bound] write_artifact (versioned); read_artifact/list_artifacts are
+│                         #   [workers] + jarvis SDK for the main agent
 │   ├── todos.py          # [bound] write_todos, set_todo_status (per-conversation plan)
-│   ├── documents.py      # [bound] search_documents, read_document (retrieval over indexed attachments)
+│   ├── documents.py      # [workers] search_documents, read_document — main agent uses jarvis SDK
 │   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
 │   ├── automations.py    # [bound] manage_automations — CRUD via one action-dispatch tool
-│   ├── board.py          # [bound] create_task/list_tasks (task board) + complete_task/block_task (in-run only)
+│   ├── board.py          # [bound] create_task + complete_task/block_task (in-run only); list_tasks via jarvis SDK
 │   ├── workflows.py      # [bound] manage_workflows + run_workflow (Agent-as-Tool — ADK AgentTool analog)
 │   ├── skills.py         # [bound] use_skill + manage_skills (agent-authored skills)
 │   ├── projects.py       # [bound] project_memory (in-project-run only) — shared project notepad
-│   ├── memory.py         # [bound iff embedder] remember, search_memory (discrete vector memory)
+│   ├── memory.py         # [bound iff embedder] remember (writes); search via jarvis SDK
 │   ├── context.py        # current_ctx() — per-call ToolContext (code_session_key, conversation_id)
 │   ├── research.py       # [kernel-preloaded] search() (Tavily/Brave, ddgs fallback) + read()
 │   │                     #   (trafilatura extraction, Playwright fallback) — plain sync helpers

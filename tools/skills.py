@@ -130,21 +130,13 @@ async def manage_skills(
     """List, create, update, or delete reusable skills (saved procedures you
     can reload later with use_skill).
 
-    For update, pass skill_id plus only the fields to change. Changing the
-    description re-embeds the skill for intent retrieval.
-
-    Args:
-        action: One of "list", "create", "update", "delete".
-        skill_id: Target skill id (required for update/delete).
-        name: Unique short handle, kebab-case recommended
-            (e.g. "weekly-market-recap"). Required for create.
-        description: One line on WHEN to use this skill — the routing key
-            matched against user intent, so make it specific and
-            trigger-oriented. Required for create.
-        body: The full procedure/instructions in markdown. Loaded only when
-            the skill is invoked, so it can be as detailed as needed.
-            Required for create.
-        enabled: Whether the skill is active. Create default True.
+    action: "list" | "create" | "update" | "delete".
+    create requires name (unique kebab-case handle), description (one line on
+    WHEN to use it — the routing key matched against future intent, so make it
+    trigger-oriented), and body (the full markdown procedure; loaded only on
+    invoke, so as detailed as needed). update takes skill_id plus only the
+    fields to change — changing description re-embeds it for retrieval.
+    delete takes skill_id.
     """
     action = (action or "").strip().lower()
     if action == "list":

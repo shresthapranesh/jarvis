@@ -32,28 +32,23 @@ async def create_task(
 ) -> str:
     """Create a durable task on the shared task board.
 
-    The task runs in the background on its own agent loop (with its own
-    conversation), independent of this chat. Use it to queue follow-up work,
-    fan a big job out into pieces, or hand work to a later time. For an
-    in-conversation checklist use write_todos instead.
+    The task runs in the background on its own agent loop and conversation,
+    independent of this chat — use it to queue follow-up work or fan a big job
+    into pieces. For an in-conversation checklist use write_todos instead.
 
     Args:
-        title: Short imperative title, e.g. "Summarize Q2 earnings reports".
-        body: Full instructions for the agent that will execute the task.
-        priority: Higher runs first when the board is busy. Default 0.
-        depends_on: Comma-separated ids of tasks that must finish first; this
-                    task starts automatically once they are all done, and their
-                    completion summaries are handed to it as context.
-        model: Model id to run with; None = the default model.
-        skill: Name of a saved skill the task's agent should follow.
-        start: If True (default) the task is dispatched as soon as there is
-               capacity; if False it is parked in the todo column until a
-               human (or update) readies it. Ignored when depends_on is set —
-               dependent tasks always wait for their parents.
-        decompose: Have a planner LLM split the task into parallel subtasks;
-                   the task itself then runs last as the synthesis step,
-                   receiving every subtask's summary. Use for big multi-part
-                   goals. Cannot be combined with depends_on.
+        title: Short imperative title.
+        body: Full instructions for the executing agent.
+        priority: Higher runs first. Default 0.
+        depends_on: Comma-separated ids of tasks that must finish first; their
+                    completion summaries are handed to this task as context.
+        model: Model id; None = default.
+        skill: Saved skill name the task's agent should follow.
+        start: False parks it in todo until a human readies it. Ignored when
+               depends_on is set.
+        decompose: Have a planner split it into parallel subtasks; the task
+                   itself runs last as the synthesis step. Cannot be combined
+                   with depends_on.
     """
     parent_ids = [p.strip() for p in (depends_on or "").split(",") if p.strip()]
     if decompose and parent_ids:

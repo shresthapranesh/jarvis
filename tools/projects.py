@@ -30,32 +30,16 @@ _MEMORY_CAP = 24_000
 async def project_memory(action: str, content: str | None = None) -> str:
     """Read or update the shared memory of the project this conversation belongs to.
 
-    Project memory is a free-text notepad shared by every conversation in the
-    project. It is injected into your system prompt each turn, so edits are
-    visible on the very next LLM call.
+    A free-text notepad shared by every conversation in the project, injected
+    into your system prompt each turn — edits apply on the very next LLM call.
+    Store ONLY facts explicitly tied to THIS project: its stack, architecture
+    decisions, conventions, key file paths, goals/status. Anything global —
+    user info, communication style, general coding prefs — goes to `remember`
+    instead. Append project facts as you learn them; initialize the memory if
+    it's empty and you have some; use write to condense when it grows stale.
 
-    WHEN TO USE — only for facts explicitly tied to THIS project:
-    - Tech stack: "Stack for THIS project: FastAPI + Strawberry GraphQL, React 19 + Relay"
-    - Architecture decisions: "Decision for THIS project: durable SQLite job queue (Job table) instead of bare asyncio.create_task"
-    - Conventions: "Conventions for THIS project: GraphQL-first API; REST only for binary download. pnpm used in this repo."
-    - Important paths: "Key files in THIS project: core/agents.py=agent factory, server/chat_runtime.py=chat handler"
-
-    WHEN NOT TO USE — these belong to global memory via `remember`, NOT project_memory:
-    - User personal info: name, role, background
-    - General communication style: "likes concise answers"
-    - Global coding prefs: "prefers pnpm", "always use type hints" unless explicitly "for this project we use..."
-    - Any fact not explicitly tied to THIS project context
-
-    Rules:
-    - Prefer this over remember ONLY when fact is explicitly tied to THIS project. If global, use remember.
-    - If memory empty AND you have project-specific facts, initialize it. Don't init with general prefs.
-    - Before finishing, check if THIS project learned something project-specific that future chats need. If outdated, use write to condense.
-    - Keep content focused, no general memory pollution.
-
-    Args:
-        action: "read" | "append" (add a note at the end) | "write" (replace
-            the entire memory — use to reorganize or prune).
-        content: The text to append/write. Required for append/write.
+    action: "read" | "append" (add a note) | "write" (replace the whole memory).
+    content: required for append/write.
     """
     ctx = current_ctx()
     if not ctx.project_id:

@@ -47,12 +47,23 @@ async def run_cell(code: str) -> str:
 
     Timeout: 60s per cell. On timeout the kernel is interrupted but your
     session state (variables, imports) is preserved, so you can continue.
+
+    Preloaded: search(query) / read(url) for the web, plus the `jarvis` read
+    SDK — jarvis.list_artifacts() / read_artifact(id, version=None) /
+    list_artifact_versions(id) / search_documents(query) /
+    read_document(id, offset=0) / list_tasks(status=None) /
+    search_memory(query).
     """
-    key = current_ctx().code_session_key
+    ctx = current_ctx()
+    key = ctx.code_session_key
     if not key:
         return "No session context — code execution is unavailable here."
     start = time.monotonic()
     logger.info("→ run_cell [%s] (%d chars)", key, len(code))
-    result = await get_kernel_registry().run_cell(key, code, timeout=DEFAULT_CELL_TIMEOUT)
+    # conversation_id (not the kernel key — workers override that) scopes the
+    # kernel-preloaded `jarvis` read SDK to this conversation.
+    result = await get_kernel_registry().run_cell(
+        key, code, timeout=DEFAULT_CELL_TIMEOUT, conversation_id=ctx.conversation_id
+    )
     logger.info("← run_cell [%s] (%d chars, %.0fms)", key, len(result), (time.monotonic() - start) * 1000)
     return result

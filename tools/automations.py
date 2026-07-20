@@ -168,33 +168,16 @@ async def manage_automations(
 ) -> str:
     """List, create, update, or delete automations (scheduled or on-demand tasks).
 
-    For update, pass automation_id plus only the fields to change (an empty
-    string clears a text field like schedule).
-
-    Args:
-        action: One of "list", "create", "update", "delete".
-        automation_id: Target automation id (required for update/delete).
-        name: Human-readable name (required for create).
-        input_type: (create) "prompt" (LLM agent run), "code" (Python
-            subprocess), "webhook" (HTTP call), or "monitor" (watch something
-            and notify only when it changes — always stateful, stays silent
-            when nothing changed).
-        description: Optional short description.
-        prompt_text: (prompt) The query/instruction the agent will run.
-            (monitor) The target to watch, e.g. "NVDA closing price; alert
-            when it drops below 150".
-        model: (prompt/monitor) Model ID, e.g. "google_genai:gemini-2.5-pro".
-            None = use default.
-        code_text: (code) Python source code to execute.
-        webhook_url: (webhook) Target URL.
-        webhook_method: (webhook) HTTP method. Defaults to "POST".
-        webhook_headers: (webhook) JSON string of headers.
-        webhook_body: (webhook) Raw request body.
-        schedule: Cron expression for recurring runs, e.g. "0 9 * * *" =
-            daily 9am. None/empty = manual trigger only.
-        enabled: Whether the automation is active. Create default True.
-        stateful: (prompt) Share one conversation across runs so the agent
-            remembers previous runs. Monitors are always stateful.
+    action: "list" | "create" | "update" | "delete".
+    create requires name + input_type — "prompt" (agent run: prompt_text,
+    optional model id, stateful=True shares one conversation across runs),
+    "code" (code_text runs as a Python subprocess), "webhook" (webhook_url +
+    optional method/headers-JSON/body), or "monitor" (always-stateful prompt
+    run that watches prompt_text's target, e.g. "NVDA close; alert below 150",
+    and notifies only on change). schedule is a cron expression ("0 9 * * *" =
+    daily 9am); None/empty = manual trigger only. update takes automation_id
+    plus only the fields to change (empty string clears a text field).
+    delete takes automation_id.
     """
     action = (action or "").strip().lower()
     if action == "list":

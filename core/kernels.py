@@ -19,10 +19,11 @@ logger = logging.getLogger(__name__)
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # Preloaded into every kernel right after startup (silent, no history entry) so
-# the agent can call search()/read() (tools/research.py) without importing.
-# The project root is pinned onto sys.path so the `tools` package resolves no
-# matter what cwd the server was started from. Failure is non-fatal: the agent
-# just sees a NameError and can import/fetch manually.
+# the agent can call search()/read() (tools/research.py) and the `jarvis` read
+# SDK (tools/sdk.py) without importing. The project root is pinned onto
+# sys.path so the `tools` package resolves no matter what cwd the server was
+# started from. Failure is non-fatal: the agent just sees a NameError and can
+# import/fetch manually.
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 _BOOTSTRAP_CODE = (
     "try:\n"
@@ -31,6 +32,10 @@ _BOOTSTRAP_CODE = (
     "    if _root not in _sys.path:\n"
     "        _sys.path.insert(0, _root)\n"
     "    from tools.research import search, read\n"
+    "except Exception:\n"
+    "    pass\n"
+    "try:\n"
+    "    import tools.sdk as jarvis\n"
     "except Exception:\n"
     "    pass\n"
 )
@@ -54,6 +59,9 @@ class KernelSession:
         self.kc = None
         self.lock = asyncio.Lock()
         self.last_used = time.monotonic()
+        # Conversation id last injected into the jarvis SDK (tools/sdk.py) —
+        # reset on every (re)start so a restarted kernel gets re-scoped.
+        self._sdk_conversation: str | None = None
 
     async def _ensure_started(self) -> None:
         """Start the kernel if it isn't running (also restarts a dead one)."""
@@ -89,6 +97,7 @@ class KernelSession:
         # msg_id, so _drain_until_idle for real cells ignores it.
         kc.execute(_BOOTSTRAP_CODE, silent=True, store_history=False)
         self.km, self.kc = km, kc
+        self._sdk_conversation = None
         logger.info("kernel started for session %s", self.key)
 
     async def _drain_until_idle(self, msg_id: str, out: list[str]) -> None:
@@ -124,7 +133,12 @@ class KernelSession:
             elif mtype == "status" and content.get("execution_state") == "idle":
                 return
 
-    async def run(self, code: str, timeout: float = DEFAULT_CELL_TIMEOUT) -> str:
+    async def run(
+        self,
+        code: str,
+        timeout: float = DEFAULT_CELL_TIMEOUT,
+        conversation_id: str | None = None,
+    ) -> str:
         """Execute one cell, returning combined stdout/stderr/result/traceback text.
 
         Serialized via ``self.lock``. On timeout the kernel is interrupted
@@ -136,6 +150,20 @@ class KernelSession:
             self.last_used = time.monotonic()
             kc, km = self.kc, self.km
             assert kc is not None and km is not None
+            if conversation_id and conversation_id != self._sdk_conversation:
+                # Scope the jarvis read SDK to this run's conversation. Silent
+                # execute like the bootstrap; per-kernel the id is stable, so
+                # this fires once per (re)start.
+                kc.execute(
+                    "try:\n"
+                    "    import tools.sdk as _jarvis_sdk\n"
+                    f"    _jarvis_sdk.set_conversation({conversation_id!r})\n"
+                    "except Exception:\n"
+                    "    pass\n",
+                    silent=True,
+                    store_history=False,
+                )
+                self._sdk_conversation = conversation_id
             msg_id = kc.execute(code)
             out: list[str] = []
             interrupted = False
@@ -212,9 +240,15 @@ class KernelRegistry:
             await victim.shutdown()
         return session
 
-    async def run_cell(self, key: str, code: str, timeout: float = DEFAULT_CELL_TIMEOUT) -> str:
+    async def run_cell(
+        self,
+        key: str,
+        code: str,
+        timeout: float = DEFAULT_CELL_TIMEOUT,
+        conversation_id: str | None = None,
+    ) -> str:
         session = await self._get_or_create(key)
-        return await session.run(code, timeout=timeout)
+        return await session.run(code, timeout=timeout, conversation_id=conversation_id)
 
     async def shutdown(self, key: str) -> None:
         async with self._lock:
