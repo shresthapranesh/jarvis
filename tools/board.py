@@ -124,12 +124,11 @@ async def list_tasks(status: str | None = None) -> str:
 async def complete_task(summary: str, metadata: str | None = None) -> str:
     """Mark the board task you are currently executing as done.
 
-    Only valid inside a board-task run. Call this when the task's goal is
-    achieved — the summary (and optional metadata) is the handoff that
-    dependent tasks receive as context.
+    Only valid inside a board-task run. Call when the goal is achieved — the
+    summary (and optional metadata) is the handoff dependent tasks receive.
 
     Args:
-        summary: Concise handoff: what was done, where the results live.
+        summary: Concise handoff: what was done, where results live.
         metadata: Optional JSON object string with structured results,
                   e.g. '{"artifact": "...", "files": [...]}'.
     """
@@ -157,16 +156,15 @@ async def complete_task(summary: str, metadata: str | None = None) -> str:
 async def block_task(reason: str, needs_input: bool = False) -> str:
     """Mark the board task you are currently executing as blocked.
 
-    Only valid inside a board-task run. Call this when you cannot finish —
-    missing input, missing capability, or a decision only a human can make.
+    Only valid inside a board-task run. Call when you can't finish — missing
+    input/capability, or a decision only a human can make.
 
     Args:
-        reason: What is missing and what would unblock the task. When asking
-                the user something, phrase this as the question itself.
-        needs_input: Set True when a human answer would unblock the task —
-                     the board shows an answer box on the card, and the answer
-                     is delivered to you when the task resumes (same
-                     conversation, so you keep your context).
+        reason: What is missing and what would unblock it. When asking the
+                user, phrase this as the question itself.
+        needs_input: True when a human answer would unblock the task — the
+                     board shows an answer box, and the answer reaches you on
+                     resume (same conversation, context preserved).
     """
     ctx = current_ctx()
     if not ctx.board_task_id:

@@ -52,23 +52,16 @@ async def write_artifact(
 ) -> str:
     """Save a markdown deliverable (report, draft, document, resume, etc.).
 
-    Use this — not write_file — when the user asks for a finished document.
-    The frontend renders the artifact in a side panel that the user can read,
-    edit, copy, or download.
-
-    Versioning (ADK ArtifactService analog): each write creates a versioned
-    snapshot under artifacts_dir/{id}_v{version}.md and a DB row in
-    artifact_versions. The live file {id}.md always holds the latest version.
-    On first create, version 1 is the initial content. On update, previous
-    history is preserved and a new version is added.
+    Use this — not write_file — for a finished document the user will keep.
+    The frontend renders it in a side panel to read, edit, copy, or download.
+    Each write is versioned automatically.
 
     Args:
         title: Short human-readable title (shown in the side panel and library).
-        content: Markdown body. Use full headings, lists, tables — render-ready.
-        artifact_id: Pass to update an existing artifact in place (creates new
-            version). Omit to create a new one.
+        content: Markdown body — render-ready (headings, lists, tables).
+        artifact_id: Pass to update an existing artifact in place; omit to create.
 
-    Returns the artifact id and title as a JSON string the agent can refer to.
+    Returns the artifact id and title as JSON.
     """
     ctx = current_ctx()
     conversation_id = ctx.conversation_id

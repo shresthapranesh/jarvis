@@ -210,19 +210,14 @@ async def manage_workflows(
 
 @tool
 async def run_workflow(workflow_id: str, inputs_json: str | None = None) -> str:
-    """Execute a saved workflow as a sub-agent (ADK Agent-as-Tool pattern).
+    """Run a saved workflow as a sub-agent, returning its final outputs as JSON.
 
-    Loads the workflow by id, runs it with the given inputs, and returns its
-    final outputs as JSON. Use this to delegate multi-step work to a reusable
-    workflow you or the user built.
+    Delegates multi-step work to a reusable workflow you or the user built.
 
     Args:
-        workflow_id: ID of the workflow to run (from list_workflows / manage_workflows).
-        inputs_json: Optional JSON object string with input key-values for the
-            workflow's start nodes, e.g. '{"topic": "AI news"}'. Defaults to {}.
-
-    Returns:
-        JSON string of the workflow's terminal outputs, or an error message.
+        workflow_id: ID of the workflow to run.
+        inputs_json: Optional JSON object string of inputs for the start
+            nodes, e.g. '{"topic": "AI news"}'. Defaults to {}.
     """
     # Recursion guard: prevent workflow AgentNode -> run_workflow -> same workflow -> ...
     depth = _workflow_depth.get()

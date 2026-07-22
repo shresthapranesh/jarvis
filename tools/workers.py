@@ -90,28 +90,16 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
 
     @tool
     async def spawn_workers(tasks: list[dict]) -> str:
-        """Spawn multiple worker agents to run independent tasks concurrently.
+        """Spawn worker agents to run independent tasks concurrently; returns when all complete.
 
-        Each task is a dict with:
-          "task":    (required) natural-language description of what to do
-          "context": (optional) extra background the worker should know
-          "role":    (optional) one of "researcher", "coder", "writer", "general"
-                     — defaults to "general"
+        Each task is a dict:
+          "task":    (required) what to do
+          "context": (optional) extra background for the worker
+          "role":    (optional) "researcher", "coder", "writer", or "general"
+                     (default) — tunes the worker's prompt and tool subset
 
-        Roles tune the worker's prompt and tool subset:
-          - researcher → run_cell() + read_file. Best for finding/verifying facts.
-          - coder      → full toolset. Best for writing/editing code.
-          - writer     → read_file + write_file (no code). Best for prose.
-          - general    → full toolset, generic prompt. Fallback.
-
-        Workers run in parallel and return when all complete.
-
-        Example:
-          spawn_workers([
-            {"role": "researcher", "task": "Find current US/China/EU GDP"},
-            {"role": "researcher", "task": "Find current US/China/EU population"},
-            {"role": "writer", "task": "Draft a one-paragraph comparison"},
-          ])
+        Workers are separate agents and can't see your kernel variables — put
+        everything each one needs in its task/context.
         """
 
         # Propagate the parent's conversation_id so worker-side tools (e.g.
