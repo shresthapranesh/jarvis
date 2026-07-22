@@ -37,21 +37,12 @@ async def write_todos(
     todos: list[str],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Update your task list.
+    """Update your task list (REPLACES the entire list each call).
 
     Call at the start of complex multi-step work to plan, and update as you
-    complete steps. The current list is shown in your context on every turn,
-    and the user sees it live in their UI. Pass an empty list to clear.
-
-    Each call REPLACES the entire list. New items start as "pending"; use
-    `set_todo_status(index, status)` to mark progress without rewriting.
-
-    Example:
-      write_todos([
-        "Search for Q1 revenue figures",
-        "Compare with prior year",
-        "Write summary report",
-      ])
+    complete steps. The list shows in your context every turn and the user
+    sees it live. New items start "pending"; use set_todo_status(index,
+    status) to mark progress. Pass an empty list to clear.
     """
     items: list[dict] = [{"text": t, "status": "pending"} for t in todos]
     current_ctx().emit("todos_updated", todos=items)
@@ -69,10 +60,10 @@ async def set_todo_status(
     tool_call_id: Annotated[str, InjectedToolCallId],
     state: Annotated[dict, InjectedState],
 ) -> Command:
-    """Mark a single todo item as pending/in_progress/done by its 0-based index.
+    """Mark a single todo item pending/in_progress/done by its 0-based index.
 
-    Use to signal progress on a long-running task. The current list is shown
-    in your context every turn — read the indices from there.
+    Signals progress on a long task. Read indices from the list shown in your
+    context each turn.
     """
     todos = _normalise(state.get("todos"))
     if index < 0 or index >= len(todos):
