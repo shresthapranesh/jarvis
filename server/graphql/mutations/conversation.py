@@ -30,6 +30,10 @@ class StartTaskInput:
     # Raw project id (matches conversation_id's convention); applies only when
     # this call creates a new conversation.
     project_id: str | None = None
+    # Incognito: create the new conversation as ephemeral (hidden from history,
+    # no long-term-memory writes, hard-deleted on close). Applies only when this
+    # call creates the conversation; ignored when joining an existing one.
+    ephemeral: bool = False
 
 
 @strawberry.type
@@ -94,7 +98,7 @@ class ConversationMutation:
 
         task_id, conv_id = await register_chat_task(
             session, input.query, model, input.conversation_id, attachments,
-            project_id=input.project_id,
+            project_id=input.project_id, ephemeral=input.ephemeral,
         )
         # register_chat_task has now copied document bytes to documents_dir and
         # baked image/audio/video bytes into the message content; safe to drop
@@ -161,5 +165,23 @@ class ConversationMutation:
         id: relay.GlobalID,
     ) -> bool:
         session = info.context["session"]
+        await delete_conversation(session, id.node_id)
+        return True
+
+    @strawberry.mutation
+    async def discard_conversation(
+        self,
+        info: strawberry.Info,
+        id: relay.GlobalID,
+    ) -> bool:
+        """Tear down an incognito conversation (fire on tab-close / end-incognito).
+        Guarded to ephemeral rows so a stray call can never delete a real
+        conversation. No-ops (returns False) for non-ephemeral or missing rows."""
+        from db.models import Conversation
+
+        session = info.context["session"]
+        conv = await session.get(Conversation, id.node_id)
+        if conv is None or not conv.ephemeral:
+            return False
         await delete_conversation(session, id.node_id)
         return True

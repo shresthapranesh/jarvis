@@ -97,6 +97,7 @@ async def _run_agent_task(
 
     status = "error"
     project_id: str | None = None
+    ephemeral: bool = False
     _plugin_manager = locals().get("_pm", None)
 
     async def finalize(content: str, final_status: str) -> None:
@@ -126,15 +127,17 @@ async def _run_agent_task(
             ctx.state.set(f"session:{conv_id}:last_query", query[:200])
         prefetch_retrieval(store, query, user_msg_id)
         content_task = asyncio.create_task(_build_message_content(query, attachments, model))
-        project_task = asyncio.create_task(_resolve_project_id(conv_id))
+        scope_task = asyncio.create_task(_resolve_conv_scope(conv_id))
 
         content = await content_task
 
         agent = build_agent(model, checkpointer=checkpointer, store=store, invocation_context=ctx)
-        project_id = await project_task
+        project_id, ephemeral = await scope_task
         configurable: dict[str, Any] = {"thread_id": conv_id, "conversation_id": conv_id}
         if project_id:
             configurable["project_id"] = project_id
+        if ephemeral:
+            configurable["ephemeral"] = True
         config = {
             "configurable": configurable,
             "recursion_limit": 100,
@@ -215,7 +218,7 @@ async def _run_agent_task(
             # maybe_auto_maintain with mode="auto"/"refresh" but not auto-triggered
             # on every run to avoid aggressiveness.
             # Fire-and-forget — never blocks user-visible done event.
-            if project_id and final_message and final_message.strip():
+            if project_id and not ephemeral and final_message and final_message.strip():
                 try:
                     from core.project_memory_consolidation import (
                         maybe_auto_maintain_project_memory,
@@ -300,13 +303,16 @@ async def _run_agent_task(
         loop.call_later(5.0, lambda tid=task_id: _tasks.pop(tid, None))
 
 
-async def _resolve_project_id(conv_id: str) -> str | None:
-    """Project membership, resolved fresh at run start (not baked into the
-    job payload) so bots and post-restart resumes need no payload changes
-    and add/remove-from-project applies on the next run."""
+async def _resolve_conv_scope(conv_id: str) -> tuple[str | None, bool]:
+    """Project membership + incognito flag, resolved fresh at run start (not
+    baked into the job payload) so bots and post-restart resumes need no payload
+    changes and add/remove-from-project applies on the next run. Returns
+    ``(project_id, ephemeral)``."""
     async with async_session() as session:
         conv_row = await session.get(Conversation, conv_id)
-        return conv_row.project_id if conv_row is not None else None
+        if conv_row is None:
+            return None, False
+        return conv_row.project_id, bool(conv_row.ephemeral)
 
 
 # ── Queue handler ────────────────────────────────────────────────────────────
@@ -463,19 +469,25 @@ async def register_chat_task(
     conversation_id: str | None = None,
     attachments: list | None = None,
     project_id: str | None = None,
+    ephemeral: bool = False,
 ) -> tuple[str, str]:
     """GraphQL-side wrapper: create conversation if missing, write the user
     Message + any document attachments, then enqueue the chat job.
 
-    ``project_id`` only applies when a new conversation is created here;
-    joining an existing conversation goes through ``setConversationProject``.
-    Returns ``(task_id, conversation_id)``. Caller validates ``model``.
+    ``project_id`` and ``ephemeral`` only apply when a new conversation is
+    created here; joining an existing conversation goes through
+    ``setConversationProject`` (project) and inherits the stored incognito flag.
+    Incognito and project membership are mutually exclusive — an ephemeral chat
+    ignores ``project_id``. Returns ``(task_id, conversation_id)``. Caller
+    validates ``model``.
     """
+    if ephemeral:
+        project_id = None
     if project_id and await get_project(session, project_id) is None:
         raise ValueError(f"project not found: {project_id}")
     title = query[:60] if not conversation_id else None
     conv = await get_or_create_conversation(
-        session, conversation_id, model, title, project_id=project_id
+        session, conversation_id, model, title, project_id=project_id, ephemeral=ephemeral
     )
 
     if attachments:

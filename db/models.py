@@ -30,6 +30,11 @@ class Conversation(Base):
     # The web UI's conversation list only shows surface="web".
     surface: Mapped[str] = mapped_column(String, default="web", index=True)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Incognito: the conversation persists normally during its run (the streaming
+    # + job-queue pipeline is keyed off these rows), but it is hidden from the web
+    # sidebar, all long-term-memory side effects are suppressed while it runs, and
+    # it is hard-deleted (rows + on-disk files + checkpointer thread) on close.
+    ephemeral: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # Optional project membership (web conversations only). Deliberately no
     # relationship on Project: deleting a project nulls this instead of
     # cascading into conversations.

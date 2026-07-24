@@ -78,6 +78,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         state._http_client = http
         state._queue = _build_queue()
 
+        # Reap incognito conversations left behind by a crash / a client that
+        # never fired discardConversation. Runs here (not in the earlier session
+        # block) so the checkpointer is live and each thread is deleted too.
+        try:
+            from db.ops import sweep_ephemeral_conversations
+
+            async with async_session() as _sess:
+                reaped = await sweep_ephemeral_conversations(_sess)
+            if reaped:
+                logger.info("startup incognito sweep: reaped %d conversation(s)", reaped)
+        except Exception as exc:
+            logger.warning("incognito sweep failed: %s", exc)
+
         # ── MCP (MCP toolset) ─────────────────────────────────
         # Warm up MCP client so tools are cached before first agent build.
         # Merge env + file + DB (DB wins) so runtime-added servers are active on boot.

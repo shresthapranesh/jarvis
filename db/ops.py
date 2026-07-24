@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 
 async def create_conversation(
     session: AsyncSession, model: str, title: str | None, surface: str = "web",
-    project_id: str | None = None,
+    project_id: str | None = None, ephemeral: bool = False,
 ) -> Conversation:
-    conv = Conversation(id=str(uuid4()), model=model, title=title, surface=surface, project_id=project_id)
+    conv = Conversation(
+        id=str(uuid4()), model=model, title=title, surface=surface,
+        project_id=project_id, ephemeral=ephemeral,
+    )
     session.add(conv)
     await session.commit()
     return conv
@@ -34,6 +37,7 @@ async def get_or_create_conversation(
     title: str | None,
     surface: str = "web",
     project_id: str | None = None,
+    ephemeral: bool = False,
 ) -> Conversation:
     if conversation_id:
         result = await session.get(Conversation, conversation_id)
@@ -42,11 +46,14 @@ async def get_or_create_conversation(
                 result.model = model
                 await session.commit()
             return result
-        conv = Conversation(id=conversation_id, model=model, title=title, surface=surface, project_id=project_id)
+        conv = Conversation(
+            id=conversation_id, model=model, title=title, surface=surface,
+            project_id=project_id, ephemeral=ephemeral,
+        )
         session.add(conv)
         await session.commit()
         return conv
-    return await create_conversation(session, model, title, surface, project_id)
+    return await create_conversation(session, model, title, surface, project_id, ephemeral)
 
 
 async def add_message(
@@ -127,6 +134,8 @@ async def list_conversations(
     )
     stmt = (
         select(Conversation, msg_count.label("message_count"))
+        # Incognito conversations never appear in history listings.
+        .where(Conversation.ephemeral == False)  # noqa: E712
         .order_by(Conversation.pinned.desc(), Conversation.created_at.desc())
     )
     if surface is not None:
@@ -141,6 +150,7 @@ async def list_conversations(
             "surface": conv.surface,
             "pinned": conv.pinned,
             "project_id": conv.project_id,
+            "ephemeral": conv.ephemeral,
             "created_at": conv.created_at.isoformat(),
             "message_count": count,
         }
@@ -241,6 +251,43 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
         await get_kernel_registry().shutdown(conv_id)
     except Exception as e:
         logger.warning("Failed to shut down kernel for %s: %s", conv_id, e)
+
+
+async def sweep_ephemeral_conversations(session: AsyncSession) -> int:
+    """Delete any incognito conversations left behind by a crash or a client
+    that never fired discardConversation. Called on startup. Each is torn down
+    via delete_conversation so rows, on-disk files, and the checkpointer thread
+    all go with it. Skips any that still have a pending/running job (mirrors the
+    zombie-row sweep) so an in-flight incognito run isn't yanked out from under
+    its worker."""
+    ids = list(
+        (await session.execute(
+            select(Conversation.id).where(Conversation.ephemeral == True)  # noqa: E712
+        )).scalars()
+    )
+    if not ids:
+        return 0
+    # A chat Job's id is the assistant Message id (job.id == task_id), and that
+    # message belongs to the conversation — so an ephemeral conv is "in flight"
+    # iff it owns a message whose id is a pending/running chat job.
+    live_job_ids = select(Job.id).where(
+        Job.kind == "chat", Job.status.in_(("pending", "running"))
+    )
+    live = set(
+        (await session.execute(
+            select(Message.conversation_id).where(
+                Message.conversation_id.in_(ids),
+                Message.id.in_(live_job_ids),
+            )
+        )).scalars()
+    )
+    swept = 0
+    for cid in ids:
+        if cid in live:
+            continue
+        await delete_conversation(session, cid)
+        swept += 1
+    return swept
 
 
 async def get_conversation_meta(session: AsyncSession, conv_id: str) -> Conversation | None:
@@ -704,6 +751,8 @@ async def get_recent_messages(
         select(Message.role, Message.content, Message.created_at, Conversation.title)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Message.role.in_(["user", "assistant"]))
+        # Incognito conversations must never feed long-term memory consolidation.
+        .where(Conversation.ephemeral == False)  # noqa: E712
         .order_by(Message.created_at.desc())
         .limit(limit)
     )

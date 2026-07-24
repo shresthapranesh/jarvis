@@ -35,6 +35,11 @@ async def remember(text: str, kind: str = "fact") -> str:
     """
     if not text.strip():
         return "Nothing to remember (empty text)."
+    from tools.context import current_ctx
+
+    if current_ctx().ephemeral:
+        # Incognito conversations must not write durable memory.
+        return "Skipped: this is an incognito chat, nothing is saved to long-term memory."
     if not embeddings_available():
         return "Long-term memory is unavailable (no embedding model configured)."
     k = kind if kind in ("core", "fact") else "fact"
