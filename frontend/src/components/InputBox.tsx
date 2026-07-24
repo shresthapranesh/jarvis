@@ -18,6 +18,10 @@ interface Props {
   initialModel?: string;
   persistedDocuments?: PersistedDocument[];
   onDeletePersistedDocument?: (docId: string) => void;
+  // Incognito toggle — only wired on the new-chat surface (index page). When
+  // provided, an eye-off button lets the user start the conversation ephemeral.
+  incognito?: boolean;
+  onToggleIncognito?: () => void;
 }
 
 function fileTypeCategory(mimeType: string): 'image' | 'audio' | 'video' | 'document' {
@@ -38,6 +42,8 @@ export function InputBox({
   initialModel,
   persistedDocuments,
   onDeletePersistedDocument,
+  incognito = false,
+  onToggleIncognito,
 }: Props) {
   const {data: catalog} = useModels();
   const [model, setModel] = useState('');
@@ -132,7 +138,7 @@ export function InputBox({
 
   return (
     <div className="input-wrap">
-      <div className={`input-card${disabled ? ' input-card--disabled' : ''}`}>
+      <div className={`input-card${disabled ? ' input-card--disabled' : ''}${incognito ? ' input-card--incognito' : ''}`}>
         {(attachments.length > 0 || (persistedDocuments && persistedDocuments.length > 0)) && (
           <div className="attachment-strip">
             {persistedDocuments?.map((doc) => (
@@ -241,7 +247,7 @@ export function InputBox({
           }}
           className="input-textarea"
           rows={1}
-          placeholder="Ask anything…"
+          placeholder={incognito ? 'Ask anything… (incognito — not saved)' : 'Ask anything…'}
           disabled={disabled}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
@@ -268,6 +274,22 @@ export function InputBox({
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
+
+          {onToggleIncognito && (
+            <button
+              type="button"
+              className={`attach-btn${incognito ? ' attach-btn--active' : ''}`}
+              title={incognito ? 'Incognito on — this chat won’t be saved' : 'Start an incognito chat (not saved)'}
+              aria-pressed={incognito}
+              disabled={disabled}
+              onClick={onToggleIncognito}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            </button>
+          )}
 
           <button
             type="button"

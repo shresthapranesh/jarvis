@@ -46,6 +46,9 @@ def _migrate(conn: Connection) -> None:
     if "project_id" not in conv_cols:
         conn.execute(text("ALTER TABLE conversations ADD COLUMN project_id VARCHAR REFERENCES projects(id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conversations_project_id ON conversations (project_id)"))
+    if "ephemeral" not in conv_cols:
+        conn.execute(text("ALTER TABLE conversations ADD COLUMN ephemeral BOOLEAN DEFAULT 0"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conversations_ephemeral ON conversations (ephemeral)"))
     auto_cols = {c["name"] for c in inspector.get_columns("automations")}
     if "notifications" not in auto_cols:
         conn.execute(text("ALTER TABLE automations ADD COLUMN notifications TEXT"))

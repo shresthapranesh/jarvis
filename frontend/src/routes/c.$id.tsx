@@ -34,6 +34,7 @@ import {
   loadConversationPage,
 } from '../relay/ConversationPageQuery';
 import {commitDeleteDocument} from '../relay/DeleteDocumentMutation';
+import {commitDiscardConversation} from '../relay/DiscardConversationMutation';
 import {documentListQuery, refreshDocumentList} from '../relay/DocumentListQuery';
 import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
@@ -284,9 +285,39 @@ function ConversationPage() {
   ];
 
   const isActive = streaming || !!runningMsg;
+  const isEphemeral = data.ephemeral;
+
+  // Incognito teardown. Discard when the user closes the tab (best-effort) and
+  // when they navigate away from a settled ephemeral chat. `activeRef` keeps the
+  // unmount cleanup from deleting a conversation whose run is still in flight —
+  // the startup sweep + the next explicit close cover that case instead.
+  const activeRef = useRef(isActive);
+  activeRef.current = isActive;
+  useEffect(() => {
+    if (!isEphemeral) return;
+    const onBeforeUnload = () => {
+      void commitDiscardConversation(id).catch(() => {});
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      if (!activeRef.current) {
+        void commitDiscardConversation(id).catch(() => {});
+      }
+    };
+  }, [id, isEphemeral]);
 
   return (
     <div className="page">
+      {isEphemeral && (
+        <div className="incognito-bar" title="This conversation is not saved and will be deleted when you leave.">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+          Incognito — this chat isn’t saved to history or long-term memory, and is deleted when you leave.
+        </div>
+      )}
       {data.project && (
         <div className="project-badge-bar">
           <Link

@@ -183,6 +183,7 @@ type Conversation implements Node {
   model: String!
   surface: String!
   pinned: Boolean!
+  ephemeral: Boolean!
   projectId: String
   createdAt: DateTime!
   project: Project
@@ -309,6 +310,7 @@ type Mutation {
   resumeTask(taskId: String!, answer: String!): Boolean!
   updateConversation(id: ID!, title: String = null, model: String = null, pinned: Boolean = null): Conversation!
   deleteConversation(id: ID!): Boolean!
+  discardConversation(id: ID!): Boolean!
   updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!
   restoreArtifactVersion(id: ID!, version: Int!): Artifact!
   deleteArtifact(id: ID!): Boolean!
@@ -502,6 +504,7 @@ input StartTaskInput {
   conversationId: String = null
   attachmentUploads: [UploadReferenceInput!] = null
   projectId: String = null
+  ephemeral: Boolean! = false
 }
 
 type StartTaskPayload {

@@ -119,6 +119,7 @@ class Conversation(relay.Node):
     model: str
     surface: str  # "web" | "telegram" | "discord" | "automation"
     pinned: bool
+    ephemeral: bool  # incognito — hidden from history, hard-deleted on close
     project_id: str | None  # raw DB id of the owning project, if any
     created_at: datetime
 
@@ -130,6 +131,7 @@ class Conversation(relay.Node):
             model=row.model,
             surface=row.surface,
             pinned=row.pinned,
+            ephemeral=row.ephemeral,
             project_id=row.project_id,
             created_at=row.created_at,
         )

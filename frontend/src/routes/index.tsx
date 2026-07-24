@@ -12,6 +12,7 @@ function IndexPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [incognito, setIncognito] = useState(false);
 
   async function handleSubmit(query: string, model: string, attachments: MediaAttachment[]) {
     setLoading(true);
@@ -23,7 +24,7 @@ function IndexPage() {
           )
         : null;
       const {taskId, conversationId} = await commitStartTask({
-        input: {query, model, attachmentUploads: uploads},
+        input: {query, model, attachmentUploads: uploads, ephemeral: incognito},
       });
 
       // The /c/$id route loader will fetch the new conversation page (which
@@ -51,7 +52,12 @@ function IndexPage() {
         )}
       </div>
       <footer className="page-footer">
-        <InputBox onSubmit={handleSubmit} disabled={loading} />
+        <InputBox
+          onSubmit={handleSubmit}
+          disabled={loading}
+          incognito={incognito}
+          onToggleIncognito={() => setIncognito((v) => !v)}
+        />
       </footer>
     </div>
   );

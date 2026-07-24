@@ -6722,6 +6722,26 @@ body {
   color: var(--accent);
 }
 
+/* ── Incognito (ephemeral) chat ──────────────────────────────────────── */
+.incognito-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 7px 16px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.incognito-bar svg {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+.input-card--incognito {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
 /* ── Settings page — shared page language + small additions ──────────── */
 
 .settings-tabs {

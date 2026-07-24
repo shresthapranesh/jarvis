@@ -67,6 +67,10 @@ class ToolContext:
     # Set only when the conversation belongs to a project (server/chat_runtime.py);
     # project_memory refuses to run without it.
     project_id: str | None = None
+    # True for incognito conversations (server/chat_runtime.py): tools that write
+    # long-term state (remember, ...) turn themselves into no-ops so nothing
+    # outlives the ephemeral conversation.
+    ephemeral: bool = False
     event_sink: EventSink = field(default=_noop_sink, repr=False)
     store: MemoryStore | None = None
     _request_input: Callable[[Any], Any] = field(default=_no_input, repr=False)
@@ -124,6 +128,7 @@ def current_ctx() -> ToolContext:
     kernel_key: Any = None
     board_task_id: Any = None
     project_id: Any = None
+    ephemeral: Any = False
     try:
         configurable = get_config().get("configurable") or {}
         conversation_id = configurable.get("conversation_id")
@@ -131,6 +136,7 @@ def current_ctx() -> ToolContext:
         kernel_key = configurable.get("kernel_key")
         board_task_id = configurable.get("board_task_id")
         project_id = configurable.get("project_id")
+        ephemeral = configurable.get("ephemeral", False)
     except Exception:
         pass
 
@@ -152,6 +158,7 @@ def current_ctx() -> ToolContext:
         kernel_key=str(kernel_key) if kernel_key else None,
         board_task_id=str(board_task_id) if board_task_id else None,
         project_id=str(project_id) if project_id else None,
+        ephemeral=bool(ephemeral),
         event_sink=sink,
         store=store,
         _request_input=interrupt,
