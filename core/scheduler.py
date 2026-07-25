@@ -211,3 +211,45 @@ def register_memory_activity_prune_job(cron_expr: str = "0 4 * * *") -> None:
         misfire_grace_time=300,
     )
     logger.info("memory_activity prune scheduled: %s", cron_expr)
+
+
+def _prune_checkpoints_job() -> None:
+    """Drop superseded LangGraph checkpoints — runs on the main loop.
+
+    Every graph super-step rewrites the whole state, so checkpoints.db grows
+    quadratically with run length and nothing else reclaims it. See
+    core/checkpoint_retention.py for the retention rules and guards.
+    """
+    if state._main_loop is None:
+        return
+    from core.checkpoint_retention import prune_checkpoints  # noqa: PLC0415
+
+    future = asyncio.run_coroutine_threadsafe(prune_checkpoints(), state._main_loop)
+    try:
+        stats = future.result(timeout=300)
+        pruned = stats["root_pruned"] + stats["subgraph_pruned"]
+        if pruned:
+            logger.info(
+                "checkpoint prune: removed %d checkpoints (%d root, %d subgraph), "
+                "freed %.1f MB, skipped %d active thread(s)",
+                pruned,
+                stats["root_pruned"],
+                stats["subgraph_pruned"],
+                stats["bytes_freed"] / 1e6,
+                stats["threads_skipped_active"],
+            )
+    except Exception:
+        logger.exception("checkpoint prune failed")
+
+
+def register_checkpoint_prune_job(cron_expr: str = "20 * * * *") -> None:
+    """Register the checkpoint retention sweep. Hourly at :20 by default —
+    off the hour so it doesn't stack with the staging cleanup."""
+    _scheduler.add_job(
+        func=_prune_checkpoints_job,
+        trigger=CronTrigger.from_crontab(cron_expr),
+        id="checkpoint_prune",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("checkpoint prune scheduled: %s", cron_expr)

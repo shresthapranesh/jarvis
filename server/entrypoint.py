@@ -39,6 +39,7 @@ from core.scheduler import (
     _register_scheduler_job,
     _scheduler,
     register_board_dispatch_job,
+    register_checkpoint_prune_job,
     register_kernel_reaper_job,
     register_memory_activity_prune_job,
     register_memory_consolidation_job,
@@ -139,6 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         register_kernel_reaper_job()
         register_board_dispatch_job()
         register_memory_activity_prune_job()
+        register_checkpoint_prune_job()
 
         _tg_app = None
         _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
