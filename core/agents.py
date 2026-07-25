@@ -562,9 +562,14 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         project memory (which can change mid-turn via tools) stay volatile.
         """
         raw_messages = list(state.get("messages", []))
-        retrieved_parts: list[str] = await _retrieved_volatile_parts(store, raw_messages)
-        project_parts: list[str] = await _project_volatile_parts(
-            (config.get("configurable") or {}).get("project_id")
+        # Independent of each other, so they overlap rather than stack: the
+        # retrieval is a cached per-turn task (usually already resolved), while
+        # the project read is a fresh DB round-trip on EVERY model iteration by
+        # design (see _project_volatile_parts). Awaiting them in sequence put
+        # that round-trip on the critical path of all ~50 iterations of a run.
+        retrieved_parts, project_parts = await asyncio.gather(
+            _retrieved_volatile_parts(store, raw_messages),
+            _project_volatile_parts((config.get("configurable") or {}).get("project_id")),
         )
         all_volatile_for_cache_split = retrieved_parts + project_parts
 

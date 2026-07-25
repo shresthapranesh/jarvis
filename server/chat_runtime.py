@@ -24,7 +24,7 @@ from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_
 from core.config import get_config
 from core.invocation_context import InvocationContext
 from core.log_callback import AgentLogger, UsageAccumulator
-from core.queue import Job, JobQueue
+from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
 from core.schemas import AttachmentIn
 from core.state import (
     TaskState,
@@ -387,7 +387,11 @@ async def _watch_queue_cancel(
     queue: JobQueue, job_id: str, state: TaskState,
 ) -> None:
     """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event /
-    resume_future so the existing in-runtime observers see it."""
+    resume_future so the existing in-runtime observers see it.
+
+    This covers only the durable/cross-process path — a same-process stop
+    mutation already flips these flags itself. See CANCEL_POLL_INTERVAL_SECONDS.
+    """
     while not state.done and not state.cancelled:
         if await queue.is_cancel_requested(job_id):
             state.cancelled = True
@@ -395,7 +399,7 @@ async def _watch_queue_cancel(
             if state.resume_future and not state.resume_future.done():
                 state.resume_future.cancel()
             return
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(CANCEL_POLL_INTERVAL_SECONDS)
 
 
 # ── Task registration (shared by GraphQL startTask, Telegram, Discord) ───────
