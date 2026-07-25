@@ -10,6 +10,7 @@ export const artifactListQuery = graphql`
       id
       title
       kind
+      mimeType
       conversationId
       messageId
       createdAt

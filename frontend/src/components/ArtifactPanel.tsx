@@ -287,14 +287,18 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
           </>
         ) : (
           <>
-            <button className="artifact-btn" onClick={() => setEditing(true)}>
-              {ICON.edit}
-              <span>Edit</span>
-            </button>
-            <button className={`artifact-btn${copied ? ' success' : ''}`} onClick={copy}>
-              {copied ? ICON.check : ICON.copy}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
-            </button>
+            {detail.kind === 'markdown' && (
+              <>
+                <button className="artifact-btn" onClick={() => setEditing(true)}>
+                  {ICON.edit}
+                  <span>Edit</span>
+                </button>
+                <button className={`artifact-btn${copied ? ' success' : ''}`} onClick={copy}>
+                  {copied ? ICON.check : ICON.copy}
+                  <span>{copied ? 'Copied' : 'Copy'}</span>
+                </button>
+              </>
+            )}
             <a className="artifact-btn" href={artifactDownloadUrl(rawId)} download={`${detail.title || rawId}.md`}>
               {ICON.download}
               <span>Download</span>
@@ -365,9 +369,34 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
       ) : (
         <>
           <h2 className="artifact-detail-title">{detail.title}</h2>
-          <div className="artifact-detail-content agent-bubble" dangerouslySetInnerHTML={{__html: marked.parse(detail.content) as string}} />
+          {renderArtifactBody(detail, rawId)}
         </>
       )}
     </div>
   );
+}
+
+function renderArtifactBody(
+  detail: {kind: string; content: string; mimeType: string | null | undefined; title: string},
+  rawId: string,
+) {
+  const src = artifactDownloadUrl(rawId);
+  switch (detail.kind) {
+    case 'audio':
+      return <audio className="artifact-media" controls src={src} />;
+    case 'video':
+      return <video className="artifact-media" controls src={src} />;
+    case 'image':
+      return <img className="artifact-media" src={src} alt={detail.title} />;
+    case 'markdown':
+      return (
+        <div className="artifact-detail-content agent-bubble" dangerouslySetInnerHTML={{__html: marked.parse(detail.content) as string}} />
+      );
+    default:
+      return (
+        <div className="artifact-detail-content agent-bubble">
+          Binary artifact ({detail.mimeType || 'unknown type'}) — use Download to view it.
+        </div>
+      );
+  }
 }

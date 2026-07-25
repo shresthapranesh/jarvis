@@ -4,21 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import gc
-import io
 import os
 import pathlib
 import platform as _platform
 import re
 import tempfile
 import threading
-import wave as _wave
-from functools import lru_cache
 
 from fastapi import APIRouter, Response, UploadFile
 from fastapi.responses import JSONResponse
 
 from core.config import get_config
 from core.schemas import TTSRequest
+from core.tts import synthesize_wav_bytes
 
 router = APIRouter()
 
@@ -67,12 +65,6 @@ def _get_whisper_model(size: str):
         return _whisper_model
 
 
-@lru_cache(maxsize=4)
-def _get_piper_voice(path: str):
-    from piper import PiperVoice  # noqa: PLC0415
-    return PiperVoice.load(path)
-
-
 # ── Health ───────────────────────────────────────────────────────────────────
 
 @router.get("/health")
@@ -95,15 +87,8 @@ async def tts_endpoint(req: TTSRequest) -> Response:
 
     loop = asyncio.get_running_loop()
 
-    def synthesize() -> bytes:
-        voice = _get_piper_voice(_PIPER_VOICE_PATH)
-        buf = io.BytesIO()
-        with _wave.open(buf, "wb") as wf:
-            voice.synthesize_wav(clean, wf)
-        return buf.getvalue()
-
     try:
-        wav_bytes = await loop.run_in_executor(None, synthesize)
+        wav_bytes = await loop.run_in_executor(None, synthesize_wav_bytes, clean, _PIPER_VOICE_PATH)
     except ImportError:
         return JSONResponse(
             {"error": "TTS not available in this build (piper-tts excluded)"},

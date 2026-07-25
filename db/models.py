@@ -214,6 +214,7 @@ class Artifact(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[str] = mapped_column(String, default="markdown")
+    mime_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     conversation_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("conversations.id"), nullable=True, index=True

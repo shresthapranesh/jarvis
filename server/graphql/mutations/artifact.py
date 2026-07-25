@@ -7,7 +7,7 @@ from pathlib import Path
 import strawberry
 from strawberry import relay
 
-from core.config import get_config
+from core.artifact_storage import artifact_path, version_path
 from db.ops import (
     create_artifact_version,
     delete_artifact as db_delete_artifact,
@@ -19,12 +19,6 @@ from db.ops import (
 )
 
 from ..types.artifact import Artifact, ArtifactVersion
-
-
-def _artifact_path(artifact_id: str) -> Path:
-    cfg = get_config()
-    cfg.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    return cfg.artifacts_dir / f"{artifact_id}.md"
 
 
 @strawberry.type
@@ -44,29 +38,32 @@ class ArtifactMutation:
         if title is not None:
             await db_update_artifact(session, id.node_id, title=title)
         if content is not None:
+            if art.kind != "markdown":
+                raise ValueError(
+                    "binary artifacts can't be edited inline — recreate via write_artifact_file"
+                )
             # Version the old content before overwriting, mirroring write_artifact tool
-            cfg = get_config()
-            live_path = _artifact_path(id.node_id)
+            live_path = artifact_path(id.node_id, ".md")
             latest = await get_latest_artifact_version_number(session, id.node_id)
             if latest == 0 and live_path.exists():
                 # Migrate existing file without history as v1
-                v1_filename = str(cfg.artifacts_dir / f"{id.node_id}_v1.md")
+                v1_path = version_path(id.node_id, 1, ".md")
                 try:
-                    if not Path(v1_filename).exists():
-                        Path(v1_filename).write_text(live_path.read_text(encoding="utf-8"), encoding="utf-8")
+                    if not v1_path.exists():
+                        v1_path.write_text(live_path.read_text(encoding="utf-8"), encoding="utf-8")
                 except Exception:
                     pass
-                await create_artifact_version(session, id.node_id, art.title, v1_filename, 1)
+                await create_artifact_version(session, id.node_id, art.title, str(v1_path), 1)
                 latest = 1
             live_path.write_text(content, encoding="utf-8")
             # Create new version file
             new_ver = latest + 1
-            ver_filename = str(cfg.artifacts_dir / f"{id.node_id}_v{new_ver}.md")
+            ver_path = version_path(id.node_id, new_ver, ".md")
             try:
-                Path(ver_filename).write_text(content, encoding="utf-8")
+                ver_path.write_text(content, encoding="utf-8")
             except Exception:
                 pass
-            await create_artifact_version(session, id.node_id, title or art.title, ver_filename, new_ver)
+            await create_artifact_version(session, id.node_id, title or art.title, str(ver_path), new_ver)
             await db_update_artifact(session, id.node_id)  # bump updated_at
 
         updated = await get_artifact(session, id.node_id)
@@ -87,24 +84,24 @@ class ArtifactMutation:
         ver = await get_artifact_version(session, id.node_id, version)
         if ver is None:
             raise ValueError(f"version {version} not found for artifact {id.node_id}")
-        # Read version file content
+        # Byte-level copy — works uniformly for markdown and binary kinds alike.
         try:
-            content = Path(ver.filename).read_text(encoding="utf-8")
+            data = Path(ver.filename).read_bytes()
         except Exception as exc:
             raise ValueError(f"failed to read version file: {exc}")
 
-        cfg = get_config()
-        live_path = _artifact_path(id.node_id)
+        ext = Path(ver.filename).suffix or Path(art.filename).suffix or ".bin"
+        live_path = artifact_path(id.node_id, ext)
         latest = await get_latest_artifact_version_number(session, id.node_id)
-        live_path.write_text(content, encoding="utf-8")
+        live_path.write_bytes(data)
         new_ver = latest + 1
-        ver_filename = str(cfg.artifacts_dir / f"{id.node_id}_v{new_ver}.md")
+        ver_path = version_path(id.node_id, new_ver, ext)
         try:
-            Path(ver_filename).write_text(content, encoding="utf-8")
+            ver_path.write_bytes(data)
         except Exception:
             pass
-        await create_artifact_version(session, id.node_id, ver.title, ver_filename, new_ver)
-        await db_update_artifact(session, id.node_id, title=ver.title)
+        await create_artifact_version(session, id.node_id, ver.title, str(ver_path), new_ver)
+        await db_update_artifact(session, id.node_id, title=ver.title, filename=str(live_path))
 
         updated = await get_artifact(session, id.node_id)
         assert updated is not None
@@ -120,9 +117,7 @@ class ArtifactMutation:
         art = await get_artifact(session, id.node_id)
         if art is None:
             raise ValueError("artifact not found")
-        path = _artifact_path(id.node_id)
-        if path.exists():
-            path.unlink()
+        # db_delete_artifact already cleans up the live file + all version files.
         await db_delete_artifact(session, id.node_id)
         return True
 

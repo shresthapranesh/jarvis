@@ -62,6 +62,9 @@ def _migrate(conn: Connection) -> None:
         conn.execute(text("ALTER TABLE board_tasks ADD COLUMN blocked_kind VARCHAR"))
     if "pending_answer" not in bt_cols:
         conn.execute(text("ALTER TABLE board_tasks ADD COLUMN pending_answer TEXT"))
+    art_cols = {c["name"] for c in inspector.get_columns("artifacts")}
+    if "mime_type" not in art_cols:
+        conn.execute(text("ALTER TABLE artifacts ADD COLUMN mime_type VARCHAR"))
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 

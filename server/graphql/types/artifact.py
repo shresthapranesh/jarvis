@@ -27,7 +27,10 @@ class ArtifactVersion:
         p = Path(self.filename)
         if not p.exists():
             return ""
-        return p.read_text(encoding="utf-8")
+        try:
+            return p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ""
 
     @classmethod
     def from_db(cls, row: db_models.ArtifactVersion) -> "ArtifactVersion":
@@ -47,6 +50,7 @@ class Artifact(relay.Node):
     title: str
     filename: str
     kind: str
+    mime_type: str | None
     conversation_id: str | None
     message_id: str | None
     created_at: datetime
@@ -59,6 +63,7 @@ class Artifact(relay.Node):
             title=row.title,
             filename=row.filename,
             kind=row.kind,
+            mime_type=row.mime_type,
             conversation_id=row.conversation_id,
             message_id=row.message_id,
             created_at=row.created_at,
@@ -83,11 +88,18 @@ class Artifact(relay.Node):
 
     @strawberry.field
     def content(self) -> str:
-        """File-backed body. Reads on demand so list queries stay cheap."""
-        path = get_config().artifacts_dir / f"{self.id}.md"
+        """File-backed body. Reads on demand so list queries stay cheap.
+
+        Binary kinds (audio/video/image/binary) return "" here — fetch their
+        bytes via the raw download REST endpoint instead.
+        """
+        path = Path(self.filename)
         if not path.exists():
             return ""
-        return path.read_text(encoding="utf-8")
+        try:
+            return path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ""
 
     @strawberry.field
     async def versions(self, info: strawberry.Info) -> list[ArtifactVersion]:
@@ -99,8 +111,9 @@ class Artifact(relay.Node):
     def version_count(self) -> int:
         # Cheap sync? We have versions field for full list; this is a helper
         # but we can't async here easily. Use file glob as quick estimate.
+        # Glob any extension — versioned files aren't always markdown.
         try:
             cfg = get_config()
-            return len(list(cfg.artifacts_dir.glob(f"{self.id}_v*.md")))
+            return len(list(cfg.artifacts_dir.glob(f"{self.id}_v*")))
         except Exception:
             return 0

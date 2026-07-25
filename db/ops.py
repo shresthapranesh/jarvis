@@ -190,11 +190,13 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
     if conv is None:
         return
 
-    art_ids = list(
-        (await session.execute(
-            select(Artifact.id).where(Artifact.conversation_id == conv_id)
-        )).scalars()
-    )
+    art_rows = (
+        await session.execute(
+            select(Artifact.id, Artifact.filename).where(Artifact.conversation_id == conv_id)
+        )
+    ).all()
+    art_ids = [row[0] for row in art_rows]
+    art_filenames = {row[0]: row[1] for row in art_rows}
     doc_paths = list(
         (await session.execute(
             select(Document.path).where(Document.conversation_id == conv_id)
@@ -215,14 +217,14 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
 
     cfg = get_config()
     for aid in art_ids:
-        path = cfg.artifacts_dir / f"{aid}.md"
+        path = Path(art_filenames.get(aid) or (cfg.artifacts_dir / f"{aid}.md"))
         try:
             path.unlink(missing_ok=True)
         except OSError as e:
             logger.warning("Failed to unlink artifact file %s: %s", path, e)
-        # Also any versioned files not captured via DB (fallback glob)
+        # Also any versioned files not captured via DB (fallback glob, any extension)
         try:
-            for vf in cfg.artifacts_dir.glob(f"{aid}_v*.md"):
+            for vf in cfg.artifacts_dir.glob(f"{aid}_v*"):
                 vf.unlink(missing_ok=True)
         except OSError:
             pass
@@ -941,6 +943,7 @@ async def create_artifact(
     title: str,
     filename: str,
     kind: str = "markdown",
+    mime_type: str | None = None,
     conversation_id: str | None = None,
     message_id: str | None = None,
 ) -> Artifact:
@@ -949,6 +952,7 @@ async def create_artifact(
         title=title,
         filename=filename,
         kind=kind,
+        mime_type=mime_type,
         conversation_id=conversation_id,
         message_id=message_id,
     )
@@ -995,12 +999,12 @@ async def delete_artifact(session: AsyncSession, artifact_id: str) -> bool:
             select(ArtifactVersion.filename).where(ArtifactVersion.artifact_id == artifact_id)
         )).scalars()
     )
+    live_path = art.filename
     await session.delete(art)
     await session.commit()
-    cfg = get_config()
     # Delete live file
     try:
-        (cfg.artifacts_dir / f"{artifact_id}.md").unlink(missing_ok=True)
+        Path(live_path).unlink(missing_ok=True)
     except OSError:
         pass
     for vp in version_paths:

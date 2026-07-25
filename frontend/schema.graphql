@@ -16,6 +16,7 @@ type Artifact implements Node {
   title: String!
   filename: String!
   kind: String!
+  mimeType: String
   conversationId: String
   messageId: String
   createdAt: DateTime!

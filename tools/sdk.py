@@ -20,9 +20,12 @@ Two transports, chosen by what the operation needs:
 
 What deliberately stays a bound tool: anything coupled to the agent graph —
 todos (`Command` state deltas), complete/block_task (current-run lifecycle),
-spawn_workers/run_workflow (subgraphs on the parent's LLM), write_artifact
-(its live side-panel event is tied to this run's stream writer), and
-`remember` (there is no createMemory mutation to route to).
+spawn_workers/run_workflow (subgraphs on the parent's LLM), write_artifact/
+write_artifact_file (their live side-panel event is tied to this run's
+stream writer), and `remember` (there is no createMemory mutation to route to).
+
+A third kind of helper (e.g. `text_to_speech`) is neither a DB read nor a
+write — pure local compute, callable directly with no transport at all.
 
 Conversation and project scope are injected per kernel by core/kernels.py via
 `set_conversation()` / `set_project()`.
@@ -34,6 +37,7 @@ import json
 import os
 import sqlite3
 from typing import Any
+from uuid import uuid4
 
 _conversation_id: str | None = None
 _project_id: str | None = None
@@ -631,11 +635,32 @@ def project_memory(action: str = "read", content: str | None = None) -> str:
     return f"Project memory updated ({len(new)} chars)."
 
 
+def text_to_speech(text: str) -> str:
+    """Synthesize speech from text using the local Piper TTS voice.
+
+    Writes a scratch .wav file and returns its path — pass that path to the
+    write_artifact_file tool (kind="audio") to save it as a shareable artifact.
+    Raises if piper-tts isn't installed in this build, or the voice model file
+    is missing (set PIPER_VOICE env var).
+    """
+    from core.config import get_config
+    from core.tts import synthesize_wav_bytes
+
+    data = synthesize_wav_bytes(text)
+    cfg = get_config()
+    out_dir = cfg.work_dir
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"tts-{uuid4().hex[:12]}.wav")
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
 # ── Discovery ─────────────────────────────────────────────────────────────────
 
 _CATEGORIES: dict[str, tuple[str, list]] = {
     "artifacts": (
-        "read/list saved deliverables (write_artifact stays a tool)",
+        "read/list saved deliverables (write_artifact/write_artifact_file stay tools)",
         [list_artifacts, read_artifact, list_artifact_versions],
     ),
     "documents": (
@@ -661,6 +686,10 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     "memory": (
         "long-term facts and per-project shared memory",
         [search_memory, project_memory],
+    ),
+    "media": (
+        "local audio synthesis (write_artifact_file stays a tool to save the result)",
+        [text_to_speech],
     ),
 }
 

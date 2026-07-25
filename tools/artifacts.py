@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 from pathlib import Path
 
 from langchain_core.tools import tool
 
-from core.config import get_config
+from core.artifact_storage import artifact_path, infer_kind, version_path
 from db import async_session
 from db.ops import (
     create_artifact,
@@ -31,17 +32,15 @@ from tools.context import current_ctx
 
 logger = logging.getLogger(__name__)
 
+MAX_ARTIFACT_FILE_BYTES = 50 * 1024 * 1024  # 50 MiB — artifacts persist indefinitely and duplicate per version
+
 
 def _artifact_path(artifact_id: str) -> Path:
-    cfg = get_config()
-    cfg.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    return cfg.artifacts_dir / f"{artifact_id}.md"
+    return artifact_path(artifact_id, ".md")
 
 
 def _version_path(artifact_id: str, version: int) -> Path:
-    cfg = get_config()
-    cfg.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    return cfg.artifacts_dir / f"{artifact_id}_v{version}.md"
+    return version_path(artifact_id, version, ".md")
 
 
 @tool
@@ -65,7 +64,6 @@ async def write_artifact(
     """
     ctx = current_ctx()
     conversation_id = ctx.conversation_id
-    cfg = get_config()
 
     async with async_session() as session:
         if artifact_id:
@@ -140,8 +138,108 @@ async def write_artifact(
 
 
 @tool
+async def write_artifact_file(
+    title: str,
+    file_path: str,
+    kind: str | None = None,
+    mime_type: str | None = None,
+    artifact_id: str | None = None,
+) -> str:
+    """Save a binary deliverable (audio, video, image, or other file) as an artifact.
+
+    Use this — not write_artifact — when the deliverable isn't markdown text:
+    e.g. audio synthesized via jarvis.text_to_speech(), a downloaded video clip,
+    or an image. The source file must already exist on disk (produced via
+    run_cell). The frontend renders it in the side panel with an audio/video/
+    image player as appropriate. Each write is versioned automatically, same
+    as write_artifact.
+
+    Args:
+        title: Short human-readable title (shown in the side panel and library).
+        file_path: Path to the already-written source file to register.
+        kind: One of "audio", "video", "image", "binary". Inferred from the
+            file extension / mime_type if omitted.
+        mime_type: MIME type of the file. Inferred from the extension if omitted.
+        artifact_id: Pass to update an existing artifact in place; omit to create.
+
+    Returns the artifact id, title, kind, and size as JSON.
+    """
+    ctx = current_ctx()
+    conversation_id = ctx.conversation_id
+
+    src = Path(file_path)
+    if not src.exists() or not src.is_file():
+        return json.dumps({"error": f"file not found: {file_path}"})
+    size = src.stat().st_size
+    if size > MAX_ARTIFACT_FILE_BYTES:
+        return json.dumps({
+            "error": f"file is {size} bytes, exceeds the {MAX_ARTIFACT_FILE_BYTES // (1024 * 1024)} MiB artifact cap"
+        })
+
+    ext = src.suffix or (mimetypes.guess_extension(mime_type) if mime_type else None) or ".bin"
+    if not mime_type:
+        mime_type = mimetypes.guess_type(src.name)[0]
+    if not kind:
+        kind = infer_kind(mime_type, ext)
+    data = src.read_bytes()
+
+    async with async_session() as session:
+        if artifact_id:
+            existing = await get_artifact(session, artifact_id)
+            if existing is None:
+                return json.dumps({"error": f"artifact {artifact_id} not found"})
+            live_path = artifact_path(artifact_id, ext)
+            latest_version = await get_latest_artifact_version_number(session, artifact_id)
+            await update_artifact(session, artifact_id, title=title, kind=kind, mime_type=mime_type)
+            art = existing
+            action = "updated"
+            live_path.write_bytes(data)
+            new_version = latest_version + 1
+            ver_path = version_path(artifact_id, new_version, ext)
+            try:
+                ver_path.write_bytes(data)
+                await create_artifact_version(session, artifact_id, title, str(ver_path), new_version)
+                logger.info("artifact %s version %d saved", artifact_id, new_version)
+            except Exception as exc:
+                logger.warning("artifact version save failed for %s v%d: %s", artifact_id, new_version, exc)
+        else:
+            art = await create_artifact(
+                session,
+                title=title,
+                filename="",
+                kind=kind,
+                mime_type=mime_type,
+                conversation_id=conversation_id,
+            )
+            live_path = artifact_path(art.id, ext)
+            await update_artifact(session, art.id, filename=str(live_path))
+            action = "created"
+            live_path.write_bytes(data)
+            try:
+                v1_path = version_path(art.id, 1, ext)
+                v1_path.write_bytes(data)
+                await create_artifact_version(session, art.id, title, str(v1_path), 1)
+            except Exception as exc:
+                logger.warning("artifact v1 save failed for %s: %s", art.id, exc)
+
+    ctx.emit(
+        "artifact",
+        action=action,
+        id=art.id,
+        title=title,
+        preview=f"[{kind} · {mime_type or 'unknown'} · {size} bytes]",
+        conversation_id=conversation_id,
+    )
+    return json.dumps({"id": art.id, "title": title, "action": action, "kind": kind, "mime_type": mime_type, "size": size})
+
+
+@tool
 async def read_artifact(artifact_id: str, version: int | None = None) -> str:
     """Read the markdown content of a previously saved artifact.
+
+    Binary artifacts (audio/video/image/binary kind) can't be read as text —
+    this returns a short descriptor instead; use the raw download endpoint to
+    fetch the actual bytes.
 
     Args:
         artifact_id: The artifact id.
@@ -152,6 +250,13 @@ async def read_artifact(artifact_id: str, version: int | None = None) -> str:
         art = await get_artifact(session, artifact_id)
         if art is None:
             return f"Artifact not found: {artifact_id}"
+        if art.kind != "markdown":
+            size = Path(art.filename).stat().st_size if Path(art.filename).exists() else 0
+            return (
+                f"Artifact {artifact_id} is a {art.kind} file "
+                f"({art.mime_type or 'unknown mime type'}, {size} bytes) — "
+                "binary, not text-readable; download it via the raw artifact endpoint."
+            )
         if version is not None:
             from db.ops import get_artifact_version
 
