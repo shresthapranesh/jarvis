@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.budget import BudgetTracker, get_budget_limits_for_task
-from core.queue import Job, JobQueue
+from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
 from db import async_session
 from db.models import Workflow, WorkflowRun
 from db.ops import (
@@ -180,7 +180,11 @@ async def workflow_job_handler(job: Job) -> None:
 async def _watch_queue_cancel(
     queue: JobQueue, job_id: str, state: TaskState,
 ) -> None:
-    """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event."""
+    """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event.
+
+    This covers only the durable/cross-process path — a same-process stop
+    mutation already flips these flags itself. See CANCEL_POLL_INTERVAL_SECONDS.
+    """
     while not state.done and not state.cancelled:
         if await queue.is_cancel_requested(job_id):
             state.cancelled = True
@@ -188,7 +192,7 @@ async def _watch_queue_cancel(
             if state.resume_future and not state.resume_future.done():
                 state.resume_future.cancel()
             return
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(CANCEL_POLL_INTERVAL_SECONDS)
 
 
 # ── Manual trigger (shared by GraphQL runWorkflow) ───────────────────────────

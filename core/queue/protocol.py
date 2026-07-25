@@ -11,6 +11,17 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
+# How often a running handler re-checks `is_cancel_requested`. This is the
+# DURABLE/cross-process cancellation path only: `stopRunningTask` and the
+# per-kind `stopTask` both flip the in-process TaskState flags (`cancelled`,
+# `_stop_event`, `resume_future`) synchronously before calling
+# `get_queue().cancel(...)`, so a same-process stop is already immediate and
+# does not wait on this poll. Each tick is a DB round-trip per running task, so
+# a tight interval buys latency the in-process path already provides. Matches
+# the 5.0s default `stream()` uses for claim polling.
+CANCEL_POLL_INTERVAL_SECONDS = 5.0
+
+
 @dataclass
 class Job:
     """The handle returned by `claim()` and yielded by `stream()`. Holds only

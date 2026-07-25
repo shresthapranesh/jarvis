@@ -20,7 +20,7 @@ from core.agents import DEFAULT_MODEL, build_agent
 from core.invocation_context import InvocationContext
 from core.budget import BudgetTracker, get_budget_limits_for_task
 from core.runner import build_callbacks
-from core.queue import Job, JobQueue
+from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
 from db import async_session
 from db.models import Automation, AutomationRun
 from db.ops import (
@@ -468,13 +468,17 @@ async def _watch_queue_cancel(
 ) -> None:
     """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event
     so the existing in-runtime observers (state.cancelled checks, the code-type
-    cancel watcher) see it without any other plumbing."""
+    cancel watcher) see it without any other plumbing.
+
+    This covers only the durable/cross-process path — a same-process stop
+    mutation already flips these flags itself. See CANCEL_POLL_INTERVAL_SECONDS.
+    """
     while not state.done and not state.cancelled:
         if await queue.is_cancel_requested(job_id):
             state.cancelled = True
             state._stop_event.set()
             return
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(CANCEL_POLL_INTERVAL_SECONDS)
 
 
 # ── Manual trigger (shared by GraphQL triggerAutomation) ─────────────────────
