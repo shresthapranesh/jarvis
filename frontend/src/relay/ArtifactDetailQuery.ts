@@ -12,6 +12,7 @@ export const artifactDetailQuery = graphql`
       title
       content
       kind
+      mimeType
       filename
       conversationId
       messageId

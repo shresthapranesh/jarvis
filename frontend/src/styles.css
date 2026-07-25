@@ -5104,6 +5104,15 @@ body {
   line-height: 1.55;
 }
 
+.artifact-media {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+audio.artifact-media {
+  width: 100%;
+}
+
 .artifact-editor {
   display: flex;
   flex-direction: column;

@@ -41,6 +41,7 @@ from tools.artifacts import (
     list_artifacts as artifact_list,
     read_artifact,
     write_artifact,
+    write_artifact_file,
 )
 from tools.code import run_cell
 from tools.documents import read_document, search_documents
@@ -460,10 +461,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         _mcp_tools_for_workers = []
 
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [run_cell, read_file, write_file, list_files, write_artifact, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
+        "general":    [run_cell, read_file, write_file, list_files, write_artifact, write_artifact_file, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
         "researcher": [run_cell, read_file, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
         "coder":      [run_cell, read_file, write_file, list_files],
-        "writer":     [read_file, write_file, write_artifact, read_artifact, artifact_list, search_documents, read_document],
+        "writer":     [read_file, write_file, write_artifact, write_artifact_file, read_artifact, artifact_list, search_documents, read_document],
     }
 
     def _make_role_factory(role: str):
@@ -514,12 +515,13 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     #                             separate process cannot write the reducer
     #   complete_task/block_task  act on the CURRENT run's lifecycle
     #   spawn_workers/run_workflow  instantiate subgraphs on this LLM binding
-    #   write_artifact            its live side-panel event is tied to this
+    #   write_artifact/_file      its live side-panel event is tied to this
     #                             run's stream writer
     #   remember                  no createMemory mutation exists to route to
     main_tools = [
         run_cell,
         write_artifact,
+        write_artifact_file,
         write_todos,
         set_todo_status,
         spawn_workers,
