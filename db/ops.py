@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import case, func, select, update
+from sqlalchemy import text as sa_text  # `text` is a param name in several ops below
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1174,6 +1175,51 @@ async def delete_memory(session: AsyncSession, memory_id: str) -> bool:
 
 async def count_memories(session: AsyncSession) -> int:
     return (await session.execute(select(func.count()).select_from(Memory))).scalar_one()
+
+
+# ── Lexical (BM25) retrieval ──────────────────────────────────────────────────
+# `match_expr` must come from core.retrieval.fts_match_expr — never raw user
+# text, which FTS5 parses as a query language and rejects on bare punctuation.
+# bm25() returns a *negative* relevance where lower is better, hence ORDER BY
+# ASC; callers use rank order only, not the magnitude.
+
+async def search_memories_lexical(
+    session: AsyncSession, match_expr: str, *, kind: str = "fact", limit: int = 20
+) -> list[str]:
+    """Memory ids matching `match_expr`, best BM25 rank first. Empty on any
+    FTS failure (index missing on an older DB, SQLite built without FTS5)."""
+    try:
+        rows = await session.execute(sa_text("""
+            SELECT m.id AS id
+            FROM memories_fts f
+            JOIN memories m ON m.rowid = f.rowid
+            WHERE memories_fts MATCH :q AND m.kind = :kind
+            ORDER BY bm25(memories_fts)
+            LIMIT :limit
+        """), {"q": match_expr, "kind": kind, "limit": limit})
+        return [r[0] for r in rows.all()]
+    except Exception as exc:
+        logger.warning("lexical memory search failed (%s) — dense-only this turn", exc)
+        return []
+
+
+async def search_chunks_lexical(
+    session: AsyncSession, conversation_id: str, match_expr: str, *, limit: int = 20
+) -> list[str]:
+    """DocumentChunk ids in `conversation_id` matching `match_expr`, best first."""
+    try:
+        rows = await session.execute(sa_text("""
+            SELECT c.id AS id
+            FROM document_chunks_fts f
+            JOIN document_chunks c ON c.rowid = f.rowid
+            WHERE document_chunks_fts MATCH :q AND c.conversation_id = :cid
+            ORDER BY bm25(document_chunks_fts)
+            LIMIT :limit
+        """), {"q": match_expr, "cid": conversation_id, "limit": limit})
+        return [r[0] for r in rows.all()]
+    except Exception as exc:
+        logger.warning("lexical chunk search failed (%s) — dense-only this turn", exc)
+        return []
 
 
 # ── Memory activity (audit log for when memories were surfaced) ───────────────

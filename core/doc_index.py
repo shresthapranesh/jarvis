@@ -13,6 +13,7 @@ from uuid import uuid4
 import numpy as np
 from sqlalchemy import func, select
 
+from core.retrieval import env_float
 from db import async_session
 from db.models import Document, DocumentChunk
 
@@ -28,6 +29,14 @@ _CHUNK_SIZE = 1600   # chars per chunk
 _CHUNK_OVERLAP = 200
 _EMBED_BATCH = 64
 _READ_WINDOW_CHARS = 6000
+
+# Hybrid-retrieval cutoff for document chunks. Looser than the memory cutoff on
+# purpose: the agent called `search_documents` explicitly, so a weak passage is
+# still more useful than nothing, whereas an unwanted *memory* is injected into
+# every prompt without anyone asking. See core/retrieval.py:select_hybrid.
+_SPARSE_CANDIDATES = 20
+_CHUNK_MIN_COSINE = env_float("JARVIS_DOCS_MIN_COSINE", 0.25)
+_CHUNK_REL_DROP = env_float("JARVIS_DOCS_REL_DROP", 0.60)
 
 # ── Query embedding cache (deduplicate + avoid re-embedding same text) ────────
 # Many turns reuse similar queries; memory + skills both embed the same query
@@ -358,52 +367,89 @@ async def index_document(document_id: str, text: str) -> int:
 # ── Search / sequential read ─────────────────────────────────────────────────
 
 async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[dict]:
-    """Top-k chunks for `query` across all indexed documents in the
-    conversation, by cosine similarity. Returns
-    [{document_id, filename, seq, score, text}, ...]."""
+    """Top-k chunks for `query` across all indexed documents in the conversation.
+
+    Hybrid: dense cosine + BM25 over the FTS5 mirror, fused by rank. The lexical
+    arm is what makes exact-token lookups work — an error code, a config key, an
+    identifier has no *meaning* for an embedding to encode, so dense search
+    scores it as unremarkable while BM25 lands on it directly.
+
+    Returns [{document_id, filename, seq, score, text}, ...] — possibly fewer
+    than `k`, or empty when nothing clears the cutoff. Raises only when neither
+    arm can run (no embedder *and* no usable lexical terms).
+    """
+    from core.retrieval import fts_match_expr, select_hybrid
+    from db.ops import search_chunks_lexical
+
     embedder = get_embedder()
-    if embedder is None:
+    match_expr = fts_match_expr(query)
+    if embedder is None and match_expr is None:
         raise RuntimeError("no embedding model available (GOOGLE_API_KEY unset?)")
 
-    # For doc search we allow trivial queries but still use cache
-    qvec = await aembed_query_cached(query, allow_trivial=True)
-    if qvec is None:
-        try:
-            qvec = np.asarray(await embedder.aembed_query(query), dtype=np.float32)
-        except Exception:
-            raise
+    async def _load_rows() -> list[Any]:
+        async with async_session() as session:
+            return list((await session.execute(
+                select(DocumentChunk, Document.filename)
+                .join(Document, DocumentChunk.document_id == Document.id)
+                .where(DocumentChunk.conversation_id == conversation_id)
+            )).all())
 
-    async with async_session() as session:
-        rows = (await session.execute(
-            select(DocumentChunk, Document.filename)
-            .join(Document, DocumentChunk.document_id == Document.id)
-            .where(
-                DocumentChunk.conversation_id == conversation_id,
-                DocumentChunk.embedding.is_not(None),
+    async def _sparse() -> list[str]:
+        if match_expr is None:
+            return []
+        async with async_session() as session:
+            return await search_chunks_lexical(
+                session, conversation_id, match_expr, limit=_SPARSE_CANDIDATES
             )
-        )).all()
 
-    scored: list[tuple[float, DocumentChunk, str]] = []
-    qnorm = float(np.linalg.norm(qvec)) or 1.0
-    for chunk, filename in rows:
-        vec = np.frombuffer(chunk.embedding, dtype=np.float32)
-        if vec.shape != qvec.shape:
-            # Chunk was embedded with a different model — skip rather than crash.
+    # Doc search allows trivial queries (the agent asked explicitly) but still
+    # goes through the shared query-embedding cache.
+    qvec, rows, sparse = await asyncio.gather(
+        aembed_query_cached(query, allow_trivial=True), _load_rows(), _sparse()
+    )
+    if not rows:
+        return []
+
+    by_id: dict[str, tuple[DocumentChunk, str]] = {c.id: (c, fn) for c, fn in rows}
+
+    dense: list[tuple[str, float]] = []
+    if qvec is not None:
+        qnorm = float(np.linalg.norm(qvec)) or 1.0
+        for chunk, _fn in rows:
+            if chunk.embedding is None:
+                continue
+            vec = np.frombuffer(chunk.embedding, dtype=np.float32)
+            if vec.shape != qvec.shape:
+                # Chunk was embedded with a different model — skip rather than crash.
+                continue
+            score = float(np.dot(vec, qvec) / ((float(np.linalg.norm(vec)) or 1.0) * qnorm))
+            dense.append((chunk.id, score))
+        dense.sort(key=lambda t: t[1], reverse=True)
+
+    keep = select_hybrid(
+        dense=dense,
+        sparse=sparse,
+        k=k,
+        min_score=_CHUNK_MIN_COSINE,
+        rel_drop=_CHUNK_REL_DROP,
+        label="documents",
+    )
+
+    dense_scores = dict(dense)
+    out: list[dict] = []
+    for chunk_id in keep:
+        entry = by_id.get(chunk_id)
+        if entry is None:
             continue
-        score = float(np.dot(vec, qvec) / ((float(np.linalg.norm(vec)) or 1.0) * qnorm))
-        scored.append((score, chunk, filename))
-
-    scored.sort(key=lambda t: t[0], reverse=True)
-    return [
-        {
-            "document_id": c.document_id,
-            "filename": fn,
-            "seq": c.seq,
-            "score": round(s, 4),
-            "text": c.text,
-        }
-        for s, c, fn in scored[:k]
-    ]
+        chunk, filename = entry
+        out.append({
+            "document_id": chunk.document_id,
+            "filename": filename,
+            "seq": chunk.seq,
+            "score": round(dense_scores.get(chunk_id, 0.0), 4),
+            "text": chunk.text,
+        })
+    return out
 
 
 async def read_chunks(document_id: str, offset: int = 0) -> dict | None:

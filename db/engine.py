@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import Connection, event, inspect, text
@@ -7,10 +8,68 @@ from pathlib import Path
 
 from core.config import get_config
 
+logger = logging.getLogger(__name__)
+
 _cfg = get_config()
 Path(_cfg.work_dir).mkdir(parents=True, exist_ok=True)
 DATABASE_URL = _cfg.database_url
 from db.models import Base
+
+
+# Lexical (BM25) side of hybrid retrieval — see core/retrieval.py. Each entry is
+# (fts table, source table, indexed column). External-content tables store no
+# copy of the text; they read it back through `content=` at query time, so the
+# only cost is the inverted index.
+_FTS_TABLES = (
+    ("memories_fts", "memories", "text"),
+    ("document_chunks_fts", "document_chunks", "text"),
+)
+
+
+def _ensure_fts(conn: Connection) -> None:
+    """Create the FTS5 mirrors + sync triggers, once.
+
+    Best-effort: a SQLite build without FTS5 compiled in degrades to dense-only
+    retrieval rather than failing startup. Every write path for these tables
+    goes through real INSERT/UPDATE/DELETE (SQLAlchemy emits explicit DELETEs
+    even for ORM cascades), so triggers are sufficient to keep the index in
+    sync — no application-level bookkeeping.
+    """
+    for fts, src, col in _FTS_TABLES:
+        try:
+            already = conn.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:n"),
+                {"n": fts},
+            ).first() is not None
+
+            conn.execute(text(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS {fts} USING fts5("
+                f"{col}, content='{src}', content_rowid='rowid', "
+                "tokenize='porter unicode61 remove_diacritics 2')"
+            ))
+            # 'delete' rows carry the OLD text: external-content FTS5 can't read
+            # it back from the source row that is already gone/changed.
+            conn.execute(text(
+                f"CREATE TRIGGER IF NOT EXISTS {src}_fts_ai AFTER INSERT ON {src} BEGIN "
+                f"INSERT INTO {fts}(rowid, {col}) VALUES (new.rowid, new.{col}); END"
+            ))
+            conn.execute(text(
+                f"CREATE TRIGGER IF NOT EXISTS {src}_fts_ad AFTER DELETE ON {src} BEGIN "
+                f"INSERT INTO {fts}({fts}, rowid, {col}) VALUES('delete', old.rowid, old.{col}); END"
+            ))
+            conn.execute(text(
+                f"CREATE TRIGGER IF NOT EXISTS {src}_fts_au AFTER UPDATE OF {col} ON {src} BEGIN "
+                f"INSERT INTO {fts}({fts}, rowid, {col}) VALUES('delete', old.rowid, old.{col}); "
+                f"INSERT INTO {fts}(rowid, {col}) VALUES (new.rowid, new.{col}); END"
+            ))
+            if not already:
+                # Backfill rows that predate the index.
+                conn.execute(text(f"INSERT INTO {fts}({fts}) VALUES('rebuild')"))
+                logger.info("built FTS index %s over %s", fts, src)
+        except Exception as exc:
+            logger.warning(
+                "FTS index %s unavailable (%s) — retrieval falls back to dense-only", fts, exc
+            )
 
 
 def _migrate(conn: Connection) -> None:
@@ -65,6 +124,7 @@ def _migrate(conn: Connection) -> None:
     art_cols = {c["name"] for c in inspector.get_columns("artifacts")}
     if "mime_type" not in art_cols:
         conn.execute(text("ALTER TABLE artifacts ADD COLUMN mime_type VARCHAR"))
+    _ensure_fts(conn)
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 

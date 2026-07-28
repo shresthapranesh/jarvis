@@ -428,6 +428,17 @@ Agent memory has **two layers**, selected by whether an embedder is configured (
 
 GraphQL `agentMemory` query + `updateMemory` (blob) / `updateMemoryItem` (discrete) mutations expose both; `frontend/src/components/MemoryView.tsx` + the `/memory` route render and edit them.
 
+### Hybrid retrieval (`core/retrieval.py`)
+`search_memory` and `doc_index.search_chunks` run **two arms and fuse them by rank**:
+- **Dense** — cosine over stored embeddings (as before).
+- **Sparse** — BM25 via SQLite **FTS5**. `memories_fts` / `document_chunks_fts` are external-content virtual tables created in `db/engine.py:_ensure_fts()` (called from `_migrate`), kept in sync by AFTER INSERT/DELETE/UPDATE-OF-text triggers on the source tables — no application bookkeeping. Missing FTS5 support degrades to dense-only with a warning; a fresh index backfills via `INSERT INTO x_fts(x_fts) VALUES('rebuild')`.
+
+**Never pass user text to `MATCH`** — FTS5 parses it as a query language and raises on bare `"`, `*`, `:`, `-`, or the bare keywords AND/OR/NOT/NEAR. Always go through `fts_match_expr()`, which tokenizes to word chars, drops stopwords, quotes each term, and ORs them. `bm25()` returns a *negative* score where lower is better — `ORDER BY bm25(t)` ascending; callers use rank order only, never the magnitude.
+
+Fusion is **RRF** (`rrf_fuse`), not a weighted sum: bm25 is unbounded/negative and cosine is [-1, 1], so any linear blend of raw scores is meaningless. `select_hybrid()` then applies the cutoff — an item survives if its cosine clears `max(min_score, rel_drop * best_cosine)` **or** it is a top-`k` lexical hit (bypassing the dense floor is the point of the sparse arm: exact tokens — error codes, filenames, ids — carry no meaning for an embedding to encode). **Returning zero results is a valid outcome**; callers must handle an empty list rather than assuming top-k.
+
+`min_score` is model-specific and cannot be derived a priori — tune per install via `JARVIS_MEMORY_MIN_COSINE` / `JARVIS_MEMORY_REL_DROP` / `JARVIS_DOCS_MIN_COSINE` / `JARVIS_DOCS_REL_DROP`, using the kept/dropped scores `select_hybrid` logs. Because the sparse arm needs no embedder, memory + document search now work on keyless setups (lexical-only) instead of returning nothing.
+
 ## Projects Feature
 A **project** groups web conversations under shared context (claude.ai-style): `Project.instructions` (user-owned guidance) and `Project.memory` (a free-text blob the agent maintains itself). `Conversation.project_id` is a nullable indexed FK; **only `surface="web"` conversations may join** (enforced in `set_conversation_project`, db/ops.py). Deleting a project keeps its conversations — the FK is nulled explicitly before the row delete.
 - **Injection**: `_project_volatile_parts` (core/agents.py) re-reads the project row **every model iteration** (todos pattern, NOT `_retrieval_cache`) and appends `## Project` / `### Project Instructions` / `### Project Memory` sections to the volatile suffix — so agent writes and live user edits apply on the very next LLM call without busting the prompt cache. The graph is model-shared, so project context must never be closured into `_build_agent`. When memory is empty it injects an explicit placeholder cue ("empty — initialize...") so the model has a trigger to call `project_memory`.
