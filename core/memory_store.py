@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -9,15 +10,42 @@ from typing import Any
 import numpy as np
 
 from core.doc_index import get_embedder
+from core.retrieval import env_float, fts_match_expr, select_hybrid
 from db import async_session
-from db.ops import create_memory, delete_memory, list_memories, update_memory_item
+from db.ops import (
+    create_memory,
+    delete_memory,
+    list_memories,
+    search_memories_lexical,
+    update_memory_item,
+)
 
 logger = logging.getLogger(__name__)
 
 # Cosine ≥ this against an existing same-kind item ⇒ treat as the same memory
 # and update it in place rather than inserting a near-duplicate. Keeps
 # contradictions from piling up the way the whole-doc rewrite handled for free.
+# NOTE: this is calibrated to the *current* embedding model's geometry and does
+# not transfer across models — re-tune it if `embedding.model` changes.
 _DEDUP_THRESHOLD = 0.88
+
+# ── Hybrid retrieval cutoff ───────────────────────────────────────────────────
+# How many BM25 candidates to pull before fusion. Only the top-k of these can
+# bypass the dense floor, so a larger pool costs a cheap index scan and nothing
+# in output quality.
+_SPARSE_CANDIDATES = 20
+
+# The "everything here is garbage" floor. This is the load-bearing constant for
+# rejecting a whole result set, and it CANNOT be derived a priori — cosine
+# distributions are model-specific, and most models compress unrelated pairs
+# into a narrow band well above zero. Ship, watch the scores that `select_hybrid`
+# logs against real queries, then tune. Raise it until junk stops surfacing; if
+# real memories start disappearing, you have gone too far.
+_MIN_COSINE = env_float("JARVIS_MEMORY_MIN_COSINE", 0.30)
+
+# Drop anything scoring below this fraction of the best hit — catches the long
+# tail when the top result *is* good but the rest are filler.
+_REL_DROP = env_float("JARVIS_MEMORY_REL_DROP", 0.75)
 
 # Core memories are always injected — cache them briefly to avoid DB hit
 # per turn (trivial queries hit this too). Cap to avoid token bloat.
@@ -96,33 +124,74 @@ async def search_memory(
     conversation_id: str | None = None,
     source: str = "retrieval",
 ) -> list[dict]:
-    """Top-k `fact` items for `query` by cosine similarity.
+    """Top-k `fact` items for `query` — hybrid dense + BM25, with a real cutoff.
 
-    Returns ``[{id, text, score}]``. Empty list when no embedder, no fact rows,
-    trivial query (greeting), or every stored embedding mismatches.
-    Uses cached query embedding to deduplicate concurrent memory+skill calls.
-    Logs access to memory_activities table fire-and-forget for audit.
+    Returns ``[{id, text, score}]`` where `score` is the dense cosine (0.0 for
+    items that surfaced on the lexical arm alone). **May return fewer than `k`,
+    or nothing at all**: when no memory clears the relevance cutoff the right
+    answer is to inject nothing rather than the k least-irrelevant rows.
+
+    Empty list also when the query is trivial (a greeting) or there are no fact
+    rows. Unlike before, a missing embedder is *not* fatal — the lexical arm
+    still runs, so keyless / Ollama-less setups keep working memory search.
+    Logs access to memory_activities fire-and-forget for audit.
     """
-    from core.doc_index import aembed_query_cached
+    from core.doc_index import _is_trivial_query, aembed_query_cached
 
-    qvec = await aembed_query_cached(query)
-    if qvec is None:
+    if _is_trivial_query(query):
         return []
-    qnorm = float(np.linalg.norm(qvec)) or 1.0
 
-    async with async_session() as session:
-        rows = await list_memories(session, kind="fact")
+    match_expr = fts_match_expr(query)
 
-    scored: list[tuple[float, str, str]] = []
-    for r in rows:
-        if r.embedding is None:
-            continue
-        score = _cosine(qvec, qnorm, r.embedding)
-        if score is not None:
-            scored.append((score, r.id, r.text))
+    async def _load_rows() -> list:
+        async with async_session() as session:
+            return await list_memories(session, kind="fact")
 
-    scored.sort(key=lambda t: t[0], reverse=True)
-    result = [{"id": i, "text": t, "score": round(s, 4)} for s, i, t in scored[:k]]
+    async def _sparse() -> list[str]:
+        if match_expr is None:
+            return []
+        async with async_session() as session:
+            return await search_memories_lexical(
+                session, match_expr, kind="fact", limit=_SPARSE_CANDIDATES
+            )
+
+    # Independent — overlap the embedding round-trip with both DB reads rather
+    # than paying them back to back.
+    qvec, rows, sparse = await asyncio.gather(
+        aembed_query_cached(query, allow_trivial=True), _load_rows(), _sparse()
+    )
+    if not rows:
+        return []
+
+    dense: list[tuple[str, float]] = []
+    if qvec is not None:
+        qnorm = float(np.linalg.norm(qvec)) or 1.0
+        for r in rows:
+            if r.embedding is None:
+                continue
+            score = _cosine(qvec, qnorm, r.embedding)
+            if score is not None:
+                dense.append((r.id, score))
+        dense.sort(key=lambda t: t[1], reverse=True)
+
+    keep = select_hybrid(
+        dense=dense,
+        sparse=sparse,
+        k=k,
+        min_score=_MIN_COSINE,
+        rel_drop=_REL_DROP,
+        label="memory",
+    )
+    if not keep:
+        return []
+
+    dense_scores = dict(dense)
+    texts = {r.id: r.text for r in rows}
+    result = [
+        {"id": i, "text": texts[i], "score": round(dense_scores.get(i, 0.0), 4)}
+        for i in keep
+        if i in texts
+    ]
 
     # Fire-and-forget activity log — track when memories were used
     if result:
