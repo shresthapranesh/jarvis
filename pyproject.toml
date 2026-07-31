@@ -58,5 +58,17 @@ project-includes = [
 [dependency-groups]
 dev = [
     "debugpy>=1.8.20",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff~=0.15",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "llm: hits a real model provider; skipped unless credentials are present",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
