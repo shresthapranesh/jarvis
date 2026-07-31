@@ -432,6 +432,21 @@ def _get_sync_checkpointer() -> SqliteSaver:
     return _sync_checkpointer
 
 
+def close_sync_checkpointer() -> None:
+    """Close the lazy sync checkpointer connection, if one was ever opened.
+
+    Only the no-runner path (CLI, tests) builds it; the server uses the async
+    saver from the lifespan. Safe to call unconditionally.
+    """
+    global _sync_checkpointer
+    saver, _sync_checkpointer = _sync_checkpointer, None
+    if saver is not None:
+        try:
+            saver.conn.close()
+        except Exception:  # already closed / mid-teardown
+            pass
+
+
 # ── Agent builder ─────────────────────────────────────────────────────────────
 
 def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> CompiledStateGraph:

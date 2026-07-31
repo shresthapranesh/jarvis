@@ -36,6 +36,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from uuid import uuid4
 
@@ -67,10 +69,22 @@ def _db_path() -> str:
     return url.rsplit(":///", 1)[-1]
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
+    """A read-only connection, closed on exit.
+
+    `with sqlite3.connect(...)` is a *transaction* context manager — it commits
+    or rolls back and leaves the connection open, so the old form relied on GC
+    to close. That is fine until a call raises: the traceback pins the frame,
+    and IPython keeps tracebacks in the kernel namespace, so one failed SDK call
+    would hold a connection for the kernel's whole 30-minute idle life.
+    """
     conn = sqlite3.connect(f"file:{_db_path()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _embedder() -> Any:
