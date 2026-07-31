@@ -5,6 +5,8 @@ from __future__ import annotations
 import strawberry
 from strawberry.tools import merge_types
 
+from .extensions import SerializeSessionResolvers
+
 from .mutations.artifact import ArtifactMutation
 from .mutations.automation import AutomationMutation
 from .mutations.board_task import BoardTaskMutation
@@ -49,4 +51,10 @@ Subscription = merge_types("Subscription", (
     WorkflowSubscription,
 ))
 
-schema = strawberry.Schema(query=Query, mutation=Mutation, subscription=Subscription)
+schema = strawberry.Schema(
+    query=Query,
+    mutation=Mutation,
+    subscription=Subscription,
+    # Resolvers share one AsyncSession per request; see extensions.py.
+    extensions=[SerializeSessionResolvers],
+)
