@@ -34,25 +34,40 @@ _discord_client: object | None = None  # discord.Client when set; lazy-typed to 
 _queue: JobQueue | None = None
 
 
+def _runner_resource(name: str):
+    """Read a resource off the active JarvisRunner, or None if there isn't one.
+
+    Imported lazily: core.runner imports core.queue, which this module also
+    imports, so a module-level import would cycle.
+    """
+    from core.runner import get_runner_or_none
+
+    runner = get_runner_or_none()
+    return None if runner is None else getattr(runner, name, None)
+
+
 def get_async_checkpointer() -> AsyncSqliteSaver:
-    """Return the process-wide AsyncSqliteSaver. Must be called after lifespan init."""
-    if _async_checkpointer is None:
+    """The active AsyncSqliteSaver — the runner's if installed, else the global."""
+    cp = _runner_resource("checkpointer") or _async_checkpointer
+    if cp is None:
         raise RuntimeError("async checkpointer not initialized — server lifespan has not started")
-    return _async_checkpointer
+    return cp
 
 
 def get_store() -> AsyncSqliteStore:
-    """Return the process-wide AsyncSqliteStore. Must be called after lifespan init."""
-    if _store is None:
+    """The active AsyncSqliteStore — the runner's if installed, else the global."""
+    store = _runner_resource("store") or _store
+    if store is None:
         raise RuntimeError("store not initialized — server lifespan has not started")
-    return _store
+    return store
 
 
 def get_http_client() -> httpx.AsyncClient:
-    """Return the process-wide httpx.AsyncClient. Must be called after lifespan init."""
-    if _http_client is None:
+    """The active httpx.AsyncClient — the runner's if installed, else the global."""
+    client = _runner_resource("http_client") or _http_client
+    if client is None:
         raise RuntimeError("http client not initialized — server lifespan has not started")
-    return _http_client
+    return client
 
 
 def get_telegram_bot():
@@ -66,10 +81,11 @@ def get_discord_client():
 
 
 def get_queue() -> JobQueue:
-    """Return the process-wide JobQueue. Must be called after lifespan init."""
-    if _queue is None:
+    """The active JobQueue — the runner's if installed, else the global."""
+    queue = _runner_resource("queue") or _queue
+    if queue is None:
         raise RuntimeError("job queue not initialized — server lifespan has not started")
-    return _queue
+    return queue
 
 
 # ── Task registry ────────────────────────────────────────────────────────────

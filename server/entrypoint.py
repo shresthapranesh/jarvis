@@ -26,7 +26,7 @@ from core.queue import SqliteJobQueue, Worker
 
 from core import state
 from core.runner import JarvisRunner, set_runner
-from db import async_session, close_db, init_db
+from db import async_session, close_db, get_database, init_db
 from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
@@ -115,7 +115,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("MCP init failed: %s", exc, exc_info=True)
 
         # ── Runner (Jarvis analog) ───────────────────────────────────────
-        # Centralizes checkpointer/store/queue/config and cache config.
+        # Centralizes db/checkpointer/store/queue/config and cache config.
+        # get_config(), get_database() and the core.state accessors all resolve
+        # through this once it is installed, so it is the source of truth
+        # rather than a second copy of these references.
         try:
             set_runner(
                 JarvisRunner(
@@ -124,6 +127,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     store=store,
                     queue=state._queue,
                     http_client=http,
+                    db=get_database(),
                 )
             )
             logger.info("runner initialized: %s", get_config().queue_backend)
