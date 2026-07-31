@@ -26,7 +26,7 @@ from core.queue import SqliteJobQueue, Worker
 
 from core import state
 from core.runner import JarvisRunner, set_runner
-from db import async_session, init_db
+from db import async_session, close_db, init_db
 from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
@@ -212,6 +212,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         set_runner(None)
     _scheduler.shutdown(wait=False)
     state._main_loop = None
+
+    # Release the DB pool (and its aiosqlite threads) plus the lazy sync
+    # checkpointer. Last, so anything above can still reach the database.
+    from core.agents import close_sync_checkpointer
+
+    with contextlib.suppress(Exception):
+        close_sync_checkpointer()
+    with contextlib.suppress(Exception):
+        await close_db()
 
 
 def _build_queue():

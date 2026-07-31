@@ -1,19 +1,24 @@
 import logging
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import Connection, event, inspect, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from pathlib import Path
 
-from core.config import get_config
+from db.models import Base
 
 logger = logging.getLogger(__name__)
 
-_cfg = get_config()
-Path(_cfg.work_dir).mkdir(parents=True, exist_ok=True)
-DATABASE_URL = _cfg.database_url
-from db.models import Base
+# Pool sizing. aiosqlite runs every connection on its own OS thread, and
+# QueuePool keeps `pool_size` of them open for the process lifetime — so
+# pool_size is the *idle* footprint, paid whether or not anyone is connected.
+# Overflow connections above it are closed on return, so the ceiling costs
+# nothing while idle. Keep the ceiling where it was (15) and shrink the
+# resident set instead.
+_POOL_SIZE = int(os.environ.get("JARVIS_DB_POOL_SIZE", "2"))
+_MAX_OVERFLOW = int(os.environ.get("JARVIS_DB_MAX_OVERFLOW", "13"))
 
 
 # Lexical (BM25) side of hybrid retrieval — see core/retrieval.py. Each entry is
@@ -126,11 +131,9 @@ def _migrate(conn: Connection) -> None:
         conn.execute(text("ALTER TABLE artifacts ADD COLUMN mime_type VARCHAR"))
     _ensure_fts(conn)
 
-engine = create_async_engine(DATABASE_URL, echo=False)
-
-
-@event.listens_for(engine.sync_engine, "connect")
 def _set_sqlite_pragmas(dbapi_conn: object, _record: object) -> None:
+    """journal_mode is persisted in the file; synchronous and busy_timeout are
+    per-connection, so this has to run on every new DBAPI connection."""
     cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
@@ -138,13 +141,104 @@ def _set_sqlite_pragmas(dbapi_conn: object, _record: object) -> None:
     cursor.close()
 
 
-async_session = async_sessionmaker(engine, expire_on_commit=False)
+def _sqlite_file(url: str) -> Path | None:
+    """The on-disk path behind a file-backed sqlite URL, else None (`:memory:`)."""
+    if "sqlite" not in url or ":///" not in url:
+        return None
+    path = url.rsplit(":///", 1)[-1]
+    return None if not path or path == ":memory:" else Path(path)
+
+
+class Database:
+    """One database: engine + session factory + schema lifecycle.
+
+    Owning these as an object instead of module globals means the connection
+    pool has an explicit lifetime — `close()` actually releases the aiosqlite
+    threads — and the URL is a constructor argument rather than something
+    frozen from the environment at import time.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        pool_size: int = _POOL_SIZE,
+        max_overflow: int = _MAX_OVERFLOW,
+        echo: bool = False,
+    ) -> None:
+        self.url = url
+        file = _sqlite_file(url)
+        if file is not None:
+            file.parent.mkdir(parents=True, exist_ok=True)
+        self.engine: AsyncEngine = create_async_engine(
+            url, echo=echo, pool_size=pool_size, max_overflow=max_overflow
+        )
+        event.listen(self.engine.sync_engine, "connect", _set_sqlite_pragmas)
+        self.session = async_sessionmaker(self.engine, expire_on_commit=False)
+
+    async def init(self) -> None:
+        """Create missing tables and apply migrations. Idempotent."""
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(_migrate)
+
+    async def close(self) -> None:
+        """Dispose the pool, closing every connection and its aiosqlite thread."""
+        await self.engine.dispose()
+
+    def __repr__(self) -> str:
+        return f"Database({self.url!r})"
+
+
+# ── Process-default database ─────────────────────────────────────────────────
+# Everything still reaches the DB through the module-level `async_session()`
+# below. That resolves through here on every call, so swapping the default (or
+# eventually handing a Database to whoever owns the scope) needs no call-site
+# changes.
+
+_database: Database | None = None
+
+
+def set_database(db: Database | None) -> Database | None:
+    """Install the process-default Database. Returns the one it replaced."""
+    global _database
+    previous, _database = _database, db
+    return previous
+
+
+def get_database() -> Database:
+    """The process-default Database, built from AppConfig on first use."""
+    global _database
+    if _database is None:
+        from core.config import get_config
+
+        cfg = get_config()
+        # Preserved from the old import-time side effect: work_dir must exist
+        # even when DATABASE_URL points somewhere else entirely.
+        Path(cfg.work_dir).mkdir(parents=True, exist_ok=True)
+        _database = Database(cfg.database_url)
+    return _database
+
+
+def async_session() -> AsyncSession:
+    """A new session on the process-default Database.
+
+    Kept as a module-level callable so the ~130 `async with async_session()`
+    call sites (many of which import the name at module scope) keep working
+    while the Database it resolves to becomes swappable.
+    """
+    return get_database().session()
 
 
 async def init_db() -> None:
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_migrate)
+    await get_database().init()
+
+
+async def close_db() -> None:
+    """Dispose the process-default Database, if one was ever built."""
+    db = set_database(None)
+    if db is not None:
+        await db.close()
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
