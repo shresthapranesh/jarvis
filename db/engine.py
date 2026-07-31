@@ -190,11 +190,12 @@ class Database:
         return f"Database({self.url!r})"
 
 
-# ── Process-default database ─────────────────────────────────────────────────
+# ── Database resolution ──────────────────────────────────────────────────────
 # Everything still reaches the DB through the module-level `async_session()`
-# below. That resolves through here on every call, so swapping the default (or
-# eventually handing a Database to whoever owns the scope) needs no call-site
-# changes.
+# below, which resolves through get_database() on every call. That in turn
+# prefers the active JarvisRunner's database, falling back to a process default
+# for the CLI, tests, and anything running before the server lifespan. So the
+# runner is the source of truth without a single call site having to know.
 
 _database: Database | None = None
 
@@ -206,8 +207,8 @@ def set_database(db: Database | None) -> Database | None:
     return previous
 
 
-def get_database() -> Database:
-    """The process-default Database, built from AppConfig on first use."""
+def _process_default_database() -> Database:
+    """The fallback Database, built from AppConfig on first use."""
     global _database
     if _database is None:
         from core.config import get_config
@@ -218,6 +219,16 @@ def get_database() -> Database:
         Path(cfg.work_dir).mkdir(parents=True, exist_ok=True)
         _database = Database(cfg.database_url)
     return _database
+
+
+def get_database() -> Database:
+    """The active Database — the runner's if one is installed, else the default."""
+    from core.runner import get_runner_or_none
+
+    runner = get_runner_or_none()
+    if runner is not None and runner.db is not None:
+        return runner.db
+    return _process_default_database()
 
 
 def async_session() -> AsyncSession:

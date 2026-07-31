@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, fields
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from httpx import AsyncClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -14,6 +14,9 @@ from core.config import AppConfig
 from core.context_cache import ContextCacheConfig
 from core.model_catalog import ModelSpec, get_model_spec
 from core.queue import JobQueue
+
+if TYPE_CHECKING:  # runtime import would cycle: db.engine resolves through us
+    from db.engine import Database
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,7 @@ class JarvisRunner:
         store: AsyncSqliteStore,
         queue: JobQueue,
         http_client: AsyncClient,
+        db: Database | None = None,
         runner_config: RunnerConfig | None = None,
     ) -> None:
         self.config = config
@@ -74,6 +78,9 @@ class JarvisRunner:
         self.store = store
         self.queue = queue
         self.http_client = http_client
+        # The app database. Optional so a partially-built runner (tests, the
+        # CLI) still works; get_database() falls back to the process default.
+        self.db = db
         self.runner_config = runner_config or RunnerConfig()
         self._plugin_manager: Any | None = None
 

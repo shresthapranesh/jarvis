@@ -15,7 +15,7 @@ def configure(**kwargs: Any) -> None:
     """Pre-set config overrides from CLI args before the first get_config() call."""
     global _overrides
     _overrides = {k: v for k, v in kwargs.items() if v is not None}
-    get_config.cache_clear()
+    _process_default_config.cache_clear()
 
 
 @dataclass(frozen=True)
@@ -71,11 +71,29 @@ class AppConfig:
 
 
 @lru_cache(maxsize=1)
-def get_config() -> AppConfig:
-    """Process-wide AppConfig singleton. Loads .env, then env vars; CLI overrides win."""
+def _process_default_config() -> AppConfig:
+    """Fallback AppConfig. Loads .env, then env vars; CLI overrides win."""
     try:
         from dotenv import load_dotenv
         load_dotenv()
     except ImportError:
         pass
     return AppConfig.from_env(_overrides)
+
+
+def get_config() -> AppConfig:
+    """The active AppConfig — the runner's if one is installed, else the default.
+
+    Resolving through the runner keeps it the single source of truth without
+    the ~30 call sites having to ask for it. The import is lazy because
+    core.runner imports this module for AppConfig.
+    """
+    try:
+        from core.runner import get_runner_or_none
+
+        runner = get_runner_or_none()
+        if runner is not None and runner.config is not None:
+            return runner.config
+    except Exception:  # partially-imported runner during startup
+        pass
+    return _process_default_config()
