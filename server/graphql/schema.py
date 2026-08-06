@@ -13,6 +13,7 @@ from .mutations.board_task import BoardTaskMutation
 from .mutations.conversation import ConversationMutation
 from .mutations.mcp import McpMutation
 from .mutations.memory import MemoryMutation
+from .mutations.models import ModelsMutation
 from .mutations.notification import NotificationMutation
 from .mutations.project import ProjectMutation
 from .mutations.skill import SkillMutation
@@ -44,7 +45,7 @@ Mutation = merge_types("Mutation", (
     MemoryMutation, ConversationMutation, ArtifactMutation,
     AutomationMutation, BoardTaskMutation, WorkflowMutation,
     NotificationMutation, ProjectMutation, SkillMutation, TaskRunMutation,
-    McpMutation,
+    McpMutation, ModelsMutation,
 ))
 Subscription = merge_types("Subscription", (
     ChatSubscription, AutomationSubscription, BoardTaskSubscription,
