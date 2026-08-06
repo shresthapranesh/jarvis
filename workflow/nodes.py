@@ -18,6 +18,7 @@ from uuid import uuid4
 from core.agents import build_agent
 from core.model_catalog import DEFAULT_MODEL, get_model_spec
 from core.state import TaskState, emit_event as _emit
+from db.ops import resolve_model
 from core.streaming import STREAM_MODES
 
 
@@ -272,7 +273,7 @@ class AgentNode(BaseNode):
 
     Config fields:
         prompt_template (str):  template with ``{{var}}`` placeholders
-        model (str):            model id, defaults to DEFAULT_MODEL
+        model (str):            model id; defaults to the configured default model
         output_key (str):       name of the output port, defaults to "result"
         input_ports (list[str]): expected input port names
         output_schema (dict | str | None): JSON schema for structured output.
@@ -287,7 +288,7 @@ class AgentNode(BaseNode):
 
     async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
         prompt = _interpolate(self.config.get("prompt_template", ""), inputs)
-        model_id = self.config.get("model", DEFAULT_MODEL)
+        model_id = await resolve_model(self.config.get("model"))
         output_key = self.config.get("output_key", "result")
         output_schema = self.config.get("output_schema")
         schema_mode = self.config.get("output_schema_mode", "auto")
@@ -342,7 +343,7 @@ class ConditionalNode(BaseNode):
     Config fields:
         condition (str):  question/statement with ``{{var}}`` placeholders;
                           LLM answers "true" or "false"
-        model (str):      model id for evaluation, defaults to DEFAULT_MODEL
+        model (str):      model id for evaluation; defaults to the configured default
         input_key (str):  primary input port name (used by output_ports)
     """
 
@@ -355,7 +356,7 @@ class ConditionalNode(BaseNode):
         from langchain_core.messages import HumanMessage, SystemMessage
 
         condition = _interpolate(self.config.get("condition", ""), inputs)
-        model_id = self.config.get("model", DEFAULT_MODEL)
+        model_id = await resolve_model(self.config.get("model"))
 
         spec = _get_model_spec(model_id)
         llm = spec.build_llm()
@@ -467,7 +468,7 @@ class PlannerNode(BaseNode):
     Config fields:
         prompt_template (str): goal / task with {{var}} placeholders
         rubric (str): optional guidance / constraints for planning
-        model (str): model id, defaults to DEFAULT_MODEL
+        model (str): model id; defaults to the configured default model
         max_steps (int): max steps (default 5, clamped 1..10)
         output_key (str): output port name, defaults to "plan"
         output_schema (dict|str|None): optional schema for structured plan output
@@ -483,7 +484,7 @@ class PlannerNode(BaseNode):
 
         base_prompt = _interpolate(str(self.config.get("prompt_template", self.config.get("goal", "") or "")), inputs)
         rubric = _interpolate(str(self.config.get("rubric", "") or ""), inputs)
-        model_id = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        model_id = await resolve_model(self.config.get("model"))
         output_key = self.config.get("output_key", "plan")
         max_steps = max(1, min(10, int(self.config.get("max_steps", 5))))
         output_schema = self.config.get("output_schema")
@@ -612,7 +613,7 @@ class RouterNode(BaseNode):
         categories (list[str]): output port names; the LLM picks exactly one.
                                 Outgoing edges use these as their sourceHandle.
         instruction (str):      classification prompt with ``{{var}}`` placeholders
-        model (str):            model id, defaults to DEFAULT_MODEL
+        model (str):            model id; defaults to the configured default model
     """
 
     node_type = "router"
@@ -628,7 +629,7 @@ class RouterNode(BaseNode):
             raise ValueError("RouterNode requires a non-empty 'categories' list")
 
         instruction = _interpolate(self.config.get("instruction", ""), inputs)
-        model_id = self.config.get("model", DEFAULT_MODEL)
+        model_id = await resolve_model(self.config.get("model"))
         llm = _get_model_spec(model_id).build_llm()
 
         cat_list = ", ".join(categories)
@@ -703,7 +704,7 @@ class RefineNode(BaseNode):
     async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
         base_prompt = _interpolate(self.config.get("prompt_template", ""), inputs)
         rubric = _interpolate(self.config.get("rubric", ""), inputs)
-        model_id = self.config.get("model", DEFAULT_MODEL)
+        model_id = await resolve_model(self.config.get("model"))
         output_key = self.config.get("output_key", "result")
         max_iters = max(1, min(5, int(self.config.get("max_iterations", 3))))
 
@@ -772,7 +773,7 @@ class SequentialNode(BaseNode):
         steps = self.config.get("steps", [])
         if not steps:
             raise ValueError("SequentialNode requires non-empty 'steps' list")
-        model_default = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        model_default = await resolve_model(self.config.get("model"))
         final_output_key = self.config.get("output_key")
 
         data: dict[str, Any] = dict(inputs)
@@ -846,7 +847,7 @@ class ParallelNode(BaseNode):
         branches = self.config.get("branches", [])
         if not branches:
             raise ValueError("ParallelNode requires non-empty 'branches' list")
-        model_default = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        model_default = await resolve_model(self.config.get("model"))
         concurrency = self.config.get("concurrency")
 
         _emit(task_state, "map_start", node_id=self.node_id, total=len(branches))
@@ -903,7 +904,7 @@ class LoopNode(BaseNode):
         prompt_template (str): generation task with {{var}} placeholders
         rubric (str): criteria evaluator judges against; if empty, runs
             max_iterations unconditionally (no early exit)
-        model (str): model id for generation + evaluation (default DEFAULT_MODEL)
+        model (str): model id for generation + evaluation (default: configured default)
         max_iterations (int): max rounds (default 3, clamped 1..10)
         output_key (str): output port name (default "result")
         exit_on (str): token to indicate done (default "PASS"); evaluator must
@@ -916,7 +917,7 @@ class LoopNode(BaseNode):
     async def execute(self, inputs: dict[str, Any], task_state: TaskState) -> NodeOutput:
         base_prompt = _interpolate(self.config.get("prompt_template", ""), inputs)
         rubric = _interpolate(self.config.get("rubric", ""), inputs)
-        model_id = self.config.get("model", DEFAULT_MODEL) or DEFAULT_MODEL
+        model_id = await resolve_model(self.config.get("model"))
         output_key = self.config.get("output_key", "result")
         max_iters = max(1, min(10, int(self.config.get("max_iterations", 3))))
         exit_on = str(self.config.get("exit_on", "PASS")).strip().upper() or "PASS"

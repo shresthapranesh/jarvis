@@ -11,10 +11,9 @@ from strawberry import relay
 
 from core.agents import is_valid_model
 from core.config import get_config
-from core.model_catalog import DEFAULT_MODEL
 from core.schemas import AttachmentIn
 from core.state import _tasks, emit_event
-from db.ops import delete_conversation, update_conversation
+from db.ops import delete_conversation, resolve_model, update_conversation
 
 from ..types.conversation import Conversation
 from ..types.upload import UploadReferenceInput
@@ -86,10 +85,10 @@ class ConversationMutation:
         info: strawberry.Info,
         input: StartTaskInput,
     ) -> StartTaskPayload:
-        model = input.model or DEFAULT_MODEL
+        session = info.context["session"]
+        model = await resolve_model(input.model, session)
         if not is_valid_model(model):
             raise ValueError(f"unknown model {model!r}; query `models` for the catalog")
-        session = info.context["session"]
 
         attachments: list[AttachmentIn] | None = None
         staging_paths: list[tuple[Path, Path]] = []

@@ -139,8 +139,9 @@ async def prefill_todos_with_llm(query: str, model_id: str | None = None) -> lis
         return None
     try:
         from core.model_catalog import DEFAULT_MODEL, get_model_spec
+        from db.ops import resolve_model
 
-        mid = model_id or DEFAULT_MODEL
+        mid = await resolve_model(model_id)
         try:
             spec = get_model_spec(mid)
         except ValueError:

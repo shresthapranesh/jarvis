@@ -810,6 +810,27 @@ async def get_default_model(session: AsyncSession) -> str:
     return value if value else _CATALOG_DEFAULT
 
 
+async def resolve_model(explicit: str | None, session: AsyncSession | None = None) -> str:
+    """The model a run should actually use: `explicit` if set, else the default.
+
+    Call this instead of writing `explicit or DEFAULT_MODEL`. That constant is
+    the compile-time catalog seed, not the operator's choice, so falling back to
+    it routes the run to a model the user never selected — the failure is silent
+    until that provider errors and names a model nobody picked.
+
+    Pass `session` when one is already open; otherwise a short-lived one is
+    used, so this is safe to call from sync-ish contexts like workflow nodes.
+    """
+    if explicit:
+        return explicit
+    if session is not None:
+        return await get_default_model(session)
+    from db import async_session
+
+    async with async_session() as own_session:
+        return await get_default_model(own_session)
+
+
 # ── Custom (runtime-added) models ─────────────────────────────────────────────
 #
 # Persisted as a JSON list of {id, label, provider} under the config key

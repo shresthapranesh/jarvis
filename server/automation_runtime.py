@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.agents import DEFAULT_MODEL, build_agent
+from core.agents import build_agent
 from core.invocation_context import InvocationContext
 from core.budget import BudgetTracker, get_budget_limits_for_task
 from core.runner import build_callbacks
@@ -30,6 +30,7 @@ from db.ops import (
     finish_automation_run,
     get_automation,
     get_or_create_conversation,
+    resolve_model,
 )
 from core.notifications import send_notifications
 from core.state import (
@@ -65,6 +66,7 @@ def _compute_next_run_at(auto: Automation) -> str | None:
 async def _execute_prompt_type(
     auto: Automation, state: TaskState, checkpointer, thread_id: str,
     invocation_context: InvocationContext | None = None,
+    model_id: str | None = None,
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
@@ -73,7 +75,8 @@ async def _execute_prompt_type(
     state._budget_tracker = tracker
     callbacks = build_callbacks(tracker, task_state=state)
     _store = invocation_context.store if invocation_context and invocation_context.store else get_store()
-    agent = build_agent(auto.model or DEFAULT_MODEL, checkpointer=checkpointer, store=_store, invocation_context=invocation_context)
+    model = model_id or await _resolve_model(auto)
+    agent = build_agent(model, checkpointer=checkpointer, store=_store, invocation_context=invocation_context)
 
     user_content = auto.prompt_text or ""
     if auto.input_type == "monitor":
@@ -264,6 +267,16 @@ async def _has_inflight_sibling(automation_id: str, run_id: str) -> bool:
     return False
 
 
+async def _resolve_model(auto: Automation, session: AsyncSession | None = None) -> str:
+    """The model for this run: the automation's own, else the configured default.
+
+    Falling back to the compile-time `DEFAULT_MODEL` made a null-model
+    automation run on a provider the user never selected (and blow its
+    free-tier quota) while the UI showed nothing wrong.
+    """
+    return await resolve_model(auto.model, session)
+
+
 async def _persist_stateful_message(
     conv_id: str, role: str, content: str, status: str = "done",
 ) -> None:
@@ -289,6 +302,16 @@ async def _run_automation_inner(
     try:
         status = "done"
 
+        # Resolved once so the conversation row, the agent, and the log line
+        # can't disagree about which model this run used. Only the LLM-backed
+        # input types need it — code/webhook runs would open a session for a
+        # value they never read.
+        model_id: str | None = (
+            await _resolve_model(auto)
+            if auto.input_type in ("prompt", "monitor")
+            else None
+        )
+
         if _is_stateful_prompt(auto):
             if await _has_inflight_sibling(auto.id, run_id):
                 skip_msg = "skipped: a previous run of this stateful automation is still in flight"
@@ -300,14 +323,14 @@ async def _run_automation_inner(
             conv_id = automation_conversation_id(auto.id)
             async with async_session() as session:
                 await get_or_create_conversation(
-                    session, conv_id, auto.model or DEFAULT_MODEL, auto.name,
-                    surface="automation",
+                    session, conv_id, model_id or await _resolve_model(auto, session),
+                    auto.name, surface="automation",
                 )
                 await add_message(session, conv_id, "user", auto.prompt_text or "")
 
         if auto.input_type in ("prompt", "monitor"):
             thread_id = conv_id or f"automation_{run_id}"
-            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id, invocation_context=invocation_context)
+            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id, invocation_context=invocation_context, model_id=model_id)
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":
@@ -448,7 +471,9 @@ async def automation_job_handler(job: Job) -> None:
             parent_id=automation_id,
         )
         _tasks[run_id] = state
-        log_task_created(run_id, state, auto.model)
+        # Log the resolved model, not `auto.model` — a bare "model=-" is what
+        # hid a null-model run falling back to the wrong provider.
+        log_task_created(run_id, state, await _resolve_model(auto))
 
     # Import here to avoid a circular dependency at module load — state owns
     # the queue accessor, and the queue is only set after the lifespan starts.
@@ -527,7 +552,7 @@ async def register_automation_run(
         label=auto.name,
         parent_id=automation_id,
     )
-    log_task_created(run_id, _tasks[run_id], auto.model)
+    log_task_created(run_id, _tasks[run_id], await _resolve_model(auto, session))
 
     await session.commit()
     return run_id
