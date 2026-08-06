@@ -124,6 +124,11 @@ def get_model_spec(model_id: str) -> ModelSpec:
     return spec
 
 
+def is_builtin_model(model_id: str) -> bool:
+    """Whether `model_id` is compiled in — built-ins can't be edited or removed."""
+    return any(m.id == model_id for m in BUILTIN_MODELS)
+
+
 def is_valid_model(model: str) -> bool:
     """Whether `model` is in the catalog (built-in or custom). Checked at write
     boundaries only — read paths stay permissive so old DB rows with stale model

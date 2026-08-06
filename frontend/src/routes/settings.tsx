@@ -14,7 +14,7 @@ import {environment} from '../relay/environment';
 import {useToast} from '../lib/toast';
 import {ConfirmDialog} from '../components/ConfirmDialog';
 import {FormModal} from '../components/FormModal';
-import {EditIcon, PlusIcon, SearchIcon, TrashIcon} from '../components/icons';
+import {CheckIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon} from '../components/icons';
 import type {
   NotificationChannel,
   NotificationChannelReference,
@@ -50,9 +50,9 @@ const TAB_INFO: Record<SettingsTab, {label: string; subtitle: React.ReactNode}> 
     label: 'Models',
     subtitle: (
       <>
-        Language models available across providers. Add custom models via the CLI —{' '}
-        <code>uv run python main.py model add provider:model_id "Label"</code> — and they
-        appear here automatically.
+        Language models available across providers. Add your own as{' '}
+        <code>provider:model_name</code> — no code change needed — and pick which one runs
+        by default. Built-ins are compiled in and can only be set as the default.
       </>
     ),
   },
@@ -125,23 +125,40 @@ const settingsModelsQuery = graphql`
   query settingsModelsQuery {
     models {
       default
+      providers
       available {
         id
         label
         provider
+        builtin
       }
     }
   }
 `;
 
-async function fetchModelCatalog() {
-  const res: any = await fetchQuery(environment, settingsModelsQuery, {}, {fetchPolicy: 'network-only'}).toPromise();
-  return res?.models as
-    | {default: string; available: {id: string; label: string; provider: string}[]}
-    | undefined;
+interface CatalogModel {
+  id: string;
+  label: string;
+  provider: string;
+  builtin: boolean;
 }
 
+interface ModelCatalogData {
+  default: string;
+  providers: readonly string[];
+  available: readonly CatalogModel[];
+}
+
+async function fetchModelCatalog() {
+  const res: any = await fetchQuery(environment, settingsModelsQuery, {}, {fetchPolicy: 'network-only'}).toPromise();
+  return res?.models as ModelCatalogData | undefined;
+}
+
+type ModelEditor = {mode: 'add'} | {mode: 'edit'; model: CatalogModel};
+
 function ModelsTab() {
+  const queryClient = useQueryClient();
+  const toast = useToast();
   const {data, isLoading} = useQuery({
     queryKey: ['models-catalog'],
     queryFn: fetchModelCatalog,
@@ -149,6 +166,57 @@ function ModelsTab() {
 
   const [filter, setFilter] = useState('');
   const [providerFilter, setProviderFilter] = useState<string>('all');
+  const [editor, setEditor] = useState<ModelEditor | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CatalogModel | null>(null);
+
+  const refresh = () => queryClient.invalidateQueries({queryKey: ['models-catalog']});
+
+  const saveMut = useMutation({
+    mutationFn: async (draft: {id: string; label: string; provider: string}) => {
+      const provider = draft.provider || null;
+      if (editor?.mode === 'edit') {
+        const {commitUpdateModel} = await import('../relay/UpdateModelMutation');
+        await commitUpdateModel(draft.id, draft.label, provider);
+      } else {
+        const {commitAddModel} = await import('../relay/AddModelMutation');
+        await commitAddModel(draft.id, draft.label, provider);
+      }
+    },
+    onSuccess: async () => {
+      toast.push(editor?.mode === 'edit' ? 'Model updated' : 'Model added', 'success');
+      setEditor(null);
+      await refresh();
+    },
+    onError: (e: Error) => toast.push(e.message, 'error'),
+  });
+
+  const removeMut = useMutation({
+    mutationFn: async (id: string) => {
+      const {commitRemoveModel} = await import('../relay/RemoveModelMutation');
+      await commitRemoveModel(id);
+    },
+    onSuccess: async () => {
+      toast.push('Model removed', 'success');
+      setDeleteTarget(null);
+      await refresh();
+    },
+    onError: (e: Error) => {
+      setDeleteTarget(null);
+      toast.push(e.message, 'error');
+    },
+  });
+
+  const defaultMut = useMutation({
+    mutationFn: async (id: string) => {
+      const {commitSetDefaultModel} = await import('../relay/SetDefaultModelMutation');
+      await commitSetDefaultModel(id);
+    },
+    onSuccess: async (_r, id) => {
+      toast.push(`Default model set to ${id}`, 'success');
+      await refresh();
+    },
+    onError: (e: Error) => toast.push(e.message, 'error'),
+  });
 
   const providers = useMemo(() => {
     const set = new Set<string>();
@@ -169,12 +237,19 @@ function ModelsTab() {
     });
   }, [data, filter, providerFilter]);
 
+  const customCount = (data?.available ?? []).filter((m) => !m.builtin).length;
+
   return (
     <div className="memory-section">
       <h2 className="memory-section-title">
         Model catalog <span className="memory-count">{data?.available?.length ?? 0}</span>
         <span className="memory-section-hint">
-          default: <code>{data?.default ?? '—'}</code>
+          {customCount} custom · default: <code>{data?.default ?? '—'}</code>
+        </span>
+        <span className="settings-section-actions">
+          <button className="artifact-btn primary" onClick={() => setEditor({mode: 'add'})}>
+            <PlusIcon size={14} /> Add model
+          </button>
         </span>
       </h2>
 
@@ -207,21 +282,191 @@ function ModelsTab() {
         <div className="memory-empty">No models match the filter.</div>
       ) : (
         <ul className="settings-model-grid">
-          {filtered.map((m) => (
-            <li key={m.id} className="skill-card settings-model-card">
-              <div className="skill-card-head">
-                <span className="settings-badge">{m.provider}</span>
-                {m.id === data?.default && (
-                  <span className="settings-badge settings-badge--live">default</span>
-                )}
-              </div>
-              <span className="skill-card-name settings-model-id">{m.id}</span>
-              <p className="skill-card-desc">{m.label}</p>
-            </li>
-          ))}
+          {filtered.map((m) => {
+            const isDefault = m.id === data?.default;
+            return (
+              <li key={m.id} className="skill-card settings-model-card">
+                <div className="skill-card-head">
+                  <span className="settings-badge">{m.provider}</span>
+                  {isDefault && (
+                    <span className="settings-badge settings-badge--live">default</span>
+                  )}
+                  {!m.builtin && <span className="settings-badge">custom</span>}
+                  {!m.builtin && (
+                    <div className="skill-card-controls">
+                      <button
+                        className="icon-btn"
+                        title="Edit model"
+                        onClick={() => setEditor({mode: 'edit', model: m})}
+                      >
+                        <EditIcon size={14} />
+                      </button>
+                      <button
+                        className="icon-btn icon-btn--danger"
+                        title="Remove model"
+                        onClick={() => setDeleteTarget(m)}
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <span className="skill-card-name settings-model-id">{m.id}</span>
+                <p className="skill-card-desc">{m.label}</p>
+                <div className="settings-model-actions">
+                  {isDefault ? (
+                    <span className="auto-form-hint">
+                      <CheckIcon size={12} /> Used when no model is specified
+                    </span>
+                  ) : (
+                    <button
+                      className="artifact-btn small"
+                      disabled={defaultMut.isPending}
+                      onClick={() => defaultMut.mutate(m.id)}
+                    >
+                      Set as default
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
+
+      {editor && (
+        <ModelModal
+          editor={editor}
+          providers={data?.providers ?? []}
+          pending={saveMut.isPending}
+          onSubmit={(draft) => saveMut.mutate(draft)}
+          onClose={() => setEditor(null)}
+        />
+      )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Remove model"
+        message={
+          <p>
+            Remove <strong>{deleteTarget?.id}</strong> from the catalog? Conversations
+            pinned to it fall back to the default model.
+            {deleteTarget?.id === data?.default &&
+              ' This is the current default — it will reset to the built-in default.'}
+          </p>
+        }
+        confirmLabel="Remove"
+        danger
+        onConfirm={() => deleteTarget && removeMut.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
+  );
+}
+
+function ModelModal({
+  editor,
+  providers,
+  pending,
+  onSubmit,
+  onClose,
+}: {
+  editor: ModelEditor;
+  providers: readonly string[];
+  pending: boolean;
+  onSubmit: (draft: {id: string; label: string; provider: string}) => void;
+  onClose: () => void;
+}) {
+  const editing = editor.mode === 'edit';
+  const [id, setId] = useState(editing ? editor.model.id : '');
+  const [label, setLabel] = useState(editing ? editor.model.label : '');
+  // '' means "infer from the id prefix" — the same default the CLI uses.
+  const [provider, setProvider] = useState(
+    editing && editor.model.provider !== editor.model.id.split(':')[0]
+      ? editor.model.provider
+      : '',
+  );
+
+  const inferred = id.split(':')[0].trim();
+  const resolvedProvider = provider || inferred;
+  const modelName = id.slice(id.indexOf(':') + 1).trim();
+
+  const error = useMemo(() => {
+    if (!id.trim()) return null;
+    if (!id.includes(':') || !modelName) {
+      return "Expected 'provider:model_name' — e.g. google_genai:gemini-3.5-flash";
+    }
+    if (!providers.includes(resolvedProvider)) {
+      return `Unsupported provider '${resolvedProvider}' — must be one of: ${providers.join(', ')}`;
+    }
+    return null;
+  }, [id, modelName, providers, resolvedProvider]);
+
+  const canSubmit = Boolean(id.trim() && label.trim()) && error === null;
+
+  return (
+    <FormModal
+      open
+      title={editing ? `Edit ${editor.model.id}` : 'Add model'}
+      subtitle={
+        editing
+          ? 'The ID is the catalog key and cannot be changed — remove and re-add to rename.'
+          : "Any model from a supported provider works without a code change. The part after ':' is passed verbatim to the provider's SDK."
+      }
+      submitLabel={editing ? 'Save changes' : 'Add model'}
+      submitDisabled={!canSubmit}
+      pending={pending}
+      error={error}
+      onSubmit={() => canSubmit && onSubmit({id: id.trim(), label: label.trim(), provider})}
+      onClose={onClose}
+    >
+      <div className="auto-form-group">
+        <span className="auto-form-label">Model ID</span>
+        <input
+          className="auto-form-input settings-mono"
+          placeholder="google_genai:gemini-3.5-flash"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+          disabled={editing}
+          spellCheck={false}
+          autoFocus={!editing}
+        />
+        <span className="auto-form-hint">
+          <code>provider:model_name</code> — provider must be one of{' '}
+          {providers.join(', ')}.
+        </span>
+      </div>
+      <div className="auto-form-group">
+        <span className="auto-form-label">Label</span>
+        <input
+          className="auto-form-input"
+          placeholder="Gemini 3.5 Flash (Google)"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          autoFocus={editing}
+        />
+        <span className="auto-form-hint">Shown in the model dropdowns.</span>
+      </div>
+      <div className="auto-form-group">
+        <span className="auto-form-label">Provider</span>
+        <select
+          className="auto-form-select"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value)}
+        >
+          <option value="">Infer from ID{inferred ? ` — ${inferred}` : ''}</option>
+          {providers.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        <span className="auto-form-hint">
+          Which backend builds the client. Override only when the ID prefix isn't the
+          provider.
+        </span>
+      </div>
+    </FormModal>
   );
 }
 
