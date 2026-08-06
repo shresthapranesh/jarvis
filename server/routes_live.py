@@ -8,9 +8,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from core.agents import DEFAULT_MODEL, build_agent, is_valid_model
+from core.agents import build_agent, is_valid_model
 from core.log_callback import AgentLogger
 from core.state import TaskState, get_async_checkpointer, get_store
+from db.ops import resolve_model
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_chunk
 
 router = APIRouter()
@@ -32,7 +33,7 @@ async def _drain_events(state: TaskState, websocket: WebSocket, cursor: int) -> 
 @router.websocket("/ws/live")
 async def live_ws(websocket: WebSocket) -> None:
     await websocket.accept()
-    model = websocket.query_params.get("model", DEFAULT_MODEL)
+    model = await resolve_model(websocket.query_params.get("model"))
     if not is_valid_model(model):
         await websocket.close(code=1008, reason=f"unknown model {model!r}")
         return
