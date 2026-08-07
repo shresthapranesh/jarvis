@@ -175,7 +175,8 @@ async def manage_automations(
     optional method/headers-JSON/body), or "monitor" (always-stateful prompt
     run that watches prompt_text's target, e.g. "NVDA close; alert below 150",
     and notifies only on change). schedule is a cron expression ("0 9 * * *" =
-    daily 9am); None/empty = manual trigger only. update takes automation_id
+    daily 9am) in the server's local timezone, not UTC; None/empty = manual
+    trigger only. update takes automation_id
     plus only the fields to change (empty string clears a text field).
     delete takes automation_id.
     """

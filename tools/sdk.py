@@ -380,7 +380,8 @@ def create_automation(
       "webhook" — set webhook_url (+ method / headers-JSON / body).
       "monitor" — always-stateful prompt run that watches prompt_text's target
                   (e.g. "NVDA close; alert below 150") and notifies only on change.
-    schedule is a cron expression ("0 9 * * *" = daily 9am); None = manual only.
+    schedule is a cron expression ("0 9 * * *" = daily 9am), interpreted in the
+    server's local timezone, not UTC; None = manual only.
     """
     data = api(
         "mutation($input: AutomationInput!) { createAutomation(input: $input)"

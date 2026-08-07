@@ -287,12 +287,14 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
       )}
 
       <div className="auto-form-group">
-        <label className="auto-form-label">Schedule (cron, leave blank for ad-hoc)</label>
+        <label className="auto-form-label">
+          Schedule (cron in server local time, leave blank for ad-hoc)
+        </label>
         <input
           className="auto-form-input"
           value={form.schedule ?? ''}
           onChange={(e) => set('schedule', e.target.value)}
-          placeholder="0 9 * * 1  (Mon 9am UTC)"
+          placeholder="0 9 * * 1  (Mon 9am)"
           disabled={saving}
         />
       </div>

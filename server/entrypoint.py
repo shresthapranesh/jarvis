@@ -38,12 +38,14 @@ from .routes_uploads import router as uploads_router
 from core.scheduler import (
     _register_scheduler_job,
     _scheduler,
+    get_scheduler_timezone,
     register_board_dispatch_job,
     register_checkpoint_prune_job,
     register_kernel_reaper_job,
     register_memory_activity_prune_job,
     register_memory_consolidation_job,
     register_staging_cleanup_job,
+    set_scheduler_timezone,
 )
 
 _DIST = pathlib.Path(__file__).resolve().parent.parent / "static" / "dist"
@@ -59,16 +61,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state._main_loop = asyncio.get_running_loop()
     get_broadcast_handler().attach_loop(state._main_loop)
     await init_db()
-    _scheduler.start()
     async with async_session() as session:
         sweep = await cleanup_zombie_running_rows(session)
         if any(sweep.values()):
             logger.info("startup zombie sweep: %s", sweep)
         configure_embedding_model(await get_setting(session, "embedding.model"))
         load_custom_models(await get_custom_models(session))
+        # Before start() — APScheduler won't reconfigure a running scheduler.
+        set_scheduler_timezone(await get_setting(session, "scheduler.timezone"))
         automations = await list_enabled_scheduled_automations(session)
         for auto in automations:
             _register_scheduler_job(auto)
+    logger.info("scheduler timezone: %s", get_scheduler_timezone())
+    _scheduler.start()
     async with (
         AsyncSqliteSaver.from_conn_string(get_config().checkpoints_db) as cp,
         AsyncSqliteStore.from_conn_string(get_config().checkpoints_db) as store,
