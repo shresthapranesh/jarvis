@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.agents import build_agent
@@ -33,7 +32,7 @@ from db.ops import (
     resolve_model,
 )
 from core.notifications import send_notifications
-from core.scheduler import get_scheduler_timezone
+from core.scheduler import _cron, get_scheduler_timezone
 from core.state import (
     TaskState,
     _notify,
@@ -54,15 +53,17 @@ from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_c
 def _compute_next_run_at(auto: Automation) -> str | None:
     """Next fire time as an offset-aware ISO string.
 
-    Must use the same timezone the scheduler fires in (local by default, see
-    `core.scheduler.get_scheduler_timezone`) — computing this in UTC while the
-    trigger runs on local time shows the user a time the job never fires at.
+    Must be built with the same `_cron` helper the scheduler registers jobs
+    with: it binds the scheduler's timezone (computing this in UTC while the
+    trigger runs on local time shows a time the job never fires at) and reads
+    numeric weekdays as Unix cron does. Any divergence here reports a schedule
+    the automation does not actually keep.
     """
     if not (auto.schedule and auto.enabled):
         return None
     try:
         tz = get_scheduler_timezone()
-        trigger = CronTrigger.from_crontab(auto.schedule, timezone=tz)
+        trigger = _cron(auto.schedule)
         next_fire = trigger.get_next_fire_time(None, datetime.now(tz))
         return next_fire.isoformat() if next_fire else None
     except Exception:

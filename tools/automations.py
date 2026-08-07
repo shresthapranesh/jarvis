@@ -1,9 +1,7 @@
 """Agent tools for managing automations via the Jarvis database."""
 from __future__ import annotations
 
-from apscheduler.triggers.cron import CronTrigger
-
-from core.scheduler import _register_scheduler_job, _remove_scheduler_job
+from core.scheduler import _cron, _register_scheduler_job, _remove_scheduler_job
 from db.engine import async_session
 from db.ops import (
     create_automation as _create,
@@ -22,7 +20,8 @@ def _invalid_input(input_type: str | None, schedule: str | None) -> str | None:
         return f"Error: unknown input_type '{input_type}'; must be one of {', '.join(_INPUT_TYPES)}."
     if schedule:
         try:
-            CronTrigger.from_crontab(schedule)
+            # Via `_cron` so validation accepts exactly what registration builds.
+            _cron(schedule)
         except Exception:
             return f"Error: invalid cron expression '{schedule}'."
     return None
