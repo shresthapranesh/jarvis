@@ -5,11 +5,10 @@ from __future__ import annotations
 import strawberry
 from strawberry import relay
 
-from apscheduler.triggers.cron import CronTrigger
 
 from core.agents import is_valid_model
 from core.state import _tasks, get_queue
-from core.scheduler import _register_scheduler_job, _remove_scheduler_job
+from core.scheduler import _cron, _register_scheduler_job, _remove_scheduler_job
 from db.ops import (
     create_automation as db_create_automation,
     delete_automation as db_delete_automation,
@@ -43,7 +42,8 @@ def _validate_input(input: AutomationInput) -> None:
         raise ValueError(f"unknown model {input.model!r}; query `models` for the catalog")
     if input.schedule:
         try:
-            CronTrigger.from_crontab(input.schedule)
+            # Via `_cron` so validation accepts exactly what registration builds.
+            _cron(input.schedule)
         except Exception:
             raise ValueError("invalid cron expression")
 

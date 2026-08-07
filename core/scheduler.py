@@ -68,11 +68,93 @@ def set_scheduler_timezone(name: str | None) -> None:
     _scheduler.configure(timezone=resolved)
 
 
+# ── Day-of-week normalization ────────────────────────────────────────────────
+# Unix cron numbers weekdays 0=Sunday..6=Saturday (7 also means Sunday).
+# APScheduler numbers them 0=Monday..6=Sunday — and `CronTrigger.from_crontab`
+# passes the field through verbatim without remapping, so every *numeric*
+# day-of-week silently fires one day late ("0 9 * * 1" ran Tuesday, not Monday)
+# and "0 9 * * 1-5" meant Tue-Sat rather than the weekdays it reads as.
+# Weekday *names* are unambiguous in APScheduler, so we expand the field to an
+# explicit name list and let it parse that.
+
+_DOW_NAMES = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")  # indexed by Unix number
+_DOW_NUMS = {name: num for num, name in enumerate(_DOW_NAMES)}
+
+
+def _dow_atom(token: str) -> int | None:
+    """A single Unix day-of-week value as 0=Sunday..6=Saturday, or None if the
+    token isn't one (unrecognized syntax is left for APScheduler to handle)."""
+    token = token.strip().lower()
+    if token in _DOW_NUMS:
+        return _DOW_NUMS[token]
+    if token.isdigit():
+        value = int(token)
+        # Unix cron accepts both 0 and 7 for Sunday.
+        return value % 7 if value <= 7 else None
+    return None
+
+
+def _normalize_dow_field(field: str) -> str | None:
+    """Rewrite a Unix-cron day-of-week field as explicit APScheduler weekday
+    names. Returns None if the field uses syntax we don't model, in which case
+    the caller passes it through untouched."""
+    days: set[int] = set()
+    for token in field.split(","):
+        token = token.strip()
+        base, _, step_raw = token.partition("/")
+        if step_raw:
+            if not step_raw.isdigit() or int(step_raw) < 1:
+                return None
+            step = int(step_raw)
+        else:
+            step = 1
+
+        if base in ("*", "?"):
+            lo, hi = 0, 6
+        elif "-" in base.strip("-"):
+            start_raw, _, end_raw = base.partition("-")
+            lo, hi = _dow_atom(start_raw), _dow_atom(end_raw)
+            if lo is None or hi is None:
+                return None
+        else:
+            single = _dow_atom(base)
+            if single is None:
+                return None
+            # A bare `a/n` means `a-6/n` in Unix cron; a bare `a` is just itself.
+            lo, hi = single, (6 if step_raw else single)
+
+        # Ranges wrap (`fri-mon` == Fri, Sat, Sun, Mon), and the step counts
+        # from the start of the range, not from Sunday.
+        span = (hi - lo) % 7
+        days.update((lo + offset) % 7 for offset in range(0, span + 1, step))
+
+    if not days:
+        return None
+    if len(days) == 7:
+        return "*"
+    # Emit in APScheduler's own Mon..Sun order purely so the trigger reads well.
+    return ",".join(_DOW_NAMES[day] for day in sorted(days, key=lambda d: (d - 1) % 7))
+
+
+def normalize_crontab(expr: str) -> str:
+    """Translate a standard Unix crontab expression into the dialect
+    `CronTrigger.from_crontab` actually implements. Only the day-of-week field
+    differs; everything else is passed through untouched."""
+    fields = expr.split()
+    if len(fields) != 5:
+        return expr  # let APScheduler raise its own "wrong number of fields"
+    normalized = _normalize_dow_field(fields[4])
+    if normalized is None:
+        return expr
+    return " ".join((*fields[:4], normalized))
+
+
 def _cron(expr: str) -> CronTrigger:
-    """Build a cron trigger bound to the scheduler timezone. Always go through
-    this — a bare `CronTrigger.from_crontab(expr)` silently picks its own
-    timezone rather than inheriting the scheduler's."""
-    return CronTrigger.from_crontab(expr, timezone=get_scheduler_timezone())
+    """Build a cron trigger bound to the scheduler timezone, with the expression
+    read as standard Unix cron. Always go through this — a bare
+    `CronTrigger.from_crontab(expr)` both silently picks its own timezone rather
+    than inheriting the scheduler's, and misreads numeric weekdays."""
+    return CronTrigger.from_crontab(normalize_crontab(expr), timezone=get_scheduler_timezone())
 
 
 _scheduler = BackgroundScheduler(timezone=get_scheduler_timezone())
