@@ -33,6 +33,7 @@ from db.ops import (
     resolve_model,
 )
 from core.notifications import send_notifications
+from core.scheduler import get_scheduler_timezone
 from core.state import (
     TaskState,
     _notify,
@@ -51,11 +52,18 @@ from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_c
 # ── Schedule introspection ───────────────────────────────────────────────────
 
 def _compute_next_run_at(auto: Automation) -> str | None:
+    """Next fire time as an offset-aware ISO string.
+
+    Must use the same timezone the scheduler fires in (local by default, see
+    `core.scheduler.get_scheduler_timezone`) — computing this in UTC while the
+    trigger runs on local time shows the user a time the job never fires at.
+    """
     if not (auto.schedule and auto.enabled):
         return None
     try:
-        trigger = CronTrigger.from_crontab(auto.schedule, timezone=timezone.utc)
-        next_fire = trigger.get_next_fire_time(None, datetime.now(timezone.utc))
+        tz = get_scheduler_timezone()
+        trigger = CronTrigger.from_crontab(auto.schedule, timezone=tz)
+        next_fire = trigger.get_next_fire_time(None, datetime.now(tz))
         return next_fire.isoformat() if next_fire else None
     except Exception:
         return None

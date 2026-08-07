@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from datetime import tzinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -12,7 +15,67 @@ from . import state
 
 logger = logging.getLogger(__name__)
 
-_scheduler = BackgroundScheduler(timezone="UTC")
+
+# ── Timezone ─────────────────────────────────────────────────────────────────
+# Cron expressions are written by humans ("0 9 * * 1" means Monday 9am to the
+# person who typed it), so every schedule is interpreted in the machine's local
+# timezone, not UTC. Override with the `scheduler.timezone` config setting or
+# the JARVIS_TIMEZONE env var when the process runs somewhere (a UTC container)
+# whose local time isn't the user's.
+
+_timezone: tzinfo | None = None
+
+
+def _resolve_timezone(name: str | None) -> tzinfo | None:
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        logger.warning("invalid timezone %r (%s) — falling back to local time", name, exc)
+        return None
+
+
+def get_scheduler_timezone() -> tzinfo:
+    """The timezone every cron expression is interpreted in.
+
+    Resolution order: an explicit override (`set_scheduler_timezone`, i.e. the
+    `scheduler.timezone` setting) → `JARVIS_TIMEZONE` → the machine's local
+    timezone → UTC as a last resort.
+    """
+    global _timezone
+    if _timezone is None:
+        _timezone = _resolve_timezone(os.environ.get("JARVIS_TIMEZONE"))
+    if _timezone is None:
+        try:
+            from tzlocal import get_localzone  # noqa: PLC0415
+
+            _timezone = get_localzone()
+        except Exception as exc:
+            logger.warning("could not detect local timezone (%s) — using UTC", exc)
+            _timezone = ZoneInfo("UTC")
+    return _timezone
+
+
+def set_scheduler_timezone(name: str | None) -> None:
+    """Apply the `scheduler.timezone` config setting. Must be called before
+    `_scheduler.start()` — APScheduler won't reconfigure a running scheduler."""
+    resolved = _resolve_timezone(name)
+    if resolved is None:
+        return
+    global _timezone
+    _timezone = resolved
+    _scheduler.configure(timezone=resolved)
+
+
+def _cron(expr: str) -> CronTrigger:
+    """Build a cron trigger bound to the scheduler timezone. Always go through
+    this — a bare `CronTrigger.from_crontab(expr)` silently picks its own
+    timezone rather than inheriting the scheduler's."""
+    return CronTrigger.from_crontab(expr, timezone=get_scheduler_timezone())
+
+
+_scheduler = BackgroundScheduler(timezone=get_scheduler_timezone())
 
 
 def _register_scheduler_job(auto) -> None:
@@ -20,7 +83,7 @@ def _register_scheduler_job(auto) -> None:
     try:
         _scheduler.add_job(
             func=_run_scheduled_automation,
-            trigger=CronTrigger.from_crontab(auto.schedule),
+            trigger=_cron(auto.schedule),
             id=f"auto_{auto.id}",
             args=[auto.id],
             replace_existing=True,
@@ -114,7 +177,7 @@ def register_memory_consolidation_job(cron_expr: str = "0 */6 * * *") -> None:
     """Register the memory consolidation cron job. Called once from server lifespan."""
     _scheduler.add_job(
         func=_run_memory_consolidation,
-        trigger=CronTrigger.from_crontab(cron_expr),
+        trigger=_cron(cron_expr),
         id="memory_consolidation",
         replace_existing=True,
         misfire_grace_time=300,
@@ -145,7 +208,7 @@ def register_staging_cleanup_job(cron_expr: str = "0 * * * *") -> None:
     """Register the staged-uploads cleanup cron job. Defaults to hourly."""
     _scheduler.add_job(
         func=_cleanup_staged_uploads,
-        trigger=CronTrigger.from_crontab(cron_expr),
+        trigger=_cron(cron_expr),
         id="staging_cleanup",
         replace_existing=True,
         misfire_grace_time=300,
@@ -173,7 +236,7 @@ def register_kernel_reaper_job(cron_expr: str = "*/10 * * * *") -> None:
     """Register the idle-kernel reaper cron job. Defaults to every 10 minutes."""
     _scheduler.add_job(
         func=_run_kernel_reaper,
-        trigger=CronTrigger.from_crontab(cron_expr),
+        trigger=_cron(cron_expr),
         id="kernel_reaper",
         replace_existing=True,
         misfire_grace_time=120,
@@ -202,10 +265,10 @@ def _prune_memory_activities_job() -> None:
 
 
 def register_memory_activity_prune_job(cron_expr: str = "0 4 * * *") -> None:
-    """Register daily prune for memory_activities (default 04:00 UTC)."""
+    """Register daily prune for memory_activities (default 04:00 local time)."""
     _scheduler.add_job(
         func=_prune_memory_activities_job,
-        trigger=CronTrigger.from_crontab(cron_expr),
+        trigger=_cron(cron_expr),
         id="memory_activity_prune",
         replace_existing=True,
         misfire_grace_time=300,
@@ -247,7 +310,7 @@ def register_checkpoint_prune_job(cron_expr: str = "20 * * * *") -> None:
     off the hour so it doesn't stack with the staging cleanup."""
     _scheduler.add_job(
         func=_prune_checkpoints_job,
-        trigger=CronTrigger.from_crontab(cron_expr),
+        trigger=_cron(cron_expr),
         id="checkpoint_prune",
         replace_existing=True,
         misfire_grace_time=300,
