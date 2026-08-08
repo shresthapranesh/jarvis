@@ -119,13 +119,12 @@ export function ConversationList() {
         {conversations.length === 0 ? (
           <div className="conv-empty">No conversations yet</div>
         ) : (
-          conversations.map((conv, idx) => (
+          conversations.map((conv) => (
             <div
               key={conv.id}
               className={`conv-row${conv.id === activeId ? ' active' : ''}${
                 menu?.id === conv.id ? ' menu-open' : ''
               }`}
-              style={{['--stagger' as string]: Math.min(idx, 6)} as React.CSSProperties}
             >
               {editingId === conv.id ? (
                 <input

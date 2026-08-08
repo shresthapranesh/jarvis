@@ -231,7 +231,7 @@ export function StreamingBubble({text, thinkingText, steps, workers, onShowSteps
       {workers && workers.length > 0 && <WorkerPanel workers={workers} />}
       {text ? (
         <div className="agent-bubble streaming">
-          <span key={text.length} className="stream-fade" dangerouslySetInnerHTML={{__html: marked.parse(text) as string}} />
+          <span dangerouslySetInnerHTML={{__html: marked.parse(text) as string}} />
           <span className="cursor" />
         </div>
       ) : (
