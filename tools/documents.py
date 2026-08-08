@@ -14,7 +14,14 @@ import logging
 
 from langchain_core.tools import tool
 
-from core.doc_index import embeddings_available, read_chunks, search_chunks
+from core.doc_index import (
+    INDEX_FAILED,
+    await_conversation_indexes,
+    await_index_ready,
+    embeddings_available,
+    read_chunks,
+    search_chunks,
+)
 from tools.context import current_ctx
 
 logger = logging.getLogger(__name__)
@@ -40,13 +47,22 @@ async def search_documents(query: str, k: int = 6) -> str:
         return "No conversation context — document search is only available in chats."
     if not embeddings_available():
         return "Document search is unavailable (no embedding model configured)."
+    # Attachments index in the background so they don't delay the first token.
+    # Searching mid-index would return nothing and read as "not in the document",
+    # so wait for any still-pending attachment in this conversation first.
+    await await_conversation_indexes(conversation_id)
     try:
         hits = await search_chunks(conversation_id, query, k=k)
     except Exception as exc:
         logger.warning("search_documents failed: %s", exc)
         return f"Document search failed: {exc}"
     if not hits:
-        return "No indexed documents in this conversation (small attachments are inlined directly in the message)."
+        return (
+            "No matching passages. Either no document in this conversation is "
+            "indexed (small attachments are inlined directly in the message), or "
+            "nothing cleared the relevance cutoff — try different wording, or "
+            "read_document(document_id) to read it directly."
+        )
     return json.dumps(hits)
 
 
@@ -64,6 +80,13 @@ async def read_document(document_id: str, offset: int = 0) -> str:
         document_id: The id from the attachment stub or a search hit.
         offset: Chunk index to start from (default 0 = start of document).
     """
+    status = await await_index_ready(document_id)
+    if status == INDEX_FAILED:
+        return (
+            f"Document {document_id} could not be indexed (the embedding step "
+            "failed), so its text isn't available here. Ask the user to re-attach "
+            "it, or work from what's already in the conversation."
+        )
     try:
         window = await read_chunks(document_id, offset=offset)
     except Exception as exc:

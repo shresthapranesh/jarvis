@@ -10,11 +10,11 @@ from collections.abc import Sequence
 from typing import Any, TypeAlias
 
 from db import async_session
-from db.ops import add_step, update_message_content, update_message_status, update_message_usage
+from db.ops import add_step, add_steps, update_message_content, update_message_status, update_message_usage
 
 from langgraph.types import StreamMode
 
-from .doc_index import INLINE_THRESHOLD, embeddings_available, index_document
+from .doc_index import INLINE_THRESHOLD, embeddings_available, start_indexing
 from .document_extractor import extract_raw_text, format_inline
 from .schemas import AttachmentIn
 from .state import TaskState, emit_event
@@ -115,22 +115,28 @@ async def _document_part(att: AttachmentIn, raw: str | None, error: str | None) 
     chunk-indexed and replaced by a short stub pointing the agent at the
     search_documents / read_document tools — keeping a big PDF out of the
     per-turn token bill and out of the summarizer's reach.
+
+    Indexing is started, not awaited: embedding a large PDF took seconds off the
+    first token for passages the agent may never ask for. The retrieval tools
+    block on readiness instead (core/doc_index.await_index_ready), so a search
+    still can't race the indexer and conclude the document is empty.
     """
     if error is not None:
         return {"type": "text", "text": f"[Document: {att.name}]\n[Extraction failed: {error}]\n[End of document]"}
     assert raw is not None
     if att.document_id and len(raw) > INLINE_THRESHOLD and embeddings_available():
         try:
-            n_chunks = await index_document(att.document_id, raw)
+            start_indexing(att.document_id, raw)
             return {"type": "text", "text": (
                 f"[Document attached: {att.name} — {len(raw):,} characters, "
-                f"indexed as {n_chunks} searchable chunks "
+                f"being indexed for search now "
                 f"(document_id={att.document_id!r}). Too large to include inline: "
                 f'use search_documents("...") to find relevant passages, or '
-                f"read_document({att.document_id!r}, offset=0) to read it sequentially.]"
+                f"read_document({att.document_id!r}, offset=0) to read it sequentially. "
+                f"Those calls wait for indexing to finish, so the first one may pause briefly.]"
             )}
         except Exception as exc:
-            logger.warning("indexing %s failed (%s) — inlining instead", att.name, exc)
+            logger.warning("could not start indexing %s (%s) — inlining instead", att.name, exc)
     return {"type": "text", "text": format_inline(att.name, raw)}
 
 
@@ -411,14 +417,17 @@ async def _process_chunk(
                     emit_event(state, "step", node=node_name, source=src, subagent=subagent, data=step_data)
 
                 if persist_steps and task_id and conv_id and step_seq_ref is not None:
+                    # One commit for the whole chunk. Events are emitted after
+                    # the write so a subscriber never sees a step the transcript
+                    # wouldn't have on reload.
+                    rows: list[tuple[str, str, str | None, int, str | None]] = []
+                    for node_name, src, step_data in step_records:
+                        rows.append((node_name, src, step_data, step_seq_ref[0], subagent))
+                        step_seq_ref[0] += 1
                     async with async_session() as session:
-                        for node_name, src, step_data in step_records:
-                            await add_step(
-                                session, task_id, conv_id, node_name, src, step_data, step_seq_ref[0],
-                                subagent=subagent,
-                            )
-                            _emit_step(node_name, src, step_data)
-                            step_seq_ref[0] += 1
+                        await add_steps(session, task_id, conv_id, rows)
+                    for node_name, src, step_data in step_records:
+                        _emit_step(node_name, src, step_data)
                 else:
                     for node_name, src, step_data in step_records:
                         _emit_step(node_name, src, step_data)

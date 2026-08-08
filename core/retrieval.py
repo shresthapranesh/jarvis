@@ -23,6 +23,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Sequence
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,44 @@ def fts_match_expr(query: str) -> str | None:
     if not terms:
         return None
     return " OR ".join(terms)
+
+
+def cosine_ranking(
+    qvec: "np.ndarray", items: Sequence[tuple[str, bytes | None]]
+) -> list[tuple[str, float]]:
+    """Cosine of `qvec` against stored float32 vectors, best first.
+
+    `items` is (id, embedding_bytes). Rows with no embedding, or one whose
+    dimensionality doesn't match `qvec` (embedded by a different model), are
+    skipped rather than raising — the same tolerance the per-row version had.
+
+    Stacking into one `(N, D)` matmul instead of looping `np.dot` per row keeps
+    the whole scan inside BLAS; the Python-level loop cost dominated once a
+    conversation had a few hundred chunks.
+    """
+    ids: list[str] = []
+    vectors: list[np.ndarray] = []
+    for item_id, blob in items:
+        if blob is None:
+            continue
+        vec = np.frombuffer(blob, dtype=np.float32)
+        if vec.shape != qvec.shape:
+            continue
+        ids.append(item_id)
+        vectors.append(vec)
+    if not ids:
+        return []
+
+    matrix = np.stack(vectors)
+    norms = np.linalg.norm(matrix, axis=1)
+    # A zero-norm row would divide to nan and poison the sort; treat it as 1.0
+    # so the row scores 0 and simply ranks last, matching the per-row fallback.
+    norms[norms == 0.0] = 1.0
+    qnorm = float(np.linalg.norm(qvec)) or 1.0
+    scores = (matrix @ qvec) / (norms * qnorm)
+
+    order = np.argsort(-scores)
+    return [(ids[i], float(scores[i])) for i in order]
 
 
 def rrf_fuse(rankings: list[tuple[float, list[str]]], *, k: int = _RRF_K) -> dict[str, float]:

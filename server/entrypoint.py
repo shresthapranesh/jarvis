@@ -55,6 +55,40 @@ logger = logging.getLogger(__name__)
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
 
+async def _tune_checkpoint_connections(*savers: object) -> None:
+    """Apply the concurrency PRAGMAs langgraph doesn't set on checkpoints.db.
+
+    Unlike the app DB — where db/engine.py sets these on every pooled connection —
+    checkpoints.db is opened by `AsyncSqliteSaver`/`AsyncSqliteStore`, which set
+    nothing at connect time. All three matter under parallel subagents, which
+    write the same file through both handles:
+
+      busy_timeout  defaults to 0, so a writer that finds the lock held raises
+                    SQLITE_BUSY immediately instead of waiting for it.
+      synchronous   defaults to FULL; NORMAL is the standard WAL pairing and is
+                    safe against process crashes (only an OS-level crash can lose
+                    the most recent commits — recoverable checkpoint state).
+      journal_mode  langgraph's own setup() does set WAL, but lazily, on the
+                    first checkpoint operation; until then the file is still in
+                    rollback-journal mode, where readers and writers block each
+                    other outright.
+
+    journal_mode is a property of the file, the other two are per-connection —
+    so this runs on every handle right after it opens.
+    """
+    for saver in savers:
+        conn = getattr(saver, "conn", None)
+        if conn is None:
+            logger.warning("no .conn on %s — skipping PRAGMA tuning", type(saver).__name__)
+            continue
+        try:
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA busy_timeout=30000")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+        except Exception as exc:
+            logger.warning("could not tune %s connection: %s", type(saver).__name__, exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging(get_config().work_dir, console=bool(os.environ.get("JARVIS_LOG_CONSOLE")))
@@ -79,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         AsyncSqliteStore.from_conn_string(get_config().checkpoints_db) as store,
         httpx.AsyncClient(timeout=30.0) as http,
     ):
+        await _tune_checkpoint_connections(cp, store)
         state._async_checkpointer = cp
         state._store = store
         state._http_client = http

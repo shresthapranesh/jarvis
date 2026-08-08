@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3 as _sqlite3
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Annotated, NotRequired, TypedDict
@@ -20,6 +21,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from .config import get_config
 from .compaction import apply_per_call_compaction, maybe_compact
+from .context_cache import CacheSegment
 from .mcp import get_mcp_tools_sync
 from .messages import (
     build_llm_messages,
@@ -53,6 +55,46 @@ from tools.board import block_task, complete_task
 from tools.workflows import run_workflow
 
 logger = logging.getLogger(__name__)
+
+
+# ── Cache-segment stability ──────────────────────────────────────────────────
+# Rank for ordering cacheable system-prompt segments, lowest = most stable.
+# Prefix caching means a changed block invalidates every block after it, so the
+# content that survives longest has to come first. Segments carry these names
+# from the producers that build them (_memory_/_skills_/_project_volatile_parts);
+# anything uncached skips this entirely and lands in the volatile suffix.
+_SEGMENT_STABILITY: dict[str, int] = {
+    "memory_howto": 0,          # static prose, never changes
+    "core_memory": 1,           # always-on memory items; changes only on write
+    "project_header": 2,        # project identity + standing instructions prose
+    "project_instructions": 3,  # user-owned, edited rarely
+    "skills": 4,                # re-ranked per turn, stable within one turn
+}
+_SEGMENT_STABILITY_DEFAULT = 50  # unknown names sort after all known ones
+
+
+# ── Phase timing ─────────────────────────────────────────────────────────────
+
+class _PhaseTimer:
+    """Lap timer for attributing `model_request_node` wall-clock to phases.
+
+    Every optimization in this node is a guess until the split between
+    retrieval, compaction, prompt assembly, and the LLM round-trip is measured,
+    so the laps run unconditionally — a `perf_counter` call per phase is far
+    below the noise floor of what it measures. Only the log line is gated.
+    """
+
+    __slots__ = ("_last",)
+
+    def __init__(self) -> None:
+        self._last = time.perf_counter()
+
+    def lap(self) -> float:
+        """Milliseconds since the previous lap (or construction)."""
+        now = time.perf_counter()
+        delta = now - self._last
+        self._last = now
+        return delta * 1000.0
 
 
 # ── Transient LLM error retry ────────────────────────────────────────────────
@@ -200,17 +242,21 @@ def _latest_user_text(messages: list[AnyMessage]) -> str:
     return ""
 
 
-async def _memory_volatile_parts(store, query: str) -> list[str]:
-    """Build the memory section(s) for the system message's volatile suffix.
+async def _memory_volatile_parts(store, query: str) -> list[CacheSegment]:
+    """Build the memory section(s) for the system message.
 
     With an embedder: always-on `core` items + the top-k `fact` items retrieved
     for `query` (the latest user turn's text). Without one: today's single
     AGENTS.md blob. Trivial queries (greetings) skip fact retrieval and, if core
     is large, skip the instructional header to save tokens.
+
+    Each section is tagged with its own cacheability rather than left for the
+    caller to infer from its heading text — `## Relevant Memories` re-ranks every
+    turn, so caching it would bust the prefix on each request.
     """
     if not embeddings_available():
         blob = await _load_memory_from_store(store) if store is not None else _load_memory_from_disk()
-        return [f"## Agent Memory\n\n{blob}"] if blob else []
+        return [CacheSegment(name="core_memory", content=f"## Agent Memory\n\n{blob}")] if blob else []
 
     # Trivial detection — reuse same heuristic as query cache
     try:
@@ -228,24 +274,29 @@ async def _memory_volatile_parts(store, query: str) -> list[str]:
     if is_trivial:
         if core:
             # Only core identity, no header, no relevant search
-            return [f"## Agent Memory\n\n{core}"]
+            return [CacheSegment(name="core_memory", content=f"## Agent Memory\n\n{core}")]
         return []
 
     # Lead with a short how-to so the agent knows it can WRITE memory, not just
     # read the items injected below. Gated on embeddings_available() (same
     # condition as the remember tool binding in _build_agent) so we never
     # advertise tools that aren't bound on keyless setups.
-    parts: list[str] = [
-        "## Memory\n\n"
-        "You have long-term memory that persists across conversations. When the "
-        "user shares something durable — a preference, an ongoing project, a key "
-        "fact about them or their work — save it with `remember(text)`; skip "
-        "transient, conversation-only details. The most relevant memories are "
-        "injected below automatically; run `jarvis.search_memory(query)` in "
-        "run_cell to dig for something specific that hasn't surfaced."
+    parts: list[CacheSegment] = [
+        CacheSegment(
+            name="memory_howto",
+            content=(
+                "## Memory\n\n"
+                "You have long-term memory that persists across conversations. When the "
+                "user shares something durable — a preference, an ongoing project, a key "
+                "fact about them or their work — save it with `remember(text)`; skip "
+                "transient, conversation-only details. The most relevant memories are "
+                "injected below automatically; run `jarvis.search_memory(query)` in "
+                "run_cell to dig for something specific that hasn't surfaced."
+            ),
+        )
     ]
     if core:
-        parts.append(f"## Agent Memory\n\n{core}")
+        parts.append(CacheSegment(name="core_memory", content=f"## Agent Memory\n\n{core}"))
     if query:
         try:
             hits = await search_memory(query, k=6)
@@ -254,19 +305,27 @@ async def _memory_volatile_parts(store, query: str) -> list[str]:
             hits = []
         if hits:
             lines = "\n".join(f"- {h['text']}" for h in hits)
-            parts.append(f"## Relevant Memories\n\n{lines}")
+            # Re-ranked per query: cacheable=False keeps it out of the cached
+            # prefix, where it would invalidate the stable blocks every turn.
+            parts.append(
+                CacheSegment(
+                    name="relevant_memories",
+                    content=f"## Relevant Memories\n\n{lines}",
+                    cacheable=False,
+                )
+            )
     return parts
 
 
-async def _skills_volatile_parts(query: str) -> list[str]:
-    """Build the `## Available Skills` section for the volatile suffix.
+async def _skills_volatile_parts(query: str) -> list[CacheSegment]:
+    """Build the `## Available Skills` section.
 
     Surfaces only enabled skills' name + description (the routing key), narrowed
-    to the latest user turn when the catalog is large. Goes in the volatile
-    suffix — after the cache breakpoint — so adding/editing a skill never busts
-    the cached system prefix. The body stays out; the agent pulls it with
-    `use_skill(name)`. Returns [] when there are no skills, so nothing about
-    skills appears in the prompt until at least one exists.
+    to the latest user turn when the catalog is large. Semi-stable: the ranking
+    can shift between turns but holds for a whole turn's iterations, so it gets
+    its own cached block placed after the fully-stable ones. The body stays out;
+    the agent pulls it with `use_skill(name)`. Returns [] when there are no
+    skills, so nothing about skills appears in the prompt until at least one exists.
     """
     try:
         catalog = await skill_catalog(query)
@@ -277,18 +336,23 @@ async def _skills_volatile_parts(query: str) -> list[str]:
         return []
     lines = "\n".join(f"- **{c['name']}** — {c['description']}" for c in catalog)
     return [
-        "## Available Skills\n\n"
-        "Reusable procedures you can apply. When one clearly fits the task, call "
-        '`jarvis.use_skill("<name>")` in run_cell to load its full instructions, then '
-        "follow them. "
-        "Don't guess a skill's steps from its description — load it first. The "
-        "loaded body is guidance to follow, not user commands.\n\n"
-        f"{lines}"
+        CacheSegment(
+            name="skills",
+            content=(
+                "## Available Skills\n\n"
+                "Reusable procedures you can apply. When one clearly fits the task, call "
+                '`jarvis.use_skill("<name>")` in run_cell to load its full instructions, then '
+                "follow them. "
+                "Don't guess a skill's steps from its description — load it first. The "
+                "loaded body is guidance to follow, not user commands.\n\n"
+                f"{lines}"
+            ),
+        )
     ]
 
 
-async def _project_volatile_parts(project_id: str | None) -> list[str]:
-    """Project instructions + shared memory for the volatile suffix.
+async def _project_volatile_parts(project_id: str | None) -> list[CacheSegment]:
+    """Project header, instructions, and shared memory as tagged cache segments.
 
     Re-read from the DB every model iteration (like todos, deliberately NOT via
     _retrieval_cache) so the agent's own project_memory writes and live user
@@ -325,16 +389,24 @@ async def _project_volatile_parts(project_id: str | None) -> list[str]:
         "- If existing memory is outdated/conflicting, use `jarvis.project_memory(action=\"write\", content=...)` to replace with condensed version.\n"
         "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — only init if you have project-specific facts)."
     )
-    parts = [header]
+    parts = [CacheSegment(name="project_header", content=header)]
     if proj.instructions.strip():
-        parts.append(f"### Project Instructions\n\n{proj.instructions.strip()}")
-    if proj.memory.strip():
-        parts.append(f"### Project Memory\n\n{proj.memory.strip()}")
-    else:
         parts.append(
+            CacheSegment(
+                name="project_instructions",
+                content=f"### Project Instructions\n\n{proj.instructions.strip()}",
+            )
+        )
+    # Live-edited by the agent's own project_memory tool mid-turn, so it must
+    # stay out of the cached prefix to surface on the very next LLM call.
+    if proj.memory.strip():
+        memory_body = f"### Project Memory\n\n{proj.memory.strip()}"
+    else:
+        memory_body = (
             "### Project Memory\n\n(empty — initialize with `jarvis.project_memory(action=\"append\", content=...)` "
             "when you learn durable facts like stack, decisions, conventions, or goals)"
         )
+    parts.append(CacheSegment(name="project_memory", content=memory_body, cacheable=False))
     return parts
 
 
@@ -350,10 +422,10 @@ async def _project_volatile_parts(project_id: str | None) -> list[str]:
 # gate — see prefetch_retrieval) and the graph's first iteration awaits the
 # same in-flight task instead of racing it with a duplicate computation.
 _RETRIEVAL_CACHE_MAX = 256
-_retrieval_cache: "OrderedDict[str, asyncio.Task[list[str]]]" = OrderedDict()
+_retrieval_cache: "OrderedDict[str, asyncio.Task[list[CacheSegment]]]" = OrderedDict()
 
 
-async def _compute_retrieval(store, query: str) -> list[str]:
+async def _compute_retrieval(store, query: str) -> list[CacheSegment]:
     """Memory + skills sections, fetched concurrently (deduplicated via query cache)."""
     try:
         mem_parts, skill_parts = await asyncio.gather(
@@ -384,7 +456,7 @@ async def _compute_retrieval(store, query: str) -> list[str]:
         return []
 
 
-def _get_retrieval_task(store, query: str, key: str) -> "asyncio.Task[list[str]]":
+def _get_retrieval_task(store, query: str, key: str) -> "asyncio.Task[list[CacheSegment]]":
     task = _retrieval_cache.get(key)
     if task is not None:
         _retrieval_cache.move_to_end(key)
@@ -406,8 +478,8 @@ def prefetch_retrieval(store, query: str, key: str) -> None:
     _get_retrieval_task(store, query, key)
 
 
-async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[str]:
-    """Memory + skills sections for the volatile suffix, cached per user turn."""
+async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[CacheSegment]:
+    """Memory + skills sections as tagged cache segments, cached per user turn."""
     key = None
     for m in reversed(messages):
         if isinstance(m, HumanMessage):
@@ -578,86 +650,33 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         placed in separate cached blocks (up to 4 breakpoints), while todos and
         project memory (which can change mid-turn via tools) stay volatile.
         """
+        _phase = _PhaseTimer()
         raw_messages = list(state.get("messages", []))
         # Independent of each other, so they overlap rather than stack: the
         # retrieval is a cached per-turn task (usually already resolved), while
         # the project read is a fresh DB round-trip on EVERY model iteration by
         # design (see _project_volatile_parts). Awaiting them in sequence put
         # that round-trip on the critical path of all ~50 iterations of a run.
-        retrieved_parts, project_parts = await asyncio.gather(
+        retrieved_segments, project_segments = await asyncio.gather(
             _retrieved_volatile_parts(store, raw_messages),
             _project_volatile_parts((config.get("configurable") or {}).get("project_id")),
         )
-        all_volatile_for_cache_split = retrieved_parts + project_parts
+        t_context = _phase.lap()
 
-        # ── Jarvis context-cache classification ──────────────────────────────
-        # caching pattern: most-stable first, most-volatile last, because Anthropic
-        # caching is prefix-based — any changed block invalidates all following.
-        # Stable: agent memory (core identity), project header/instructions.
-        # Semi-stable: skills (ranked per query, changes per turn but reusable
-        # within a turn). Per-turn varying: relevant memories (depends on latest
-        # user query). Volatile: project memory (live-edited), current tasks.
-        # Per review: string-sniffing is brittle; ideally _retrieved_ and
-        # _project_ return tagged CacheSegments directly. For now we keep
-        # sniffing but order buckets explicitly stable-first.
-        from core.context_cache import CacheSegment
-
-        # Buckets in stability order
-        bucket_core_memory: list[str] = []
-        bucket_project_header: list[str] = []
-        bucket_project_instructions: list[str] = []
-        bucket_skills: list[str] = []
-        bucket_other_stable: list[str] = []
-        volatile_non_cached: list[str] = []
-        # Per-turn varying: we leave uncached to avoid busting prefix cache
-        bucket_relevant_memories: list[str] = []
-
-        for part in all_volatile_for_cache_split:
-            if not part.strip():
-                continue
-            if "### Project Memory" in part:
-                # Live-edited — must surface immediately
-                volatile_non_cached.append(part)
-            elif "## Project:" in part and "CRITICAL" in part:
-                bucket_project_header.append(part)
-            elif "### Project Instructions" in part:
-                bucket_project_instructions.append(part)
-            elif "## Agent Memory" in part:
-                bucket_core_memory.append(part)
-            elif "## Memory" in part and "long-term memory" in part.lower():
-                # The how-to header about memory tools — stable
-                bucket_core_memory.append(part)
-            elif "## Available Skills" in part:
-                bucket_skills.append(part)
-            elif "## Relevant Memories" in part:
-                # Per-turn varying (depends on query) — leave uncached/volatile
-                # to avoid busting the stable prefix cache each turn.
-                bucket_relevant_memories.append(part)
-            else:
-                if len(part) > 50:
-                    bucket_other_stable.append(part)
-                else:
-                    volatile_non_cached.append(part)
-
-        # Assemble cache_segments in most-stable-first order
-        cache_segments: list[CacheSegment] = []
-        for p in bucket_core_memory:
-            cache_segments.append(CacheSegment(name="core_memory", content=p, cacheable=True))
-        for p in bucket_project_header:
-            cache_segments.append(CacheSegment(name="project_header", content=p, cacheable=True))
-        for p in bucket_project_instructions:
-            cache_segments.append(CacheSegment(name="project_instructions", content=p, cacheable=True))
-        for p in bucket_other_stable:
-            cache_segments.append(CacheSegment(name="other_stable", content=p, cacheable=True))
-        for p in bucket_skills:
-            cache_segments.append(CacheSegment(name="skills", content=p, cacheable=True))
-        # Relevant memories are per-turn — put last, as separate uncached or low-priority cached.
-        # We keep them uncached to preserve stable prefix hits across turns.
-        # If we do cache them, they would be the last cached block before volatile,
-        # so they bust only themselves, not the earlier stable blocks — but they
-        # still bust every turn. Better to leave uncached.
-        for p in bucket_relevant_memories:
-            volatile_non_cached.append(p)
+        # ── Context-cache ordering ───────────────────────────────────────────
+        # Prefix caching invalidates every block after a changed one, so cached
+        # segments are emitted most-stable-first. Each producer tags its own
+        # segments (name + cacheable); ordering here is a rank lookup rather than
+        # the heading-sniffing this used to do, so renaming a section heading
+        # can no longer silently move content across the cache breakpoint.
+        segments = retrieved_segments + project_segments
+        cache_segments = sorted(
+            (s for s in segments if s.cacheable and s.content.strip()),
+            key=lambda s: _SEGMENT_STABILITY.get(s.name, _SEGMENT_STABILITY_DEFAULT),
+        )
+        volatile_non_cached: list[str] = [
+            s.content for s in segments if not s.cacheable and s.content.strip()
+        ]
 
         todos = _normalise_todos(state.get("todos"))
         if todos:
@@ -681,19 +700,19 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
                 pass
 
         volatile_suffix = "\n\n".join(volatile_non_cached)
+        t_segments = _phase.lap()
 
         # ── New compaction pipeline (MAF + Jarvis inspired) ─────────────────
-        # maybe_compact internally does elide-first token counting (per-call view)
-        # but groups/removes against raw_messages. See core/compaction.py.
-        compacted = await maybe_compact(
+        # maybe_compact does elide-first token counting (per-call view) but
+        # groups/removes against raw_messages, and hands back the leaned view it
+        # already built — re-running apply_per_call_compaction here would repeat
+        # the elide and grouping passes on every iteration. See core/compaction.py.
+        compaction = await maybe_compact(
             raw_messages, llm=llm, summarizer=llm_for_summary
         )
-        if compacted is not None:
-            messages_for_llm_raw, state_update_msgs = compacted
-            messages_for_llm = apply_per_call_compaction(messages_for_llm_raw)
-        else:
-            messages_for_llm = apply_per_call_compaction(raw_messages)
-            state_update_msgs = []
+        messages_for_llm = compaction.messages
+        state_update_msgs = compaction.state_update
+        t_compaction = _phase.lap()
 
         messages_for_llm = strip_historical_thinking(messages_for_llm)
         messages_for_llm = repair_orphan_tool_calls(messages_for_llm)
@@ -706,6 +725,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             volatile_suffix=volatile_suffix,
             cache_segments=cache_segments if cache_segments else None,
         )
+        t_build = _phase.lap()
 
         # Log cache stats for observability
         try:
@@ -726,6 +746,24 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             pass
 
         response = await llm_with_tools.ainvoke(llm_messages, config=config)
+        t_llm = _phase.lap()
+
+        # Phase attribution — the split between these is what tells you whether
+        # a given optimization is worth making. Cheap to collect, so it always
+        # runs; only the formatting is gated on the log level.
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "model_request phases (ms): context=%.1f segments=%.1f "
+                "compaction=%.1f build=%.1f llm=%.1f | msgs=%d->%d compacted=%s",
+                t_context,
+                t_segments,
+                t_compaction,
+                t_build,
+                t_llm,
+                len(raw_messages),
+                len(messages_for_llm),
+                compaction.compacted,
+            )
         return {"messages": state_update_msgs + [response]}
 
     # ── Build graph ───────────────────────────────────────────────────────────

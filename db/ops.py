@@ -123,6 +123,36 @@ async def add_step(
     return step
 
 
+async def add_steps(
+    session: AsyncSession,
+    message_id: str,
+    conv_id: str,
+    records: list[tuple[str, str, str | None, int, str | None]],
+) -> None:
+    """Insert several Step rows in one transaction.
+
+    `records` is (node, source, data, seq, subagent). Same rows `add_step`
+    writes, but one commit for the batch instead of one per row — a spawn_workers
+    burst emits a dozen steps per stream chunk, and a commit each was the bulk of
+    the run's DB write traffic. Durability stays chunk-grained, which is what the
+    activity sidebar rebuilds from.
+    """
+    if not records:
+        return
+    for node, source, data, seq, subagent in records:
+        session.add(Step(
+            id=str(uuid4()),
+            message_id=message_id,
+            conversation_id=conv_id,
+            node=node,
+            source=source,
+            subagent=subagent,
+            data=data,
+            seq=seq,
+        ))
+    await session.commit()
+
+
 async def list_conversations(
     session: AsyncSession, surface: str | None = "web"
 ) -> list[dict]:

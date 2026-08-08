@@ -28,6 +28,11 @@ INLINE_THRESHOLD = 12_000
 _CHUNK_SIZE = 1600   # chars per chunk
 _CHUNK_OVERLAP = 200
 _EMBED_BATCH = 64
+# How many embedding batches may be in flight at once while indexing a document.
+# Deliberately small: the gain is hiding network latency, not saturating the
+# provider, and Gemini's embedding endpoint rate-limits well below what an
+# unbounded fan-out would attempt on a large PDF.
+_EMBED_CONCURRENCY = int(os.environ.get("JARVIS_EMBED_CONCURRENCY") or 4)
 _READ_WINDOW_CHARS = 6000
 
 # Hybrid-retrieval cutoff for document chunks. Looser than the memory cutoff on
@@ -324,7 +329,8 @@ async def index_document(document_id: str, text: str) -> int:
 
     Idempotent: if the document already has chunks (e.g. a chat job retried
     after a restart), returns the existing count without re-embedding.
-    Raises on embedding failure — the caller falls back to inlining.
+    Raises on embedding failure; `start_indexing` records that as
+    `index_status='failed'` so the retrieval tools can say so.
     """
     embedder = get_embedder()
     if embedder is None:
@@ -336,6 +342,7 @@ async def index_document(document_id: str, text: str) -> int:
             .where(DocumentChunk.document_id == document_id)
         )).scalar_one()
         if existing:
+            await _set_index_status(document_id, INDEX_INDEXED, session=session)
             return existing
         doc = await session.get(Document, document_id)
         if doc is None:
@@ -343,10 +350,20 @@ async def index_document(document_id: str, text: str) -> int:
         conversation_id = doc.conversation_id
 
     chunks = chunk_text(text)
-    vectors: list[list[float]] = []
-    for i in range(0, len(chunks), _EMBED_BATCH):
-        batch = chunks[i:i + _EMBED_BATCH]
-        vectors.extend(await embedder.aembed_documents(batch))
+    batches = [chunks[i:i + _EMBED_BATCH] for i in range(0, len(chunks), _EMBED_BATCH)]
+
+    # Batches are network-bound and independent, so run a few at a time instead
+    # of strictly back to back. Bounded by a semaphore rather than unleashed —
+    # a 200-page PDF is dozens of batches and providers rate-limit.
+    sem = asyncio.Semaphore(_EMBED_CONCURRENCY)
+
+    async def _embed(batch: list[str]) -> list[list[float]]:
+        async with sem:
+            return await embedder.aembed_documents(batch)
+
+    # gather preserves input order, so vectors still line up with chunk seq.
+    results = await asyncio.gather(*(_embed(b) for b in batches))
+    vectors: list[list[float]] = [vec for batch_vecs in results for vec in batch_vecs]
 
     async with async_session() as session:
         for seq, (chunk, vec) in enumerate(zip(chunks, vectors)):
@@ -358,10 +375,162 @@ async def index_document(document_id: str, text: str) -> int:
                 text=chunk,
                 embedding=np.asarray(vec, dtype=np.float32).tobytes(),
             ))
-        await session.commit()
+        # Chunks and the 'indexed' flag land in one transaction, so a reader can
+        # never see the flag before the rows it promises.
+        await _set_index_status(document_id, INDEX_INDEXED, session=session)
 
     logger.info("indexed document %s: %d chunks (%d chars)", document_id, len(chunks), len(text))
     return len(chunks)
+
+
+# ── Background indexing + readiness ──────────────────────────────────────────
+# Indexing a large document costs seconds of embedding round-trips. Doing it
+# inline before the agent starts put all of that in front of the first token,
+# for work the agent often doesn't need until several turns later (if at all).
+#
+# So it runs in the background — but fire-and-forget would be wrong: the stub
+# tells the agent to call search_documents, and an empty result is a *valid*
+# outcome in this retrieval design (see core/retrieval.select_hybrid). A search
+# racing the indexer would return nothing and the agent would reasonably
+# conclude the document has nothing relevant. Hence a readiness signal, in two
+# layers because the `jarvis` SDK runs inside a separate kernel process:
+#   - in-process (bound tools): await the actual task
+#   - cross-process (kernel SDK): poll Document.index_status
+
+INDEX_PENDING = "pending"
+INDEX_INDEXED = "indexed"
+INDEX_FAILED = "failed"
+
+# How long a reader waits for an in-flight index before giving up and querying
+# whatever is there. Generous: the alternative to waiting is a confidently wrong
+# "nothing in this document" answer.
+INDEX_WAIT_TIMEOUT = 120.0
+
+_indexing_tasks: dict[str, asyncio.Task[int]] = {}
+
+
+async def _set_index_status(document_id: str, status: str, *, session=None) -> None:
+    """Write Document.index_status, committing on the given or a new session."""
+    async def _apply(s) -> None:
+        doc = await s.get(Document, document_id)
+        if doc is not None:
+            doc.index_status = status
+        await s.commit()
+
+    try:
+        if session is not None:
+            await _apply(session)
+        else:
+            async with async_session() as s:
+                await _apply(s)
+    except Exception as exc:
+        logger.warning("could not set index_status=%s for %s: %s", status, document_id, exc)
+
+
+def start_indexing(document_id: str, text: str) -> asyncio.Task[int]:
+    """Kick off indexing in the background and return its task.
+
+    Marks the document `pending` before returning so a reader in another process
+    knows to wait. The task marks `indexed` or `failed` when it settles.
+    """
+    existing = _indexing_tasks.get(document_id)
+    if existing is not None and not existing.done():
+        return existing
+
+    async def _run() -> int:
+        await _set_index_status(document_id, INDEX_PENDING)
+        try:
+            return await index_document(document_id, text)
+        except Exception as exc:
+            # Unlike the old inline path we can't fall back to inlining — the
+            # message content is already fixed by the time this runs — so record
+            # the failure for the retrieval tools to report.
+            logger.warning("background indexing of %s failed: %s", document_id, exc)
+            await _set_index_status(document_id, INDEX_FAILED)
+            raise
+        finally:
+            _indexing_tasks.pop(document_id, None)
+
+    task = asyncio.create_task(_run())
+    # Consume the exception so a failed index that nobody awaited doesn't surface
+    # as asyncio's "Task exception was never retrieved" at GC. Callers that do
+    # await still see it; the durable signal is index_status='failed'.
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    _indexing_tasks[document_id] = task
+    return task
+
+
+async def _read_index_status(document_id: str) -> str | None:
+    async with async_session() as session:
+        doc = await session.get(Document, document_id)
+        return None if doc is None else doc.index_status
+
+
+async def await_index_ready(
+    document_id: str, *, timeout: float = INDEX_WAIT_TIMEOUT
+) -> str | None:
+    """Block until `document_id` is done indexing; return its final status.
+
+    Awaits the in-process task when this process owns it, otherwise polls the
+    DB flag. Returns the status ('indexed' / 'failed' / None for never-indexed),
+    or the last-seen status if `timeout` elapses first.
+    """
+    task = _indexing_tasks.get(document_id)
+    if task is not None:
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("timed out waiting for index of %s", document_id)
+        except Exception:
+            pass  # the task already recorded 'failed'
+        return await _read_index_status(document_id)
+
+    status = await _read_index_status(document_id)
+    if status != INDEX_PENDING:
+        return status
+
+    # Indexing belongs to another process (or an earlier run of this one) —
+    # poll the flag it writes.
+    deadline = time.monotonic() + timeout
+    delay = 0.1
+    while time.monotonic() < deadline:
+        await asyncio.sleep(delay)
+        delay = min(delay * 1.5, 2.0)
+        status = await _read_index_status(document_id)
+        if status != INDEX_PENDING:
+            return status
+    logger.warning("timed out waiting for index of %s (cross-process)", document_id)
+    return status
+
+
+async def await_conversation_indexes(
+    conversation_id: str, *, timeout: float = INDEX_WAIT_TIMEOUT
+) -> None:
+    """Wait for every still-pending document in a conversation.
+
+    `search_documents` is conversation-scoped, so it has to wait on all of them,
+    not just one — a hit could live in any attachment.
+
+    Selects every document in the conversation, not just the ones already
+    flagged `pending`: `start_indexing` registers its task synchronously but
+    writes the flag from inside that task, so a DB-only filter can miss a
+    just-started index and let the search run against an empty table.
+    """
+    async with async_session() as session:
+        rows = list((await session.execute(
+            select(Document.id, Document.index_status).where(
+                Document.conversation_id == conversation_id
+            )
+        )).all())
+    pending = [
+        doc_id for doc_id, status in rows
+        if status == INDEX_PENDING or doc_id in _indexing_tasks
+    ]
+    if not pending:
+        return
+    await asyncio.gather(
+        *(await_index_ready(doc_id, timeout=timeout) for doc_id in pending)
+    )
 
 
 # ── Search / sequential read ─────────────────────────────────────────────────
@@ -378,7 +547,7 @@ async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[di
     than `k`, or empty when nothing clears the cutoff. Raises only when neither
     arm can run (no embedder *and* no usable lexical terms).
     """
-    from core.retrieval import fts_match_expr, select_hybrid
+    from core.retrieval import cosine_ranking, fts_match_expr, select_hybrid
     from db.ops import search_chunks_lexical
 
     embedder = get_embedder()
@@ -414,17 +583,9 @@ async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[di
 
     dense: list[tuple[str, float]] = []
     if qvec is not None:
-        qnorm = float(np.linalg.norm(qvec)) or 1.0
-        for chunk, _fn in rows:
-            if chunk.embedding is None:
-                continue
-            vec = np.frombuffer(chunk.embedding, dtype=np.float32)
-            if vec.shape != qvec.shape:
-                # Chunk was embedded with a different model — skip rather than crash.
-                continue
-            score = float(np.dot(vec, qvec) / ((float(np.linalg.norm(vec)) or 1.0) * qnorm))
-            dense.append((chunk.id, score))
-        dense.sort(key=lambda t: t[1], reverse=True)
+        # Chunks embedded by a different model are skipped inside cosine_ranking
+        # (shape mismatch) rather than crashing the search.
+        dense = cosine_ranking(qvec, [(chunk.id, chunk.embedding) for chunk, _fn in rows])
 
     keep = select_hybrid(
         dense=dense,
