@@ -100,6 +100,26 @@ function RootLayout() {
     });
   }, []);
 
+  // Wrap TanStack Router navigations in View Transitions when available
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement)?.closest('a[href]');
+      if (!a) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      const url = new URL(a.getAttribute('href')!, location.href);
+      if (url.origin !== location.origin) return;
+      if (!('startViewTransition' in document)) return;
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      e.preventDefault();
+      // @ts-expect-error View Transitions API
+      document.startViewTransition(() => {
+        navigate({to: url.pathname + url.search as any});
+      });
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [navigate]);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
@@ -107,7 +127,10 @@ function RootLayout() {
 
       if (e.key === 'k' || e.key === 'K') {
         e.preventDefault();
-        navigate({to: '/'});
+        const doNav = () => navigate({to: '/'});
+        // @ts-expect-error
+        if ('startViewTransition' in document && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(doNav);
+        else doNav();
         setTimeout(() => {
           (document.querySelector('.input-textarea') as HTMLElement | null)?.focus();
         }, 50);
