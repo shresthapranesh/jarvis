@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from core.doc_index import get_embedder
-from core.retrieval import env_float, fts_match_expr, select_hybrid
+from core.retrieval import cosine_ranking, env_float, fts_match_expr, select_hybrid
 from db import async_session
 from db.ops import (
     create_memory,
@@ -52,18 +52,6 @@ _REL_DROP = env_float("JARVIS_MEMORY_REL_DROP", 0.75)
 _CORE_CACHE_TTL = 30  # seconds
 _CORE_CACHE_MAX_CHARS = 2000
 _core_cache: dict[str, Any] = {"text": "", "ts": 0.0, "count": 0}
-
-
-def _cosine(a: np.ndarray, anorm: float, b: bytes) -> float | None:
-    """Cosine of `a` (with precomputed norm) against stored float32 bytes `b`.
-
-    Returns None when the stored vector was embedded by a different model (shape
-    mismatch) — skip rather than crash, mirroring doc_index.search_chunks.
-    """
-    vec = np.frombuffer(b, dtype=np.float32)
-    if vec.shape != a.shape:
-        return None
-    return float(np.dot(vec, a) / ((float(np.linalg.norm(vec)) or 1.0) * anorm))
 
 
 async def embed_for_storage(text: str) -> bytes | None:
@@ -165,14 +153,7 @@ async def search_memory(
 
     dense: list[tuple[str, float]] = []
     if qvec is not None:
-        qnorm = float(np.linalg.norm(qvec)) or 1.0
-        for r in rows:
-            if r.embedding is None:
-                continue
-            score = _cosine(qvec, qnorm, r.embedding)
-            if score is not None:
-                dense.append((r.id, score))
-        dense.sort(key=lambda t: t[1], reverse=True)
+        dense = cosine_ranking(qvec, [(r.id, r.embedding) for r in rows])
 
     keep = select_hybrid(
         dense=dense,
@@ -235,19 +216,11 @@ async def upsert_memory(text: str, kind: str = "fact") -> str | None:
     if emb is None:
         return None
     qvec = np.frombuffer(emb, dtype=np.float32)
-    qnorm = float(np.linalg.norm(qvec)) or 1.0
 
     async with async_session() as session:
         rows = await list_memories(session, kind=kind)
-        best_id: str | None = None
-        best_score = 0.0
-        for r in rows:
-            if r.embedding is None:
-                continue
-            score = _cosine(qvec, qnorm, r.embedding)
-            if score is not None and score > best_score:
-                best_score = score
-                best_id = r.id
+        ranked = cosine_ranking(qvec, [(r.id, r.embedding) for r in rows])
+        best_id, best_score = ranked[0] if ranked else (None, 0.0)
         if best_id is not None and best_score >= _DEDUP_THRESHOLD:
             await update_memory_item(session, best_id, text=text, embedding=emb)
             logger.info("memory: merged into %s (cosine=%.3f)", best_id, best_score)

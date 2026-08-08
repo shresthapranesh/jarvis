@@ -278,6 +278,13 @@ class Document(Base):
     mime_type: Mapped[str] = mapped_column(String, nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
     path: Mapped[str] = mapped_column(String, nullable=False)
+    # Chunk-indexing state, for documents large enough to be indexed rather than
+    # inlined: 'pending' | 'indexed' | 'failed'. NULL means never indexed (the
+    # document was small enough to go straight into the message). Indexing runs
+    # in the background so it doesn't block the first token, and the retrieval
+    # tools wait on this — the kernel that hosts the `jarvis` SDK is a separate
+    # process, so an in-memory task registry alone can't tell it when to look.
+    index_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped["Conversation"] = relationship(

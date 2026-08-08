@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from langchain_core.messages import (
@@ -173,10 +173,19 @@ def _summarize_tool_group_brief(group: MessageGroup) -> str:
 
 
 def collapse_old_tool_results(
-    messages: list[AnyMessage], *, keep_last_tool_groups: int = KEEP_LAST_TOOL_GROUPS_RAW
+    messages: list[AnyMessage],
+    *,
+    keep_last_tool_groups: int = KEEP_LAST_TOOL_GROUPS_RAW,
+    groups: list[MessageGroup] | None = None,
 ) -> list[AnyMessage]:
-    """Per-call, non-persistent collapse of old tool_call groups into short AIMessage stubs."""
-    groups = group_messages(messages)
+    """Per-call, non-persistent collapse of old tool_call groups into short AIMessage stubs.
+
+    `groups` lets a caller that already grouped `messages` hand the result in
+    rather than paying for a second O(n) pass; it must be the grouping of
+    exactly these messages.
+    """
+    if groups is None:
+        groups = group_messages(messages)
     tool_groups = [g for g in groups if g.kind == "tool_call"]
     if len(tool_groups) <= keep_last_tool_groups:
         return messages
@@ -197,10 +206,17 @@ def collapse_old_tool_results(
 def apply_per_call_compaction(
     messages: list[AnyMessage], *, keep_last_tool_groups: int = KEEP_LAST_TOOL_GROUPS_RAW
 ) -> list[AnyMessage]:
-    """Cheap path: elide stale + collapse old tool results. No persistence, no LLM calls."""
+    """Cheap path: elide stale + collapse old tool results. No persistence, no LLM calls.
+
+    One elide pass and one grouping pass. Callers that also need a token count
+    should go through `maybe_compact`, which does this once and hands the result
+    back on its `CompactionResult` — calling both duplicates every pass.
+    """
     leaned = elide_stale_tool_results(messages)
-    collapsed = collapse_old_tool_results(leaned, keep_last_tool_groups=keep_last_tool_groups)
-    return collapsed
+    groups = group_messages(leaned)
+    return collapse_old_tool_results(
+        leaned, keep_last_tool_groups=keep_last_tool_groups, groups=groups
+    )
 
 
 # ── Persistent incremental summarization ─────────────────────────────────────
@@ -236,6 +252,24 @@ def _build_safe_messages_for_summary(groups: list[MessageGroup]) -> list[AnyMess
     return safe
 
 
+@dataclass
+class CompactionResult:
+    """What one compaction check produced.
+
+    `messages` is always the per-call-compacted view ready to hand to the LLM,
+    whether or not destructive summarization fired — the leaned view has to be
+    built to count tokens anyway, so returning it saves the caller an identical
+    second `apply_per_call_compaction` pass on every agent-loop iteration.
+
+    `state_update` is the RemoveMessage list + summary to write back into graph
+    state; empty unless `compacted` is True.
+    """
+
+    messages: list[AnyMessage]
+    state_update: list = field(default_factory=list)
+    compacted: bool = False
+
+
 async def maybe_compact(
     messages: list[AnyMessage],
     *,
@@ -243,7 +277,7 @@ async def maybe_compact(
     summarizer,
     threshold: int | None = None,
     keep_recent_groups: int = KEEP_RECENT_GROUPS,
-) -> tuple[list[AnyMessage], list[AnyMessage]] | None:
+) -> CompactionResult:
     """Incremental sliding-window summarization with caching.
 
     - Token estimate is over per-call-compacted view (elide-first restored)
@@ -251,14 +285,20 @@ async def maybe_compact(
     - Most recent user group is pinned always-kept
     - Kept window forced to start with user if possible
     - Merges ALL prior summaries, not just first
+
+    Always returns a `CompactionResult`; `compacted` says whether summarization
+    actually fired. Every early return still carries the leaned view, so the
+    caller never recomputes it.
     """
     if not messages:
-        return None
+        return CompactionResult(messages=[])
 
     th = threshold if threshold is not None else compact_threshold()
 
-    # ── 1. Cheap view for token counting (elide-first) ──────────────────
+    # ── 1. Cheap view — used both for token counting and, unchanged, as the
+    #      messages handed to the LLM when compaction doesn't fire. ─────────
     leaned_for_count = apply_per_call_compaction(messages)
+    no_compaction = CompactionResult(messages=leaned_for_count)
 
     heuristic = estimate_tokens_heuristic(leaned_for_count)
     if heuristic <= int(th * 0.8):
@@ -268,7 +308,7 @@ async def maybe_compact(
             len(leaned_for_count),
             th,
         )
-        return None
+        return no_compaction
 
     token_count = estimate_tokens(leaned_for_count, llm)
     if token_count <= th:
@@ -278,13 +318,13 @@ async def maybe_compact(
             len(leaned_for_count),
             th,
         )
-        return None
+        return no_compaction
 
     # ── 2. Group raw messages for actual eviction ───────────────────────
     groups = group_messages(messages)
     if len(groups) <= keep_recent_groups:
         logger.debug("compact: only %d groups, keep=%d — skip", len(groups), keep_recent_groups)
-        return None
+        return no_compaction
 
     # Identify ALL old summary groups (could be multiple after migration)
     old_summary_groups: list[MessageGroup] = [g for g in groups if g.kind == "summary"]
@@ -294,7 +334,7 @@ async def maybe_compact(
     # ── 3. Determine kept set with pinning rules (non-contiguous support) ─
     non_summary_groups = [g for g in groups if g.kind != "summary"]
     if len(non_summary_groups) <= keep_recent_groups:
-        return None
+        return no_compaction
 
     # Start with last N groups
     kept_set: set[str] = set(g.id for g in non_summary_groups[-keep_recent_groups:])
@@ -321,7 +361,7 @@ async def maybe_compact(
 
     if not groups_to_summarize:
         logger.debug("compact: no new groups to summarize beyond kept %d (pinned start %d)", keep_recent_groups, kept_start)
-        return None
+        return no_compaction
 
     logger.info(
         "compact triggered: %d tokens (leaned %d msgs) / %d raw msgs / %d groups -> keeping %d recent groups (from idx %d), summarizing %d old groups%s",
@@ -338,7 +378,7 @@ async def maybe_compact(
     safe_msgs = _build_safe_messages_for_summary(groups_to_summarize)
     if not safe_msgs:
         logger.warning("compact: safe_msgs empty after conversion — skip")
-        return None
+        return no_compaction
 
     # ── 4. Summarize delta ───────────────────────────────────────────────
     try:
@@ -359,7 +399,7 @@ async def maybe_compact(
         )
     except Exception as exc:
         logger.warning("compaction delta summarization failed (%s: %s) — skip", type(exc).__name__, exc)
-        return None
+        return no_compaction
 
     # ── 5. Merge with ALL old summaries if exist ─────────────────────────
     if old_summary_text:
@@ -402,6 +442,10 @@ async def maybe_compact(
                 removals.append(RemoveMessage(id=m.id))
 
     state_update: list = [*removals, summary_msg]
-    new_messages_for_llm: list[AnyMessage] = [summary_msg] + kept_messages
+    # The kept window is a different list than what we leaned above, so it needs
+    # its own per-call pass — but only on the rare turn compaction actually fires.
+    new_messages_for_llm = apply_per_call_compaction([summary_msg] + kept_messages)
 
-    return new_messages_for_llm, state_update
+    return CompactionResult(
+        messages=new_messages_for_llm, state_update=state_update, compacted=True
+    )

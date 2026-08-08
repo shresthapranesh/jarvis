@@ -27,7 +27,11 @@ async def maybe_summarize(
     llm,
     summarizer,
 ) -> tuple[list[AnyMessage], list[AnyMessage]] | None:
-    """Deprecated wrapper - delegates to compaction.maybe_compact."""
+    """Deprecated wrapper - delegates to compaction.maybe_compact.
+
+    Keeps the old ``(messages, state_update) | None`` shape; maybe_compact now
+    always returns a CompactionResult and reports "didn't fire" via `compacted`.
+    """
     warnings.warn(
         "maybe_summarize is deprecated, use compaction.maybe_compact",
         DeprecationWarning,
@@ -35,4 +39,7 @@ async def maybe_summarize(
     )
     from .compaction import maybe_compact
 
-    return await maybe_compact(messages, llm=llm, summarizer=summarizer)
+    result = await maybe_compact(messages, llm=llm, summarizer=summarizer)
+    if not result.compacted:
+        return None
+    return result.messages, result.state_update

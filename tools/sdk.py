@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -201,15 +202,43 @@ def list_artifact_versions(artifact_id: str) -> list[dict]:
 
 _READ_WINDOW_CHARS = 6000
 
+# Attachments are chunk-indexed in the background by the server so indexing
+# doesn't delay the first token. This kernel is a separate process, so it can't
+# await that task — it waits on the `index_status` flag the server writes.
+# Without this wait a search during indexing returns nothing, which reads as
+# "the document doesn't mention it" rather than "it isn't ready yet".
+_INDEX_WAIT_TIMEOUT = 120.0
+_INDEX_POLL_MAX_DELAY = 2.0
+
+
+def _wait_for_index(where: str, params: tuple) -> None:
+    """Poll until no document matched by `where` is still 'pending'."""
+    deadline = time.monotonic() + _INDEX_WAIT_TIMEOUT
+    delay = 0.1
+    while True:
+        with _connect() as conn:
+            pending = conn.execute(
+                f"SELECT COUNT(*) FROM documents WHERE {where} AND index_status = 'pending'",
+                params,
+            ).fetchone()[0]
+        if not pending or time.monotonic() >= deadline:
+            return
+        time.sleep(delay)
+        delay = min(delay * 1.5, _INDEX_POLL_MAX_DELAY)
+
 
 def search_documents(query: str, k: int = 6) -> list[dict]:
     """Top-k passages from this conversation's indexed attachments.
 
     Phrase `query` as the content you want to find. Follow up with
     read_document(document_id, offset=hit["seq"]) to read around a hit.
+
+    Waits for any attachment still being indexed, so the first call after a
+    large upload may pause briefly.
     """
     if not _conversation_id:
         raise RuntimeError("No conversation scope — document search is only available in chats.")
+    _wait_for_index("conversation_id = ?", (_conversation_id,))
     qvec = _embedder().embed_query(query)
     with _connect() as conn:
         rows = conn.execute(
@@ -232,8 +261,15 @@ def search_documents(query: str, k: int = 6) -> list[dict]:
 
 
 def read_document(document_id: str, offset: int = 0) -> dict:
-    """Sequential window of an indexed document; continue with offset=next_offset."""
+    """Sequential window of an indexed document; continue with offset=next_offset.
+
+    Waits if the document is still being indexed.
+    """
+    _wait_for_index("id = ?", (document_id,))
     with _connect() as conn:
+        status = conn.execute(
+            "SELECT index_status FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
         rows = conn.execute(
             "SELECT c.text, d.filename"
             " FROM document_chunks c JOIN documents d ON c.document_id = d.id"
@@ -241,6 +277,11 @@ def read_document(document_id: str, offset: int = 0) -> dict:
             (document_id,),
         ).fetchall()
     if not rows:
+        if status is not None and status["index_status"] == "failed":
+            raise LookupError(
+                f"Document {document_id} could not be indexed (the embedding step failed), "
+                "so its text isn't available."
+            )
         raise LookupError(
             f"Document {document_id} has no index — small attachments are inlined in the message."
         )
