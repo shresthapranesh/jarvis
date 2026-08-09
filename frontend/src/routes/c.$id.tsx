@@ -15,6 +15,7 @@ import {FolderIcon} from '../components/icons';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
+import {RunSpine} from '../components/RunSpine';
 import {useTaskEvents} from '../hooks/useTaskEvents';
 import type {
   MediaAttachment,
@@ -287,6 +288,20 @@ function ConversationPage() {
   const isActive = streaming || !!runningMsg;
   const isEphemeral = data.ephemeral;
 
+  // The spine is the always-on, collapsed form of the activity sidebar: live
+  // steps while a run is in flight, the last completed run's trace at rest.
+  // It yields the rail whenever a full panel is open so they never stack.
+  const spineSteps = useMemo<Step[]>(() => {
+    if (isActive) return steps;
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      const m = allMessages[i];
+      if (m.role === 'assistant' && m.steps.length > 0) return m.steps;
+    }
+    return [];
+  }, [isActive, steps, allMessages]);
+
+  const showSpine = !panelOpen && !artifactPanelOpen && (isActive || spineSteps.length > 0);
+
   // Incognito teardown. Discard when the user closes the tab (best-effort) and
   // when they navigate away from a settled ephemeral chat. `activeRef` keeps the
   // unmount cleanup from deleting a conversation whose run is still in flight —
@@ -308,7 +323,7 @@ function ConversationPage() {
   }, [id, isEphemeral]);
 
   return (
-    <div className="page">
+    <div className={`page${showSpine ? ' has-spine' : ''}`}>
       {isEphemeral && (
         <div className="incognito-bar" title="This conversation is not saved and will be deleted when you leave.">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -345,6 +360,16 @@ function ConversationPage() {
         isLoadingOlder={isLoadingPrevious}
         onShowSteps={handleShowSteps}
       />
+      {showSpine && (
+        <RunSpine
+          steps={spineSteps}
+          workers={isActive ? workers : []}
+          artifactCount={totalArtifactCount}
+          isLive={isActive}
+          budget={liveBudget}
+          onExpand={() => handleShowSteps(spineSteps)}
+        />
+      )}
       {panelOpen && (
         <ActivitySidebar
           steps={panelSteps}

@@ -51,10 +51,31 @@
   --font-body: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
+  /* ── Type scale ──
+     The shell used to render almost everything at ~13px, which is why it read
+     as flat. Six steps, each with an intended job; nothing outside this set. */
+  --t-display: 1.75rem; /* dispatch greeting — the only truly large type */
+  --t-title: 1.0625rem; /* page titles */
+  --t-body: 0.9375rem; /* prose, messages */
+  --t-ui: 0.8125rem; /* controls, nav, list rows */
+  --t-small: 0.75rem; /* secondary meta */
+  --t-micro: 0.6875rem; /* eyebrows — always uppercase + tracked */
+  --track-micro: 0.13em;
+
+  /* ── Space scale ── */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 36px;
+  --s7: 56px;
+
   /* ── Layout ── */
   --left-w: 264px;
   --left-collapsed-w: 52px;
   --right-w: 312px;
+  --spine-w: 208px;
   --blur: blur(14px);
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -234,44 +255,88 @@ body {
 .left-panel-header {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 14px 14px 12px;
+  gap: var(--s2);
+  padding: var(--s4) var(--s3) var(--s3);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.brand {
-  font-family: var(--font-display);
-  font-size: 0.86rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  color: var(--text);
-  flex: 1;
-}
-
-/* ── Nav toggle ── */
-.nav-toggle,
-.theme-toggle {
+.brand-mark {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.brand-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+/* The one line in the shell that always answers "is it doing anything?" */
+.brand-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+  line-height: 1.2;
+}
+.brand-status--busy {
+  color: var(--signal-live);
+}
+.brand-status--busy .status-dot.ok {
+  animation: brand-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes brand-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 226, 141, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(99, 226, 141, 0);
+  }
+}
+
+/* ── Nav toggle ── */
+.icon-ghost-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border-radius: 7px;
-  border: 1px solid rgba(var(--tint-rgb), 0.09);
-  background: rgba(var(--tint-rgb), 0.04);
-  color: var(--text-dim);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-faint);
   cursor: pointer;
   flex-shrink: 0;
   transition:
     color 0.15s,
-    border-color 0.15s;
+    border-color 0.15s,
+    background 0.15s;
   padding: 0;
 }
-.nav-toggle:hover,
-.theme-toggle:hover {
+.icon-ghost-btn:hover {
   color: var(--accent);
   border-color: var(--accent-dim);
+  background: rgba(var(--tint-rgb), 0.05);
 }
 .theme-toggle svg {
   transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -335,9 +400,10 @@ body {
 }
 
 .conv-list-title {
-  font-size: 0.68rem;
+  font-size: var(--t-micro);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: var(--track-micro);
   color: var(--text-dim);
 }
 
@@ -380,21 +446,33 @@ body {
 }
 
 .conv-empty {
-  padding: 20px 14px;
-  font-size: 0.73rem;
-  color: var(--text-dim);
+  padding: var(--s5) var(--s4);
+  font-size: var(--t-small);
+  line-height: 1.6;
+  color: var(--text-faint);
   text-align: center;
 }
+.conv-empty kbd {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  color: var(--text-dim);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
 
-@keyframes conv-enter {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+.conv-section {
+  margin-bottom: var(--s3);
+}
+
+.conv-section-heading {
+  font-size: var(--t-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
+  color: var(--text-faint);
+  padding: var(--s2) 14px var(--s1);
 }
 
 .conv-row {
@@ -402,22 +480,18 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 5px;
-  padding: 6px 8px 6px 10px;
+  padding: 5px 8px 5px 10px;
   border-radius: var(--radius-sm);
   margin: 1px 6px;
   cursor: pointer;
   border-left: 2px solid transparent;
-  animation: conv-enter 0.22s cubic-bezier(0.32, 0.72, 0, 1) both;
-  animation-delay: calc(var(--stagger, 0) * 22ms);
   transition:
     background 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+    border-color 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .conv-row:hover {
   background: rgba(var(--tint-rgb), 0.06);
-  border-left-color: var(--accent);
-  transform: translateX(1px);
+  border-left-color: var(--border-strong);
 }
 .conv-row.active {
   background: var(--accent-dim);
@@ -429,22 +503,39 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: row;
-  align-items: center;
-  gap: 6px;
+  align-items: baseline;
+  gap: var(--s2);
   text-decoration: none;
 }
 
 .conv-title {
-  font-size: 0.74rem;
-  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-ui);
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.conv-row:hover .conv-title,
+.conv-row.active .conv-title {
+  color: var(--text);
+}
+.conv-row.active .conv-title {
+  font-weight: 500;
+}
 
-.conv-pin-icon {
+.conv-time {
   flex-shrink: 0;
-  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+.conv-row:hover .conv-time,
+.conv-row.active .conv-time {
+  opacity: 1;
 }
 
 .conv-title-input {
@@ -949,14 +1040,17 @@ body {
 }
 
 /* ── Turn action row (copy, steps) ── */
+/* Resting turns used to show nothing at all until hovered, which made settled
+   conversations look inert. Keep the row present but recessive. */
 .turn-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity 0.15s;
 }
 .turn:hover .turn-actions,
+.turn-actions:focus-within,
 .turn-actions--tts-active {
   opacity: 1;
 }
@@ -1813,22 +1907,39 @@ body {
   margin-left: 2px;
 }
 
-/* ── Left panel nav (Automations link) ── */
+/* ── Left panel nav ── */
 .left-panel-nav {
-  padding: 6px 6px 8px;
+  padding: var(--s3) var(--s2) var(--s2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.nav-group {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
+/* Eyebrow — the device that turns 11 equal rows into 3 readable intents. */
+.nav-heading {
+  font-size: var(--t-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
+  color: var(--text-faint);
+  padding: 0 10px var(--s2);
+}
+
 .nav-link {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   padding: 7px 10px;
-  font-size: 0.735rem;
+  font-size: var(--t-ui);
   font-weight: 450;
   letter-spacing: -0.01em;
   color: var(--text-dim);
@@ -1836,18 +1947,42 @@ body {
   border-radius: var(--radius-sm);
   transition:
     background 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
-    color 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
-    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+    color 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.nav-link svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: opacity 0.18s;
 }
 .nav-link:hover {
-  background: var(--surface2);
+  background: rgba(var(--tint-rgb), 0.05);
   color: var(--text);
-  transform: translateX(1px);
+}
+.nav-link:hover svg {
+  opacity: 1;
 }
 .nav-link.active {
   background: var(--accent-dim);
   color: var(--accent);
   font-weight: 550;
+}
+.nav-link.active svg {
+  opacity: 1;
+}
+/* Signal bar rather than a fill alone — reads as "current channel". */
+.nav-link.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 15px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+.left-panel.collapsed .nav-link.active::before {
+  display: none;
 }
 
 /* ── Automation page ── */
@@ -7124,4 +7259,457 @@ audio.artifact-media {
 }
 .settings-add-row-btn {
   align-self: flex-start;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Dispatch view — the home screen. Replaces an empty canvas with the three
+   things you actually want on arrival: what's running, a place to ask, and
+   what you were last doing.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.page.dispatch {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.dispatch-scroll {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--s7) var(--s5);
+}
+
+.dispatch-inner {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  animation: dispatch-enter 0.4s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@keyframes dispatch-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dispatch-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.dispatch-greeting {
+  font-family: var(--font-display);
+  font-size: var(--t-display);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  color: var(--text);
+}
+
+.dispatch-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-ui);
+  color: var(--text-dim);
+}
+
+.dispatch-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal-live);
+  flex-shrink: 0;
+  animation: brand-pulse 1.6s ease-in-out infinite;
+}
+
+.dispatch-error {
+  margin: 0;
+}
+
+/* The composer is the hero: it gets the widest measure and the only glow. */
+.dispatch-composer .input-wrap {
+  max-width: none;
+}
+.dispatch-composer .input-container {
+  box-shadow:
+    0 1px 0 rgba(var(--tint-rgb), 0.05) inset,
+    0 8px 32px rgba(var(--shadow-rgb), 0.35);
+}
+
+.dispatch-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.dispatch-section-heading {
+  font-size: var(--t-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
+  color: var(--text-faint);
+}
+
+.dispatch-runs,
+.dispatch-recent {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.dispatch-run {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  font-size: var(--t-ui);
+  border-left: 2px solid var(--signal-live);
+  background: var(--signal-live-dim);
+  margin-bottom: 2px;
+}
+
+.dispatch-run-mark {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--signal-live);
+  flex-shrink: 0;
+  animation: brand-pulse 1.6s ease-in-out infinite;
+}
+
+.dispatch-run-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dispatch-run-kind,
+.dispatch-run-time {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.dispatch-recent-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition:
+    background 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.dispatch-recent-row:hover {
+  background: rgba(var(--tint-rgb), 0.05);
+  border-left-color: var(--accent);
+}
+
+.dispatch-recent-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-ui);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dispatch-recent-row:hover .dispatch-recent-title {
+  color: var(--text);
+}
+
+.dispatch-recent-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--text-faint);
+}
+
+.dispatch-dot {
+  opacity: 0.5;
+}
+
+.dispatch-more {
+  align-self: flex-start;
+  font-size: var(--t-small);
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: var(--s1) var(--s3);
+  transition: color 0.15s;
+}
+.dispatch-more:hover {
+  color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Run spine — the signature. A permanent trace of what the agent is doing,
+   in place of the old hover-to-discover steps button. Collapsed form of the
+   activity sidebar: clicking any node expands into it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.page.has-spine #messages {
+  padding-right: calc(var(--spine-w) + var(--s5));
+}
+.page.has-spine .page-footer {
+  padding-right: calc(var(--spine-w) + var(--s5));
+}
+
+.run-spine {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--spine-w);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--glass-border);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--tint-rgb), 0.035) 0%,
+    rgba(var(--tint-rgb), 0.015) 100%
+  );
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  z-index: 20;
+  animation: panel-enter 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.spine-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--s4) var(--s4) var(--s3);
+  flex-shrink: 0;
+}
+
+.spine-eyebrow {
+  font-size: var(--t-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
+  color: var(--text-dim);
+}
+
+.spine-state {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--text-faint);
+}
+.spine-state--live {
+  color: var(--signal-live);
+}
+
+/* The rail itself: one hairline, nodes hung off it. */
+.spine-track {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--s3) var(--s3) var(--s4);
+  position: relative;
+  scrollbar-width: none;
+}
+.spine-track::-webkit-scrollbar {
+  display: none;
+}
+.spine-nodes {
+  position: relative;
+}
+.spine-nodes::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: rgba(var(--tint-rgb), 0.14);
+}
+
+.spine-empty {
+  font-size: var(--t-small);
+  color: var(--text-faint);
+  padding: var(--s2) 0 var(--s2) var(--s4);
+}
+
+.spine-earlier {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  color: var(--text-faint);
+  padding: var(--s1) 0 var(--s2) var(--s4);
+  transition: color 0.15s;
+}
+.spine-earlier:hover {
+  color: var(--accent);
+}
+
+.spine-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 4px 0 4px 0;
+  color: var(--text-dim);
+  transition: color 0.15s;
+}
+.spine-node:hover {
+  color: var(--text);
+}
+
+.spine-mark {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1.5px solid currentColor;
+  box-shadow: 0 0 0 3px var(--bg);
+}
+
+.spine-label {
+  font-family: var(--font-mono);
+  font-size: var(--t-micro);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Kind is carried by the reserved signal hues — the whole reason they exist. */
+.spine-node--tool .spine-mark {
+  color: var(--signal-tool);
+}
+.spine-node--worker .spine-mark {
+  color: var(--signal-insight);
+}
+.spine-node--artifact .spine-mark {
+  color: var(--accent);
+}
+.spine-node--think .spine-mark {
+  color: var(--text-faint);
+}
+
+.spine-node--active .spine-mark,
+.spine-node--pending .spine-mark {
+  color: var(--signal-live);
+  background: var(--signal-live);
+  animation: spine-ping 1.4s ease-in-out infinite;
+}
+
+@keyframes spine-ping {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px var(--bg),
+      0 0 0 4px rgba(99, 226, 141, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px var(--bg),
+      0 0 0 8px rgba(99, 226, 141, 0);
+  }
+}
+
+.spine-node--pending {
+  cursor: default;
+  color: var(--signal-live);
+}
+
+.spine-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: var(--s3) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.spine-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s3);
+}
+
+.spine-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.spine-stat dt {
+  font-size: var(--t-micro);
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
+  color: var(--text-faint);
+}
+.spine-stat dd {
+  font-family: var(--font-mono);
+  font-size: var(--t-small);
+  color: var(--text);
+}
+.spine-stat--workers dd {
+  color: var(--signal-insight);
+}
+
+.spine-expand {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--t-small);
+  padding: 5px var(--s2);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+.spine-expand:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  background: rgba(var(--tint-rgb), 0.04);
+}
+
+/* Below this the rail would crowd the thread out; the steps button in the
+   turn actions remains the way in. */
+@media (max-width: 1100px) {
+  .run-spine {
+    display: none;
+  }
+  .page.has-spine #messages,
+  .page.has-spine .page-footer {
+    padding-right: var(--s5);
+  }
 }

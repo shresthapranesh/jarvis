@@ -187,3 +187,98 @@ export const InfoIcon = (p: IconProps) => (
     <line x1="12" y1="8" x2="12" y2="8" />
   </Icon>
 );
+
+// ── Shell navigation ────────────────────────────────────────────────────────
+
+export const MicIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+    <line x1="12" y1="19" x2="12" y2="23" />
+  </Icon>
+);
+
+export const WorkflowIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="3" width="6" height="6" rx="1.5" />
+    <rect x="15" y="3" width="6" height="6" rx="1.5" />
+    <rect x="9" y="15" width="6" height="6" rx="1.5" />
+    <line x1="6" y1="9" x2="12" y2="15" />
+    <line x1="18" y1="9" x2="12" y2="15" />
+  </Icon>
+);
+
+export const FileIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+  </Icon>
+);
+
+export const BookIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </Icon>
+);
+
+export const StarIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.6 5.8 21 7 14 2 9.3 9 8.5 12 2" />
+  </Icon>
+);
+
+export const ListIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 6h16" />
+    <path d="M4 12h16" />
+    <path d="M4 18h10" />
+  </Icon>
+);
+
+export const GearIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </Icon>
+);
+
+export const SunIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+  </Icon>
+);
+
+export const MoonIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+  </Icon>
+);
+
+export const ChevronLeftIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="15 18 9 12 15 6" />
+  </Icon>
+);
+
+/**
+ * The product mark — a dispatch node fanning out to concurrent workers.
+ * Drawn rather than imported so it inherits the petrol/signal tokens.
+ */
+export const BrandMark = ({size = 20}: {size?: number}) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <path
+      d="M9 16 L16 9 M9 16 L16 23 M16 9 L23 12.5 M16 23 L23 19.5"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      opacity="0.5"
+    />
+    <circle cx="9" cy="16" r="3.2" fill="currentColor" />
+    <circle cx="16" cy="9" r="2.3" fill="currentColor" opacity="0.72" />
+    <circle cx="16" cy="23" r="2.3" fill="currentColor" opacity="0.72" />
+    <circle cx="23" cy="12.5" r="1.8" fill="currentColor" opacity="0.45" />
+    <circle cx="23" cy="19.5" r="1.8" fill="currentColor" opacity="0.45" />
+  </svg>
+);

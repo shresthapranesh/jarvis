@@ -12,6 +12,8 @@ export const conversationListQuery = graphql`
       title
       pinned
       projectId
+      createdAt
+      messageCount
     }
   }
 `;

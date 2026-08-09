@@ -4,6 +4,23 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import type {Environment} from 'relay-runtime';
 
 import {ConversationList} from '../components/ConversationList';
+import {
+  BookIcon,
+  BoltIcon,
+  BrandMark,
+  ChevronLeftIcon,
+  ClockIcon,
+  FileIcon,
+  FolderIcon,
+  GearIcon,
+  KanbanIcon,
+  ListIcon,
+  MicIcon,
+  MoonIcon,
+  StarIcon,
+  SunIcon,
+  WorkflowIcon,
+} from '../components/icons';
 import {checkHealth} from '../lib/api';
 import {fetchRunningTasks} from '../relay/RunningTasksQuery';
 import type {RunningTask} from '../lib/types';
@@ -16,7 +33,46 @@ interface RouterContext {
 
 const NAV_MIN_W = 180;
 const NAV_MAX_W = 440;
-const NAV_DEFAULT_W = 260;
+const NAV_DEFAULT_W = 264;
+
+// Grouped so the rail reads as three intents rather than eleven equal rows:
+// what the agent is *doing*, what it *knows*, and how you *tune* it.
+interface NavItem {
+  to: string;
+  label: string;
+  Icon: (p: {size?: number}) => React.ReactElement;
+  /** Only Tasks carries a live count today; keyed so more can opt in. */
+  badge?: 'running';
+}
+
+const NAV_GROUPS: {heading: string; items: NavItem[]}[] = [
+  {
+    heading: 'Work',
+    items: [
+      {to: '/live', label: 'Live', Icon: MicIcon},
+      {to: '/board', label: 'Board', Icon: KanbanIcon},
+      {to: '/workflow', label: 'Workflows', Icon: WorkflowIcon},
+      {to: '/automation', label: 'Automations', Icon: BoltIcon},
+      {to: '/tasks', label: 'Tasks', Icon: ClockIcon, badge: 'running'},
+    ],
+  },
+  {
+    heading: 'Context',
+    items: [
+      {to: '/projects', label: 'Projects', Icon: FolderIcon},
+      {to: '/artifacts', label: 'Artifacts', Icon: FileIcon},
+      {to: '/memory', label: 'Memory', Icon: BookIcon},
+      {to: '/skills', label: 'Skills', Icon: StarIcon},
+    ],
+  },
+  {
+    heading: 'System',
+    items: [
+      {to: '/logs', label: 'Logs', Icon: ListIcon},
+      {to: '/settings', label: 'Settings', Icon: GearIcon},
+    ],
+  },
+];
 
 function RootLayout() {
   const {data} = useQuery({
@@ -111,7 +167,6 @@ function RootLayout() {
       if (!('startViewTransition' in document)) return;
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       e.preventDefault();
-      // @ts-expect-error View Transitions API
       document.startViewTransition(() => {
         navigate({to: url.pathname + url.search as any});
       });
@@ -128,8 +183,11 @@ function RootLayout() {
       if (e.key === 'k' || e.key === 'K') {
         e.preventDefault();
         const doNav = () => navigate({to: '/'});
-        // @ts-expect-error
-        if ('startViewTransition' in document && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(doNav);
+        if (
+          'startViewTransition' in document &&
+          !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        )
+          document.startViewTransition(doNav);
         else doNav();
         setTimeout(() => {
           (document.querySelector('.input-textarea') as HTMLElement | null)?.focus();
@@ -155,305 +213,67 @@ function RootLayout() {
         style={navCollapsed ? undefined : {width: navWidth}}
       >
         <div className="left-panel-header">
-          <div className={`status-dot ${healthy ? 'ok' : 'err'}`} />
-          {!navCollapsed && <span className="brand">Assistant</span>}
+          <span className="brand-mark" aria-hidden="true">
+            <BrandMark size={navCollapsed ? 18 : 20} />
+          </span>
+          {!navCollapsed && (
+            <div className="brand-block">
+              <span className="brand">Jarvis</span>
+              <span className={`brand-status${runningCount > 0 ? ' brand-status--busy' : ''}`}>
+                <span className={`status-dot ${healthy ? 'ok' : 'err'}`} />
+                {!healthy
+                  ? 'offline'
+                  : runningCount > 0
+                    ? `${runningCount} running`
+                    : 'idle'}
+              </span>
+            </div>
+          )}
           {!navCollapsed && (
             <button
-              className="theme-toggle"
+              className="icon-ghost-btn theme-toggle"
               onClick={toggleTheme}
               title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
               aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
             >
-              {theme === 'dark' ? (
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="12" r="4" />
-                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-                </svg>
-              ) : (
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-              )}
+              {theme === 'dark' ? <SunIcon size={14} /> : <MoonIcon size={14} />}
             </button>
           )}
           <button
-            className={`nav-toggle${navCollapsed ? ' nav-toggle--collapsed' : ''}`}
+            className={`icon-ghost-btn nav-toggle${navCollapsed ? ' nav-toggle--collapsed' : ''}`}
             onClick={toggleNav}
             title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
+            <ChevronLeftIcon size={14} />
           </button>
         </div>
         <div className="left-panel-nav">
-          <Link
-            to="/projects"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Projects"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-            {!navCollapsed && <span>Projects</span>}
-          </Link>
-          <Link
-            to="/automation"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Automations"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-            </svg>
-            {!navCollapsed && <span>Automations</span>}
-          </Link>
-          <Link
-            to="/live"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Live"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <line x1="12" y1="19" x2="12" y2="23" />
-              <line x1="8" y1="23" x2="16" y2="23" />
-            </svg>
-            {!navCollapsed && <span>Live</span>}
-          </Link>
-          <Link
-            to="/board"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Board"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="5" height="14" rx="1" />
-              <rect x="10" y="3" width="5" height="18" rx="1" />
-              <rect x="17" y="3" width="5" height="10" rx="1" />
-            </svg>
-            {!navCollapsed && <span>Board</span>}
-          </Link>
-          <Link
-            to="/workflow"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Workflows"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="6" height="6" rx="1" />
-              <rect x="15" y="3" width="6" height="6" rx="1" />
-              <rect x="9" y="15" width="6" height="6" rx="1" />
-              <line x1="6" y1="9" x2="12" y2="15" />
-              <line x1="18" y1="9" x2="12" y2="15" />
-            </svg>
-            {!navCollapsed && <span>Workflows</span>}
-          </Link>
-          <Link
-            to="/artifacts"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Artifacts"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            {!navCollapsed && <span>Artifacts</span>}
-          </Link>
-          <Link
-            to="/tasks"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Tasks"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="9" />
-              <polyline points="12 7 12 12 15 14" />
-            </svg>
-            {!navCollapsed && <span>Tasks</span>}
-            {runningCount > 0 && (
-              <span className={`nav-badge${navCollapsed ? ' nav-badge--compact' : ''}`}>
-                {runningCount}
-              </span>
-            )}
-          </Link>
-          <Link
-            to="/memory"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Memory"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-            </svg>
-            {!navCollapsed && <span>Memory</span>}
-          </Link>
-          <Link
-            to="/skills"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Skills"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.6 5.8 21 7 14 2 9.3 9 8.5 12 2" />
-            </svg>
-            {!navCollapsed && <span>Skills</span>}
-          </Link>
-          <Link
-            to="/logs"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Logs"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 6h16" />
-              <path d="M4 12h16" />
-              <path d="M4 18h10" />
-            </svg>
-            {!navCollapsed && <span>Logs</span>}
-          </Link>
-          <Link
-            to="/settings"
-            className="nav-link"
-            activeProps={{className: 'nav-link active'}}
-            title="Settings"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            {!navCollapsed && <span>Settings</span>}
-          </Link>
+          {NAV_GROUPS.map((group) => (
+            <div className="nav-group" key={group.heading}>
+              {!navCollapsed && <p className="nav-heading">{group.heading}</p>}
+              {group.items.map(({to, label, Icon, badge}) => {
+                const count = badge === 'running' ? runningCount : 0;
+                return (
+                  <Link
+                    key={to}
+                    to={to}
+                    className="nav-link"
+                    activeProps={{className: 'nav-link active'}}
+                    title={label}
+                  >
+                    <Icon size={15} />
+                    {!navCollapsed && <span>{label}</span>}
+                    {count > 0 && (
+                      <span className={`nav-badge${navCollapsed ? ' nav-badge--compact' : ''}`}>
+                        {count}
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </div>
         {!navCollapsed && <ConversationList />}
         {!navCollapsed && (
