@@ -13,25 +13,44 @@ from langchain_core.messages import (
 )
 
 
-_THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
+# Three names for the same thing: Anthropic emits `thinking`/`redacted_thinking`,
+# while LangChain's v1 content-block format calls it `reasoning`. All three must
+# be listed — a name missing here is a block that survives into history, and
+# providers dereference these blocks unguarded. `langchain_google_genai` does a
+# bare `part["reasoning"]`, so one stray v1 block from another provider (whose
+# `summary`-shaped blocks carry no `reasoning` key at all) crashes every
+# subsequent Gemini call on that thread with `KeyError: 'reasoning'`.
+_THINKING_TYPES = frozenset({"thinking", "redacted_thinking", "reasoning"})
+
+# additional_kwargs mirrors of the same content, under the provider's own key.
+_THINKING_KWARGS = ("thinking", "reasoning")
 
 
 def _strip_thinking_from_message(msg: AIMessage) -> AIMessage:
     content = msg.content
-    if not isinstance(content, list):
+    stale_kwargs = [k for k in _THINKING_KWARGS if k in (msg.additional_kwargs or {})]
+
+    filtered = content
+    if isinstance(content, list):
+        filtered = [
+            b for b in content
+            if not (isinstance(b, dict) and b.get("type") in _THINKING_TYPES)
+        ]
+        if len(filtered) == len(content):
+            filtered = content
+        elif not filtered:
+            filtered = [{"type": "text", "text": ""}]
+
+    if filtered is content and not stale_kwargs:
         return msg
-    filtered = [
-        b for b in content
-        if not (isinstance(b, dict) and b.get("type") in _THINKING_TYPES)
-    ]
-    if len(filtered) == len(content):
-        return msg
-    if not filtered:
-        filtered = [{"type": "text", "text": ""}]
+
     new_msg = msg.model_copy(update={"content": filtered})
-    if "thinking" in (new_msg.additional_kwargs or {}):
+    if stale_kwargs:
         new_msg = new_msg.model_copy(update={
-            "additional_kwargs": {k: v for k, v in new_msg.additional_kwargs.items() if k != "thinking"}
+            "additional_kwargs": {
+                k: v for k, v in new_msg.additional_kwargs.items()
+                if k not in _THINKING_KWARGS
+            }
         })
     return new_msg
 
