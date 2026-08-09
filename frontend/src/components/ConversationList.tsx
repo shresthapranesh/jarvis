@@ -5,6 +5,7 @@ import {createPortal} from 'react-dom';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
+import {BUCKET_ORDER, relativeTime, timeBucket, type TimeBucket} from '../lib/format';
 import {conversationListQuery, refreshConversationList} from '../relay/ConversationListQuery';
 import {commitDeleteConversation} from '../relay/DeleteConversationMutation';
 import {decodeGlobalId} from '../relay/globalId';
@@ -31,9 +32,33 @@ export function ConversationList() {
         id: decodeGlobalId(c.id),
         title: c.title,
         pinned: c.pinned,
+        createdAt: c.createdAt as string,
       })),
     [data.conversations],
   );
+
+  // Pinned float to their own section; everything else falls into calendar
+  // buckets so a long history stays scannable without a search box.
+  const sections = useMemo(() => {
+    const pinned = conversations.filter((c) => c.pinned);
+    const rest = conversations.filter((c) => !c.pinned);
+
+    const byBucket = new Map<TimeBucket, typeof rest>();
+    for (const conv of rest) {
+      const bucket = timeBucket(conv.createdAt);
+      const list = byBucket.get(bucket);
+      if (list) list.push(conv);
+      else byBucket.set(bucket, [conv]);
+    }
+
+    const out: {heading: string; items: typeof rest}[] = [];
+    if (pinned.length) out.push({heading: 'Pinned', items: pinned});
+    for (const bucket of BUCKET_ORDER) {
+      const items = byBucket.get(bucket);
+      if (items?.length) out.push({heading: bucket, items});
+    }
+    return out;
+  }, [conversations]);
 
   const params = useParams({strict: false}) as {id?: string};
   const activeId = params.id;
@@ -117,62 +142,53 @@ export function ConversationList() {
       </div>
       <div className="conv-list-body">
         {conversations.length === 0 ? (
-          <div className="conv-empty">No conversations yet</div>
+          <p className="conv-empty">
+            No conversations yet. Press <kbd>⌘K</kbd> to start one.
+          </p>
         ) : (
-          conversations.map((conv, idx) => (
-            <div
-              key={conv.id}
-              className={`conv-row${conv.id === activeId ? ' active' : ''}${
-                menu?.id === conv.id ? ' menu-open' : ''
-              }`}
-              style={{['--stagger' as string]: Math.min(idx, 6)} as React.CSSProperties}
-            >
-              {editingId === conv.id ? (
-                <input
-                  className="conv-title-input"
-                  value={editValue}
-                  autoFocus
-                  onChange={(e) => setEditValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitRename(conv.id);
-                    if (e.key === 'Escape') setEditingId(null);
-                  }}
-                  onBlur={() => commitRename(conv.id)}
-                />
-              ) : (
-                <Link to="/c/$id" params={{id: conv.id}} className="conv-link">
-                  {conv.pinned && (
-                    <svg
-                      className="conv-pin-icon"
-                      width="10"
-                      height="10"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M12 17v5" />
-                      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
-                    </svg>
+          sections.map((section) => (
+            <section className="conv-section" key={section.heading}>
+              <h3 className="conv-section-heading">{section.heading}</h3>
+              {section.items.map((conv) => (
+                <div
+                  key={conv.id}
+                  className={`conv-row${conv.id === activeId ? ' active' : ''}${
+                    menu?.id === conv.id ? ' menu-open' : ''
+                  }`}
+                >
+                  {editingId === conv.id ? (
+                    <input
+                      className="conv-title-input"
+                      value={editValue}
+                      autoFocus
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitRename(conv.id);
+                        if (e.key === 'Escape') setEditingId(null);
+                      }}
+                      onBlur={() => commitRename(conv.id)}
+                    />
+                  ) : (
+                    <Link to="/c/$id" params={{id: conv.id}} className="conv-link">
+                      <span className="conv-title">{conv.title ?? 'Untitled'}</span>
+                      <span className="conv-time">{relativeTime(conv.createdAt)}</span>
+                    </Link>
                   )}
-                  <span className="conv-title">{conv.title ?? 'Untitled'}</span>
-                </Link>
-              )}
-              <button
-                className="conv-menu-btn"
-                title="More actions"
-                onClick={(e) => openMenu(e, conv.id)}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                  <circle cx="5" cy="12" r="1.8" />
-                  <circle cx="12" cy="12" r="1.8" />
-                  <circle cx="19" cy="12" r="1.8" />
-                </svg>
-              </button>
-            </div>
+                  <button
+                    className="conv-menu-btn"
+                    title="More actions"
+                    onClick={(e) => openMenu(e, conv.id)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                      <circle cx="5" cy="12" r="1.8" />
+                      <circle cx="12" cy="12" r="1.8" />
+                      <circle cx="19" cy="12" r="1.8" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </section>
           ))
         )}
       </div>
