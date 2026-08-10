@@ -7,7 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     "aiosqlite~=0.22",
     "apscheduler~=3.11",
-    "browser-use~=0.11.13",
     "ddgs~=9.14",
     "discord-py~=2.4",
     "fastapi~=0.136",
