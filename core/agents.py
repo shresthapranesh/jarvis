@@ -111,16 +111,13 @@ def _collect_transient_errors() -> tuple[type[BaseException], ...]:
         classes.append(_GenaiServerError)
     except ImportError:
         pass
-    try:
-        from google.api_core.exceptions import (
-            InternalServerError as _GApiInternal,
-            ServiceUnavailable as _GApiUnavailable,
-            DeadlineExceeded as _GApiDeadline,
-            GatewayTimeout as _GApiGateway,
-        )
-        classes.extend([_GApiInternal, _GApiUnavailable, _GApiDeadline, _GApiGateway])
-    except ImportError:
-        pass
+    # No google.api_core branch: langchain-google-genai 4.x talks to the
+    # google-genai SDK, whose transient failures surface as
+    # google.genai.errors.ServerError (caught above). The old client's
+    # api_core exceptions are unreachable from every provider we build, and
+    # google-api-core is not in the dependency tree at all — it used to arrive
+    # transitively via browser-use, so the import silently succeeded and made
+    # the branch look live.
     try:
         from anthropic import (
             APIConnectionError as _AnthroConn,

@@ -128,7 +128,6 @@ jarvis/
 │   │                     #   injected into every run_cell kernel (core/kernels.py), not bound tools
 │   ├── web.py            # [unbound] web_search (ddgs), fetch_page, extract_links, playwright_browse
 │   ├── finance.py        # [unbound] get_stock_data, get_historical_prices, compare_stocks, …
-│   ├── browser_agent.py  # [unbound] headless browser sub-agent
 │   └── datetime.py       # [unbound] get_current_datetime
 └── frontend/             # React 19 + TanStack Router + Relay + Vite + TypeScript
     ├── relay.config.json # Relay compiler config (schema → ./schema.graphql, artifacts → src/__generated__)
@@ -252,6 +251,8 @@ Conventions:
 
 ### Chat events
 `token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `budget_exceeded`, `done`, `stopped`, `error`
+
+> `browser_step` currently has **no producer** — its only emitter was `tools/browser_agent.py`, which was deleted along with the `browser-use` dependency. The consumer plumbing (`core/streaming.py`, `BrowserStepEvent` in the `ChatEvent` union, the frontend hook) is left in place because removing a union member is a GraphQL schema change requiring a Relay regeneration. Wire a new emitter to it, or remove the plumbing as its own change.
 
 Worker lifecycle events (`worker_*`) stream live from `tools/workers.py` and — except `worker_token` — are also persisted as `Step` rows (`source="subagent"`, `subagent="<role>:<idx>"`, result capped at `WORKER_RESULT_PERSIST_CAP`), so the activity sidebar can rebuild per-worker groups after a reload.
 
@@ -526,7 +527,7 @@ Optional — enabled by setting `DISCORD_BOT_TOKEN` before starting the server. 
 
 ## Environment
 - Python 3.13, managed with `uv`.
-- Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI, Meta), `langgraph-checkpoint-sqlite`, APScheduler, `browser-use`/Playwright, faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
+- Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI, Meta), `langgraph-checkpoint-sqlite`, APScheduler, Playwright (the `read()` fallback in `tools/research.py`), faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
 - Frontend stack: React 19, TanStack Router/Query, **Relay** (`babel-plugin-relay` run as a standalone Vite transform — see `vite.config.ts`), Vite, TypeScript.
 - Tests: `uv run pytest` (pytest + pytest-asyncio, `asyncio_mode = "auto"`). Tests live in `tests/` and run against a throwaway `WORK_DIR` — never `~/.jarvis`. The `jarvis` fixture (`tests/conftest.py`) boots a full `JarvisRunner` in-process without uvicorn, the scheduler, or queue workers, so handlers can be driven directly and synchronously. Tests that call a real model are marked `llm` and skip without `GOOGLE_API_KEY`; run just those with `-m llm`.
 - No linter configured; use `uvx pyrefly check --summarize-errors` for Python type checking and `pnpm typecheck` for the frontend. Frontend formatting via `pnpm fmt` (oxfmt).
