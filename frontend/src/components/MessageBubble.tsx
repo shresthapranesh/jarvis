@@ -1,5 +1,5 @@
 import {marked} from 'marked';
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 
 function SpeakerIcon() {
   return (
@@ -200,6 +200,7 @@ export function StreamingBubble({text, thinkingText, steps, workers, onShowSteps
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
+  const html = useMemo(() => marked.parse(text) as string, [text]);
 
   // Auto-scroll thinking block to bottom as new reasoning tokens arrive.
   useEffect(() => {
@@ -231,7 +232,11 @@ export function StreamingBubble({text, thinkingText, steps, workers, onShowSteps
       {workers && workers.length > 0 && <WorkerPanel workers={workers} />}
       {text ? (
         <div className="agent-bubble streaming">
-          <span key={text.length} className="stream-fade" dangerouslySetInnerHTML={{__html: marked.parse(text) as string}} />
+          {/* No `key` here: keying on text.length remounts this node on every
+              token, which restarts the fade-in over the whole accumulated
+              message and reads as flicker. The fade belongs to the bubble
+              mounting once, not to each token. */}
+          <span dangerouslySetInnerHTML={{__html: html}} />
           <span className="cursor" />
         </div>
       ) : (

@@ -731,7 +731,10 @@ body {
   animation: msg-enter 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
-.stream-fade {
+/* Runs once, when the streaming bubble first appears. Do not put this on a
+   node that gets re-keyed per token — the animation restarts each time and
+   the whole message flickers. */
+.agent-bubble.streaming {
   animation: stream-fade 0.14s ease-out both;
 }
 
