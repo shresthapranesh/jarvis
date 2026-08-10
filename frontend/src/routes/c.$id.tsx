@@ -112,6 +112,10 @@ function ConversationPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const topRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Whether the thread should stay glued to the bottom as content grows. True
+  // only during the settle window right after a conversation opens — see the
+  // scroll-restore effects below.
+  const pinBottomRef = useRef(true);
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelSteps, setPanelSteps] = useState<Step[]>([]);
@@ -188,8 +192,73 @@ function ConversationPage() {
   // a layout effect, so it lands before paint) means the first frame the user
   // sees is the newest message — never a scroll down through the history.
   useLayoutEffect(() => {
+    pinBottomRef.current = true;
     const container = containerRef.current;
     if (container) container.scrollTop = container.scrollHeight;
+  }, [id]);
+
+  // …and hold it there while the page settles. The restore above runs on the
+  // first commit, before markdown, code blocks and images have their final
+  // height, so a restored thread keeps growing underneath it and the newest
+  // message ends up short of the fold.
+  //
+  // The observers watch the children, not #messages itself: the container is a
+  // flex child with its own scrollbar, so growing content changes its
+  // scrollHeight but never its border box — a ResizeObserver on the container
+  // would never fire.
+  //
+  // The window is deliberately short-lived. It ends at the first scroll away
+  // from the bottom, and at SETTLE_MS regardless, so this stays a fix for
+  // late-arriving layout and never becomes follow-the-output-forever: an
+  // already-running conversation opened in a second tab must not start yanking
+  // itself down on every token, and handleSubmit's smooth scroll must not get
+  // cut short by an instant re-pin landing on top of it.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const SETTLE_MS = 1500;
+    const BOTTOM_SLACK = 4; // fractional scrollHeight/clientHeight never sum exactly
+
+    const repin = () => {
+      if (pinBottomRef.current) container.scrollTop = container.scrollHeight;
+    };
+
+    // Every re-pin lands exactly at the bottom, so a scroll that settles
+    // anywhere else came from the reader — or from the older-page prepend
+    // below, which restores an earlier position on purpose. Either way the
+    // scroll position is theirs from then on.
+    const onScroll = () => {
+      if (!pinBottomRef.current) return;
+      const fromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+      if (fromBottom > BOTTOM_SLACK) pinBottomRef.current = false;
+    };
+
+    const resize = new ResizeObserver(repin);
+    for (const child of Array.from(container.children)) resize.observe(child);
+
+    // Children mount as the page hydrates; each new one needs observing too.
+    const mutation = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of Array.from(record.addedNodes)) {
+          if (node instanceof Element) resize.observe(node);
+        }
+      }
+      repin();
+    });
+    mutation.observe(container, {childList: true});
+
+    container.addEventListener('scroll', onScroll, {passive: true});
+    const settled = window.setTimeout(() => {
+      pinBottomRef.current = false;
+    }, SETTLE_MS);
+
+    return () => {
+      resize.disconnect();
+      mutation.disconnect();
+      container.removeEventListener('scroll', onScroll);
+      window.clearTimeout(settled);
+    };
   }, [id]);
 
   // Infinite-scroll-upward: when the top sentinel becomes visible, load the
@@ -208,6 +277,11 @@ function ConversationPage() {
         if (!entry?.isIntersecting || isLoadingPrevious) return;
         const prevHeight = container.scrollHeight;
         const prevTop = container.scrollTop;
+        // Release the bottom pin before the rows land. If the settle window is
+        // still open (short first page — the top sentinel can be in view from
+        // the start), the resize from prepending would otherwise re-pin to the
+        // bottom, and it fires before the fixup below gets its frame.
+        pinBottomRef.current = false;
         loadPrevious(CONVERSATION_PAGE_SIZE, {
           onComplete: () => {
             requestAnimationFrame(() => {
@@ -239,6 +313,9 @@ function ConversationPage() {
       created_at: new Date().toISOString(),
       steps: [],
     });
+    // Submitting takes over the scroll: this animation owns the trip to the
+    // bottom, so an in-flight settle window must not jump ahead of it.
+    pinBottomRef.current = false;
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
       const uploads = attachments.length
