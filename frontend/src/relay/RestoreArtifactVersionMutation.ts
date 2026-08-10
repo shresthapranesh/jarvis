@@ -2,7 +2,7 @@ import {graphql} from 'react-relay';
 import {commitMutation} from 'react-relay';
 import type {RestoreArtifactVersionMutation} from '../__generated__/RestoreArtifactVersionMutation.graphql';
 import {environment} from './environment';
-import {encodeGlobalId, decodeGlobalId} from './globalId';
+import {encodeGlobalId} from './globalId';
 
 const mutation = graphql`
   mutation RestoreArtifactVersionMutation($id: ID!, $version: Int!) {

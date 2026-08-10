@@ -24,7 +24,11 @@ function relayTransform(): Plugin {
         parserOpts: {plugins: ['typescript', 'jsx']},
       });
       if (!result?.code) return null;
-      return {code: result.code, map: result.map ?? undefined};
+      // Serialize rather than hand the object over: babel types the map's
+      // `names`/`sources` as readonly arrays, while rollup's ExistingRawSourceMap
+      // wants mutable ones, so the object form doesn't typecheck. `SourceMapInput`
+      // also accepts a raw sourcemap JSON string, which carries identical data.
+      return {code: result.code, map: result.map ? JSON.stringify(result.map) : undefined};
     },
   };
 }
