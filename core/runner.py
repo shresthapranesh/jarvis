@@ -183,11 +183,15 @@ class JarvisRunner:
 
     def get_context_cache_config(self, model: str) -> ContextCacheConfig:
         """Build ContextCacheConfig for a given model."""
+        from core.context_cache import resolve_cache_ttl
+        from core.model_catalog import provider_from_id
+
         enabled = self.should_use_cache(model)
         return ContextCacheConfig(
             enabled=enabled,
             max_breakpoints=self.runner_config.max_cache_breakpoints,
             min_chars_for_cache=self.runner_config.context_cache_min_chars,
+            cache_ttl=resolve_cache_ttl(provider_from_id(model)),
         )
 
     def get_budget_limits(self, kind: str = "chat"):
