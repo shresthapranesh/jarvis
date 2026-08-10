@@ -21,7 +21,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from .config import get_config
 from .compaction import apply_per_call_compaction, compact_threshold, maybe_compact
-from .context_cache import CacheSegment
+from .context_cache import CacheSegment, resolve_cache_ttl
 from .mcp import get_mcp_tools_sync
 from .messages import (
     build_llm_messages,
@@ -639,12 +639,17 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     # rather than per iteration: the graph is built per model, so this cannot
     # change over the compiled agent's lifetime.
     compaction_threshold = compact_threshold(model)
+    # Same reasoning: provider is fixed for this compiled graph, and the env read
+    # + validation shouldn't repeat on every model iteration.
+    cache_ttl = resolve_cache_ttl(spec.provider)
     logger.info(
         "agent %s: compaction threshold %d tokens (window=%s)",
         model,
         compaction_threshold,
         spec.context_window or "unknown",
     )
+    if cache_ttl != "5m":
+        logger.info("agent %s: cache_control ttl=%s", model, cache_ttl)
 
     # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
 
@@ -736,6 +741,7 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
             messages_for_llm,
             volatile_suffix=volatile_suffix,
             cache_segments=cache_segments if cache_segments else None,
+            cache_ttl=cache_ttl,
         )
         t_build = _phase.lap()
 

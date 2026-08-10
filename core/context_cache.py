@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +36,46 @@ class CacheSegment:
             self.tokens_estimate = len(self.content) // 4
 
 
+# Providers whose API accepts the extended `ttl` field on a cache_control block.
+# Deliberately anthropic-only: Bedrock's Converse API exposes cache points with a
+# different shape, and an unsupported field there would fail *every* call rather
+# than degrade, so it stays on the 5m default until someone verifies it.
+_EXTENDED_TTL_PROVIDERS = frozenset({"anthropic"})
+_VALID_TTLS = frozenset({"5m", "1h"})
+DEFAULT_CACHE_TTL = "5m"
+
+
+def resolve_cache_ttl(provider: str) -> str:
+    """Cache-block TTL for `provider`, from `JARVIS_CACHE_TTL` (`5m` | `1h`).
+
+    Defaults to 5m — the API default, and the value that keeps the emitted
+    cache_control byte-identical to what we sent before this was configurable.
+
+    1h is a cost trade, not a free win: it keeps the prefix warm across a user's
+    pause, but bills cache *writes* at 2x base instead of 1.25x. It only pays off
+    if reads within the hour actually happen, so it's opt-in and worth measuring
+    against your own traffic rather than switching on by default.
+    """
+    raw = (os.environ.get("JARVIS_CACHE_TTL") or DEFAULT_CACHE_TTL).strip()
+    if raw not in _VALID_TTLS:
+        logger.warning(
+            "ignoring JARVIS_CACHE_TTL=%r — expected one of %s",
+            raw,
+            ", ".join(sorted(_VALID_TTLS)),
+        )
+        return DEFAULT_CACHE_TTL
+    if raw != DEFAULT_CACHE_TTL and provider not in _EXTENDED_TTL_PROVIDERS:
+        logger.info(
+            "JARVIS_CACHE_TTL=%s ignored for provider %r — extended TTL is only "
+            "wired for %s",
+            raw,
+            provider,
+            ", ".join(sorted(_EXTENDED_TTL_PROVIDERS)),
+        )
+        return DEFAULT_CACHE_TTL
+    return raw
+
+
 @dataclass
 class ContextCacheConfig:
     """Jarvis-like config for how caching is applied.
@@ -42,11 +83,23 @@ class ContextCacheConfig:
     enabled: whether caching is on (model provider supports it)
     max_breakpoints: max cache_control blocks (Anthropic limit 4)
     min_chars_for_cache: don't cache tiny segments (< this) — waste of breakpoint
+    cache_ttl: "5m" (API default) or "1h" — see resolve_cache_ttl
     """
 
     enabled: bool = True
     max_breakpoints: int = MAX_CACHE_BREAKPOINTS
     min_chars_for_cache: int = 50
+    cache_ttl: str = DEFAULT_CACHE_TTL
+
+    def cache_control(self) -> dict[str, str]:
+        """The cache_control payload for one block.
+
+        `ttl` is omitted at the default so the request body stays exactly what it
+        was before this setting existed — an added field is an added way to break.
+        """
+        if self.cache_ttl == DEFAULT_CACHE_TTL:
+            return {"type": "ephemeral"}
+        return {"type": "ephemeral", "ttl": self.cache_ttl}
 
 
 @dataclass
@@ -115,7 +168,7 @@ def build_cached_system_message(
     # Block 0: static prompt — always cached, first breakpoint
     if static_prompt.strip():
         blocks.append(
-            {"type": "text", "text": static_prompt, "cache_control": {"type": "ephemeral"}}
+            {"type": "text", "text": static_prompt, "cache_control": cfg.cache_control()}
         )
         stats.breakpoints_used = 1
         stats.segments_cached = 1
@@ -145,7 +198,7 @@ def build_cached_system_message(
     # Emit cached segments as individual blocks
     for seg in cached_parts:
         blocks.append(
-            {"type": "text", "text": seg.content, "cache_control": {"type": "ephemeral"}}
+            {"type": "text", "text": seg.content, "cache_control": cfg.cache_control()}
         )
         stats.segments_cached += 1
         stats.breakpoints_used += 1

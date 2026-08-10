@@ -376,9 +376,18 @@ Visual graph executor (`workflow/engine.py`):
 
 ## Context Caching + Runner (ADK Runner / ContextCacheConfig analog)
 - `core/context_cache.py`: `CacheSegment` (name, content, cacheable, token_est),
-  `ContextCacheConfig` (enabled, max_breakpoints=4, min_chars=50),
+  `ContextCacheConfig` (enabled, max_breakpoints=4, min_chars=50, cache_ttl),
   `build_cached_system_message()` builds a `SystemMessage` with up to 4
   `cache_control: ephemeral` blocks. Logs per-call cache stats.
+  - **Cache TTL** is `5m` (the API default) unless `JARVIS_CACHE_TTL=1h`.
+    `resolve_cache_ttl(provider)` gates it to **anthropic only** — Bedrock's
+    Converse API models cache points differently, and an unsupported field there
+    fails *every* call rather than degrading, so it stays on 5m until verified.
+    At `5m` the `ttl` key is **omitted entirely**, keeping the request body
+    byte-identical to before the setting existed. 1h is a cost trade, not a free
+    win: cache *writes* bill at 2x base instead of 1.25x, so it only pays off if
+    reads land within the hour. Resolved once per compiled agent in
+    `_build_agent`, alongside `use_cache`.
   - Layout: [system prompt cached] + [core_memory cached] + [skills cached] +
     [project_instructions cached] + [project_memory + todos volatile uncached].
   - Tiny segments (<50 chars) skip cache to avoid breakpoint waste.

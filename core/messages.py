@@ -300,6 +300,7 @@ def _make_system_message_multi(
     segments: list[Any] | None,
     volatile_text: str,
     cache: bool,
+    cache_ttl: str = "5m",
 ) -> SystemMessage:
     """multi-breakpoint builder — delegates to context_cache module.
 
@@ -319,7 +320,7 @@ def _make_system_message_multi(
             segments=segments,
             volatile_suffix=volatile_text,
             use_cache=cache,
-            config=ContextCacheConfig(enabled=cache),
+            config=ContextCacheConfig(enabled=cache, cache_ttl=cache_ttl),
         )
         return sys_msg
     except Exception:
@@ -346,6 +347,7 @@ def build_llm_messages(
     *,
     volatile_suffix: str = "",
     cache_segments: list[Any] | None = None,
+    cache_ttl: str = "5m",
 ) -> list[AnyMessage]:
     """Build the message list for an LLM call with exactly one SystemMessage.
 
@@ -380,5 +382,9 @@ def build_llm_messages(
     volatile_text = "\n\n".join(volatile_parts)
 
     if cache_segments:
-        return [_make_system_message_multi(system_text, cache_segments, volatile_text, cache)] + rest
+        return [
+            _make_system_message_multi(
+                system_text, cache_segments, volatile_text, cache, cache_ttl
+            )
+        ] + rest
     return [_make_system_message(system_text, volatile_text, cache)] + rest
