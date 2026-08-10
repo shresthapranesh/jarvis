@@ -670,7 +670,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 24px;
-  scroll-behavior: smooth;
+  /* No `scroll-behavior: smooth` here on purpose. It applies to every
+     programmatic scroll that doesn't name a behavior — including the
+     restore-to-bottom on open and the scrollTop fixup after prepending older
+     messages, both of which must be instant. Callers that want the animation
+     pass `behavior: 'smooth'` explicitly (see routes/c.$id.tsx). */
 }
 
 #messages::-webkit-scrollbar {

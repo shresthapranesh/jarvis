@@ -184,8 +184,12 @@ function ConversationPage() {
     }
   }, [streaming, runningMsg, steps, panelOpen]);
 
+  // Open a conversation already at the bottom. Assigning scrollTop directly (in
+  // a layout effect, so it lands before paint) means the first frame the user
+  // sees is the newest message — never a scroll down through the history.
   useLayoutEffect(() => {
-    bottomRef.current?.scrollIntoView();
+    const container = containerRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
   }, [id]);
 
   // Infinite-scroll-upward: when the top sentinel becomes visible, load the
@@ -206,14 +210,8 @@ function ConversationPage() {
         const prevTop = container.scrollTop;
         loadPrevious(CONVERSATION_PAGE_SIZE, {
           onComplete: () => {
-            // `scroll-behavior: smooth` is set on #messages; bypass it explicitly
-            // so the scrollTop adjustment is instant (otherwise the user sees
-            // the page animate after older messages are prepended).
             requestAnimationFrame(() => {
-              container.scrollTo({
-                top: prevTop + (container.scrollHeight - prevHeight),
-                behavior: 'instant' as ScrollBehavior,
-              });
+              container.scrollTop = prevTop + (container.scrollHeight - prevHeight);
             });
           },
         });
