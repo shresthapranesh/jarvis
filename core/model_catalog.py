@@ -9,6 +9,17 @@ class ModelSpec:
     id: str        # e.g. "google_genai:gemini-2.5-pro"
     label: str     # e.g. "Gemini 2.5 Pro"
     provider: str  # e.g. "google_genai"
+    # Total input tokens the model accepts, or None when unknown. Consumed by
+    # core.compaction.compact_threshold() to size the summarization trigger per
+    # model instead of applying one flat number to a catalog whose windows span
+    # two orders of magnitude.
+    #
+    # None is a safe answer, not a gap to fill with a guess: it falls back to the
+    # conservative flat default. The error is asymmetric — a window set too small
+    # only summarizes earlier than needed, while one set too large disables the
+    # trigger until the provider rejects the call outright. Leave it None unless
+    # the number is known.
+    context_window: int | None = None
 
     def build_llm(self):
         """Instantiate the appropriate LangChain chat model for this spec."""
@@ -52,19 +63,28 @@ KNOWN_PROVIDERS: frozenset[str] = frozenset(
 )
 
 
+# `context_window` is left None wherever the effective number isn't known — see
+# the field comment on ModelSpec for why that's the safe value rather than a
+# placeholder. Two cases deliberately stay None:
+#   ollama:*  the model card's window is not what you get. ChatOllama sends no
+#             `num_ctx`, so the server applies its own default (a few thousand
+#             tokens on a stock install) and silently truncates above it. The
+#             honest window here is whatever num_ctx is set to, which this
+#             process can't see — so fall back to the flat default.
+#   models at or past the knowledge cutoff, where a number would be invented.
 BUILTIN_MODELS: tuple[ModelSpec, ...] = (
     ModelSpec("google_genai:gemma-4-31b-it",           "Gemma 4 31B (Google)",      "google_genai"),
     ModelSpec("google_genai:gemma-4-26b-a4b-it",       "Gemma 4 26B (Google)",      "google_genai"),
-    ModelSpec("google_genai:gemini-2.5-pro",           "Gemini 2.5 Pro (Google)",   "google_genai"),
-    ModelSpec("google_genai:gemini-2.0-flash",         "Gemini 2.0 Flash (Google)", "google_genai"),
+    ModelSpec("google_genai:gemini-2.5-pro",           "Gemini 2.5 Pro (Google)",   "google_genai", 1_048_576),
+    ModelSpec("google_genai:gemini-2.0-flash",         "Gemini 2.0 Flash (Google)", "google_genai", 1_048_576),
     ModelSpec("google_genai:gemini-3.1-flash-lite",    "Gemini 3.1 Flash Lite (Google)", "google_genai"),
     ModelSpec("ollama:gemma4:26b",                     "Gemma 4 26B (Ollama)",  "ollama"),
     ModelSpec("ollama:llama3.3",                       "Llama 3.3 (Ollama)",    "ollama"),
     ModelSpec("ollama:qwen3:32b",                      "Qwen3 32B (Ollama)",    "ollama"),
-    ModelSpec("bedrock:us.anthropic.claude-sonnet-4-6",                      "Claude Sonnet 4.6 (AWS Bedrock)",    "bedrock"),
+    ModelSpec("bedrock:us.anthropic.claude-sonnet-4-6",                      "Claude Sonnet 4.6 (AWS Bedrock)",    "bedrock",  200_000),
     ModelSpec("anthropic:claude-opus-4-7",                                   "Claude Opus 4.7 (Anthropic)",        "anthropic"),
     ModelSpec("anthropic:claude-sonnet-4-6",                                 "Claude Sonnet 4.6 (Anthropic)",      "anthropic"),
-    ModelSpec("anthropic:claude-haiku-4-5-20251001",                         "Claude Haiku 4.5 (Anthropic)",       "anthropic"),
+    ModelSpec("anthropic:claude-haiku-4-5-20251001",                         "Claude Haiku 4.5 (Anthropic)",       "anthropic", 200_000),
     ModelSpec("meta:muse-spark-1.1",                                         "Muse Spark 1.1 (Meta)",              "meta"),
 )
 
@@ -92,7 +112,10 @@ def load_custom_models(rows: Iterable[dict]) -> None:
     """Hydrate the cache from raw config rows ({id, label, provider}).
 
     `provider` is inferred from the id prefix when absent; rows missing a
-    usable id are skipped.
+    usable id are skipped. An optional `context_window` is accepted so a
+    runtime-added model can size its own compaction threshold; anything
+    non-numeric or non-positive is dropped back to None (the flat default),
+    since a bad window is worse than no window.
     """
     specs: list[ModelSpec] = []
     for r in rows:
@@ -100,7 +123,13 @@ def load_custom_models(rows: Iterable[dict]) -> None:
         if not mid:
             continue
         provider = r.get("provider") or provider_from_id(mid)
-        specs.append(ModelSpec(mid, r.get("label") or mid, provider))
+        try:
+            window = int(r["context_window"])
+        except (KeyError, TypeError, ValueError):
+            window = 0
+        specs.append(
+            ModelSpec(mid, r.get("label") or mid, provider, window if window > 0 else None)
+        )
     set_custom_models(specs)
 
 
