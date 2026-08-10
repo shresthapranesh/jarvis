@@ -274,7 +274,10 @@ async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> s
         op = it.get("op", "add")
         if op == "delete":
             did = it.get("id")
-            if did not in existing_ids:
+            # `ops` is LLM-generated JSON, so `id` can be any type or absent.
+            # The isinstance check is what the set-membership test was already
+            # relying on implicitly — a non-str could never match a str id.
+            if not isinstance(did, str) or did not in existing_ids:
                 logger.debug("memory_consolidation: skip delete id=%s not in existing", did)
                 continue
             reason = it.get("reason", "unknown")
@@ -285,8 +288,8 @@ async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> s
             continue
         if op == "update":
             did = it.get("id")
-            if did not in existing_ids:
-                # id not found — treat as add
+            if not isinstance(did, str) or did not in existing_ids:
+                # id not found (or not a string) — treat as add
                 text = it.get("text", "")
                 kind = it.get("kind", "fact")
                 if text and await upsert_memory(text, kind):
