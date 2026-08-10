@@ -20,7 +20,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from .config import get_config
-from .compaction import apply_per_call_compaction, maybe_compact
+from .compaction import apply_per_call_compaction, compact_threshold, maybe_compact
 from .context_cache import CacheSegment
 from .mcp import get_mcp_tools_sync
 from .messages import (
@@ -634,6 +634,18 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     llm_with_tools = _with_llm_retry(llm.bind_tools(main_tools))
     llm_for_summary = _with_llm_retry(llm)
 
+    # Sized from this model's context window, not a flat number shared by a
+    # catalog whose windows span two orders of magnitude. Resolved once here
+    # rather than per iteration: the graph is built per model, so this cannot
+    # change over the compiled agent's lifetime.
+    compaction_threshold = compact_threshold(model)
+    logger.info(
+        "agent %s: compaction threshold %d tokens (window=%s)",
+        model,
+        compaction_threshold,
+        spec.context_window or "unknown",
+    )
+
     # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
 
     async def model_request_node(state: AgentState, config: RunnableConfig) -> dict:
@@ -705,7 +717,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         # already built — re-running apply_per_call_compaction here would repeat
         # the elide and grouping passes on every iteration. See core/compaction.py.
         compaction = await maybe_compact(
-            raw_messages, llm=llm, summarizer=llm_for_summary
+            raw_messages,
+            llm=llm,
+            summarizer=llm_for_summary,
+            threshold=compaction_threshold,
         )
         messages_for_llm = compaction.messages
         state_update_msgs = compaction.state_update

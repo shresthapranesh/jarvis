@@ -33,12 +33,38 @@ KEEP_LAST_TOOL_GROUPS_RAW = 4  # per-call: keep last 4 tool_call groups full (al
 TOOL_RESULT_COLLAPSE_MAX_CHARS = 300
 
 
-def compact_threshold() -> int:
+# Fraction of a model's context window that history is allowed to occupy before
+# destructive summarization fires. The rest of the window has to absorb the
+# system prompt, the bound tool schemas, the volatile suffix, and the model's own
+# output — history is the only part that grows without bound, so it gets a
+# minority share.
+COMPACT_WINDOW_FRACTION = 0.4
+# Ceiling on the derived threshold. Past this point the constraint stops being
+# "does it fit" and becomes "what does it cost to resend every iteration" — on a
+# 1M-token window, 40% would bill ~400k input tokens per agent-loop step, which
+# is far more expensive than the one summarization call it avoids.
+COMPACT_THRESHOLD_MAX = 200_000
+# Floor, so a small or misconfigured window can't collapse the threshold to the
+# point where the agent summarizes after every other tool call and never
+# accumulates enough context to be useful.
+COMPACT_THRESHOLD_MIN = 12_000
+# Applied when the model's window is unknown (see ModelSpec.context_window).
+COMPACT_THRESHOLD_DEFAULT = 80_000
+
+
+def compact_threshold(model: str | None = None) -> int:
     """Token count at which destructive summarization triggers.
 
-    Defaults to 80k (original was 100k, briefly 40k). 40k is too aggressive for
-    destructive trimming — per-call compaction handles that regime.
-    Override with JARVIS_COMPACT_TOKEN_THRESHOLD for testing.
+    Derived from the model's context window when the catalog knows it, so a
+    1M-token Gemini isn't summarized at the same point as a 200k Claude. Falls
+    back to a flat 80k when the window is unknown — which is most of the
+    catalog, and deliberately so (per-call compaction already handles the
+    regime below this threshold, so the fallback is conservative rather than
+    wrong).
+
+    `JARVIS_COMPACT_TOKEN_THRESHOLD` overrides everything, including the
+    per-model derivation — it exists for tests and for pinning a value when a
+    catalog window turns out to be wrong in production.
     """
     raw = os.environ.get("JARVIS_COMPACT_TOKEN_THRESHOLD") or os.environ.get(
         "JARVIS_SUMMARIZE_TOKEN_THRESHOLD"
@@ -48,7 +74,24 @@ def compact_threshold() -> int:
             return int(raw)
         except ValueError:
             pass
-    return 80_000
+
+    window = None
+    if model:
+        # Never let an unknown/stale model id break the agent loop: read paths
+        # stay permissive by design (see is_valid_model), so a conversation
+        # pinned to a removed model must still run on the flat default.
+        try:
+            from .model_catalog import get_model_spec
+
+            window = get_model_spec(model).context_window
+        except Exception:
+            window = None
+
+    if not window or window <= 0:
+        return COMPACT_THRESHOLD_DEFAULT
+
+    derived = int(window * COMPACT_WINDOW_FRACTION)
+    return max(COMPACT_THRESHOLD_MIN, min(derived, COMPACT_THRESHOLD_MAX))
 
 
 # ── Grouping ─────────────────────────────────────────────────────────────────
