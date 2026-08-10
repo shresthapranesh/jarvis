@@ -16,3 +16,5 @@ wheels/
 .env
 .vscode
 backups/
+# TypeScript incremental build cache — local only, rewritten by every build
+frontend/*.tsbuildinfo
