@@ -113,6 +113,10 @@ def test_displayed_next_run_lands_on_the_weekday_the_user_wrote():
     from server.automation_runtime import _compute_next_run_at
 
     auto = type("Auto", (), {"schedule": "0 9 * * 1", "enabled": True})()
-    shown = datetime.fromisoformat(_compute_next_run_at(auto))
+    next_run = _compute_next_run_at(auto)
+    # Asserting first turns a None return into a readable failure instead of a
+    # TypeError inside fromisoformat, and narrows the str | None for the checker.
+    assert next_run is not None, "an enabled automation with a valid cron must have a next run"
+    shown = datetime.fromisoformat(next_run)
     assert shown.weekday() == 0  # Python Monday
     assert shown.hour == 9

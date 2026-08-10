@@ -37,6 +37,9 @@ from core.state import (
     log_task_complete,
     log_task_created,
 )
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.runnables import RunnableConfig
+
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_chunk
 from server.automation_runtime import _watch_queue_cancel
 
@@ -178,6 +181,10 @@ async def _run_agent(
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
 
+    # Declared up front as the base type: `list` is invariant, so a list built
+    # from the concrete handler classes below is not assignable to
+    # RunnableConfig's `list[BaseCallbackHandler]` without this.
+    callbacks: list[BaseCallbackHandler]
     try:
         from core.runner import get_runner_or_none
 
@@ -205,17 +212,21 @@ async def _run_agent(
         store=st,
         invocation_context=invocation_context,
     )
+    # Annotated rather than inlined: an inline dict literal infers a
+    # heterogeneous value type that doesn't match the RunnableConfig TypedDict,
+    # which is what made this astream call fail overload resolution.
+    run_config: RunnableConfig = {
+        "configurable": {
+            "thread_id": conv_id,
+            "conversation_id": conv_id,
+            "board_task_id": task.id,
+        },
+        "recursion_limit": 100,
+        "callbacks": callbacks,
+    }
     async for raw_chunk in agent.astream(
         {"messages": [{"role": "user", "content": prompt}]},
-        config={
-            "configurable": {
-                "thread_id": conv_id,
-                "conversation_id": conv_id,
-                "board_task_id": task.id,
-            },
-            "recursion_limit": 100,
-            "callbacks": callbacks,
-        },
+        config=run_config,
         stream_mode=STREAM_MODES,
         subgraphs=True,
     ):
