@@ -52,7 +52,12 @@ export function ArtifactsBrowser() {
 
   const convTitles = useMemo(() => {
     const map = new Map<string, string>();
-    for (const c of convData.conversations) map.set(decodeGlobalId(c.id), c.title);
+    // Conversation.title is nullable. Leaving untitled ones out of the map lets
+    // the lookup below miss and fall through to its own 'Open chat' label,
+    // which is what a null title already rendered as.
+    for (const c of convData.conversations) {
+      if (c.title) map.set(decodeGlobalId(c.id), c.title);
+    }
     return map;
   }, [convData.conversations]);
 
