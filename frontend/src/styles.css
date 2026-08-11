@@ -75,6 +75,10 @@
   --left-w: 264px;
   --left-collapsed-w: 52px;
   --right-w: 312px;
+  /* Height of the layout viewport hidden by the virtual keyboard. Kept at 0 by
+     default and driven by the visualViewport listener in __root.tsx; the shell
+     subtracts it so the composer never sits behind the keyboard. */
+  --kb-inset: 0px;
   --spine-w: 208px;
   --blur: blur(14px);
   --radius-sm: 6px;
@@ -224,7 +228,7 @@ body {
 /* ── Shell ── */
 .app-shell {
   display: flex;
-  height: 100dvh;
+  height: calc(100dvh - var(--kb-inset, 0px));
   overflow: hidden;
   view-transition-name: root;
 }
@@ -1462,7 +1466,7 @@ body {
 
 /* ── Footer / Input ── */
 .page-footer {
-  padding: 10px 20px 14px;
+  padding: 10px 20px calc(14px + env(safe-area-inset-bottom, 0px));
   background: transparent;
   flex-shrink: 0;
 }
@@ -7747,5 +7751,341 @@ audio.artifact-media {
   .page.has-spine #messages,
   .page.has-spine .page-footer {
     padding-right: var(--s5);
+  }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Mobile / touch
+
+   One breakpoint — 860px — set where the 264px nav stops leaving a usable
+   main column. `MOBILE_QUERY` in routes/__root.tsx must stay in sync with it:
+   JS owns the drawer's open/closed state and whether the rail renders
+   expanded; this block owns the geometry. Changing one without the other
+   leaves the drawer open behind a full-width main panel.
+
+   The 768px / 900px / 1100px queries earlier in this file are older, narrower
+   fixes (artifacts split pane, project grid, run spine) and still apply.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The mobile chrome is always in the DOM; on desktop it is inert. */
+.mobile-topbar,
+.nav-scrim {
+  display: none;
+}
+
+@keyframes nav-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 860px) {
+  /* ── Nav rail → off-canvas drawer ────────────────────────────────────── */
+  .left-panel {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 110;
+    /* The resize handle writes an inline `width`, and inline styles beat any
+       stylesheet rule — !important is the only way to take the width back. */
+    width: min(300px, 84vw) !important;
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    transform: translateX(-100%);
+    transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+    /* A fixed, translated element makes a poor view-transition subject, and
+       the drawer already animates itself. */
+    view-transition-name: none;
+    /* Opaque over the scrim: the glass treatment is for a rail sitting beside
+       content, not a drawer sitting on top of it. */
+    background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .left-panel.nav-open {
+    transform: translateX(0);
+  }
+  /* A 5px drag target means nothing on touch. */
+  .nav-resize-handle {
+    display: none;
+  }
+
+  .nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 105;
+    border: none;
+    padding: 0;
+    background: rgba(var(--shadow-rgb), 0.55);
+    animation: nav-scrim-in 0.2s ease;
+  }
+
+  /* ── Top bar — carries the drawer toggle the rail used to ────────────── */
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    flex-shrink: 0;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 6px);
+    padding-bottom: 6px;
+    padding-left: calc(var(--s2) + env(safe-area-inset-left, 0px));
+    padding-right: calc(var(--s2) + env(safe-area-inset-right, 0px));
+    border-bottom: 1px solid var(--border);
+    /* In normal flow, so nothing ever scrolls under it — a backdrop-filter
+       here would cost a frame's work to blur the flat page background. */
+    background: var(--glass-bg);
+  }
+  .mobile-topbar .brand-mark {
+    color: var(--accent);
+  }
+  .mobile-topbar-brand {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    flex: 1;
+    min-width: 0;
+  }
+  .mobile-topbar-brand .brand {
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  /* The topbar is a new flex child of .main-panel, so route roots can no
+     longer resolve `height: 100%` against it — they must flex instead. */
+  .main-panel > :not(.mobile-topbar) {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+  }
+
+  /* ── Fixed side panels → full-screen sheets ──────────────────────────── */
+  .steps-panel,
+  .artifact-panel,
+  .auto-panel,
+  .runs-panel,
+  .wf-history-sidebar {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    border-left: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* These ship translucent (--glass-bg + backdrop blur), which reads fine
+       for a narrow panel floating over a wide page. At full width there is no
+       "over" left — the thread behind shows straight through the text. Opaque
+       instead, which also drops a full-screen backdrop-filter that mid-range
+       phones pay for on every frame. */
+    background: var(--bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  /* Only .wf-modal has a min-width; .confirm-modal / .form-modal already
+     size as `calc(100% - 32px)` and need no help. */
+  .wf-modal {
+    min-width: 0;
+    width: calc(100% - 32px);
+  }
+  /* 100vh ignores the mobile URL bar, so the footer can sit off-screen. */
+  .form-modal {
+    max-height: calc(100dvh - 64px);
+  }
+
+  /* ── Form controls ───────────────────────────────────────────────────── */
+  /* iOS zooms the page when focusing any control under 16px, and never zooms
+     back out. The :not() chain is only there to out-specify the per-control
+     class rules — no design intent survives an unrecoverable zoom. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select,
+  .input-textarea,
+  .model-input {
+    font-size: 16px;
+  }
+
+  /* ── Composer footer ─────────────────────────────────────────────────── */
+  /* Everything in this row must be able to shrink, or the send button — the
+     one control the composer exists for — gets pushed past the right edge.
+     .model-input ships flex-shrink: 0 and a 220px max, which at the 16px
+     control size is wider than the screen has to spare. */
+  .model-input {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  .input-hint {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Touch targets ───────────────────────────────────────────────────── */
+  .icon-ghost-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .send-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .nav-link {
+    padding: 11px 10px;
+  }
+
+  /* ── Page gutters — 40px of a 390px screen is a tenth of the content ─── */
+  .memory-page,
+  .tasks-page,
+  .artifacts-loading {
+    padding-left: var(--s4);
+    padding-right: var(--s4);
+    padding-top: var(--s5);
+  }
+  .board-page {
+    padding: var(--s4) var(--s4) var(--s2);
+  }
+  .logs-page {
+    padding-left: var(--s3);
+    padding-right: var(--s3);
+  }
+
+  /* Shared page header — memory, settings, projects and skills all use it.
+     Its actions cluster is flex-shrink: 0, which on a phone strands the
+     title/subtitle block in a ~130px column. Let the actions take their own
+     row instead of squeezing the prose. */
+  .memory-header {
+    flex-wrap: wrap;
+    gap: var(--s3);
+  }
+  .memory-header > div:first-child {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  #messages {
+    padding: 20px 14px;
+  }
+  .page-footer {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Touch input — keyed to the pointer, not the viewport
+
+   `hover: none` is the correct question here and 860px is not: a touch laptop
+   at 1400px cannot hover either, and a desktop user with a narrow window still
+   can. Reveal-on-hover is the one pattern that fails outright on touch — the
+   affordance never appears, so the action behind it does not exist.
+
+   These rules only ever *reveal*. Nothing here hides anything, so a pointer
+   device is unaffected no matter how the queries resolve.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (hover: none) {
+  /* Unreachable without these — both rest at opacity: 0. The conversation
+     menu (rename/delete) was reachable only on the active row; the memory /
+     skill card actions (edit/delete) were reachable not at all. */
+  .conv-menu-btn,
+  .memory-item-actions {
+    opacity: 1;
+  }
+
+  /* These two rest dimmed rather than hidden, so they were usable already —
+     but "recessive until hover" resolves to permanently recessive on touch. */
+  .turn-actions,
+  .auto-card-actions {
+    opacity: 1;
+  }
+
+  /* .conv-time is deliberately NOT revealed. It is information rather than an
+     action, it costs ~5rem of a 300px drawer row, and the same timestamp is
+     already on the home page's recent list. */
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Narrow viewports — dense data
+
+   A second breakpoint, and a deliberate one. 860px is where the *shell* stops
+   working (the 264px rail crowds out the main column). Tables are a different
+   question: four columns still read fine at 800px, so stacking them there
+   would be a downgrade. 600px is where the column count actually stops
+   fitting. Keep the two breakpoints keyed to their own reason — don't collapse
+   them into one number.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  /* ── Log rows ────────────────────────────────────────────────────────── */
+  /* The grid is `156px 64px 200px 1fr` — 420px of fixed track before the
+     message column gets anything, so it overflows any phone. Fixed tracks do
+     not shrink; only re-flowing helps. Meta on one line, message below it. */
+  .logs-row {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    row-gap: 2px;
+    padding: 6px 12px;
+  }
+  .logs-cell--msg {
+    grid-column: 1 / -1;
+  }
+  .logs-cell--logger {
+    text-overflow: ellipsis;
+  }
+
+  /* ── Artifacts table → stacked cards ─────────────────────────────────── */
+  /* Title claims its own line; conversation / kind / updated wrap beneath it
+     as a meta row. The header row carries no content once the columns stop
+     being columns, so it goes. */
+  .artifacts-table thead {
+    display: none;
+  }
+  .artifacts-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 12px 16px;
+  }
+  .artifacts-table td {
+    display: block;
+    padding: 0;
+  }
+  /* The title cell is also .artifacts-cell-title, whose `display: flex` aligns
+     the file icon against the text — but `.artifacts-table td` outranks that
+     single class, so the flex has to be restated here or the icon detaches. */
+  .artifacts-table td:first-child {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 100%;
+    padding-left: 0;
+  }
+
+  /* ── Board columns ───────────────────────────────────────────────────── */
+  /* Already scrolls horizontally; snapping just stops it resting mid-column.
+     Flex-basis over min-width so a column fills the screen with a peek of the
+     next — the peek is what says "there is more to the right". */
+  .board-columns {
+    scroll-snap-type: x mandatory;
+  }
+  .board-col {
+    flex: 0 0 82%;
+    scroll-snap-align: start;
+  }
+
+  /* ── Full-viewport blurs ─────────────────────────────────────────────── */
+  /* These two blur the entire viewport every frame they are up, which is the
+     one backdrop-filter cost worth caring about on a mid-range phone. The
+     scrim already carries the separation; darken it slightly to compensate. */
+  .auto-panel-backdrop,
+  .confirm-backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(var(--shadow-rgb), 0.72);
   }
 }

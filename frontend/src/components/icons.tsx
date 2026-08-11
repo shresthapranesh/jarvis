@@ -236,6 +236,16 @@ export const ListIcon = (p: IconProps) => (
   </Icon>
 );
 
+/* Three equal bars — distinct from ListIcon, whose short last line reads as a
+   list rather than a menu affordance. */
+export const MenuIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 6h16" />
+    <path d="M4 12h16" />
+    <path d="M4 18h16" />
+  </Icon>
+);
+
 export const GearIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="3" />

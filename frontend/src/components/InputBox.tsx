@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {useQueryClient} from '@tanstack/react-query';
 
+import {useIsMobile} from '../hooks/useIsMobile';
 import {useModels} from '../hooks/useModels';
 import {useWhisperSTT} from '../hooks/useWhisperSTT';
 import type {MediaAttachment, PersistedDocument} from '../lib/types';
@@ -46,6 +47,7 @@ export function InputBox({
   onToggleIncognito,
 }: Props) {
   const {data: catalog} = useModels();
+  const isMobile = useIsMobile();
   const [model, setModel] = useState('');
   const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -370,7 +372,12 @@ export function InputBox({
             ))}
           </select>
 
-          <span className="input-hint">{interimText || 'Enter · Shift+Enter for newline'}</span>
+          {/* On touch there is no Enter/Shift+Enter to describe, and at the 16px
+              control size the hint pushes the send button off screen. Live
+              speech interim text still shows — that one is not keyboard advice. */}
+          <span className="input-hint">
+            {interimText || (isMobile ? '' : 'Enter · Shift+Enter for newline')}
+          </span>
 
           {onStop && disabled ? (
             <button className="send-btn stop-btn" onClick={onStop} title="Stop">
