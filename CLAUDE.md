@@ -284,6 +284,10 @@ Tool schemas are re-sent on **every** LLM call, and `should_use_cache()` only re
 
 Scope (`conversation_id`, `project_id`) is injected per kernel by `core/kernels.py:KernelSession.run()`, fed from `ToolContext` by `tools/code.py`, and re-injected after a kernel restart (`_sdk_scope`). Note it uses `conversation_id`, **not** the kernel key — workers override the key but must still resolve the parent conversation.
 
+**Cross-conversation recall** lives in the `conversations` category: `search_conversations` (BM25 over `messages_fts` + a substring match on titles), `read_conversation` (defaults to the current chat, so it also recovers turns lost to compaction), and `list_conversations`. All three go through `_conversation_scope()`, which drops `ephemeral` (incognito) conversations unconditionally and — when the kernel has a `project_id` — restricts to that project. That project default is the point of the feature: project memory is a summary, and this is how the agent gets back to the transcript behind it (the `_project_volatile_parts` header in `core/agents.py` tells it to). Search additionally excludes the current conversation, which is already in context.
+
+`list_conversations` **raises outside a project**, and takes no `surface`. A project is a bounded set of same-topic conversations, so enumerating it answers something; without one the "list" is just the user's entire chat history, which is a search with no question attached. No surface arg because only `surface="web"` conversations can join a project (`db/ops.py:set_conversation_project`). Scope reaches the SDK as the module global `_project_id`, injected per kernel by `core/kernels.py` from `ToolContext` — the agent cannot pick a project, and outside chat (automations, board, bots, CLI) nothing sets one.
+
 **Adding to the SDK:** define the function in `tools/sdk.py`, then register it in `_CATEGORIES` — `help()` renders signatures from `inspect.signature` + the docstring, so the docstring is the only documentation and costs zero tokens until discovered. If it needs a server-side side effect, add/route through a GraphQL mutation rather than writing the DB directly.
 
 ## Safety Posture
@@ -448,7 +452,9 @@ GraphQL `agentMemory` query + `updateMemory` (blob) / `updateMemoryItem` (discre
 ### Hybrid retrieval (`core/retrieval.py`)
 `search_memory` and `doc_index.search_chunks` run **two arms and fuse them by rank**:
 - **Dense** — cosine over stored embeddings (as before).
-- **Sparse** — BM25 via SQLite **FTS5**. `memories_fts` / `document_chunks_fts` are external-content virtual tables created in `db/engine.py:_ensure_fts()` (called from `_migrate`), kept in sync by AFTER INSERT/DELETE/UPDATE-OF-text triggers on the source tables — no application bookkeeping. Missing FTS5 support degrades to dense-only with a warning; a fresh index backfills via `INSERT INTO x_fts(x_fts) VALUES('rebuild')`.
+- **Sparse** — BM25 via SQLite **FTS5**. `memories_fts` / `document_chunks_fts` / `messages_fts` are external-content virtual tables created in `db/engine.py:_ensure_fts()` (called from `_migrate`), kept in sync by AFTER INSERT/DELETE/UPDATE-OF-text triggers on the source tables — no application bookkeeping. Missing FTS5 support degrades to dense-only with a warning; a fresh index backfills via `INSERT INTO x_fts(x_fts) VALUES('rebuild')`, so adding one to `_FTS_TABLES` indexes existing rows on the next boot.
+
+`messages_fts` is the odd one out: messages carry no embeddings, so it is not a hybrid arm but the **entire** implementation of `jarvis.search_conversations` — lexical only, no dense fallback, hence the LIKE-scan path in the SDK for SQLite builds without FTS5.
 
 **Never pass user text to `MATCH`** — FTS5 parses it as a query language and raises on bare `"`, `*`, `:`, `-`, or the bare keywords AND/OR/NOT/NEAR. Always go through `fts_match_expr()`, which tokenizes to word chars, drops stopwords, quotes each term, and ORs them. `bm25()` returns a *negative* score where lower is better — `ORDER BY bm25(t)` ascending; callers use rank order only, never the magnitude.
 

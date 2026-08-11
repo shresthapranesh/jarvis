@@ -303,6 +303,215 @@ def read_document(document_id: str, offset: int = 0) -> dict:
     }
 
 
+# ── Conversations ─────────────────────────────────────────────────────────────
+
+# How many matching messages to pull per requested conversation. Search ranks
+# messages but returns conversations, so the top `limit` rows would collapse to
+# far fewer than `limit` results whenever one chat dominates the ranking.
+_CONV_SEARCH_FANOUT = 20
+_SNIPPET_TOKENS = 14
+_MESSAGE_TRUNCATE = 2000
+
+
+def _has_fts(conn: sqlite3.Connection, name: str) -> bool:
+    """Whether an FTS mirror exists — a SQLite build without FTS5 has none."""
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", (name,)
+    ).fetchone() is not None
+
+
+def _conversation_scope(project_only: bool, surface: str | None) -> tuple[str, list]:
+    """WHERE fragment (over `conversations c`) + params shared by the reads below.
+
+    Ephemeral (incognito) conversations are never returned: the point of that
+    flag is that nothing about the run outlives it.
+    """
+    clauses = ["COALESCE(c.ephemeral, 0) = 0"]
+    params: list = []
+    if surface:
+        clauses.append("c.surface = ?")
+        params.append(surface)
+    if project_only and _project_id:
+        clauses.append("c.project_id = ?")
+        params.append(_project_id)
+    return " AND ".join(clauses), params
+
+
+def list_conversations(limit: int = 20) -> list[dict]:
+    """The other conversations in this project, most recently active first.
+
+    Only meaningful inside a project, where the set is bounded and every
+    member is about the same thing — it answers "what else has been worked on
+    here". Outside a project there is no such set, only the user's entire
+    history, so this raises; use search_conversations, which needs a question.
+
+    Incognito conversations are never listed. Project members are always web
+    conversations, so there is no surface to choose.
+    """
+    if not _project_id:
+        raise RuntimeError(
+            "list_conversations only works inside a project. "
+            "Use search_conversations(query) to find a past chat by what it says."
+        )
+    where, params = _conversation_scope(True, "web")
+    last_message = "(SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = c.id)"
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT c.id AS conversation_id, c.title, c.surface, c.project_id, c.created_at,"
+            " (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS messages,"
+            f" {last_message} AS last_message_at"
+            f" FROM conversations c WHERE {where}"
+            f" ORDER BY COALESCE({last_message}, c.created_at) DESC LIMIT ?",
+            [*params, max(1, limit)],
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def search_conversations(
+    query: str, project_only: bool = True, surface: str | None = "web", limit: int = 8
+) -> list[dict]:
+    """Past conversations that mention `query`, best match first.
+
+    Keyword search (BM25) over message text plus a substring match on titles —
+    there is no embedding here, so unlike search_memory it rewards the exact
+    tokens you expect on the page (names, ids, filenames, error strings) rather
+    than a paraphrase of the idea. In a project this searches that project's
+    other chats; pass project_only=False to search every conversation instead.
+
+    The current conversation is excluded — you are already in it. Each hit
+    carries a `snippet` and a `conversation_id` to pass to read_conversation.
+    """
+    from core.retrieval import fts_match_expr
+
+    where, params = _conversation_scope(project_only, surface)
+    if _conversation_id:
+        where += " AND c.id != ?"
+        params.append(_conversation_id)
+    cols = "c.id AS conversation_id, c.title, c.surface, c.project_id"
+    expr = fts_match_expr(query)
+    hits: dict[str, dict] = {}
+
+    with _connect() as conn:
+        if expr and _has_fts(conn, "messages_fts"):
+            rows = conn.execute(
+                f"SELECT {cols}, m.created_at,"
+                " snippet(messages_fts, 0, '', '', '…', ?) AS snippet"
+                " FROM messages_fts"
+                " JOIN messages m ON m.rowid = messages_fts.rowid"
+                " JOIN conversations c ON c.id = m.conversation_id"
+                f" WHERE messages_fts MATCH ? AND {where}"
+                " ORDER BY bm25(messages_fts) LIMIT ?",
+                [_SNIPPET_TOKENS, expr, *params, max(1, limit) * _CONV_SEARCH_FANOUT],
+            ).fetchall()
+        else:
+            # No FTS5 in this SQLite build, or nothing indexable survived the
+            # query (all stopwords) — substring scan so search still answers,
+            # just unranked. Newest first is the only ordering available.
+            needle = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            rows = conn.execute(
+                f"SELECT {cols}, m.created_at, m.content AS snippet"
+                " FROM messages m JOIN conversations c ON c.id = m.conversation_id"
+                f" WHERE m.content LIKE ? ESCAPE '\\' AND {where}"
+                " ORDER BY m.created_at DESC LIMIT ?",
+                [f"%{needle}%", *params, max(1, limit) * _CONV_SEARCH_FANOUT],
+            ).fetchall()
+
+        for row in rows:
+            hit = hits.get(row["conversation_id"])
+            if hit is None:
+                hit = dict(row)
+                hit.pop("created_at", None)
+                hit["last_match_at"] = row["created_at"]
+                hit["matches"] = 0
+                hit["matched"] = "message"
+                hit["snippet"] = _excerpt(row["snippet"], query)
+                hits[row["conversation_id"]] = hit
+            hit["matches"] += 1
+            if row["created_at"] and row["created_at"] > (hit["last_match_at"] or ""):
+                hit["last_match_at"] = row["created_at"]
+
+        # A title can be the only trace of a topic (a chat *about* the Q3 budget
+        # may never spell it out), so titles are matched independently.
+        title_needle = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        for row in conn.execute(
+            f"SELECT {cols}, c.created_at FROM conversations c"
+            f" WHERE {where} AND c.title LIKE ? ESCAPE '\\'"
+            " ORDER BY c.created_at DESC LIMIT ?",
+            [*params, f"%{title_needle}%", max(1, limit)],
+        ):
+            if row["conversation_id"] in hits:
+                continue
+            hit = dict(row)
+            hit["last_match_at"] = hit.pop("created_at", None)
+            hit["matches"] = 0
+            hit["matched"] = "title"
+            hit["snippet"] = ""
+            hits[row["conversation_id"]] = hit
+
+    return list(hits.values())[: max(1, limit)]
+
+
+def _excerpt(text: str, query: str) -> str:
+    """A short window of `text`, centered on the query when it appears verbatim.
+
+    FTS5 `snippet()` already returns a window; this only has to do real work on
+    the LIKE fallback path, where the whole message body comes back.
+    """
+    text = (text or "").strip()
+    if len(text) <= 240:
+        return text
+    at = text.lower().find(query.strip().lower())
+    if at < 0:
+        return text[:240] + "…"
+    start = max(0, at - 100)
+    return ("…" if start else "") + text[start:start + 240].strip() + "…"
+
+
+def read_conversation(
+    conversation_id: str | None = None, limit: int = 40, max_chars: int = _MESSAGE_TRUNCATE
+) -> dict:
+    """The last `limit` messages of a conversation, oldest first.
+
+    Defaults to the current conversation, which is how you re-read turns that
+    have dropped out of context after compaction. Message bodies over
+    `max_chars` are truncated; tool steps are not included, only what the user
+    and the assistant said.
+    """
+    target = conversation_id or _conversation_id
+    if not target:
+        raise RuntimeError("No conversation scope — pass a conversation_id.")
+    with _connect() as conn:
+        conv = conn.execute(
+            "SELECT id, title, surface, project_id, created_at FROM conversations WHERE id = ?",
+            (target,),
+        ).fetchone()
+        if conv is None:
+            raise LookupError(f"Conversation not found: {target}")
+        total = conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id = ?", (target,)
+        ).fetchone()[0]
+        rows = conn.execute(
+            "SELECT role, content, status, created_at FROM messages"
+            " WHERE conversation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (target, max(1, limit)),
+        ).fetchall()
+    messages = []
+    for row in reversed(rows):
+        content = row["content"] or ""
+        truncated = len(content) > max_chars
+        messages.append({
+            "role": row["role"],
+            "content": content[:max_chars] + ("… [truncated]" if truncated else ""),
+            "status": row["status"],
+            "created_at": row["created_at"],
+        })
+    out = dict(conv)
+    out["conversation_id"] = out.pop("id")
+    out["total_messages"] = total
+    out["messages"] = messages
+    return out
+
+
 # ── Task board ────────────────────────────────────────────────────────────────
 
 def list_tasks(status: str | None = None) -> list[dict]:
@@ -723,6 +932,10 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
         "search/read large attached documents that were indexed",
         [search_documents, read_document],
     ),
+    "conversations": (
+        "search and re-read past chats (in a project, its other conversations)",
+        [search_conversations, read_conversation, list_conversations],
+    ),
     "automations": (
         "scheduled or on-demand tasks (cron, code, webhook, monitor)",
         [list_automations, create_automation, update_automation, delete_automation],
@@ -756,7 +969,7 @@ def help(category: str | None = None) -> str:  # noqa: A001 — deliberate `jarv
 
     if category is None:
         lines = ["jarvis SDK — call jarvis.help('<category>') for full signatures.", ""]
-        lines += [f"  {name:<12} {blurb}" for name, (blurb, _) in _CATEGORIES.items()]
+        lines += [f"  {name:<14}{blurb}" for name, (blurb, _) in _CATEGORIES.items()]
         return "\n".join(lines)
 
     key = category.strip().lower()

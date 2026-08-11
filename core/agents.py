@@ -384,7 +384,12 @@ async def _project_volatile_parts(project_id: str | None) -> list[CacheSegment]:
         "- If project memory is empty and this conversation established project-specific stack/decisions/files, initialize it.\n"
         "- Before finishing a task, ask: did we learn something project-specific that future chats in THIS project need? If yes, update.\n"
         "- If existing memory is outdated/conflicting, use `jarvis.project_memory(action=\"write\", content=...)` to replace with condensed version.\n"
-        "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — only init if you have project-specific facts)."
+        "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — only init if you have project-specific facts).\n\n"
+        "**Earlier conversations in this project are searchable.** Project memory is a summary, not a "
+        "transcript — when the user refers to something decided or discussed before, or you need the detail "
+        "behind a memory entry, run `jarvis.search_conversations(\"<the exact terms you expect>\")` in run_cell "
+        "and follow a hit with `jarvis.read_conversation(conversation_id)`. It is keyword search, so use the "
+        "concrete names/ids/filenames, not a paraphrase. Search before saying you have no record of something."
     )
     parts = [CacheSegment(name="project_header", content=header)]
     if proj.instructions.strip():
