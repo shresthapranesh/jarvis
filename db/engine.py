@@ -21,13 +21,17 @@ _POOL_SIZE = int(os.environ.get("JARVIS_DB_POOL_SIZE", "2"))
 _MAX_OVERFLOW = int(os.environ.get("JARVIS_DB_MAX_OVERFLOW", "13"))
 
 
-# Lexical (BM25) side of hybrid retrieval — see core/retrieval.py. Each entry is
-# (fts table, source table, indexed column). External-content tables store no
-# copy of the text; they read it back through `content=` at query time, so the
-# only cost is the inverted index.
+# Lexical (BM25) search indexes — the sparse arm of hybrid retrieval for the
+# embedded tables (see core/retrieval.py), and the only arm for messages. Each
+# entry is (fts table, source table, indexed column). External-content tables
+# store no copy of the text; they read it back through `content=` at query
+# time, so the only cost is the inverted index.
 _FTS_TABLES = (
     ("memories_fts", "memories", "text"),
     ("document_chunks_fts", "document_chunks", "text"),
+    # Messages have no embeddings, so this one is not a hybrid arm — it is the
+    # whole of `jarvis.search_conversations` (tools/sdk.py).
+    ("messages_fts", "messages", "content"),
 )
 
 
