@@ -44,6 +44,7 @@ from core.scheduler import (
     register_kernel_reaper_job,
     register_memory_activity_prune_job,
     register_memory_consolidation_job,
+    register_project_memory_job,
     register_staging_cleanup_job,
     set_scheduler_timezone,
 )
@@ -180,6 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _chat_worker_task = asyncio.create_task(_build_chat_worker(state._queue).run())
         _board_worker_task = asyncio.create_task(_build_board_worker(state._queue).run())
         register_memory_consolidation_job()
+        register_project_memory_job()
         register_staging_cleanup_job()
         register_kernel_reaper_job()
         register_board_dispatch_job()

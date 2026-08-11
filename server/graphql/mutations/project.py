@@ -84,6 +84,33 @@ class ProjectMutation:
         return Project.from_db(proj)
 
     @strawberry.mutation
+    async def consolidate_project_memory(
+        self,
+        info: strawberry.Info,
+        id: relay.GlobalID,
+        model: str | None = None,
+    ) -> str:
+        """Run the memory consolidation pass for this project now.
+
+        Skips the quiet-period wait the scheduled sweep observes, so a user who
+        just finished a session doesn't have to wait for the next tick.
+        """
+        from core.model_catalog import is_valid_model
+        from core.project_memory_consolidation import consolidate_project_memory
+        from core.state import get_store
+        from db.ops import resolve_model
+
+        session = info.context["session"]
+        if await get_project(session, id.node_id) is None:
+            raise ValueError("project not found")
+        model_id = await resolve_model(model)
+        if not is_valid_model(model_id):
+            raise ValueError(f"unknown model {model_id!r}; query `models` for the catalog")
+        return await consolidate_project_memory(
+            get_store(), id.node_id, model_id=model_id, force=True
+        )
+
+    @strawberry.mutation
     async def delete_project(
         self,
         info: strawberry.Info,

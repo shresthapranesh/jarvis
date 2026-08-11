@@ -267,6 +267,45 @@ def register_memory_consolidation_job(cron_expr: str = "0 */6 * * *") -> None:
     logger.info("memory consolidation scheduled: %s", cron_expr)
 
 
+def _run_project_memory_consolidation() -> None:
+    """Called from BackgroundScheduler thread — submits the project sweep onto the main loop."""
+    from core.project_memory_consolidation import consolidate_project_memories  # noqa: PLC0415
+
+    if state._main_loop is None:
+        return
+    store = state._store
+    if store is None:
+        return
+    future = asyncio.run_coroutine_threadsafe(
+        consolidate_project_memories(store),
+        state._main_loop,
+    )
+    try:
+        result = future.result(timeout=300)
+        logger.info("project memory consolidation: %s", result)
+    except Exception:
+        logger.exception("project memory consolidation failed")
+
+
+def register_project_memory_job(interval_minutes: int = 30) -> None:
+    """Register the project-memory sweep. Interval, not cron: it is a debounce.
+
+    The tick only decides *whether* a project has gone quiet — the real gating
+    lives in `consolidate_project_memory`, so a short interval costs a couple of
+    cheap COUNT queries per project, not LLM calls.
+    """
+    from apscheduler.triggers.interval import IntervalTrigger  # noqa: PLC0415
+
+    _scheduler.add_job(
+        func=_run_project_memory_consolidation,
+        trigger=IntervalTrigger(minutes=interval_minutes),
+        id="project_memory_consolidation",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("project memory consolidation scheduled: every %s min", interval_minutes)
+
+
 def _cleanup_staged_uploads(max_age_seconds: int = 3600) -> None:
     """Delete staged upload files (and their .meta.json sidecars) older than
     `max_age_seconds`. Files that were claimed by a successful startTask are
