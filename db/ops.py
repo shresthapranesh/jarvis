@@ -373,6 +373,80 @@ async def append_project_memory(session: AsyncSession, project_id: str, text: st
     return proj
 
 
+async def get_project_activity_since(
+    session: AsyncSession, project_id: str, since: datetime | None
+) -> tuple[int, datetime | None, datetime | None, int]:
+    """(count, oldest_created_at, newest_created_at, total_chars) of new messages.
+
+    Cheap enough to run for every project on every consolidation tick — the job
+    uses `newest` to decide whether the project has gone quiet, `oldest` to
+    decide how long material has been waiting, and the char total to decide
+    whether an LLM call is worth spending, all before fetching any content.
+    Incognito conversations are excluded here for the same reason
+    `get_recent_messages` excludes them: they must never reach memory.
+    """
+    q = (
+        select(
+            func.count(Message.id),
+            func.min(Message.created_at),
+            func.max(Message.created_at),
+            func.coalesce(func.sum(func.length(Message.content)), 0),
+        )
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(Conversation.project_id == project_id)
+        .where(Message.role.in_(["user", "assistant"]))
+        .where(Conversation.ephemeral == False)  # noqa: E712
+    )
+    if since is not None:
+        q = q.where(Message.created_at > since)
+    count, oldest, newest, chars = (await session.execute(q)).one()
+    return int(count or 0), oldest, newest, int(chars or 0)
+
+
+async def get_project_messages_since(
+    session: AsyncSession,
+    project_id: str,
+    since: datetime | None,
+    limit: int = 400,
+) -> list[dict]:
+    """A project's user/assistant messages after `since`, **oldest first**.
+
+    Oldest-first is load-bearing: the consolidation job walks these under a char
+    budget and advances its watermark only as far as it actually consumed, so a
+    backlog is picked up by the next run instead of being silently skipped (the
+    bug `get_recent_messages` still has — it takes the newest N and advances the
+    watermark past everything).
+    """
+    q = (
+        select(
+            Message.role,
+            Message.content,
+            Message.created_at,
+            Conversation.title,
+            Conversation.id.label("conversation_id"),
+        )
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(Conversation.project_id == project_id)
+        .where(Message.role.in_(["user", "assistant"]))
+        .where(Conversation.ephemeral == False)  # noqa: E712
+        .order_by(Message.created_at.asc())
+        .limit(limit)
+    )
+    if since is not None:
+        q = q.where(Message.created_at > since)
+    rows = (await session.execute(q)).all()
+    return [
+        {
+            "role": r.role,
+            "content": r.content,
+            "created_at": r.created_at,
+            "title": r.title or "Untitled",
+            "conversation_id": r.conversation_id,
+        }
+        for r in rows
+    ]
+
+
 async def delete_project(session: AsyncSession, project_id: str) -> bool:
     """Delete a project, keeping its conversations (their project_id is nulled).
 

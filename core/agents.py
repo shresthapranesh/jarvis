@@ -371,20 +371,16 @@ async def _project_volatile_parts(project_id: str | None) -> list[CacheSegment]:
     if proj.description and proj.description.strip():
         header += f"{proj.description.strip()}\n\n"
     header += (
-        f"This conversation is part of project '{proj.name}'. All conversations in this project share the "
-        "instructions and memory below.\n\n"
-        "**CRITICAL — You MUST actively maintain project memory (but ONLY project-specific facts):**\n"
-        "- When you learn a durable fact about THIS project that future conversations will need, save it with "
-        '`jarvis.project_memory(action="append", content="...")` in run_cell. Don\'t wait to be asked.\n'
-        "- What to save: tech stack & versions for THIS project, architecture decisions for THIS project, "
-        "coding conventions specific to THIS project, important file paths/modules, API contracts, goals/status for THIS project.\n"
-        "- What NOT to save: general user info (name, role, background), general communication prefs "
-        '("likes concise answers"), global coding prefs that apply to ALL projects — those belong to the `remember` tool, not project memory. '
-        "If a preference is not explicitly tied to THIS project, use `remember` instead.\n"
-        "- If project memory is empty and this conversation established project-specific stack/decisions/files, initialize it.\n"
-        "- Before finishing a task, ask: did we learn something project-specific that future chats in THIS project need? If yes, update.\n"
-        "- If existing memory is outdated/conflicting, use `jarvis.project_memory(action=\"write\", content=...)` to replace with condensed version.\n"
-        "- Current memory appears below under '### Project Memory' (if empty, placeholder shows — only init if you have project-specific facts).\n\n"
+        f"This conversation is part of project '{proj.name}'; all its conversations share the instructions "
+        "and memory below.\n\n"
+        "**Project memory is a short shared summary, not a log.** Append only a fact that would make a "
+        "future conversation in this project act *differently* — stack and versions, architecture "
+        "decisions, project-specific conventions, key file paths, API contracts, goals/status. One line "
+        "each, no narration. If in doubt, don't write: every entry is re-read on every turn of every "
+        "conversation here. General user info and global preferences go to `remember`; current-task "
+        "progress goes to todos.\n"
+        '`jarvis.project_memory(action="append"|"write", content=...)` — `write` replaces the whole memory '
+        "with a condensed version once it starts repeating itself.\n\n"
         "**Earlier conversations in this project are searchable.** Project memory is a summary, not a "
         "transcript — when the user refers to something decided or discussed before, or you need the detail "
         "behind a memory entry, run `jarvis.search_conversations(\"<the exact terms you expect>\")` in run_cell "
@@ -404,10 +400,9 @@ async def _project_volatile_parts(project_id: str | None) -> list[CacheSegment]:
     if proj.memory.strip():
         memory_body = f"### Project Memory\n\n{proj.memory.strip()}"
     else:
-        memory_body = (
-            "### Project Memory\n\n(empty — initialize with `jarvis.project_memory(action=\"append\", content=...)` "
-            "when you learn durable facts like stack, decisions, conventions, or goals)"
-        )
+        # Plain, non-imperative — an empty-state nag here read as a standing
+        # order to fill it, which is most of why memory accumulated noise.
+        memory_body = "### Project Memory\n\n(empty)"
     parts.append(CacheSegment(name="project_memory", content=memory_body, cacheable=False))
     return parts
 

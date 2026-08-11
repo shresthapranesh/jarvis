@@ -342,6 +342,7 @@ type Mutation {
   deleteNotificationChannel(id: ID!): Boolean!
   createProject(input: ProjectCreateInput!): Project!
   updateProject(id: ID!, input: ProjectUpdateInput!): Project!
+  consolidateProjectMemory(id: ID!, model: String = null): String!
   deleteProject(id: ID!): Boolean!
   setConversationProject(conversationId: ID!, projectId: ID = null): Conversation!
   createSkill(input: SkillCreateInput!): Skill!

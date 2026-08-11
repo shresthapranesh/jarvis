@@ -42,6 +42,8 @@ from contextlib import contextmanager
 from typing import Any
 from uuid import uuid4
 
+from core.text_dedupe import dedupe_against
+
 _conversation_id: str | None = None
 _project_id: str | None = None
 _embedding_override_applied = False
@@ -868,13 +870,29 @@ def delete_skill(skill_id: str) -> bool:
 
 # ── Project memory ────────────────────────────────────────────────────────────
 
+# Project memory is injected uncached into every LLM call of every conversation
+# in the project, so unbounded growth is a per-turn tax forever. The cap forces
+# a condense; the dedup keeps `append` from re-stating what is already there.
+# (tools/projects.py holds the same cap, but that tool is unbound — this is the
+# only path the agent actually reaches.)
+#
+# The dedup helpers live in core/text_dedupe so the consolidation job's merge
+# mode answers "is this already said?" exactly the way this tool does.
+_PROJECT_MEMORY_CAP = 24_000
+
+
 def project_memory(action: str = "read", content: str | None = None) -> str:
     """Read or update the shared memory of this conversation's project.
 
-    A free-text notepad shared by every conversation in the project, injected
-    into your context each turn. Store ONLY facts tied to THIS project — its
-    stack, architecture decisions, conventions, key paths, goals. Global facts
-    (user info, general prefs) belong in the `remember` tool instead.
+    A short shared summary — NOT a log — injected into the context of every
+    conversation in the project on every turn. Append only what would make a
+    future conversation act differently: stack, architecture decisions,
+    project-specific conventions, key paths, goals/status. If in doubt, don't
+    write. Global facts (user info, general prefs) belong in `remember`;
+    current-task progress belongs in todos.
+
+    `append` silently drops lines already present (near-matches included) and
+    refuses to push memory past 24k chars — condense with `write` instead.
 
     action: "read" | "append" (add a note) | "write" (replace the whole memory).
     """
@@ -891,13 +909,34 @@ def project_memory(action: str = "read", content: str | None = None) -> str:
         raise ValueError(f"unknown action {action!r}; use read, append, or write")
     if not content:
         raise ValueError(f"{action} requires content")
-    new = f"{current.rstrip()}\n\n{content}".strip() if action == "append" else content
+
+    note = ""
+    if action == "append":
+        addition, dropped = dedupe_against(current, content)
+        if not addition:
+            return (
+                f"Nothing appended — all {dropped} line(s) are already in project "
+                "memory. Read it before writing."
+            )
+        new = f"{current.rstrip()}\n\n{addition}".strip()
+        if dropped:
+            note = f"; {dropped} duplicate line(s) dropped"
+    else:
+        new = content.strip()
+
+    if len(new) > _PROJECT_MEMORY_CAP:
+        raise ValueError(
+            f"project memory would be {len(new)} chars, over the "
+            f"{_PROJECT_MEMORY_CAP} cap. Read it, condense it, and call "
+            'project_memory(action="write", content=<condensed>) instead.'
+        )
+
     api(
         "mutation($id: ID!, $input: ProjectUpdateInput!) {"
         " updateProject(id: $id, input: $input) { id } }",
         {"id": _global_id("Project", _project_id), "input": {"memory": new}},
     )
-    return f"Project memory updated ({len(new)} chars)."
+    return f"Project memory updated ({len(new)} chars{note})."
 
 
 def text_to_speech(text: str) -> str:

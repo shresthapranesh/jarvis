@@ -1,112 +1,117 @@
-"""Project memory auto-maintenance — safety net when agent skips project_memory."""
+"""Project memory consolidation — the scheduled writer behind `Project.memory`.
+
+Project memory has three writers, and what keeps them from fighting is that
+they hold **different authorities**, not different schedules:
+
+| writer                          | latency  | may add | may delete |
+|---------------------------------|----------|---------|------------|
+| agent, in-band (`jarvis.project_memory`) | instant  | yes     | no         |
+| this job, **merge** mode        | ~15-45m  | yes     | no         |
+| this job, **rewrite** mode      | ~daily   | yes     | **yes**    |
+
+Only one thing can shrink memory. Two tiers that could both evict would fight
+over the same entries on different schedules, and nothing would be able to tell
+which one dropped a fact.
+
+Because all three derive from the same transcript, a lost update is
+self-healing: if the agent appends at 10:59 and a merge pass clobbers it at
+11:00, the next pass re-derives the fact from the messages it came from. The
+compare-and-set on `Project.updated_at` is therefore a courtesy, not a
+correctness requirement.
+
+Watermarks live in the LangGraph store (mirroring memory_consolidation's
+`last_run_at`), so none of this needs a schema migration.
+"""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.store.sqlite.aio import AsyncSqliteStore
 
+from core.text_dedupe import dedupe_against
 from db.engine import async_session
 from db.models import Project
-from db.ops import get_default_model, update_project
+from db.ops import (
+    get_default_model,
+    get_project_activity_since,
+    get_project_messages_since,
+    list_projects,
+    update_project,
+)
 
 logger = logging.getLogger(__name__)
 
+_META_NS = ("project_memory_consolidation",)
+
 _MEMORY_CAP = 24_000
-# Conservative thresholds — only trigger on substantive conversations
-_INIT_MIN_CHARS = 400
-_REFRESH_MIN_CHARS = 800
-_STALE_DAYS = 14
-_RECENT_UPDATE_MINUTES = 10
+_MAX_BULLETS = 20
 _NO_UPDATE_MARKER = "__NO_UPDATE__"
 
-_SYSTEM_PROMPT = """You initialize project memory — a shared notepad every conversation in THIS project will see.
+# A conversation must be idle this long before its material is consolidated.
+# This is the missing end-of-conversation signal: memory-worthy facts settle
+# when a work session ends, not mid-turn, so waiting turns O(turns) LLM calls
+# into O(sessions).
+_QUIET_MINUTES = 15
+# Even a project that never goes quiet gets a pass eventually.
+_MAX_STALENESS_HOURS = 24
+# Rewrite (the expensive, delete-capable mode) runs at most this often.
+_REWRITE_INTERVAL_HOURS = 24
+# Don't spend an LLM call on a trivial amount of new material.
+_MIN_NEW_CHARS = 600
 
-Goal: Extract ONLY facts that are explicitly tied to THIS specific project.
-
-Rules:
-- Output ONLY markdown bullet list or short paragraphs — no preamble, no explanation, no code fences.
-- Keep it under 80 lines, concise bullets.
-- If transcript has no project-specific durable facts, output empty string.
-
-What to SAVE (project-specific ONLY — must be explicitly mentioned for THIS project):
-- Tech stack & versions used in THIS project (e.g., "This project uses FastAPI + React 19")
-- Architecture decisions made for THIS project
-- Coding conventions specific to THIS project (not global prefs)
-- Important file paths/modules in THIS project
-- API contracts / endpoints defined in THIS project
-- Goals, status, todos specific to THIS project
-
-CRITICAL — DO NOT SAVE (these belong to global memory via `remember`, not project memory):
-- User's personal info: name, role, background, location
-- General communication preferences: "likes concise answers", "prefers detailed explanations"
-- Global coding preferences: "prefers pnpm", "always use type hints" UNLESS explicitly tied to this project ("for this project we use pnpm")
-- General knowledge, small talk, greetings
-- Any fact not explicitly tied to THIS project by context
-
-If transcript only contains general user info, small talk, or global preferences with NO project-specific facts, output empty string.
-- Never invent — only facts present in transcript.
-- Don't include secrets, tokens, credentials.
-"""
-
-_REFRESH_SYSTEM_PROMPT = """You maintain project memory — a shared notepad for THIS project only.
-
-You are given:
-1. Existing project memory for THIS project
-2. New conversation transcript from THIS project
-
-Task: Merge any NEW project-specific durable facts from transcript into existing memory, prune outdated.
-
-Rules:
-- Output ONLY the updated full project memory — markdown bullets/short paras, no preamble, no fences.
-- If transcript has no NEW project-specific facts beyond existing memory, output exactly: __NO_UPDATE__
-- Keep under 80 lines, concise. Preserve existing facts unless contradicted by transcript.
-- If transcript fact contradicts existing memory, prefer transcript.
-
-What to SAVE (only project-specific, explicitly tied to THIS project):
-- Tech stack & versions for THIS project
-- Architecture decisions for THIS project
-- Coding conventions specific to THIS project
-- Important files/modules, API contracts in THIS project
-- Project goals/status/todos
-
-CRITICAL — DO NOT INCLUDE (belongs to global memory):
-- User's personal info, background, general prefs
-- Global coding style that applies to ALL projects
-- General communication preferences
-- Small talk, greetings, non-project facts
-
-If nothing new project-specific, output __NO_UPDATE__.
-- Never invent beyond transcript+existing memory. Don't include secrets/tokens.
-"""
+# One pass reads at most this much transcript. Anything past it stays behind the
+# watermark and is picked up next tick.
+_MATERIAL_BUDGET = 24_000
+_MESSAGE_FETCH_LIMIT = 400
+# Asymmetric on purpose: user messages are short and assistant messages are
+# where decisions, contracts and rationale actually get stated. Truncating both
+# at one limit guts the side that carries the substance, and biases extraction
+# toward whatever is easy to say in the first few hundred characters.
+_USER_MSG_CAP = 1_200
+_ASSISTANT_MSG_CAP = 3_000
+# Projects consolidated per tick — bounds the cost of one wakeup.
+_MAX_PROJECTS_PER_TICK = 8
 
 
-def _build_transcript(query: str, final_message: str, conv_messages: list[dict] | None = None, cap: int = 12_000) -> str:
-    """Build a transcript excerpt capped to cap chars."""
-    parts: list[str] = []
-    total = 0
+# Both prompts are deliberately frugal. What they emit is re-read on every turn
+# of every conversation in the project, so the bar is "would a future
+# conversation act differently for knowing this" — and emitting nothing is the
+# expected outcome for most sessions, not a failure.
 
-    if conv_messages:
-        for m in conv_messages:
-            role = m.get("role", "unknown").upper()
-            content = (m.get("content") or "")[:800]
-            line = f"{role}: {content}\n"
-            if total + len(line) > cap:
-                break
-            parts.append(line)
-            total += len(line)
+_MERGE_SYSTEM_PROMPT = f"""You extract durable facts for a project's shared memory: a compact summary that every conversation in this project re-reads on every turn.
 
-    # Always include the latest turn (may duplicate if already in history, that's ok)
-    latest = f"USER: {query}\n\nASSISTANT: {final_message}\n"
-    if total + len(latest) <= cap:
-        parts.append(latest)
-    else:
-        remaining = cap - total
-        if remaining > 200:
-            parts.append(latest[:remaining])
+You are given the project's existing memory (possibly empty) and a transcript of recent conversations from that project. Output ONLY the bullets that should be ADDED — never restate, reword, or reorganize what the existing memory already says.
 
-    return "".join(parts)
+Add a fact only if a future conversation in this project would act *differently* for knowing it, and only if the transcript ties it to THIS project: stack and versions, architecture decisions, project-specific conventions, key file paths/modules, API contracts, goals/status.
+
+Never add: the user's personal info or background; communication preferences; coding preferences that aren't specific to this project; how a task went or what you did; general knowledge; small talk; secrets or tokens. Never invent anything absent from the transcript.
+
+Output: markdown bullets, one line each, no preamble and no code fences. At most 5 new bullets — usually zero or one.
+
+If the transcript adds nothing that clears the bar, output exactly: {_NO_UPDATE_MARKER}
+That is the common case and a correct answer — do not pad."""
+
+_REWRITE_SYSTEM_PROMPT = f"""You are rewriting a project's shared memory: a compact summary that every conversation in this project re-reads on every turn. This is the only pass allowed to remove things, so pruning is the job.
+
+You are given the current memory and a transcript of recent conversations from the project. Return the complete replacement memory: keep what still matters, drop what is outdated, redundant, or too trivial to justify permanent context, prefer the transcript wherever it contradicts the memory, and merge in genuinely new project-specific facts.
+
+Keep only: stack and versions, architecture decisions, project-specific conventions, key file paths/modules, API contracts, goals/status — all tied to THIS project. Remove personal info, general preferences, task-progress notes, small talk, and anything you would not bother telling a new teammate. Never invent beyond the transcript and the existing memory.
+
+Output: markdown bullets, one line each, no preamble and no code fences. **Hard limit {_MAX_BULLETS} bullets** — if more than that survive, drop the least useful until you are under it.
+
+If the memory is already correct and the transcript changes nothing, output exactly: {_NO_UPDATE_MARKER}"""
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _aware(dt: datetime | None) -> datetime | None:
+    """SQLite hands back naive datetimes; everything here compares in UTC."""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
 def _coerce_text(raw) -> str:
@@ -115,24 +120,67 @@ def _coerce_text(raw) -> str:
     return str(raw).strip()
 
 
-async def _gather_excerpt(conv_id: str) -> list[dict] | None:
-    try:
-        from sqlalchemy import select
-        from db.models import Message
+def _count_bullets(memory: str) -> int:
+    return sum(1 for line in memory.splitlines() if line.strip().startswith(("-", "*", "•")))
 
-        async with async_session() as session:
-            q = (
-                select(Message.role, Message.content)
-                .where(Message.conversation_id == conv_id)
-                .order_by(Message.created_at.desc())
-                .limit(8)
-            )
-            rows = (await session.execute(q)).all()
-            if rows:
-                return [{"role": r.role, "content": r.content[:800]} for r in reversed(rows)]
-    except Exception:
-        return None
-    return None
+
+def _render_material(messages: list[dict]) -> tuple[str, datetime | None]:
+    """Transcript block under `_MATERIAL_BUDGET`, plus the last timestamp consumed.
+
+    Returns the watermark the caller may advance to — never further than what
+    actually made it into the prompt, so a budget cut becomes a backlog rather
+    than a silent gap.
+    """
+    lines: list[str] = []
+    total = 0
+    consumed_through: datetime | None = None
+    for m in messages:
+        cap = _USER_MSG_CAP if m["role"] == "user" else _ASSISTANT_MSG_CAP
+        body = (m["content"] or "").strip()
+        if len(body) > cap:
+            body = body[:cap] + " …[truncated]"
+        stamp = _aware(m["created_at"])
+        line = f"[{stamp:%Y-%m-%d %H:%M}] {m['title']} | {m['role'].upper()}: {body}"
+        if total + len(line) > _MATERIAL_BUDGET and lines:
+            break
+        lines.append(line)
+        total += len(line)
+        consumed_through = stamp
+    return "\n".join(lines), consumed_through
+
+
+async def _load_meta(store: AsyncSqliteStore, project_id: str) -> tuple[datetime | None, datetime | None]:
+    """(messages_through, last_rewrite_at) — the project's two watermarks."""
+    item = await store.aget(_META_NS, project_id)
+    if item is None:
+        return None, None
+
+    def _parse(key: str) -> datetime | None:
+        raw = item.value.get(key)
+        if not raw:
+            return None
+        try:
+            return _aware(datetime.fromisoformat(raw))
+        except (TypeError, ValueError):
+            return None
+
+    return _parse("messages_through"), _parse("last_rewrite_at")
+
+
+async def _save_meta(
+    store: AsyncSqliteStore,
+    project_id: str,
+    messages_through: datetime | None,
+    last_rewrite_at: datetime | None,
+) -> None:
+    await store.aput(
+        _META_NS,
+        project_id,
+        {
+            "messages_through": messages_through.isoformat() if messages_through else None,
+            "last_rewrite_at": last_rewrite_at.isoformat() if last_rewrite_at else None,
+        },
+    )
 
 
 async def _resolve_llm(model_id: str | None):
@@ -144,174 +192,195 @@ async def _resolve_llm(model_id: str | None):
     try:
         return get_model_spec(model_id).build_llm(), model_id
     except Exception as exc:
-        logger.warning("project_memory auto-maintain: cannot build LLM %s: %s", model_id, exc)
+        logger.warning("project memory: cannot build LLM %s: %s", model_id, exc)
         return None, model_id
 
 
-async def maybe_initialize_project_memory(
+async def _ask(llm, system: str, user: str) -> str:
+    response = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    return _coerce_text(response.content)
+
+
+async def _commit_memory(project_id: str, new_memory: str, seen_updated_at: datetime | None) -> bool:
+    """Compare-and-set on `Project.updated_at`. False means someone else wrote."""
+    async with async_session() as session:
+        proj = await session.get(Project, project_id)
+        if proj is None:
+            return False
+        if seen_updated_at is not None and _aware(proj.updated_at) != seen_updated_at:
+            logger.info(
+                "project memory: %s changed under us — skipping, next pass re-derives", project_id
+            )
+            return False
+        await update_project(session, project_id, memory=new_memory)
+    return True
+
+
+# ── one project ───────────────────────────────────────────────────────────────
+
+async def consolidate_project_memory(
+    store: AsyncSqliteStore,
     project_id: str,
-    conv_id: str,
-    query: str,
-    final_message: str,
     model_id: str | None = None,
-) -> bool:
-    """Backward-compat alias — now delegates to auto-maintain (empty-only path)."""
-    return await maybe_auto_maintain_project_memory(
-        project_id, conv_id, query, final_message, model_id, mode="init"
-    )
+    force: bool = False,
+) -> str:
+    """Run one consolidation pass for a project. Returns a human-readable summary.
 
-
-async def maybe_auto_maintain_project_memory(
-    project_id: str,
-    conv_id: str,
-    query: str,
-    final_message: str,
-    model_id: str | None = None,
-    mode: str = "auto",  # "auto" | "init" | "refresh"
-) -> bool:
-    """Auto-maintain project memory (init when empty, refresh when stale).
-
-    - init: only when memory is empty
-    - refresh: only when memory is stale (>_STALE_DAYS) and substantive new transcript
-    - auto: tries init first, then refresh if not empty
-
-    Returns True if memory was written.
+    `force` skips the quiet-period and minimum-material gates (the on-demand
+    mutation), but not the "is there anything new at all" check.
     """
-    try:
-        transcript_len = len((query or "").strip() + "\n" + (final_message or "").strip())
-        # Short transcripts never qualify for either path
-        min_needed = _INIT_MIN_CHARS if mode != "refresh" else _REFRESH_MIN_CHARS
-        if transcript_len < min_needed:
-            logger.debug("project_memory auto: transcript too short (%d < %d) for %s", transcript_len, min_needed, project_id)
-            return False
+    now = datetime.now(timezone.utc)
+    messages_through, last_rewrite_at = await _load_meta(store, project_id)
 
-        async with async_session() as session:
-            proj = await session.get(Project, project_id)
-            if proj is None:
-                logger.debug("project_memory auto: project %s not found", project_id)
-                return False
-            existing = (proj.memory or "").strip()
-            updated_at = proj.updated_at
-
-        is_empty = not existing
-
-        # Guard: if memory was updated very recently (agent just called project_memory), skip auto
-        if updated_at is not None:
-            now = datetime.now(timezone.utc)
-            if updated_at.tzinfo is None:
-                updated_at = updated_at.replace(tzinfo=timezone.utc)
-            minutes_since = (now - updated_at).total_seconds() / 60
-            if minutes_since < _RECENT_UPDATE_MINUTES:
-                logger.debug(
-                    "project_memory auto: skip recent update (%.1f min ago) for %s",
-                    minutes_since,
-                    project_id,
-                )
-                return False
-
-        # Decide which path
-        should_init = is_empty and mode in ("auto", "init")
-        should_refresh = False
-
-        if not is_empty and mode in ("auto", "refresh"):
-            # stale check: updated_at older than _STALE_DAYS AND transcript large enough
-            if updated_at is None:
-                should_refresh = transcript_len >= _REFRESH_MIN_CHARS
-            else:
-                now = datetime.now(timezone.utc)
-                if updated_at.tzinfo is None:
-                    updated_at = updated_at.replace(tzinfo=timezone.utc)
-                age_days = (now - updated_at).total_seconds() / 86400
-                if age_days > _STALE_DAYS and transcript_len >= _REFRESH_MIN_CHARS:
-                    should_refresh = True
-                else:
-                    logger.debug(
-                        "project_memory auto: not stale (age %.1f days, need %d) for %s",
-                        age_days if updated_at else 0,
-                        _STALE_DAYS,
-                        project_id,
-                    )
-
-        if not should_init and not should_refresh:
-            logger.debug(
-                "project_memory auto: skip project=%s empty=%s mode=%s len=%d",
-                project_id,
-                is_empty,
-                mode,
-                transcript_len,
-            )
-            return False
-
-        excerpt = await _gather_excerpt(conv_id)
-        built = _build_transcript(query, final_message, excerpt)
-
-        llm, resolved_model = await _resolve_llm(model_id)
-        if llm is None:
-            return False
-
-        if should_init:
-            response = await llm.ainvoke(
-                [
-                    SystemMessage(content=_SYSTEM_PROMPT),
-                    HumanMessage(
-                        content=f"Transcript:\n---\n{built}\n---\n\nWrite project memory (or empty string if nothing durable):"
-                    ),
-                ]
-            )
-            new_memory = _coerce_text(response.content)
-            if not new_memory or len(new_memory) < 20:
-                logger.info("project_memory auto-init: no durable facts for %s", project_id)
-                return False
-            if len(new_memory) > _MEMORY_CAP:
-                new_memory = new_memory[:_MEMORY_CAP]
-
-            async with async_session() as session:
-                proj = await session.get(Project, project_id)
-                if proj is None or (proj.memory and proj.memory.strip()):
-                    logger.debug("project_memory auto-init race for %s", project_id)
-                    return False
-                await update_project(session, project_id, memory=new_memory)
-
-            logger.info("project_memory auto-init: initialized %s with %d chars", project_id, len(new_memory))
-            return True
-
-        # refresh path
-        response = await llm.ainvoke(
-            [
-                SystemMessage(content=_REFRESH_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=(
-                        f"Existing project memory:\n---\n{existing[:_MEMORY_CAP]}\n---\n\n"
-                        f"New transcript:\n---\n{built}\n---\n\n"
-                        f"Write updated memory, or { _NO_UPDATE_MARKER } if nothing new:"
-                    )
-                ),
-            ]
+    async with async_session() as session:
+        proj = await session.get(Project, project_id)
+        if proj is None:
+            return f"skipped: project {project_id} not found"
+        existing = (proj.memory or "").strip()
+        seen_updated_at = _aware(proj.updated_at)
+        count, oldest, newest, chars = await get_project_activity_since(
+            session, project_id, messages_through
         )
-        updated = _coerce_text(response.content)
 
-        if not updated or updated == _NO_UPDATE_MARKER or len(updated) < 20:
-            logger.info("project_memory auto-refresh: no new facts for %s", project_id)
-            return False
+    if not count or newest is None:
+        return "skipped: no new messages since last run"
 
-        if len(updated) > _MEMORY_CAP:
-            updated = updated[:_MEMORY_CAP]
+    newest = _aware(newest)
+    quiet_for = (now - newest).total_seconds() / 60 if newest else 0.0
+    # Measured from the *oldest unconsumed message*, not from the watermark: a
+    # project that has never been consolidated has no watermark, and treating
+    # that as maximally stale would defeat the quiet gate on its very first pass.
+    oldest = _aware(oldest)
+    waiting_hours = (now - oldest).total_seconds() / 3600 if oldest else 0.0
 
-        # Avoid no-op writes (LLM returned identical)
-        if updated.strip() == existing:
-            logger.debug("project_memory auto-refresh: identical for %s", project_id)
-            return False
+    if not force:
+        # A project still being worked in waits — unless material has been
+        # queued so long that waiting for silence would mean never consolidating.
+        if quiet_for < _QUIET_MINUTES and waiting_hours < _MAX_STALENESS_HOURS:
+            return f"skipped: active {quiet_for:.0f}m ago"
+        if chars < _MIN_NEW_CHARS:
+            return f"skipped: only {chars} new chars"
 
-        async with async_session() as session:
-            proj = await session.get(Project, project_id)
-            if proj is None:
-                return False
-            # race guard: if updated in meantime to something else, respect latest? Overwrite is okay for refresh but check still stale-ish
-            await update_project(session, project_id, memory=updated)
+    # Rewrite is the expensive, delete-capable mode — earn it. A project with no
+    # recorded rewrite is NOT treated as due: the first pass over existing memory
+    # should merge, and the clock starts when that pass records `last_rewrite_at`.
+    at_cap = _count_bullets(existing) >= _MAX_BULLETS or len(existing) > _MEMORY_CAP * 0.8
+    rewrite_due = last_rewrite_at is not None and (
+        (now - last_rewrite_at).total_seconds() / 3600 >= _REWRITE_INTERVAL_HOURS
+    )
+    mode = "rewrite" if existing and (at_cap or rewrite_due) else "merge"
 
-        logger.info("project_memory auto-refresh: updated %s %d → %d chars", project_id, len(existing), len(updated))
-        return True
+    async with async_session() as session:
+        messages = await get_project_messages_since(
+            session, project_id, messages_through, limit=_MESSAGE_FETCH_LIMIT
+        )
+    material, consumed_through = _render_material(messages)
+    if not material.strip() or consumed_through is None:
+        return "skipped: no usable material"
 
-    except Exception as exc:
-        logger.warning("project_memory auto-maintain failed for %s: %s", project_id, exc, exc_info=True)
-        return False
+    llm, _ = await _resolve_llm(model_id)
+    if llm is None:
+        return "skipped: no LLM available"
+
+    if mode == "merge":
+        raw = await _ask(
+            llm,
+            _MERGE_SYSTEM_PROMPT,
+            f"Existing project memory:\n---\n{existing or '(empty)'}\n---\n\n"
+            f"Recent conversations:\n---\n{material}\n---\n\nNew bullets to add:",
+        )
+        if not raw or raw == _NO_UPDATE_MARKER:
+            await _save_meta(store, project_id, consumed_through, last_rewrite_at or now)
+            return f"merge: nothing new ({count} messages read)"
+        # Add-only is enforced here, not trusted to the prompt: whatever the
+        # model returned, only lines that aren't already stated get appended,
+        # and the existing memory is carried over verbatim.
+        addition, dropped = dedupe_against(existing, raw)
+        if not addition:
+            await _save_meta(store, project_id, consumed_through, last_rewrite_at or now)
+            return f"merge: {dropped} proposed line(s) already present"
+        candidate = f"{existing}\n\n{addition}".strip() if existing else addition
+        if len(candidate) > _MEMORY_CAP or _count_bullets(candidate) > _MAX_BULLETS:
+            # Would overflow — escalate to the mode that is allowed to evict.
+            logger.info("project memory: %s merge overflowed, escalating to rewrite", project_id)
+            mode = "rewrite"
+        else:
+            if not await _commit_memory(project_id, candidate, seen_updated_at):
+                return "skipped: concurrent write, will retry next pass"
+            await _save_meta(store, project_id, consumed_through, last_rewrite_at or now)
+            logger.info(
+                "project memory merge: %s +%d line(s), %d → %d chars",
+                project_id, len(addition.splitlines()), len(existing), len(candidate),
+            )
+            return f"merge: added {len(addition.splitlines())} line(s)"
+
+    updated = await _ask(
+        llm,
+        _REWRITE_SYSTEM_PROMPT,
+        f"Current project memory:\n---\n{existing[:_MEMORY_CAP] or '(empty)'}\n---\n\n"
+        f"Recent conversations:\n---\n{material}\n---\n\nReplacement memory:",
+    )
+    if not updated or updated == _NO_UPDATE_MARKER or updated.strip() == existing:
+        await _save_meta(store, project_id, consumed_through, now)
+        return f"rewrite: no change ({count} messages read)"
+    if len(updated) > _MEMORY_CAP:
+        updated = updated[:_MEMORY_CAP]
+    if not await _commit_memory(project_id, updated, seen_updated_at):
+        return "skipped: concurrent write, will retry next pass"
+    await _save_meta(store, project_id, consumed_through, now)
+    logger.info(
+        "project memory rewrite: %s %d → %d chars (%d → %d bullets)",
+        project_id, len(existing), len(updated), _count_bullets(existing), _count_bullets(updated),
+    )
+    return f"rewrite: {len(existing)} → {len(updated)} chars"
+
+
+# ── the sweep ─────────────────────────────────────────────────────────────────
+
+async def consolidate_project_memories(
+    store: AsyncSqliteStore, model_id: str | None = None
+) -> str:
+    """Consolidate every project that has gone quiet with new material.
+
+    Registered as an interval job (core/scheduler.py). Per-project failures are
+    logged and skipped — one bad project must not stop the sweep.
+    """
+    async with async_session() as session:
+        projects = await list_projects(session)
+    if not projects:
+        return "no projects"
+
+    results: list[str] = []
+    touched = 0
+    for proj in projects:
+        if touched >= _MAX_PROJECTS_PER_TICK:
+            logger.info(
+                "project memory sweep: hit the %d-project cap, remainder next tick",
+                _MAX_PROJECTS_PER_TICK,
+            )
+            break
+        try:
+            outcome = await consolidate_project_memory(store, proj.id, model_id=model_id)
+        except Exception as exc:
+            logger.warning("project memory: %s failed: %s", proj.id, exc, exc_info=True)
+            continue
+        if not outcome.startswith("skipped"):
+            touched += 1
+            results.append(f"{proj.name}: {outcome}")
+
+    if not results:
+        return f"nothing to do ({len(projects)} project(s) checked)"
+    return "; ".join(results)
+
+
+# ── deprecated ────────────────────────────────────────────────────────────────
+
+async def maybe_auto_maintain_project_memory(*args, **kwargs) -> bool:
+    """DEPRECATED — the per-turn hook this replaced fired after every chat.
+
+    Superseded by `consolidate_project_memories`, which batches over the
+    messages table instead of re-reading one conversation's tail every turn.
+    Kept as a no-op so any stale caller fails quiet rather than loud.
+    """
+    logger.debug("maybe_auto_maintain_project_memory is a no-op; use consolidate_project_memories")
+    return False

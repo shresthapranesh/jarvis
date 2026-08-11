@@ -211,33 +211,12 @@ async def _run_agent_task(
             await finalize(final_message, status)
             emit_event(state, "done", message=final_message, conversation_id=conv_id)
 
-            # ── Project memory auto-init (conservative safety net) ────
-            # Layer 2: only when memory is empty and transcript is substantive
-            # (>400 chars). Does NOT include general user prefs — those belong to
-            # global memory (remember). Refresh (>14 days) is available via
-            # maybe_auto_maintain with mode="auto"/"refresh" but not auto-triggered
-            # on every run to avoid aggressiveness.
-            # Fire-and-forget — never blocks user-visible done event.
-            if project_id and not ephemeral and final_message and final_message.strip():
-                try:
-                    from core.project_memory_consolidation import (
-                        maybe_auto_maintain_project_memory,
-                    )
-
-                    asyncio.create_task(
-                        maybe_auto_maintain_project_memory(
-                            project_id, conv_id, query, final_message, model, mode="init"
-                        )
-                    )
-                    logger.info(
-                        "project_memory auto-init scheduled for project=%s conv=%s",
-                        project_id,
-                        conv_id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "project_memory auto scheduling failed: %s", exc
-                    )
+            # No project-memory work here. This used to fire a consolidation
+            # attempt after every completed chat, which is once per *turn* —
+            # there is no end-of-conversation signal to hook. The scheduled
+            # sweep (core/project_memory_consolidation.py) batches over the
+            # messages table once a conversation goes quiet instead, so the
+            # messages written above are already all the buffering it needs.
 
     except asyncio.CancelledError:
         coalescer.flush_all()
@@ -257,19 +236,6 @@ async def _run_agent_task(
         status = "done"
         await finalize(final_message, status)
         emit_event(state, "done", message=final_message, conversation_id=conv_id)
-        if project_id and final_message and final_message.strip():
-            try:
-                from core.project_memory_consolidation import (
-                    maybe_auto_maintain_project_memory,
-                )
-
-                asyncio.create_task(
-                    maybe_auto_maintain_project_memory(
-                        project_id, conv_id, query, final_message, model, mode="init"
-                    )
-                )
-            except Exception:
-                pass
 
     except BaseException as exc:
         coalescer.flush_all()
