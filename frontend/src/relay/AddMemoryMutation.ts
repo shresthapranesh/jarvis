@@ -20,6 +20,19 @@ export function commitAddMemory(text: string, kind: MemoryKind): Promise<MemoryI
     commitMutation<AddMemoryMutation>(environment, {
       mutation,
       variables: {text, kind},
+      // `memories` is a plain list, not a @connection, so Relay has no
+      // declarative directive for this — the new node is normalized into the
+      // store automatically, but nothing links it into the root list.
+      updater: (store) => {
+        const created = store.getRootField('addMemory');
+        if (!created) return;
+        const root = store.getRoot();
+        // The query selects `memories` with no arguments, so the storage key is
+        // the bare field name.
+        const existing = root.getLinkedRecords('memories') ?? [];
+        if (existing.some((r) => r?.getDataID() === created.getDataID())) return;
+        root.setLinkedRecords([...existing, created], 'memories');
+      },
       onCompleted: (response, errors) => {
         if (errors && errors.length > 0) {
           reject(new Error(errors[0].message));

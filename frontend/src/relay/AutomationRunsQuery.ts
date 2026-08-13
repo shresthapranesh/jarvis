@@ -36,6 +36,10 @@ export function mapAutomationRun(r: RunNode): AutomationRun {
   };
 }
 
+export function automationRunsVars(automationRawId: string) {
+  return {automationId: encodeGlobalId('Automation', automationRawId)};
+}
+
 export async function fetchAutomationRuns(automationRawId: string): Promise<AutomationRun[]> {
   const data = await fetchQuery<AutomationRunsQuery>(
     environment,

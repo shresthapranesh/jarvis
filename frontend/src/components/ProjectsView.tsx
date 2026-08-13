@@ -1,14 +1,17 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {useNavigate} from '@tanstack/react-router';
-import {useState} from 'react';
+import {useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
+import type {ProjectsQuery as TProjectsQuery} from '../__generated__/ProjectsQuery.graphql';
+import {useAsyncAction} from '../hooks/useAsyncAction';
 import {formatRelativeTime} from '../lib/api';
 import type {Project} from '../lib/types';
 import {commitCreateProject} from '../relay/CreateProjectMutation';
 import {commitDeleteProject} from '../relay/DeleteProjectMutation';
-import {fetchProjects} from '../relay/ProjectsQuery';
+import {mapProject, projectsQuery, refreshProjects} from '../relay/ProjectsQuery';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
+import {useQueryRetry} from './QueryBoundary';
 import {FolderIcon, PlusIcon, TrashIcon} from './icons';
 
 interface Draft {
@@ -21,51 +24,50 @@ const EMPTY_DRAFT: Draft = {name: '', description: '', instructions: ''};
 
 export function ProjectsView() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
-  const {
-    data: projects,
-    isLoading,
-    error,
-  } = useQuery<Project[]>({
-    queryKey: ['projects'],
-    queryFn: fetchProjects,
-  });
+  const data = useLazyLoadQuery<TProjectsQuery>(
+    projectsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const all = useMemo(() => data.projects.map(mapProject), [data.projects]);
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
-  const invalidate = () => queryClient.invalidateQueries({queryKey: ['projects']});
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      commitCreateProject({
+  const createAction = useAsyncAction(
+    async () => {
+      const created = await commitCreateProject({
         name: draft.name.trim(),
         description: draft.description.trim() || null,
         instructions: draft.instructions,
-      }),
-    onSuccess: async (created) => {
-      await invalidate();
+      });
+      await refreshProjects();
       setShowCreate(false);
       void navigate({to: '/projects/$id', params: {id: created.id}});
     },
-    onError: (e: Error) => setActionError(e.message),
-  });
+    {onError: (e) => setActionError(e.message)},
+  );
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => commitDeleteProject(id),
-    onSuccess: async () => {
-      await invalidate();
-      setDeleteTarget(null);
-      setActionError(null);
+  const deleteAction = useAsyncAction(
+    async (id: string) => {
+      await commitDeleteProject(id);
+      await refreshProjects();
     },
-    onError: (e: Error) => {
-      setDeleteTarget(null);
-      setActionError(e.message);
+    {
+      onSuccess: () => {
+        setDeleteTarget(null);
+        setActionError(null);
+      },
+      onError: (e) => {
+        setDeleteTarget(null);
+        setActionError(e.message);
+      },
     },
-  });
+  );
 
   function openCreate() {
     setDraft(EMPTY_DRAFT);
@@ -73,7 +75,6 @@ export function ProjectsView() {
     setShowCreate(true);
   }
 
-  const all = projects ?? [];
 
   return (
     <div className="page memory-page">
@@ -95,11 +96,7 @@ export function ProjectsView() {
 
       {actionError && <div className="memory-error">{actionError}</div>}
 
-      {isLoading ? (
-        <div className="memory-empty">Loading…</div>
-      ) : error ? (
-        <div className="memory-empty">Failed to load projects: {(error as Error).message}</div>
-      ) : all.length === 0 ? (
+      {all.length === 0 ? (
         <div className="memory-empty">
           <p>No projects yet.</p>
           <p>Create one to give a set of conversations shared context.</p>
@@ -148,9 +145,9 @@ export function ProjectsView() {
         subtitle="Instructions apply to every conversation in the project; you can refine them any time."
         submitLabel="Create project"
         submitDisabled={!draft.name.trim()}
-        pending={createMutation.isPending}
+        pending={createAction.pending}
         error={actionError}
-        onSubmit={() => createMutation.mutate()}
+        onSubmit={() => void createAction.run()}
         onClose={() => {
           setShowCreate(false);
           setActionError(null);
@@ -199,7 +196,7 @@ export function ProjectsView() {
         }
         confirmLabel="Delete"
         danger
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && void deleteAction.run(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

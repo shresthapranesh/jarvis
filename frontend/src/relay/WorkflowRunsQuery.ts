@@ -38,6 +38,10 @@ export function mapWorkflowRun(r: Node): WorkflowRun {
   };
 }
 
+export function workflowRunsVars(workflowRawId: string) {
+  return {workflowId: encodeGlobalId('Workflow', workflowRawId)};
+}
+
 export async function fetchWorkflowRuns(workflowRawId: string): Promise<WorkflowRun[]> {
   const data = await fetchQuery<WorkflowRunsQuery>(
     environment,

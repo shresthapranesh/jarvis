@@ -43,3 +43,7 @@ export async function fetchSkills(): Promise<Skill[]> {
   ).toPromise();
   return (data?.skills ?? []).map(mapSkill);
 }
+
+export function refreshSkills() {
+  return fetchSkills().catch(() => undefined);
+}

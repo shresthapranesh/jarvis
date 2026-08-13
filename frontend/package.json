@@ -15,7 +15,6 @@
     "typecheck": "pnpm relay && tsc -b"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.101.1",
     "@tanstack/react-router": "^1.170.16",
     "@xyflow/react": "^12.11.1",
     "graphql": "^17.0.1",

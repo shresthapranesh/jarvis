@@ -1,7 +1,11 @@
 import {ReactFlowProvider} from '@xyflow/react';
-import {useQuery, useQueryClient} from '@tanstack/react-query';
 import {useNavigate, useParams} from '@tanstack/react-router';
-import {useState} from 'react';
+import {useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
+
+import type {WorkflowDetailQuery as TWorkflowDetailQuery} from '../__generated__/WorkflowDetailQuery.graphql';
+import type {WorkflowRunsQuery as TWorkflowRunsQuery} from '../__generated__/WorkflowRunsQuery.graphql';
+import {QueryBoundary, useQueryRetry} from './QueryBoundary';
 import {
   NotificationsEditor,
   parseNotifications,
@@ -12,20 +16,41 @@ import {useWorkflowRunEvents} from '../hooks/useWorkflowRunEvents';
 import {formatRelativeTime} from '../lib/api';
 import {commitRunWorkflow} from '../relay/RunWorkflowMutation';
 import {commitUpdateWorkflow} from '../relay/UpdateWorkflowMutation';
-import {fetchWorkflow} from '../relay/WorkflowDetailQuery';
-import {fetchWorkflowRuns} from '../relay/WorkflowRunsQuery';
+import {
+  refreshWorkflow,
+  workflowDetailQuery,
+  workflowDetailVars,
+} from '../relay/WorkflowDetailQuery';
+import {mapWorkflow} from '../relay/WorkflowListQuery';
+import {
+  mapWorkflowRun,
+  workflowRunsQuery,
+  workflowRunsVars,
+} from '../relay/WorkflowRunsQuery';
 import {parseDefinition, serializeDefinition} from '../lib/types';
 import type {NotificationConfig, Workflow, WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
 
 // ── History panel ─────────────────────────────────────────────────────────────
 
-function HistoryPanel({workflowId, onClose}: {workflowId: string; onClose: () => void}) {
+function HistoryPanel(props: {workflowId: string; onClose: () => void}) {
+  return (
+    <QueryBoundary
+      label="Failed to load run history"
+      fallback={<div className="wf-history-sidebar" />}
+    >
+      <HistoryPanelInner {...props} />
+    </QueryBoundary>
+  );
+}
+
+function HistoryPanelInner({workflowId, onClose}: {workflowId: string; onClose: () => void}) {
   const navigate = useNavigate();
-  const {data: runs = [], isLoading} = useQuery({
-    queryKey: ['workflow-runs', workflowId],
-    queryFn: () => fetchWorkflowRuns(workflowId),
-    staleTime: 10_000,
-  });
+  const data = useLazyLoadQuery<TWorkflowRunsQuery>(
+    workflowRunsQuery,
+    workflowRunsVars(workflowId),
+    {fetchPolicy: 'store-and-network'},
+  );
+  const runs = useMemo(() => data.workflowRuns.map(mapWorkflowRun), [data.workflowRuns]);
 
   return (
     <div className="wf-history-sidebar">
@@ -37,10 +62,7 @@ function HistoryPanel({workflowId, onClose}: {workflowId: string; onClose: () =>
       </div>
 
       <div style={{overflowY: 'auto', flex: 1}}>
-        {isLoading && <div className="wf-history-empty">Loading…</div>}
-        {!isLoading && runs.length === 0 && (
-          <div className="wf-history-empty">No runs yet.</div>
-        )}
+        {runs.length === 0 && <div className="wf-history-empty">No runs yet.</div>}
 
         {runs.map((run) => {
           const duration = run.finished_at
@@ -280,13 +302,16 @@ function SettingsModal({workflow, onClose, onSaved}: SettingsModalProps) {
 export default function WorkflowEditorPage() {
   const {id} = useParams({from: '/workflow/$id/'});
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
-  const {data: workflow} = useQuery({
-    queryKey: ['workflow', id],
-    queryFn: () => fetchWorkflow(id),
-    staleTime: 30_000,
-  });
+  const data = useLazyLoadQuery<TWorkflowDetailQuery>(
+    workflowDetailQuery,
+    workflowDetailVars(id),
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const workflow = useMemo(
+    () => (data.workflow ? mapWorkflow(data.workflow) : null),
+    [data.workflow],
+  );
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -305,7 +330,7 @@ export default function WorkflowEditorPage() {
   );
 
   if (!workflow) {
-    return <div style={{padding: 24, color: 'var(--text-dim)'}}>Loading…</div>;
+    return <div style={{padding: 24, color: 'var(--text-dim)'}}>Workflow not found.</div>;
   }
 
   const {nodes: initNodes, edges: initEdges} = parseDefinition(workflow.definition);
@@ -315,7 +340,7 @@ export default function WorkflowEditorPage() {
     setSaveError(null);
     try {
       await commitUpdateWorkflow(id, {definition: serializeDefinition(nodes, edges)});
-      queryClient.invalidateQueries({queryKey: ['workflow', id]});
+      await refreshWorkflow(id);
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -464,7 +489,7 @@ export default function WorkflowEditorPage() {
         <SettingsModal
           workflow={workflow}
           onClose={() => setShowSettings(false)}
-          onSaved={() => queryClient.invalidateQueries({queryKey: ['workflow', id]})}
+          onSaved={() => void refreshWorkflow(id)}
         />
       )}
     </div>

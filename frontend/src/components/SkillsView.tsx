@@ -1,12 +1,15 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
-import {useState} from 'react';
+import {useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
+import type {SkillsQuery as TSkillsQuery} from '../__generated__/SkillsQuery.graphql';
+import {useAsyncAction} from '../hooks/useAsyncAction';
 import {commitCreateSkill} from '../relay/CreateSkillMutation';
 import {commitDeleteSkill} from '../relay/DeleteSkillMutation';
-import {fetchSkills} from '../relay/SkillsQuery';
+import {mapSkill, refreshSkills, skillsQuery} from '../relay/SkillsQuery';
 import {commitUpdateSkill} from '../relay/UpdateSkillMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
+import {useQueryRetry} from './QueryBoundary';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
 import type {Skill} from '../lib/types';
 
@@ -22,19 +25,18 @@ const EMPTY_DRAFT: Draft = {name: '', description: '', body: '', enabled: true};
 type Editor = {mode: 'add'} | {mode: 'edit'; skill: Skill};
 
 export function SkillsView() {
-  const queryClient = useQueryClient();
-
-  const {data: skills, isLoading, error} = useQuery<Skill[]>({
-    queryKey: ['skills'],
-    queryFn: fetchSkills,
-  });
+  const data = useLazyLoadQuery<TSkillsQuery>(
+    skillsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const all = useMemo(() => data.skills.map(mapSkill), [data.skills]);
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
 
-  const invalidate = () => queryClient.invalidateQueries({queryKey: ['skills']});
 
   function closeEditor() {
     setEditor(null);
@@ -53,62 +55,60 @@ export function SkillsView() {
     setEditor({mode: 'edit', skill: s});
   }
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      commitCreateSkill({
+  // createSkill returns the new node but `skills` is a plain root list, so the
+  // new row still has to be linked in — one refresh is simpler than an updater
+  // per mutation, and this list is small and rarely written.
+  const createAction = useAsyncAction(
+    async () => {
+      await commitCreateSkill({
         name: draft.name.trim(),
         description: draft.description.trim(),
         body: draft.body,
         enabled: draft.enabled,
-      }),
-    onSuccess: async () => {
-      await invalidate();
-      closeEditor();
+      });
+      await refreshSkills();
     },
-    onError: (e: Error) => setActionError(e.message),
-  });
+    {onSuccess: closeEditor, onError: (e) => setActionError(e.message)},
+  );
 
-  const updateMutation = useMutation({
-    mutationFn: ({id, patch}: {id: string; patch: Partial<Draft>}) =>
-      commitUpdateSkill(id, patch),
-    onSuccess: async () => {
-      await invalidate();
-      closeEditor();
-    },
-    onError: (e: Error) => setActionError(e.message),
-  });
+  // Edits need no refresh: the payload carries the same id, so Relay
+  // normalizes it onto the existing record.
+  const updateAction = useAsyncAction(
+    (id: string, patch: Partial<Draft>) => commitUpdateSkill(id, patch),
+    {onSuccess: closeEditor, onError: (e) => setActionError(e.message)},
+  );
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => commitDeleteSkill(id),
-    onSuccess: async () => {
-      await invalidate();
-      setDeleteTarget(null);
-      setActionError(null);
+  const deleteAction = useAsyncAction(
+    async (id: string) => {
+      await commitDeleteSkill(id);
+      await refreshSkills();
     },
-    onError: (e: Error) => {
-      setDeleteTarget(null);
-      setActionError(e.message);
+    {
+      onSuccess: () => {
+        setDeleteTarget(null);
+        setActionError(null);
+      },
+      onError: (e) => {
+        setDeleteTarget(null);
+        setActionError(e.message);
+      },
     },
-  });
+  );
 
   function submitEditor() {
     if (!editor) return;
     if (editor.mode === 'add') {
-      createMutation.mutate();
+      void createAction.run();
     } else {
-      updateMutation.mutate({
-        id: editor.skill.id,
-        patch: {
-          name: draft.name.trim(),
-          description: draft.description.trim(),
-          body: draft.body,
-          enabled: draft.enabled,
-        },
+      void updateAction.run(editor.skill.id, {
+        name: draft.name.trim(),
+        description: draft.description.trim(),
+        body: draft.body,
+        enabled: draft.enabled,
       });
     }
   }
 
-  const all = skills ?? [];
   const draftValid = Boolean(
     draft.name.trim() && draft.description.trim() && draft.body.trim(),
   );
@@ -124,9 +124,9 @@ export function SkillsView() {
               <input
                 type="checkbox"
                 checked={s.enabled}
-                disabled={updateMutation.isPending}
+                disabled={updateAction.pending}
                 onChange={(e) =>
-                  updateMutation.mutate({id: s.id, patch: {enabled: e.target.checked}})
+                  void updateAction.run(s.id, {enabled: e.target.checked})
                 }
               />
               <span className="switch-track" aria-hidden="true" />
@@ -177,11 +177,7 @@ export function SkillsView() {
 
       {actionError && !editorOpen && <div className="memory-error">{actionError}</div>}
 
-      {isLoading ? (
-        <div className="memory-empty">Loading…</div>
-      ) : error ? (
-        <div className="memory-empty">Failed to load skills: {(error as Error).message}</div>
-      ) : all.length === 0 ? (
+      {all.length === 0 ? (
         <div className="memory-empty">
           <p>No skills yet.</p>
           <p>
@@ -207,7 +203,7 @@ export function SkillsView() {
         wide
         submitLabel={editor?.mode === 'edit' ? 'Save changes' : 'Create skill'}
         submitDisabled={!draftValid}
-        pending={createMutation.isPending || updateMutation.isPending}
+        pending={createAction.pending || updateAction.pending}
         error={actionError}
         footerExtra={
           <label className="switch switch--labeled">
@@ -267,7 +263,7 @@ export function SkillsView() {
         }
         confirmLabel="Delete"
         danger
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && void deleteAction.run(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

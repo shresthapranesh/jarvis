@@ -21,6 +21,9 @@ export function commitUpdateMemoryItem(
   kind?: MemoryKind,
 ): Promise<MemoryItem> {
   return new Promise((resolve, reject) => {
+    // No updater: the payload selects the same `id` as MemoriesQuery, so Relay
+    // normalizes it onto the existing record and every mounted view of that
+    // memory re-renders. Identity, not list membership, is changing.
     commitMutation<UpdateMemoryItemMutation>(environment, {
       mutation,
       variables: {id, text, kind: kind ?? null},

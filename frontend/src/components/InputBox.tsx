@@ -1,5 +1,4 @@
 import {useEffect, useRef, useState} from 'react';
-import {useQueryClient} from '@tanstack/react-query';
 
 import {useIsMobile} from '../hooks/useIsMobile';
 import {useModels} from '../hooks/useModels';
@@ -52,7 +51,6 @@ export function InputBox({
   const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const queryClient = useQueryClient();
 
   const {listening, interimText, startListening, stopListening} = useWhisperSTT(
     (text) => {
@@ -80,7 +78,6 @@ export function InputBox({
     if (conversationId && newModel) {
       try {
         await commitUpdateConversation(conversationId, {model: newModel});
-        await queryClient.invalidateQueries({queryKey: ['conversation', conversationId]});
         await refreshConversationList();
       } catch (err) {
         console.error('Failed to persist model change:', err);

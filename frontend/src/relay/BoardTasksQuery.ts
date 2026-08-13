@@ -71,3 +71,15 @@ export async function fetchBoardTasks(includeArchived = false): Promise<BoardTas
   ).toPromise();
   return (data?.boardTasks ?? []).map(mapBoardTask);
 }
+
+/**
+ * Re-read the board into the store; mounted queries re-render off it.
+ *
+ * Board writes are refetched rather than store-patched on purpose: the server's
+ * dispatcher reacts to a write by promoting dependents, claiming ready tasks and
+ * changing their statuses, so one card's mutation can move several others. Only
+ * the server knows the resulting board.
+ */
+export function refreshBoardTasks(includeArchived = false) {
+  return fetchBoardTasks(includeArchived).catch(() => undefined);
+}

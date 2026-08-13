@@ -1,4 +1,3 @@
-import {useQuery, type QueryClient} from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
   Link,
@@ -10,6 +9,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import type {Environment} from 'relay-runtime';
 
 import {ConversationList} from '../components/ConversationList';
+import {QueryBoundary} from '../components/QueryBoundary';
 import {
   BookIcon,
   BoltIcon,
@@ -28,14 +28,12 @@ import {
   SunIcon,
   WorkflowIcon,
 } from '../components/icons';
+import {useHealth} from '../hooks/useHealth';
 import {useIsMobile} from '../hooks/useIsMobile';
-import {checkHealth} from '../lib/api';
-import {fetchRunningTasks} from '../relay/RunningTasksQuery';
-import type {RunningTask} from '../lib/types';
+import {useRunningTasks} from '../hooks/useRunningTasks';
 import {ToastProvider} from '../lib/toast';
 
 interface RouterContext {
-  queryClient: QueryClient;
   environment: Environment;
 }
 
@@ -111,21 +109,9 @@ const NAV_GROUPS: {heading: string; items: NavItem[]}[] = [
 ];
 
 function RootLayout() {
-  const {data} = useQuery({
-    queryKey: ['health'],
-    queryFn: checkHealth,
-    staleTime: Infinity,
-    retry: false
-  });
+  const healthy = useHealth();
 
-  const healthy = data?.status === 'ok';
-
-  const {data: runningTasks} = useQuery({
-    queryKey: ['running-tasks'],
-    queryFn: fetchRunningTasks,
-    refetchInterval: (query) => ((query.state.data as RunningTask[] | undefined)?.length ?? 0) > 0 ? 2000 : false,
-  });
-  const runningCount = runningTasks?.length ?? 0;
+  const runningCount = useRunningTasks().length;
 
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem('nav-collapsed') === 'true',
@@ -348,7 +334,13 @@ function RootLayout() {
             </div>
           ))}
         </div>
-        {!railCollapsed && <ConversationList />}
+        {/* The sidebar renders outside every route, so an unguarded throw
+            here blanks the whole app rather than one page. */}
+        {!railCollapsed && (
+          <QueryBoundary label="Failed to load conversations">
+            <ConversationList />
+          </QueryBoundary>
+        )}
         {!railCollapsed && (
           <div
             className="nav-resize-handle"

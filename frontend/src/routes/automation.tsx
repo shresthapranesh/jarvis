@@ -1,10 +1,14 @@
-import {useQuery, useMutation, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute} from '@tanstack/react-router';
 import {useEffect, useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
+import type {AutomationListQuery as TAutomationListQuery} from '../__generated__/AutomationListQuery.graphql';
 import {AutomationForm} from '../components/AutomationForm';
 import {AutomationRunsPanel} from '../components/AutomationRunsPanel';
 import {ConfirmDialog} from '../components/ConfirmDialog';
+import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
+import {useAsyncAction} from '../hooks/useAsyncAction';
+import {usePollingRefresh} from '../hooks/usePollingRefresh';
 import {
   BoltIcon,
   CalendarIcon,
@@ -23,13 +27,29 @@ import {
 import {formatNextRun, formatRelativeTime} from '../lib/api';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationInputType, CreateAutomationPayload} from '../lib/types';
-import {fetchAutomationList} from '../relay/AutomationListQuery';
+import {refreshAutomationRuns} from '../relay/AutomationRunsQuery';
+import {
+  automationListQuery,
+  mapAutomation,
+  refreshAutomationList,
+} from '../relay/AutomationListQuery';
 import {commitCreateAutomation} from '../relay/CreateAutomationMutation';
 import {commitDeleteAutomation} from '../relay/DeleteAutomationMutation';
 import {commitTriggerAutomation} from '../relay/TriggerAutomationMutation';
 import {commitUpdateAutomation} from '../relay/UpdateAutomationMutation';
 
-export const Route = createFileRoute('/automation')({component: AutomationPage});
+export const Route = createFileRoute('/automation')({component: AutomationRoute});
+
+function AutomationRoute() {
+  return (
+    <QueryBoundary
+      label="Failed to load automations"
+      fallback={<div className="auto-empty-msg">Loading…</div>}
+    >
+      <AutomationPage />
+    </QueryBoundary>
+  );
+}
 
 type TypeFilter = 'all' | AutomationInputType;
 type GroupBy = 'none' | 'type' | 'schedule';
@@ -187,7 +207,6 @@ function AutomationFormPanel({
   editing: Automation | null;
   onClose: () => void;
 }) {
-  const queryClient = useQueryClient();
   const toast = useToast();
 
   async function handleSave(payload: CreateAutomationPayload) {
@@ -199,7 +218,7 @@ function AutomationFormPanel({
         await commitCreateAutomation(payload);
         toast.push('Automation created', 'success');
       }
-      await queryClient.invalidateQueries({queryKey: ['automations']});
+      await refreshAutomationList();
       onClose();
     } catch (err) {
       toast.push((err as Error).message || 'Failed to save', 'error');
@@ -239,15 +258,17 @@ function AutomationFormPanel({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 function AutomationPage() {
-  const queryClient = useQueryClient();
   const toast = useToast();
 
-  const {data: automations = [], isLoading, error} = useQuery({
-    queryKey: ['automations'],
-    queryFn: fetchAutomationList,
-    refetchInterval: 30_000,
-    staleTime: 15_000,
-  });
+  const data = useLazyLoadQuery<TAutomationListQuery>(
+    automationListQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const automations = useMemo(() => data.automations.map(mapAutomation), [data.automations]);
+
+  // Scheduled runs change last_run_status without anyone touching the page.
+  usePollingRefresh(refreshAutomationList, 30_000);
 
   const [showForm, setShowForm] = useState(false);
   const [editingAuto, setEditingAuto] = useState<Automation | null>(null);
@@ -258,9 +279,9 @@ function AutomationPage() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
 
-  const toggleMutation = useMutation({
-    mutationFn: (auto: Automation) =>
-      commitUpdateAutomation(auto.id, {
+  const toggleAction = useAsyncAction(
+    async (auto: Automation) => {
+      await commitUpdateAutomation(auto.id, {
         name: auto.name,
         description: auto.description,
         input_type: auto.input_type,
@@ -274,34 +295,33 @@ function AutomationPage() {
         schedule: auto.schedule,
         enabled: !auto.enabled,
         notifications: auto.notifications,
-      }),
-    onSuccess: (_d, auto) => {
-      queryClient.invalidateQueries({queryKey: ['automations']});
+      });
+      await refreshAutomationList();
       toast.push(auto.enabled ? 'Automation paused' : 'Automation enabled', 'success');
     },
-    onError: (err: Error) => toast.push(err.message || 'Failed to update', 'error'),
-  });
+    {onError: (err) => toast.push(err.message || 'Failed to update', 'error')},
+  );
 
-  const triggerMutation = useMutation({
-    mutationFn: (auto: Automation) => commitTriggerAutomation(auto.id),
-    onSuccess: (_d, auto) => {
+  const triggerAction = useAsyncAction(
+    async (auto: Automation) => {
+      await commitTriggerAutomation(auto.id);
       setOpenedAuto(auto);
       toast.push(`Started "${auto.name}"`, 'info');
-      queryClient.invalidateQueries({queryKey: ['automation-runs', auto.id]});
+      void refreshAutomationRuns(auto.id);
     },
-    onError: (err: Error) => toast.push(err.message || 'Failed to trigger', 'error'),
-  });
+    {onError: (err) => toast.push(err.message || 'Failed to trigger', 'error')},
+  );
 
-  const deleteMutation = useMutation({
-    mutationFn: (auto: Automation) => commitDeleteAutomation(auto.id),
-    onSuccess: (_d, auto) => {
-      queryClient.invalidateQueries({queryKey: ['automations']});
+  const deleteAction = useAsyncAction(
+    async (auto: Automation) => {
+      await commitDeleteAutomation(auto.id);
+      await refreshAutomationList();
       if (openedAuto?.id === auto.id) setOpenedAuto(null);
       setConfirmDelete(null);
       toast.push(`Deleted "${auto.name}"`, 'success');
     },
-    onError: (err: Error) => toast.push(err.message || 'Failed to delete', 'error'),
-  });
+    {onError: (err) => toast.push(err.message || 'Failed to delete', 'error')},
+  );
 
   function openCreate() {
     setEditingAuto(null);
@@ -454,14 +474,7 @@ function AutomationPage() {
       </header>
 
       <div className="auto-list-container">
-        {isLoading && <div className="auto-empty-msg">Loading…</div>}
-        {error && (
-          <div className="error-bubble auto-empty-msg">
-            ⚠ {(error as Error).message}
-          </div>
-        )}
-
-        {!isLoading && automations.length === 0 && (
+        {automations.length === 0 && (
           <div className="auto-empty-state">
             <div className="auto-empty-glow">
               <BoltIcon size={28} />
@@ -478,7 +491,7 @@ function AutomationPage() {
           </div>
         )}
 
-        {!isLoading && automations.length > 0 && filtered.length === 0 && (
+        {automations.length > 0 && filtered.length === 0 && (
           <div className="auto-empty-msg">
             No automations match your filters.
           </div>
@@ -500,8 +513,8 @@ function AutomationPage() {
                   onOpen={openRunsPanel}
                   onEdit={openEdit}
                   onDelete={(a) => setConfirmDelete(a)}
-                  onTrigger={(a) => triggerMutation.mutate(a)}
-                  onToggle={(a) => toggleMutation.mutate(a)}
+                  onTrigger={(a) => void triggerAction.run(a)}
+                  onToggle={(a) => void toggleAction.run(a)}
                 />
               ))}
             </div>
@@ -540,7 +553,7 @@ function AutomationPage() {
             </>
           )
         }
-        onConfirm={() => confirmDelete && deleteMutation.mutate(confirmDelete)}
+        onConfirm={() => confirmDelete && void deleteAction.run(confirmDelete)}
         onCancel={() => setConfirmDelete(null)}
       />
     </div>

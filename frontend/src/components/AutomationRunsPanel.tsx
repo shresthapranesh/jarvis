@@ -1,10 +1,20 @@
-import {useQuery, useMutation, useQueryClient} from '@tanstack/react-query';
 import {marked} from 'marked';
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
+
+import type {AutomationRunsQuery as TAutomationRunsQuery} from '../__generated__/AutomationRunsQuery.graphql';
+import {useAsyncAction} from '../hooks/useAsyncAction';
+import {QueryBoundary, useQueryRetry} from './QueryBoundary';
+import {refreshAutomationList} from '../relay/AutomationListQuery';
 
 import {useAutomationRunEvents} from '../hooks/useAutomationRunEvents';
 import {formatDuration, formatRelativeTime} from '../lib/api';
-import {fetchAutomationRuns} from '../relay/AutomationRunsQuery';
+import {
+  automationRunsQuery,
+  automationRunsVars,
+  mapAutomationRun,
+  refreshAutomationRuns,
+} from '../relay/AutomationRunsQuery';
 import {commitTriggerAutomation} from '../relay/TriggerAutomationMutation';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationRun} from '../lib/types';
@@ -218,25 +228,36 @@ interface PanelProps {
   onEdit: (auto: Automation) => void;
 }
 
-export function AutomationRunsPanel({automation, onClose, onEdit}: PanelProps) {
-  const queryClient = useQueryClient();
+export function AutomationRunsPanel(props: PanelProps) {
+  return (
+    <QueryBoundary
+      label="Failed to load runs"
+      fallback={<div className="runs-empty">Loading runs…</div>}
+    >
+      <AutomationRunsPanelInner {...props} />
+    </QueryBoundary>
+  );
+}
+
+function AutomationRunsPanelInner({automation, onClose, onEdit}: PanelProps) {
   const toast = useToast();
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
-  const {data: runs = [], isLoading} = useQuery({
-    queryKey: ['automation-runs', automation.id],
-    queryFn: () => fetchAutomationRuns(automation.id),
-    staleTime: 10_000,
-  });
+  const data = useLazyLoadQuery<TAutomationRunsQuery>(
+    automationRunsQuery,
+    automationRunsVars(automation.id),
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const runs = useMemo(() => data.automationRuns.map(mapAutomationRun), [data.automationRuns]);
 
-  const triggerMutation = useMutation({
-    mutationFn: () => commitTriggerAutomation(automation.id),
-    onSuccess: ({run_id}) => {
+  const triggerAction = useAsyncAction(
+    async () => {
+      const {run_id} = await commitTriggerAutomation(automation.id);
       setActiveRunId(run_id);
       toast.push(`Started "${automation.name}"`, 'info');
     },
-    onError: (err: Error) => toast.push(err.message || 'Failed to trigger', 'error'),
-  });
+    {onError: (err) => toast.push(err.message || 'Failed to trigger', 'error')},
+  );
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -268,8 +289,8 @@ export function AutomationRunsPanel({automation, onClose, onEdit}: PanelProps) {
           <div className="runs-panel-actions">
             <button
               className="runs-panel-btn runs-panel-btn--primary"
-              onClick={() => triggerMutation.mutate()}
-              disabled={triggerMutation.isPending || !!activeRunId}
+              onClick={() => void triggerAction.run()}
+              disabled={triggerAction.pending || !!activeRunId}
               title="Run now"
             >
               <PlayIcon size={12} />
@@ -299,10 +320,10 @@ export function AutomationRunsPanel({automation, onClose, onEdit}: PanelProps) {
               automationId={automation.id}
               onComplete={() => {
                 setActiveRunId(null);
-                queryClient.invalidateQueries({
-                  queryKey: ['automation-runs', automation.id],
-                });
-                queryClient.invalidateQueries({queryKey: ['automations']});
+                // A finished run changes both this history and the list card's
+                // last_run_status.
+                void refreshAutomationRuns(automation.id);
+                void refreshAutomationList();
               }}
             />
           )}
@@ -311,8 +332,7 @@ export function AutomationRunsPanel({automation, onClose, onEdit}: PanelProps) {
             History {runs.length > 0 && <span className="runs-count">({runs.length})</span>}
           </div>
 
-          {isLoading && <div className="runs-empty">Loading runs…</div>}
-          {!isLoading && runs.length === 0 && !activeRunId && (
+          {runs.length === 0 && !activeRunId && (
             <div className="runs-empty">
               <BoltIcon size={20} />
               <p>No runs yet. Hit Run to fire one.</p>

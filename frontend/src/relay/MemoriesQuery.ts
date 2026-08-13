@@ -30,3 +30,17 @@ export async function fetchMemories(): Promise<MemoryItem[]> {
     updated_at: m.updatedAt,
   }));
 }
+
+/**
+ * Re-read the list from the network into the store. For writes the store
+ * updaters keep mounted views correct on their own; this is for the case they
+ * cannot model — consolidation rewrites the whole set server-side, so there is
+ * no local delta to apply.
+ *
+ * Writing to the store is what refreshes the UI: `useLazyLoadQuery` subscribes
+ * to the records it read, so a mounted MemoryView re-renders off this fetch
+ * without being told about it.
+ */
+export function refreshMemories() {
+  return fetchMemories().catch(() => undefined);
+}
