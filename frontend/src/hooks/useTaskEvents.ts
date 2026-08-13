@@ -1,9 +1,9 @@
-import {useQueryClient} from '@tanstack/react-query';
 import {useEffect, useRef, useState} from 'react';
 import {graphql, requestSubscription} from 'react-relay';
 
 import type {useTaskEventsSubscription} from '../__generated__/useTaskEventsSubscription.graphql';
 import type {ArtifactRef, Step, TodoItem, TodoStatus} from '../lib/types';
+import {refreshRunningTasks} from './useRunningTasks';
 import {refreshArtifactList} from '../relay/ArtifactListQuery';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {loadConversationPage} from '../relay/ConversationPageQuery';
@@ -220,7 +220,6 @@ const taskEventsSubscription = graphql`
 `;
 
 export function useTaskEvents(taskId: string | null, conversationId: string | null) {
-  const queryClient = useQueryClient();
   const [state, setState] = useState<StreamState>(EMPTY_STATE);
 
   // Reset state synchronously when taskId changes, so we never render a frame
@@ -437,7 +436,7 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             setState((s) => ({...s, streaming: false, thinkingText: '', pendingInterrupt: null}));
             void (async () => {
               await refreshConversationList();
-              await queryClient.invalidateQueries({queryKey: ['running-tasks']});
+              await refreshRunningTasks();
               if (conversationId) {
                 await loadConversationPage(conversationId);
                 await refreshArtifactList(conversationId);
@@ -456,7 +455,7 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             }));
             void (async () => {
               await refreshConversationList();
-              await queryClient.invalidateQueries({queryKey: ['running-tasks']});
+              await refreshRunningTasks();
               if (conversationId) {
                 await loadConversationPage(conversationId);
                 // Re-sync the plan: a crashed run resets todos to [] (or wrote a
@@ -477,7 +476,7 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
     });
 
     return () => disposable.dispose();
-    // conversationId/queryClient deliberately omitted — they don't drive resubscription
+    // conversationId deliberately omitted — it doesn't drive resubscription
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 

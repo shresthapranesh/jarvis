@@ -6,12 +6,17 @@ import {
   ReactFlow,
   ReactFlowProvider,
 } from '@xyflow/react';
-import {useQuery} from '@tanstack/react-query';
 import {useNavigate, useParams} from '@tanstack/react-router';
 import {useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
+import type {WorkflowDetailQuery as TWorkflowDetailQuery} from '../__generated__/WorkflowDetailQuery.graphql';
+import type {WorkflowRunDetailQuery as TWorkflowRunDetailQuery} from '../__generated__/WorkflowRunDetailQuery.graphql';
 import {nodeTypes} from './WorkflowEditor';
-import {fetchWorkflow} from '../relay/WorkflowDetailQuery';
-import {fetchWorkflowRun} from '../relay/WorkflowRunDetailQuery';
+import {useQueryRetry} from './QueryBoundary';
+import {workflowDetailQuery, workflowDetailVars} from '../relay/WorkflowDetailQuery';
+import {mapWorkflow} from '../relay/WorkflowListQuery';
+import {workflowRunDetailQuery, workflowRunDetailVars} from '../relay/WorkflowRunDetailQuery';
+import {mapWorkflowRun} from '../relay/WorkflowRunsQuery';
 import {parseDefinition} from '../lib/types';
 import type {NodeRecord} from '../lib/types';
 
@@ -152,17 +157,19 @@ export default function WorkflowRunPage() {
   const {id, runId} = useParams({from: '/workflow/$id/runs/$runId'});
   const navigate = useNavigate();
 
-  const {data: workflow} = useQuery({
-    queryKey: ['workflow', id],
-    queryFn: () => fetchWorkflow(id),
-    staleTime: 30_000,
-  });
+  const workflowData = useLazyLoadQuery<TWorkflowDetailQuery>(
+    workflowDetailQuery,
+    workflowDetailVars(id),
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const workflow = workflowData.workflow ? mapWorkflow(workflowData.workflow) : null;
 
-  const {data: run} = useQuery({
-    queryKey: ['workflow-run', runId],
-    queryFn: () => fetchWorkflowRun(runId),
-    staleTime: 10_000,
-  });
+  const runData = useLazyLoadQuery<TWorkflowRunDetailQuery>(
+    workflowRunDetailQuery,
+    workflowRunDetailVars(runId),
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const run = runData.workflowRun ? mapWorkflowRun(runData.workflowRun) : null;
 
   const {nodes: baseNodes, edges} = parseDefinition(
     workflow?.definition ?? '{"nodes":[],"edges":[]}',

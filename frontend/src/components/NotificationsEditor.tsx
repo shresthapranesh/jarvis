@@ -1,7 +1,10 @@
-import {useQuery} from '@tanstack/react-query';
 import {Link} from '@tanstack/react-router';
+import {useMemo} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
-import {fetchNotificationChannels} from '../relay/NotificationChannelsQuery';
+import type {NotificationChannelsQuery as TNotificationChannelsQuery} from '../__generated__/NotificationChannelsQuery.graphql';
+import {mapChannel, notificationChannelsQuery} from '../relay/NotificationChannelsQuery';
+import {QueryBoundary} from './QueryBoundary';
 import type {NotificationConfig, NotificationOn} from '../lib/types';
 
 interface Props {
@@ -29,12 +32,31 @@ export function serializeNotifications(rows: NotificationConfig[]): string | nul
   return cleaned.length ? JSON.stringify(cleaned) : null;
 }
 
-export function NotificationsEditor({value, onChange, disabled}: Props) {
-  const {data: channels = [], isLoading} = useQuery({
-    queryKey: ['notification-channels'],
-    queryFn: fetchNotificationChannels,
-    staleTime: 30_000,
-  });
+/**
+ * Rendered inside form modals, so it carries its own boundary: failing to load
+ * the channel list must not suspend or tear down the form around it.
+ */
+export function NotificationsEditor(props: Props) {
+  return (
+    <QueryBoundary
+      label="Failed to load channels"
+      fallback={<div className="auto-form-group">Loading channels…</div>}
+    >
+      <NotificationsEditorInner {...props} />
+    </QueryBoundary>
+  );
+}
+
+function NotificationsEditorInner({value, onChange, disabled}: Props) {
+  const data = useLazyLoadQuery<TNotificationChannelsQuery>(
+    notificationChannelsQuery,
+    {},
+    {fetchPolicy: 'store-and-network'},
+  );
+  const channels = useMemo(
+    () => data.notificationChannels.map(mapChannel),
+    [data.notificationChannels],
+  );
 
   function update(idx: number, patch: Partial<NotificationConfig>) {
     onChange(value.map((row, i) => (i === idx ? {...row, ...patch} : row)));
@@ -47,7 +69,7 @@ export function NotificationsEditor({value, onChange, disabled}: Props) {
     onChange([...value, {id: firstId, on: 'both'}]);
   }
 
-  const noChannels = !isLoading && channels.length === 0;
+  const noChannels = channels.length === 0;
 
   return (
     <div className="auto-form-group">
@@ -69,7 +91,7 @@ export function NotificationsEditor({value, onChange, disabled}: Props) {
       )}
       {value.map((row, idx) => {
         const channel = channels.find((c) => c.id === row.id);
-        const orphan = row.id && !channel && !isLoading;
+        const orphan = row.id && !channel;
         return (
           <div
             key={idx}

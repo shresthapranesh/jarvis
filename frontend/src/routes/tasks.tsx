@@ -1,8 +1,12 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 
+import {useAsyncAction} from '../hooks/useAsyncAction';
+import {
+  refreshRunningTasks,
+  useRunningTasks,
+  useRunningTasksLoaded,
+} from '../hooks/useRunningTasks';
 import {formatRelativeTime} from '../lib/api';
-import {fetchRunningTasks} from '../relay/RunningTasksQuery';
 import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
 import type {RunningTask, TaskKind} from '../lib/types';
 
@@ -17,21 +21,15 @@ const KIND_LABEL: Record<TaskKind, string> = {
 };
 
 function TasksPage() {
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const {data: tasks = [], isLoading} = useQuery({
-    queryKey: ['running-tasks'],
-    queryFn: fetchRunningTasks,
-    refetchInterval: (query) => ((query.state.data as RunningTask[] | undefined)?.length ?? 0) > 0 ? 2000 : false,
-  });
+  const tasks = useRunningTasks();
+  const loaded = useRunningTasksLoaded();
 
-  const stopMutation = useMutation({
-    mutationFn: (id: string) => commitStopRunningTask(id),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({queryKey: ['running-tasks']});
-    },
-  });
+  // Stopping is the one case the 2s poll would show late, so re-read at once.
+  const stopAction = useAsyncAction(
+    (id: string) => commitStopRunningTask(id).then(refreshRunningTasks),
+  );
 
   function goTo(task: RunningTask) {
     if (!task.parent_id) return;
@@ -54,7 +52,7 @@ function TasksPage() {
         </p>
       </header>
 
-      {isLoading ? (
+      {!loaded ? (
         <div className="tasks-empty">Loading…</div>
       ) : tasks.length === 0 ? (
         <div className="tasks-empty">No active tasks.</div>
@@ -100,8 +98,8 @@ function TasksPage() {
               <button
                 className="task-stop-btn"
                 type="button"
-                disabled={task.cancelled || stopMutation.isPending}
-                onClick={() => stopMutation.mutate(task.id)}
+                disabled={task.cancelled || stopAction.pending}
+                onClick={() => void stopAction.run(task.id)}
               >
                 Stop
               </button>

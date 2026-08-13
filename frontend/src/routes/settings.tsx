@@ -1,19 +1,26 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute} from '@tanstack/react-router';
 import {useEffect, useMemo, useState} from 'react';
-import {graphql} from 'react-relay';
+import {graphql, useLazyLoadQuery} from 'react-relay';
 import {fetchQuery} from 'relay-runtime';
 
+import type {McpServersQuery as TMcpServersQuery} from '../__generated__/McpServersQuery.graphql';
+import type {NotificationChannelsQuery as TNotificationChannelsQuery} from '../__generated__/NotificationChannelsQuery.graphql';
+import {useAsyncAction} from '../hooks/useAsyncAction';
 import type {NotificationChannelInput} from '../lib/api';
 import {commitCreateNotificationChannel} from '../relay/CreateNotificationChannelMutation';
 import {commitDeleteNotificationChannel} from '../relay/DeleteNotificationChannelMutation';
-import {fetchNotificationChannels} from '../relay/NotificationChannelsQuery';
+import {
+  mapChannel,
+  notificationChannelsQuery,
+  refreshNotificationChannels,
+} from '../relay/NotificationChannelsQuery';
 import {commitUpdateNotificationChannel} from '../relay/UpdateNotificationChannelMutation';
-import {fetchMcpServers} from '../relay/McpServersQuery';
+import {mcpServersQuery, refreshMcpServers} from '../relay/McpServersQuery';
 import {environment} from '../relay/environment';
 import {useToast} from '../lib/toast';
 import {ConfirmDialog} from '../components/ConfirmDialog';
 import {FormModal} from '../components/FormModal';
+import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
 import {CheckIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon} from '../components/icons';
 import type {
   NotificationChannel,
@@ -21,7 +28,18 @@ import type {
   NotificationChannelType,
 } from '../lib/types';
 
-export const Route = createFileRoute('/settings')({component: SettingsPage});
+export const Route = createFileRoute('/settings')({component: SettingsRoute});
+
+function SettingsRoute() {
+  return (
+    <QueryBoundary
+      label="Failed to load settings"
+      fallback={<div className="memory-empty">Loading…</div>}
+    >
+      <SettingsPage />
+    </QueryBoundary>
+  );
+}
 
 type SettingsTab = 'mcp' | 'notifications' | 'models';
 
@@ -69,25 +87,28 @@ function SettingsPage() {
     localStorage.setItem('settings-tab', tab);
   }, [tab]);
 
-  const {data: channels} = useQuery({
-    queryKey: ['notification-channels'],
-    queryFn: fetchNotificationChannels,
-  });
-
-  const {data: mcpData} = useQuery({
-    queryKey: ['mcp-servers'],
-    queryFn: fetchMcpServers,
-  });
-
-  const {data: models} = useQuery({
-    queryKey: ['models-catalog'],
-    queryFn: fetchModelCatalog,
-  });
+  // Same three queries the tabs below read; Relay serves them all from one
+  // store, so the counts cost no extra round trips.
+  const channelData = useLazyLoadQuery<TNotificationChannelsQuery>(
+    notificationChannelsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const mcpData = useLazyLoadQuery<TMcpServersQuery>(
+    mcpServersQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const modelData = useLazyLoadQuery<any>(
+    settingsModelsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
 
   const counts: Record<SettingsTab, number> = {
-    mcp: mcpData?.servers.length ?? 0,
-    notifications: channels?.length ?? 0,
-    models: models?.available?.length ?? 0,
+    mcp: mcpData.mcpServers.length,
+    notifications: channelData.notificationChannels.length,
+    models: modelData?.models?.available?.length ?? 0,
   };
 
   return (
@@ -154,69 +175,76 @@ async function fetchModelCatalog() {
   return res?.models as ModelCatalogData | undefined;
 }
 
+/**
+ * The chat model dropdown (`useModels`) reads this same query from the Relay
+ * store, so writing the fresh catalog back into the store updates it too — no
+ * cross-cache coordination needed.
+ */
+function refreshModelCatalog() {
+  return fetchModelCatalog().catch(() => undefined);
+}
+
 type ModelEditor = {mode: 'add'} | {mode: 'edit'; model: CatalogModel};
 
 function ModelsTab() {
-  const queryClient = useQueryClient();
   const toast = useToast();
-  const {data, isLoading} = useQuery({
-    queryKey: ['models-catalog'],
-    queryFn: fetchModelCatalog,
-  });
+  const queryData = useLazyLoadQuery<any>(
+    settingsModelsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const data = queryData?.models as ModelCatalogData | undefined;
 
   const [filter, setFilter] = useState('');
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [editor, setEditor] = useState<ModelEditor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CatalogModel | null>(null);
 
-  const refresh = () => queryClient.invalidateQueries({queryKey: ['models-catalog']});
+  const refresh = refreshModelCatalog;
 
-  const saveMut = useMutation({
-    mutationFn: async (draft: {id: string; label: string; provider: string}) => {
+  const saveMut = useAsyncAction(
+    async (draft: {id: string; label: string; provider: string}) => {
       const provider = draft.provider || null;
-      if (editor?.mode === 'edit') {
+      const wasEdit = editor?.mode === 'edit';
+      if (wasEdit) {
         const {commitUpdateModel} = await import('../relay/UpdateModelMutation');
         await commitUpdateModel(draft.id, draft.label, provider);
       } else {
         const {commitAddModel} = await import('../relay/AddModelMutation');
         await commitAddModel(draft.id, draft.label, provider);
       }
-    },
-    onSuccess: async () => {
-      toast.push(editor?.mode === 'edit' ? 'Model updated' : 'Model added', 'success');
+      toast.push(wasEdit ? 'Model updated' : 'Model added', 'success');
       setEditor(null);
       await refresh();
     },
-    onError: (e: Error) => toast.push(e.message, 'error'),
-  });
+    {onError: (e) => toast.push(e.message, 'error')},
+  );
 
-  const removeMut = useMutation({
-    mutationFn: async (id: string) => {
+  const removeMut = useAsyncAction(
+    async (id: string) => {
       const {commitRemoveModel} = await import('../relay/RemoveModelMutation');
       await commitRemoveModel(id);
-    },
-    onSuccess: async () => {
       toast.push('Model removed', 'success');
       setDeleteTarget(null);
       await refresh();
     },
-    onError: (e: Error) => {
-      setDeleteTarget(null);
-      toast.push(e.message, 'error');
+    {
+      onError: (e) => {
+        setDeleteTarget(null);
+        toast.push(e.message, 'error');
+      },
     },
-  });
+  );
 
-  const defaultMut = useMutation({
-    mutationFn: async (id: string) => {
+  const defaultMut = useAsyncAction(
+    async (id: string) => {
       const {commitSetDefaultModel} = await import('../relay/SetDefaultModelMutation');
       await commitSetDefaultModel(id);
-    },
-    onSuccess: async (_r, id) => {
       toast.push(`Default model set to ${id}`, 'success');
       await refresh();
     },
-    onError: (e: Error) => toast.push(e.message, 'error'),
-  });
+    {onError: (e) => toast.push(e.message, 'error')},
+  );
 
   const providers = useMemo(() => {
     const set = new Set<string>();
@@ -276,9 +304,7 @@ function ModelsTab() {
         </select>
       </div>
 
-      {isLoading ? (
-        <div className="memory-empty">Loading models…</div>
-      ) : filtered.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="memory-empty">No models match the filter.</div>
       ) : (
         <ul className="settings-model-grid">
@@ -321,8 +347,8 @@ function ModelsTab() {
                   ) : (
                     <button
                       className="artifact-btn small"
-                      disabled={defaultMut.isPending}
-                      onClick={() => defaultMut.mutate(m.id)}
+                      disabled={defaultMut.pending}
+                      onClick={() => void defaultMut.run(m.id)}
                     >
                       Set as default
                     </button>
@@ -338,8 +364,8 @@ function ModelsTab() {
         <ModelModal
           editor={editor}
           providers={data?.providers ?? []}
-          pending={saveMut.isPending}
-          onSubmit={(draft) => saveMut.mutate(draft)}
+          pending={saveMut.pending}
+          onSubmit={(draft) => void saveMut.run(draft)}
           onClose={() => setEditor(null)}
         />
       )}
@@ -357,7 +383,7 @@ function ModelsTab() {
         }
         confirmLabel="Remove"
         danger
-        onConfirm={() => deleteTarget && removeMut.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && void removeMut.run(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>
@@ -483,12 +509,16 @@ const EMPTY_CHANNEL: ChannelDraft = {name: '', type: 'telegram', target: ''};
 type ChannelEditor = {mode: 'add'} | {mode: 'edit'; channel: NotificationChannel};
 
 function NotificationsTab() {
-  const queryClient = useQueryClient();
   const toast = useToast();
-  const {data: channels = [], isLoading} = useQuery({
-    queryKey: ['notification-channels'],
-    queryFn: fetchNotificationChannels,
-  });
+  const channelData = useLazyLoadQuery<TNotificationChannelsQuery>(
+    notificationChannelsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const channels = useMemo(
+    () => channelData.notificationChannels.map(mapChannel),
+    [channelData.notificationChannels],
+  );
 
   const [editor, setEditor] = useState<ChannelEditor | null>(null);
   const [draft, setDraft] = useState<ChannelDraft>(EMPTY_CHANNEL);
@@ -496,8 +526,7 @@ function NotificationsTab() {
   const [deleteTarget, setDeleteTarget] = useState<NotificationChannel | null>(null);
   const [refsInUse, setRefsInUse] = useState<NotificationChannelReference[]>([]);
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({queryKey: ['notification-channels']});
+  const invalidate = refreshNotificationChannels;
 
   function openAdd() {
     setDraft(EMPTY_CHANNEL);
@@ -522,42 +551,42 @@ function NotificationsTab() {
     target: draft.target.trim(),
   };
 
-  const createMut = useMutation({
-    mutationFn: () => commitCreateNotificationChannel(input),
-    onSuccess: async () => {
+  const createMut = useAsyncAction(
+    async () => {
+      await commitCreateNotificationChannel(input);
       toast.push('Channel created', 'success');
       await invalidate();
-      closeEditor();
     },
-    onError: (e: Error) => setActionError(e.message),
-  });
+    {onSuccess: closeEditor, onError: (e) => setActionError(e.message)},
+  );
 
-  const updateMut = useMutation({
-    mutationFn: (id: string) => commitUpdateNotificationChannel(id, input),
-    onSuccess: async () => {
+  const updateMut = useAsyncAction(
+    async (id: string) => {
+      await commitUpdateNotificationChannel(id, input);
       toast.push('Channel updated', 'success');
       await invalidate();
-      closeEditor();
     },
-    onError: (e: Error) => setActionError(e.message),
-  });
+    {onSuccess: closeEditor, onError: (e) => setActionError(e.message)},
+  );
 
-  const deleteMut = useMutation({
-    mutationFn: (id: string) => commitDeleteNotificationChannel(id),
-    onSuccess: async (result) => {
+  const deleteMut = useAsyncAction(
+    async (id: string) => {
+      const result = await commitDeleteNotificationChannel(id);
       setDeleteTarget(null);
       if (result.ok) {
         toast.push('Channel deleted', 'success');
         setRefsInUse([]);
         await invalidate();
       } else {
+        // Still referenced by an automation/workflow — show what blocks it.
         setRefsInUse(result.references ?? []);
       }
     },
-    onError: (e: Error) => {
-      setDeleteTarget(null);
-      toast.push(e.message, 'error');
-    },
+    {
+      onError: (e) => {
+        setDeleteTarget(null);
+        toast.push(e.message, 'error');
+      },
   });
 
   const draftValid = Boolean(draft.name.trim() && draft.target.trim());
@@ -588,9 +617,7 @@ function NotificationsTab() {
         </div>
       )}
 
-      {isLoading ? (
-        <div className="memory-empty">Loading channels…</div>
-      ) : channels.length === 0 ? (
+      {channels.length === 0 ? (
         <div className="memory-empty">
           <p>No channels yet.</p>
           <p>Create one to get notified when automations finish, fail, or detect changes.</p>
@@ -636,12 +663,12 @@ function NotificationsTab() {
         subtitle="Referenced by name from automations and workflows."
         submitLabel={editor?.mode === 'edit' ? 'Save changes' : 'Create channel'}
         submitDisabled={!draftValid}
-        pending={createMut.isPending || updateMut.isPending}
+        pending={createMut.pending || updateMut.pending}
         error={actionError}
         onSubmit={() => {
           if (!editor) return;
-          if (editor.mode === 'add') createMut.mutate();
-          else updateMut.mutate(editor.channel.id);
+          if (editor.mode === 'add') void createMut.run();
+          else void updateMut.run(editor.channel.id);
         }}
         onClose={closeEditor}
       >
@@ -694,7 +721,7 @@ function NotificationsTab() {
         }
         confirmLabel="Delete"
         danger
-        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && void deleteMut.run(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>
@@ -802,80 +829,74 @@ function prettyJson(raw: string): string {
 }
 
 function McpTab() {
-  const queryClient = useQueryClient();
   const toast = useToast();
-  const {data, isLoading} = useQuery({
-    queryKey: ['mcp-servers'],
-    queryFn: fetchMcpServers,
-  });
+  const data = useLazyLoadQuery<TMcpServersQuery>(
+    mcpServersQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
 
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<{name: string; config: string} | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  const servers = data?.servers ?? [];
-  const tools = data?.tools ?? [];
+  const servers = data.mcpServers;
+  const tools = data.mcpTools;
 
-  const refresh = () => queryClient.invalidateQueries({queryKey: ['mcp-servers']});
+  const refresh = refreshMcpServers;
 
-  const addMut = useMutation({
-    mutationFn: async (form: McpFormState) => {
+  const addMut = useAsyncAction(
+    async (form: McpFormState) => {
       const json = formToConfigJson(form);
       JSON.parse(json); // validate before sending
       const {commitAddMcpServer} = await import('../relay/AddMcpServerMutation');
       await commitAddMcpServer(form.name.trim(), json);
-    },
-    onSuccess: () => {
       toast.push('MCP server added', 'success');
       setShowAdd(false);
-      refresh();
+      await refresh();
     },
-    onError: (e: any) => toast.push(e.message || String(e), 'error'),
-  });
+    {onError: (e) => toast.push(e.message || String(e), 'error')},
+  );
 
-  const updateMut = useMutation({
-    mutationFn: async (form: McpFormState) => {
+  const updateMut = useAsyncAction(
+    async (form: McpFormState) => {
       if (!editing) return;
       const json = formToConfigJson(form);
       JSON.parse(json);
       const {commitUpdateMcpServer} = await import('../relay/UpdateMcpServerMutation');
       await commitUpdateMcpServer(editing.name, json);
-    },
-    onSuccess: () => {
       toast.push('MCP server updated', 'success');
       setEditing(null);
-      refresh();
+      await refresh();
     },
-    onError: (e: any) => toast.push(e.message || String(e), 'error'),
-  });
+    {onError: (e) => toast.push(e.message || String(e), 'error')},
+  );
 
-  const removeMut = useMutation({
-    mutationFn: async (name: string) => {
+  const removeMut = useAsyncAction(
+    async (name: string) => {
       const {commitRemoveMcpServer} = await import('../relay/RemoveMcpServerMutation');
       await commitRemoveMcpServer(name);
-    },
-    onSuccess: () => {
       toast.push('MCP server removed', 'success');
       setDeleteTarget(null);
-      refresh();
+      await refresh();
     },
-    onError: (e: any) => {
-      setDeleteTarget(null);
-      toast.push(e.message || String(e), 'error');
+    {
+      onError: (e) => {
+        setDeleteTarget(null);
+        toast.push(e.message || String(e), 'error');
+      },
     },
-  });
+  );
 
-  const reloadMut = useMutation({
-    mutationFn: async () => {
+  const reloadMut = useAsyncAction(
+    async () => {
       const {commitReloadMcpServers} = await import('../relay/ReloadMcpServersMutation');
       await commitReloadMcpServers();
-    },
-    onSuccess: () => {
       toast.push('MCP reloaded', 'success');
-      refresh();
+      await refresh();
     },
-    onError: (e: any) => toast.push(e.message, 'error'),
-  });
+    {onError: (e) => toast.push(e.message, 'error')},
+  );
 
   function toolsForServer(server: {name: string}): string[] {
     if (servers.length === 1) return [...tools];
@@ -891,11 +912,11 @@ function McpTab() {
         <span className="settings-section-actions">
           <button
             className="artifact-btn"
-            onClick={() => reloadMut.mutate()}
-            disabled={reloadMut.isPending}
+            onClick={() => void reloadMut.run()}
+            disabled={reloadMut.pending}
             title="Reload MCP connections"
           >
-            {reloadMut.isPending ? 'Reloading…' : 'Reload'}
+            {reloadMut.pending ? 'Reloading…' : 'Reload'}
           </button>
           <button className="artifact-btn primary" onClick={() => setShowAdd(true)}>
             <PlusIcon size={14} /> Add server
@@ -903,9 +924,7 @@ function McpTab() {
         </span>
       </h2>
 
-      {isLoading ? (
-        <div className="memory-empty">Loading servers…</div>
-      ) : servers.length === 0 ? (
+      {servers.length === 0 ? (
         <div className="memory-empty">
           <p>No MCP servers configured.</p>
           <p>
@@ -989,8 +1008,8 @@ function McpTab() {
           title="Add MCP server"
           initial={null}
           onClose={() => setShowAdd(false)}
-          onSubmit={(f) => addMut.mutate(f)}
-          submitting={addMut.isPending}
+          onSubmit={(f) => void addMut.run(f)}
+          submitting={addMut.pending}
         />
       )}
 
@@ -999,8 +1018,8 @@ function McpTab() {
           title={`Edit ${editing.name}`}
           initial={editing}
           onClose={() => setEditing(null)}
-          onSubmit={(f) => updateMut.mutate(f)}
-          submitting={updateMut.isPending}
+          onSubmit={(f) => void updateMut.run(f)}
+          submitting={updateMut.pending}
         />
       )}
 
@@ -1015,7 +1034,7 @@ function McpTab() {
         }
         confirmLabel="Remove"
         danger
-        onConfirm={() => deleteTarget && removeMut.mutate(deleteTarget)}
+        onConfirm={() => deleteTarget && void removeMut.run(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

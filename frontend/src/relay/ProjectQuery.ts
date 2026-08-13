@@ -1,7 +1,7 @@
 import {graphql} from 'react-relay';
 import {fetchQuery} from 'relay-runtime';
 
-import type {ProjectQuery} from '../__generated__/ProjectQuery.graphql';
+import type {ProjectQuery, ProjectQuery$data} from '../__generated__/ProjectQuery.graphql';
 import type {ProjectDetail} from '../lib/types';
 import {environment} from './environment';
 import {decodeGlobalId, encodeGlobalId} from './globalId';
@@ -28,15 +28,13 @@ export const projectQuery = graphql`
   }
 `;
 
-export async function fetchProject(rawId: string): Promise<ProjectDetail | null> {
-  const data = await fetchQuery<ProjectQuery>(
-    environment,
-    projectQuery,
-    {id: encodeGlobalId('Project', rawId)},
-    {fetchPolicy: 'network-only'},
-  ).toPromise();
-  const p = data?.project;
-  if (!p) return null;
+export function projectQueryVars(rawId: string) {
+  return {id: encodeGlobalId('Project', rawId)};
+}
+
+type ProjectNode = NonNullable<ProjectQuery$data['project']>;
+
+export function mapProjectDetail(p: ProjectNode): ProjectDetail {
   return {
     id: decodeGlobalId(p.id),
     name: p.name,
@@ -54,4 +52,18 @@ export async function fetchProject(rawId: string): Promise<ProjectDetail | null>
       created_at: c.createdAt,
     })),
   };
+}
+
+export async function fetchProject(rawId: string): Promise<ProjectDetail | null> {
+  const data = await fetchQuery<ProjectQuery>(
+    environment,
+    projectQuery,
+    projectQueryVars(rawId),
+    {fetchPolicy: 'network-only'},
+  ).toPromise();
+  return data?.project ? mapProjectDetail(data.project) : null;
+}
+
+export function refreshProject(rawId: string) {
+  return fetchProject(rawId).catch(() => undefined);
 }

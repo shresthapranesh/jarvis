@@ -1,17 +1,21 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {marked} from 'marked';
 import {useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
-import {fetchAgentMemory} from '../relay/AgentMemoryQuery';
+import type {AgentMemoryQuery as TAgentMemoryQuery} from '../__generated__/AgentMemoryQuery.graphql';
+import type {MemoriesQuery as TMemoriesQuery} from '../__generated__/MemoriesQuery.graphql';
+import {useAsyncAction} from '../hooks/useAsyncAction';
+import type {MemoryItem, MemoryKind} from '../lib/types';
 import {commitAddMemory} from '../relay/AddMemoryMutation';
+import {agentMemoryQuery, refreshAgentMemory} from '../relay/AgentMemoryQuery';
 import {commitConsolidateMemory} from '../relay/ConsolidateMemoryMutation';
 import {commitDeleteMemory} from '../relay/DeleteMemoryMutation';
-import {fetchMemories} from '../relay/MemoriesQuery';
+import {memoriesQuery, refreshMemories} from '../relay/MemoriesQuery';
 import {commitUpdateMemoryItem} from '../relay/UpdateMemoryItemMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
-import type {Memory, MemoryItem, MemoryKind} from '../lib/types';
+import {useQueryRetry} from './QueryBoundary';
 
 const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
   fact: {label: 'Fact', hint: 'surfaced by relevance each turn'},
@@ -21,24 +25,25 @@ const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
 type Editor = {mode: 'add'} | {mode: 'edit'; item: MemoryItem};
 
 export function MemoryView() {
-  const queryClient = useQueryClient();
-
-  const {data: items, isLoading, error} = useQuery<MemoryItem[]>({
-    queryKey: ['memories'],
-    queryFn: fetchMemories,
-  });
-  const {data: blob} = useQuery<Memory>({
-    queryKey: ['memory'],
-    queryFn: fetchAgentMemory,
-  });
+  // Suspends on first load and throws on failure — the /memory route wraps this
+  // in a QueryBoundary, which supplies the retry fetchKey.
+  const fetchKey = useQueryRetry();
+  const memoryData = useLazyLoadQuery<TMemoriesQuery>(
+    memoriesQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey},
+  );
+  const blobData = useLazyLoadQuery<TAgentMemoryQuery>(
+    agentMemoryQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey},
+  );
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [text, setText] = useState('');
   const [kind, setKind] = useState<MemoryKind>('fact');
   const [deleteTarget, setDeleteTarget] = useState<MemoryItem | null>(null);
-
-  const invalidateItems = () => queryClient.invalidateQueries({queryKey: ['memories']});
 
   function closeEditor() {
     setEditor(null);
@@ -58,60 +63,57 @@ export function MemoryView() {
     setEditor({mode: 'edit', item: m});
   }
 
-  const addMutation = useMutation({
-    mutationFn: () => commitAddMemory(text.trim(), kind),
-    onSuccess: async () => {
-      await invalidateItems();
-      closeEditor();
-    },
-    onError: (e: Error) => setActionError(e.message),
+  // Each write leaves the Relay store correct via its own updater (or, for an
+  // edit, via plain normalization), so none of these refetch the list.
+  const addAction = useAsyncAction(() => commitAddMemory(text.trim(), kind), {
+    onSuccess: closeEditor,
+    onError: (e) => setActionError(e.message),
   });
 
-  const updateMutation = useMutation({
-    mutationFn: ({id, text: t}: {id: string; text: string}) =>
-      commitUpdateMemoryItem(id, t),
-    onSuccess: async () => {
-      await invalidateItems();
-      closeEditor();
-    },
-    onError: (e: Error) => setActionError(e.message),
+  const updateAction = useAsyncAction((id: string, t: string) => commitUpdateMemoryItem(id, t), {
+    onSuccess: closeEditor,
+    onError: (e) => setActionError(e.message),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => commitDeleteMemory(id),
-    onSuccess: async () => {
-      await invalidateItems();
+  const deleteAction = useAsyncAction((id: string) => commitDeleteMemory(id), {
+    onSuccess: () => {
       setDeleteTarget(null);
       setActionError(null);
     },
-    onError: (e: Error) => {
+    onError: (e) => {
       setDeleteTarget(null);
       setActionError(e.message);
     },
   });
 
-  const consolidateMutation = useMutation({
-    mutationFn: () => commitConsolidateMemory(),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({queryKey: ['memories']}),
-        queryClient.invalidateQueries({queryKey: ['memory']}),
-      ]);
-      setActionError(null);
+  // The exception: consolidation rewrites the whole set server-side, so there is
+  // no delta to apply — re-read both queries into the store.
+  const consolidateAction = useAsyncAction(
+    async () => {
+      await commitConsolidateMemory();
+      await Promise.all([refreshMemories(), refreshAgentMemory()]);
     },
-    onError: (e: Error) => setActionError(e.message),
-  });
+    {
+      onSuccess: () => setActionError(null),
+      onError: (e) => setActionError(e.message),
+    },
+  );
 
-  const all = items ?? [];
+  const all: MemoryItem[] = memoryData.memories.map((m) => ({
+    id: m.id,
+    kind: m.kind as MemoryKind,
+    text: m.text,
+    updated_at: m.updatedAt,
+  }));
   const core = all.filter((m) => m.kind === 'core');
   const facts = all.filter((m) => m.kind === 'fact');
-  const showBlobFallback =
-    all.length === 0 && !!blob?.exists && blob.content.trim().length > 0;
+  const blob = blobData.agentMemory;
+  const showBlobFallback = all.length === 0 && blob.exists && blob.content.trim().length > 0;
 
   function submitEditor() {
     if (!editor) return;
-    if (editor.mode === 'add') addMutation.mutate();
-    else updateMutation.mutate({id: editor.item.id, text: text.trim()});
+    if (editor.mode === 'add') void addAction.run();
+    else void updateAction.run(editor.item.id, text.trim());
   }
 
   function renderItem(m: MemoryItem) {
@@ -175,11 +177,11 @@ export function MemoryView() {
         <div className="memory-header-actions">
           <button
             className="artifact-btn"
-            onClick={() => consolidateMutation.mutate()}
-            disabled={consolidateMutation.isPending}
+            onClick={() => void consolidateAction.run()}
+            disabled={consolidateAction.pending}
             title="Run the LLM that extracts new memory items from recent conversations"
           >
-            {consolidateMutation.isPending ? 'Consolidating…' : 'Consolidate'}
+            {consolidateAction.pending ? 'Consolidating…' : 'Consolidate'}
           </button>
           <button className="artifact-btn primary" onClick={openAdd}>
             <PlusIcon size={14} /> Add memory
@@ -189,13 +191,7 @@ export function MemoryView() {
 
       {actionError && !editorOpen && <div className="memory-error">{actionError}</div>}
 
-      {isLoading ? (
-        <div className="memory-empty">Loading…</div>
-      ) : error ? (
-        <div className="memory-empty">
-          Failed to load memory: {(error as Error).message}
-        </div>
-      ) : showBlobFallback ? (
+      {showBlobFallback ? (
         <div className="memory-section">
           <h2 className="memory-section-title">Legacy memory</h2>
           <p className="memory-subtitle">
@@ -205,7 +201,7 @@ export function MemoryView() {
           </p>
           <div
             className="artifact-detail-content agent-bubble"
-            dangerouslySetInnerHTML={{__html: marked.parse(blob!.content) as string}}
+            dangerouslySetInnerHTML={{__html: marked.parse(blob.content) as string}}
           />
         </div>
       ) : all.length === 0 ? (
@@ -232,7 +228,7 @@ export function MemoryView() {
         subtitle="One self-contained fact per item — it's embedded as a whole for retrieval."
         submitLabel={editor?.mode === 'edit' ? 'Save changes' : 'Add memory'}
         submitDisabled={!text.trim()}
-        pending={addMutation.isPending || updateMutation.isPending}
+        pending={addAction.pending || updateAction.pending}
         error={actionError}
         onSubmit={submitEditor}
         onClose={closeEditor}
@@ -294,7 +290,7 @@ export function MemoryView() {
         }
         confirmLabel="Delete"
         danger
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && void deleteAction.run(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

@@ -1,47 +1,62 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
-import {useState} from 'react';
+import {useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
+
+import type {WorkflowListQuery as TWorkflowListQuery} from '../__generated__/WorkflowListQuery.graphql';
+import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
+import {useAsyncAction} from '../hooks/useAsyncAction';
 import {formatRelativeTime} from '../lib/api';
 import {commitCreateWorkflow} from '../relay/CreateWorkflowMutation';
 import {commitDeleteWorkflow} from '../relay/DeleteWorkflowMutation';
-import {fetchWorkflowList} from '../relay/WorkflowListQuery';
+import {mapWorkflow, refreshWorkflowList, workflowListQuery} from '../relay/WorkflowListQuery';
 
-export const Route = createFileRoute('/workflow/')({component: WorkflowListPage});
+export const Route = createFileRoute('/workflow/')({component: WorkflowListRoute});
+
+function WorkflowListRoute() {
+  return (
+    <QueryBoundary
+      label="Failed to load workflows"
+      fallback={<div className="wf-list-empty">Loading…</div>}
+    >
+      <WorkflowListPage />
+    </QueryBoundary>
+  );
+}
 
 function WorkflowListPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const {data: workflows = [], isLoading} = useQuery({
-    queryKey: ['workflows'],
-    queryFn: fetchWorkflowList,
-    staleTime: 10_000,
-  });
+  const data = useLazyLoadQuery<TWorkflowListQuery>(
+    workflowListQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const workflows = useMemo(() => data.workflows.map(mapWorkflow), [data.workflows]);
 
-  const deleteMutation = useMutation({
-    mutationFn: commitDeleteWorkflow,
-    onSuccess: () => {
-      setConfirmDeleteId(null);
-      queryClient.invalidateQueries({queryKey: ['workflows']});
+  const deleteAction = useAsyncAction(
+    async (id: string) => {
+      await commitDeleteWorkflow(id);
+      await refreshWorkflowList();
     },
-  });
+    {onSuccess: () => setConfirmDeleteId(null)},
+  );
 
-  const createMutation = useMutation({
-    mutationFn: commitCreateWorkflow,
-    onSuccess: (wf) => {
-      queryClient.invalidateQueries({queryKey: ['workflows']});
+  const createAction = useAsyncAction(
+    async (input: {name: string; description: string | null; definition: string}) => {
+      const wf = await commitCreateWorkflow(input);
+      await refreshWorkflowList();
       void navigate({to: '/workflow/$id', params: {id: wf.id}});
     },
-  });
+  );
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!newName.trim()) return;
-    createMutation.mutate({
+    void createAction.run({
       name: newName.trim(),
       description: newDesc.trim() || null,
       definition: '{"nodes":[],"edges":[]}',
@@ -77,16 +92,15 @@ function WorkflowListPage() {
           <button
             type="submit"
             className="auto-new-btn"
-            disabled={createMutation.isPending || !newName.trim()}
+            disabled={createAction.pending || !newName.trim()}
           >
-            {createMutation.isPending ? 'Creating…' : 'Create'}
+            {createAction.pending ? 'Creating…' : 'Create'}
           </button>
         </form>
       )}
 
-      {isLoading && <div className="wf-list-empty">Loading…</div>}
 
-      {!isLoading && workflows.length === 0 && (
+      {workflows.length === 0 && (
         <div className="wf-list-empty">No workflows yet. Create one above.</div>
       )}
 
@@ -131,10 +145,10 @@ function WorkflowListPage() {
               <button
                 className="wf-delete-node-btn"
                 style={{marginTop: 0}}
-                disabled={deleteMutation.isPending}
-                onClick={() => deleteMutation.mutate(confirmDeleteId)}
+                disabled={deleteAction.pending}
+                onClick={() => void deleteAction.run(confirmDeleteId)}
               >
-                {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                {deleteAction.pending ? 'Deleting…' : 'Delete'}
               </button>
             </div>
           </div>

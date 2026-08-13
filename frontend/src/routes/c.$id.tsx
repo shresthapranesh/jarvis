@@ -1,4 +1,3 @@
-import {useQueryClient} from '@tanstack/react-query';
 import {createFileRoute, Link, useNavigate} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {useLazyLoadQuery, usePaginationFragment} from 'react-relay';
@@ -16,6 +15,7 @@ import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {RunSpine} from '../components/RunSpine';
+import {refreshRunningTasks} from '../hooks/useRunningTasks';
 import {useTaskEvents} from '../hooks/useTaskEvents';
 import type {
   MediaAttachment,
@@ -94,7 +94,6 @@ function ConversationPage() {
     budget: liveBudget,
   } = useTaskEvents(streamTaskId, id) as any;
 
-  const queryClient = useQueryClient();
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
 
   // Once the paginated cache has the running/done message with this id, the
@@ -332,7 +331,7 @@ function ConversationPage() {
       // Refetch the newest page so the user msg + running assistant rows land
       // in the Relay store; usePaginationFragment re-renders automatically.
       await loadConversationPage(id);
-      void queryClient.invalidateQueries({queryKey: ['running-tasks']});
+      void refreshRunningTasks();
       if (attachments.some((a) => a.type === 'document')) {
         void refreshDocumentList(id);
       }

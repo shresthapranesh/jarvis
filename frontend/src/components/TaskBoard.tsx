@@ -1,10 +1,13 @@
-import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {Link} from '@tanstack/react-router';
-import {useState} from 'react';
+import {useCallback, useMemo, useState} from 'react';
+import {useLazyLoadQuery} from 'react-relay';
 
+import type {BoardTasksQuery as TBoardTasksQuery} from '../__generated__/BoardTasksQuery.graphql';
+import {useAsyncAction} from '../hooks/useAsyncAction';
 import {useBoardTaskEvents} from '../hooks/useBoardTaskEvents';
+import {usePollingRefresh} from '../hooks/usePollingRefresh';
 import {commitAnswerBoardTask} from '../relay/AnswerBoardTaskMutation';
-import {fetchBoardTasks} from '../relay/BoardTasksQuery';
+import {boardTasksQuery, mapBoardTask, refreshBoardTasks} from '../relay/BoardTasksQuery';
 import {commitCreateBoardTask} from '../relay/CreateBoardTaskMutation';
 import {commitDecomposeBoardTask} from '../relay/DecomposeBoardTaskMutation';
 import {commitDeleteBoardTask} from '../relay/DeleteBoardTaskMutation';
@@ -13,6 +16,7 @@ import {commitStopBoardTask} from '../relay/StopBoardTaskMutation';
 import {commitUpdateBoardTask} from '../relay/UpdateBoardTaskMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
+import {useQueryRetry} from './QueryBoundary';
 import {ArchiveIcon, EditIcon, PauseIcon, PlayIcon, PlusIcon, SplitIcon, StopIcon, TrashIcon} from './icons';
 import type {BoardTask, BoardTaskStatus} from '../lib/types';
 
@@ -56,8 +60,7 @@ function RunTail({runId, onFinished}: {runId: string | null; onFinished: () => v
 /** Answer box shown on blocked cards whose agent asked for input. */
 function AnswerBox({taskId, onAnswered}: {taskId: string; onAnswered: () => void}) {
   const [answer, setAnswer] = useState('');
-  const answerMutation = useMutation({
-    mutationFn: () => commitAnswerBoardTask(taskId, answer.trim()),
+  const answerAction = useAsyncAction(() => commitAnswerBoardTask(taskId, answer.trim()), {
     onSuccess: () => {
       setAnswer('');
       onAnswered();
@@ -74,33 +77,37 @@ function AnswerBox({taskId, onAnswered}: {taskId: string; onAnswered: () => void
       />
       <button
         className="artifact-btn primary board-answer-btn"
-        disabled={!answer.trim() || answerMutation.isPending}
-        onClick={() => answerMutation.mutate()}
+        disabled={!answer.trim() || answerAction.pending}
+        onClick={() => void answerAction.run()}
       >
-        {answerMutation.isPending ? 'Resuming…' : 'Answer & resume'}
+        {answerAction.pending ? 'Resuming…' : 'Answer & resume'}
       </button>
-      {answerMutation.error && (
-        <span className="board-card-reason">{(answerMutation.error as Error).message}</span>
+      {answerAction.error && (
+        <span className="board-card-reason">{answerAction.error.message}</span>
       )}
     </div>
   );
 }
 
 export function TaskBoard() {
-  const queryClient = useQueryClient();
+  const data = useLazyLoadQuery<TBoardTasksQuery>(
+    boardTasksQuery,
+    {includeArchived: false},
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
+  );
+  const tasks = useMemo(() => data.boardTasks.map(mapBoardTask), [data.boardTasks]);
 
-  const {data: tasks, isLoading, error} = useQuery<BoardTask[]>({
-    queryKey: ['board-tasks'],
-    queryFn: () => fetchBoardTasks(false),
-    refetchInterval: 3000,
-  });
+  const refresh = useCallback(() => refreshBoardTasks(false), []);
+
+  // Cards move on their own — the dispatcher promotes and claims tasks server
+  // side — so the board polls regardless of what this user is doing.
+  usePollingRefresh(refresh, 3000);
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<BoardTask | null>(null);
 
-  const invalidate = () => queryClient.invalidateQueries({queryKey: ['board-tasks']});
 
   function closeEditor() {
     setEditor(null);
@@ -126,8 +133,8 @@ export function TaskBoard() {
     setEditor({mode: 'edit', task: t});
   }
 
-  const createMutation = useMutation({
-    mutationFn: async () => {
+  const createAction = useAsyncAction(
+    async () => {
       const decompose = draft.decompose && draft.parentIds.length === 0;
       const task = await commitCreateBoardTask({
         title: draft.title.trim(),
@@ -138,70 +145,82 @@ export function TaskBoard() {
         start: decompose ? false : draft.start,
       });
       if (decompose) await commitDecomposeBoardTask(task.id);
-      return task;
+      await refresh();
     },
-    onSuccess: async () => {
-      await invalidate();
-      closeEditor();
+    {
+      onSuccess: closeEditor,
+      onError: (e) => {
+        // Create may have succeeded with only the decompose step failing —
+        // refresh so the parked task is visible next to the error.
+        void refresh();
+        setActionError(e.message);
+      },
     },
-    onError: async (e: Error) => {
-      // Create may have succeeded with only the decompose step failing —
-      // refresh so the parked task is visible next to the error.
-      await invalidate();
-      setActionError(e.message);
-    },
-  });
+  );
 
-  const decomposeMutation = useMutation({
-    mutationFn: (id: string) => commitDecomposeBoardTask(id),
-    onSuccess: () => invalidate(),
-    onError: (e: Error) => setActionError(e.message),
-  });
+  // react-query exposed the in-flight mutation's argument; without it the
+  // per-card spinner needs the id tracked explicitly.
+  const [decomposingId, setDecomposingId] = useState<string | null>(null);
+  const decomposeAction = useAsyncAction(
+    async (id: string) => {
+      setDecomposingId(id);
+      try {
+        await commitDecomposeBoardTask(id);
+        await refresh();
+      } finally {
+        setDecomposingId(null);
+      }
+    },
+    {onError: (e) => setActionError(e.message)},
+  );
 
-  const updateMutation = useMutation({
-    mutationFn: ({id}: {id: string}) =>
-      commitUpdateBoardTask(id, {
+  const updateAction = useAsyncAction(
+    async (id: string) => {
+      await commitUpdateBoardTask(id, {
         title: draft.title.trim(),
         body: draft.body.trim() || undefined,
         priority: draft.priority,
         parentIds: draft.parentIds,
-      }),
-    onSuccess: async () => {
-      await invalidate();
-      closeEditor();
+      });
+      await refresh();
     },
-    onError: (e: Error) => setActionError(e.message),
-  });
+    {onSuccess: closeEditor, onError: (e) => setActionError(e.message)},
+  );
 
-  const moveMutation = useMutation({
-    mutationFn: ({id, status}: {id: string; status: 'todo' | 'ready' | 'done' | 'archived'}) =>
-      commitSetBoardTaskStatus(id, status),
-    onSuccess: () => invalidate(),
-    onError: (e: Error) => setActionError(e.message),
-  });
-
-  const stopMutation = useMutation({
-    mutationFn: (id: string) => commitStopBoardTask(id),
-    onSuccess: () => invalidate(),
-    onError: (e: Error) => setActionError(e.message),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => commitDeleteBoardTask(id),
-    onSuccess: async () => {
-      await invalidate();
-      setDeleteTarget(null);
+  const moveAction = useAsyncAction(
+    async (id: string, status: 'todo' | 'ready' | 'done' | 'archived') => {
+      await commitSetBoardTaskStatus(id, status);
+      await refresh();
     },
-    onError: (e: Error) => {
-      setDeleteTarget(null);
-      setActionError(e.message);
+    {onError: (e) => setActionError(e.message)},
+  );
+
+  const stopAction = useAsyncAction(
+    async (id: string) => {
+      await commitStopBoardTask(id);
+      await refresh();
     },
-  });
+    {onError: (e) => setActionError(e.message)},
+  );
+
+  const deleteAction = useAsyncAction(
+    async (id: string) => {
+      await commitDeleteBoardTask(id);
+      await refresh();
+    },
+    {
+      onSuccess: () => setDeleteTarget(null),
+      onError: (e) => {
+        setDeleteTarget(null);
+        setActionError(e.message);
+      },
+    },
+  );
 
   function submitEditor() {
     if (!editor) return;
-    if (editor.mode === 'add') createMutation.mutate();
-    else updateMutation.mutate({id: editor.task.id});
+    if (editor.mode === 'add') void createAction.run();
+    else void updateAction.run(editor.task.id);
   }
 
   const all = tasks ?? [];
@@ -236,14 +255,14 @@ export function TaskBoard() {
           )}
         </div>
         {t.body && <p className="board-card-body">{t.body}</p>}
-        {t.status === 'running' && <RunTail runId={t.run_id} onFinished={invalidate} />}
+        {t.status === 'running' && <RunTail runId={t.run_id} onFinished={refresh} />}
         {t.status === 'blocked' && t.blocked_reason && (
           <p className={`board-card-reason${t.blocked_kind === 'needs_input' ? ' board-card-reason--question' : ''}`}>
             {t.blocked_reason}
           </p>
         )}
         {t.status === 'blocked' && t.blocked_kind === 'needs_input' && (
-          <AnswerBox taskId={t.id} onAnswered={invalidate} />
+          <AnswerBox taskId={t.id} onAnswered={refresh} />
         )}
         {t.status === 'done' && t.summary && (
           <p className="board-card-summary">{t.summary}</p>
@@ -253,7 +272,7 @@ export function TaskBoard() {
             <button
               className="icon-btn"
               title={t.status === 'blocked' ? 'Unblock and queue' : 'Queue for dispatch'}
-              onClick={() => moveMutation.mutate({id: t.id, status: 'ready'})}
+              onClick={() => void moveAction.run(t.id, 'ready')}
             >
               <PlayIcon size={13} />
             </button>
@@ -262,17 +281,17 @@ export function TaskBoard() {
             <button
               className="icon-btn"
               title="Split into subtasks with a planner LLM"
-              disabled={decomposeMutation.isPending && decomposeMutation.variables === t.id}
-              onClick={() => decomposeMutation.mutate(t.id)}
+              disabled={decomposingId === t.id}
+              onClick={() => void decomposeAction.run(t.id)}
             >
-              <SplitIcon size={13} className={decomposeMutation.isPending && decomposeMutation.variables === t.id ? 'board-split-busy' : undefined} />
+              <SplitIcon size={13} className={decomposingId === t.id ? 'board-split-busy' : undefined} />
             </button>
           )}
           {t.status === 'done' && (
             <button
               className="icon-btn"
               title="Re-run"
-              onClick={() => moveMutation.mutate({id: t.id, status: 'ready'})}
+              onClick={() => void moveAction.run(t.id, 'ready')}
             >
               <PlayIcon size={13} />
             </button>
@@ -281,7 +300,7 @@ export function TaskBoard() {
             <button
               className="icon-btn"
               title="Park in todo"
-              onClick={() => moveMutation.mutate({id: t.id, status: 'todo'})}
+              onClick={() => void moveAction.run(t.id, 'todo')}
             >
               <PauseIcon size={13} />
             </button>
@@ -290,7 +309,7 @@ export function TaskBoard() {
             <button
               className="icon-btn icon-btn--danger"
               title="Stop run"
-              onClick={() => stopMutation.mutate(t.id)}
+              onClick={() => void stopAction.run(t.id)}
             >
               <StopIcon size={13} />
             </button>
@@ -304,7 +323,7 @@ export function TaskBoard() {
             <button
               className="icon-btn"
               title="Archive"
-              onClick={() => moveMutation.mutate({id: t.id, status: 'archived'})}
+              onClick={() => void moveAction.run(t.id, 'archived')}
             >
               <ArchiveIcon size={13} />
             </button>
@@ -354,11 +373,7 @@ export function TaskBoard() {
 
       {actionError && !editor && <div className="memory-error">{actionError}</div>}
 
-      {isLoading ? (
-        <div className="memory-empty">Loading…</div>
-      ) : error ? (
-        <div className="memory-empty">Failed to load board: {(error as Error).message}</div>
-      ) : (
+      {(
         <div className="board-columns">
           {COLUMNS.map((col) => {
             const cards = all.filter((t) => t.status === col.key);
@@ -381,7 +396,7 @@ export function TaskBoard() {
         subtitle="The body is the instruction the agent follows when the task runs."
         submitLabel={editor?.mode === 'edit' ? 'Save changes' : 'Create task'}
         submitDisabled={!draft.title.trim()}
-        pending={createMutation.isPending || updateMutation.isPending}
+        pending={createAction.pending || updateAction.pending}
         error={actionError}
         footerExtra={
           editor?.mode === 'add' ? (
@@ -499,7 +514,7 @@ export function TaskBoard() {
         }
         confirmLabel="Delete"
         danger
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() => deleteTarget && void deleteAction.run(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>

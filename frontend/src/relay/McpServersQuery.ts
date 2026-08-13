@@ -25,3 +25,7 @@ export async function fetchMcpServers() {
     tools: data?.mcpTools ?? [],
   };
 }
+
+export function refreshMcpServers() {
+  return fetchMcpServers().catch(() => undefined);
+}

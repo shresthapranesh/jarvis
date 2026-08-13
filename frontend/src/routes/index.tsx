@@ -1,16 +1,15 @@
-import {useQuery} from '@tanstack/react-query';
 import {createFileRoute, Link, useNavigate} from '@tanstack/react-router';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
 import {InputBox} from '../components/InputBox';
+import {useRunningTasks} from '../hooks/useRunningTasks';
 import {greeting, relativeTime} from '../lib/format';
-import type {MediaAttachment, RunningTask} from '../lib/types';
+import type {MediaAttachment} from '../lib/types';
 import {uploadStagedAttachment} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {decodeGlobalId} from '../relay/globalId';
-import {fetchRunningTasks} from '../relay/RunningTasksQuery';
 import {commitStartTask} from '../relay/StartTaskMutation';
 
 export const Route = createFileRoute('/')({component: IndexPage});
@@ -40,13 +39,7 @@ function IndexPage() {
     [convData.conversations],
   );
 
-  const {data: runningTasks} = useQuery({
-    queryKey: ['running-tasks'],
-    queryFn: fetchRunningTasks,
-    refetchInterval: (query) =>
-      ((query.state.data as RunningTask[] | undefined)?.length ?? 0) > 0 ? 2000 : false,
-  });
-  const running = runningTasks ?? [];
+  const running = useRunningTasks();
 
   async function handleSubmit(query: string, model: string, attachments: MediaAttachment[]) {
     setLoading(true);

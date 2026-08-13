@@ -21,6 +21,10 @@ export const workflowDetailQuery = graphql`
   }
 `;
 
+export function workflowDetailVars(rawId: string) {
+  return {id: encodeGlobalId('Workflow', rawId)};
+}
+
 export async function fetchWorkflow(rawId: string): Promise<Workflow> {
   const data = await fetchQuery<WorkflowDetailQuery>(
     environment,
@@ -30,4 +34,8 @@ export async function fetchWorkflow(rawId: string): Promise<Workflow> {
   ).toPromise();
   if (!data?.workflow) throw new Error('Workflow not found');
   return mapWorkflow(data.workflow);
+}
+
+export function refreshWorkflow(rawId: string) {
+  return fetchWorkflow(rawId).catch(() => undefined);
 }

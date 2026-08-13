@@ -41,3 +41,7 @@ export async function fetchProjects(): Promise<Project[]> {
   ).toPromise();
   return (data?.projects ?? []).map(mapProject);
 }
+
+export function refreshProjects() {
+  return fetchProjects().catch(() => undefined);
+}

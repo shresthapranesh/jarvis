@@ -1,4 +1,3 @@
-import {useQueryClient} from '@tanstack/react-query';
 import {Link, useNavigate, useParams} from '@tanstack/react-router';
 import {useEffect, useMemo, useState} from 'react';
 import {createPortal} from 'react-dom';
@@ -11,6 +10,7 @@ import {commitDeleteConversation} from '../relay/DeleteConversationMutation';
 import {decodeGlobalId} from '../relay/globalId';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {ConfirmDialog} from './ConfirmDialog';
+import {useQueryRetry} from './QueryBoundary';
 
 interface MenuAnchor {
   id: string;
@@ -22,7 +22,9 @@ export function ConversationList() {
   const data = useLazyLoadQuery<ConversationListQuery>(
     conversationListQuery,
     {},
-    {fetchPolicy: 'store-and-network'},
+    // fetchKey is what makes the enclosing QueryBoundary's Retry button work —
+    // without it a retry re-reads Relay's cached error and throws again.
+    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
   );
 
   const conversations = useMemo(
@@ -62,7 +64,6 @@ export function ConversationList() {
 
   const params = useParams({strict: false}) as {id?: string};
   const activeId = params.id;
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -104,7 +105,6 @@ export function ConversationList() {
     if (!title) return;
     await commitUpdateConversation(id, {title});
     await refreshConversationList();
-    await queryClient.invalidateQueries({queryKey: ['conversation', id]});
   }
 
   async function togglePin(id: string, pinned: boolean) {
