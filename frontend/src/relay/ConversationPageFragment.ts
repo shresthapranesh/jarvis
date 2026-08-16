@@ -26,6 +26,10 @@ export const conversationPageFragment = graphql`
           status
           inputTokens
           outputTokens
+          ttftMs
+          llmMs
+          prefillTps
+          evalTps
           createdAt
           steps {
             id

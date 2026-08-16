@@ -743,8 +743,14 @@ body {
 }
 
 @keyframes stream-fade {
-  from { opacity: 0; transform: translateY(2px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* User bubble */
@@ -1155,6 +1161,14 @@ body {
   white-space: nowrap;
   padding: 3px 4px;
   cursor: default;
+}
+
+/* pp = prompt processing (prefill), tg = text generation (eval) — the
+   llama.cpp shorthand, spelled out in the badge's title. */
+.perf-badge {
+  display: inline-flex;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Error */
@@ -7770,7 +7784,6 @@ audio.artifact-media {
     padding-right: var(--s5);
   }
 }
-
 
 /* ══════════════════════════════════════════════════════════════════════════
    Mobile / touch

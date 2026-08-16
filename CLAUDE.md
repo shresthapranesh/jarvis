@@ -251,7 +251,7 @@ Conventions:
 - `running_tasks` query (`queries/task_run.py`) lists everything currently in `_tasks` for the Tasks page; finished tasks linger ~5s before being popped so the UI can show their terminal state.
 
 ### Chat events
-`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `budget_exceeded`, `done`, `stopped`, `error`
+`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `budget_exceeded`, `budget_update`, `perf_update`, `done`, `stopped`, `error`
 
 > `browser_step` currently has **no producer** — its only emitter was `tools/browser_agent.py`, which was deleted along with the `browser-use` dependency. The consumer plumbing (`core/streaming.py`, `BrowserStepEvent` in the `ChatEvent` union, the frontend hook) is left in place because removing a union member is a GraphQL schema change requiring a Relay regeneration. Wire a new emitter to it, or remove the plumbing as its own change.
 
@@ -429,6 +429,44 @@ Visual graph executor (`workflow/engine.py`):
   (`server/graphql/types/events.py`) → `useTaskEvents.ts` surfaces error. Chat finalizes
   with budget message; board sets `blocked_kind="budget"`; workflow raises to error.
 - Runner: `RunnerConfig` holds `budget_max_*` defaults, merged into `JarvisRunner.get_budget_limits()`.
+
+## Throughput Tracking (prefill / eval tok/s)
+`core/perf.py` measures how *fast* a run went, which the token counters can't answer:
+`UsageAccumulator`/`BudgetTracker` carry no timing, and `BudgetTracker.snapshot()['elapsed_seconds']`
+spans tools, retrieval, and compaction, so it is not a throughput denominator. `PerfCallbackHandler`
+times each LLM call and splits it at the first streamed chunk — **prefill** (start → first token,
+i.e. prompt processing) and **decode** (first token → end, i.e. generation/"eval") — feeding a
+per-run `PerfTracker`. Aggregates are **token-weighted** (Σtokens / Σseconds), never a mean of
+per-call rates. Callbacks propagate, so worker/subagent calls are included, same scope as `UsageAccumulator`.
+
+Three things make a naive `tokens / elapsed` wrong, and each has a guard:
+- **Prompt caching.** A cache hit does almost no prefill work. `cache_read` (LangChain folds it
+  into `input_tokens` and reports the split under `usage_metadata.input_token_details`) is
+  subtracted; a *fully* cached call is excluded from the prefill aggregate rather than logged
+  as 0 tok/s. Without this, prefill on a cached turn reads several times the real rate.
+- **Buffered streams.** The split assumes the first chunk marks the start of generation. A provider
+  that flushes at the end violates that: measured on `google_genai:gemma-4-31b-it`, a short reply
+  landed 7 tokens in the final 12ms — an apparent 570 tok/s from a model that runs at ~38.
+  The guard is a floor on the decode *span* (`_MIN_DECODE_SECONDS`, 0.25s), **not** on chunk count
+  or tokens-per-chunk — a real 74-token generation arrives in as few as 6 coarse chunks and is
+  perfectly measurable. Below the floor the call is `source="prefill_only"`: eval withheld, prefill
+  kept (a swallowed flush inflates TTFT, which *understates* prefill — wrong in the safe direction).
+- **Provider-reported durations win.** Ollama's `prompt_eval_duration`/`eval_duration` are measured
+  server-side and exclude queueing/transport; when both are present the call is `source="provider"`.
+
+`source` is one of `provider` | `measured` | `prefill_only` | `unsplit` (nothing streamed).
+**Any rate may legitimately be `None`** — callers must render "unknown", never 0.
+
+Wiring: `_run_agent_task` creates the `PerfTracker` (`TaskState._perf_tracker`) and passes it to
+`get_plugin_manager(perf_tracker=...)` / `build_callbacks(perf_tracker=...)` (`PerfPlugin` in
+`core/plugins.py`), appending the handler directly if a plugin manager didn't. Per LLM call it emits
+`perf_update` → `PerfUpdateEvent` → `useTaskEvents.ts` (`perf` state) → the ActivitySidebar budget
+box. On finalize, `PerfTracker.message_perf()` persists `ttft_ms`/`llm_ms`/`prefill_tps`/`eval_tps`
+onto the `Message` row (nullable Floats, migrated in `db/engine.py:_migrate`), rendered by
+`PerfBadge` in `MessageBubble.tsx` as `TTFT / pp / tg` (llama.cpp's shorthand). `ttft_ms` is the
+**first** call's TTFT — what the user waited for; `llm_ms` sums every call's round trip and so is
+always less than the wall-clock turn. Only chat persists; other runtimes get the measurement
+through `build_callbacks` when they pass a tracker.
 
 ## MCP Tool Loader (ADK McpToolset analog)
 - `core/mcp.py`: `load_mcp_server_configs()` merges env `JARVIS_MCP_SERVERS` (JSON dict or list)

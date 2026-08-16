@@ -32,6 +32,13 @@ export interface Message {
   // produced this assistant message; null for user messages and older rows.
   input_tokens: number | null;
   output_tokens: number | null;
+  // Throughput for the run behind this message. Null on user messages, on rows
+  // written before the columns existed, and whenever the provider streamed
+  // nothing to split prefill from decode against — never rendered as 0.
+  ttft_ms: number | null;
+  llm_ms: number | null;
+  prefill_tps: number | null;
+  eval_tps: number | null;
   created_at: string;
   steps: Step[];
 }
@@ -56,6 +63,10 @@ export interface RelayMessageNode {
   status: string;
   inputTokens: number | null | undefined;
   outputTokens: number | null | undefined;
+  ttftMs?: number | null | undefined;
+  llmMs?: number | null | undefined;
+  prefillTps?: number | null | undefined;
+  evalTps?: number | null | undefined;
   createdAt: string;
   steps: ReadonlyArray<{
     id: string;
@@ -455,6 +466,10 @@ export function mapMessage(m: RelayMessageNode): Message {
     status: m.status,
     input_tokens: m.inputTokens ?? null,
     output_tokens: m.outputTokens ?? null,
+    ttft_ms: m.ttftMs ?? null,
+    llm_ms: m.llmMs ?? null,
+    prefill_tps: m.prefillTps ?? null,
+    eval_tps: m.evalTps ?? null,
     created_at: m.createdAt,
     steps: m.steps.map((s) => ({
       id: s.id,

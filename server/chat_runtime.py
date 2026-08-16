@@ -24,6 +24,7 @@ from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_
 from core.config import get_config
 from core.invocation_context import InvocationContext
 from core.log_callback import AgentLogger, UsageAccumulator
+from core.perf import PerfCallbackHandler, PerfTracker
 from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
 from core.schemas import AttachmentIn
 from core.state import (
@@ -65,6 +66,8 @@ async def _run_agent_task(
     limits = get_budget_limits_for_task("chat")
     tracker = BudgetTracker(limits, task_state=state)
     state._budget_tracker = tracker
+    perf = PerfTracker(task_state=state)
+    state._perf_tracker = perf
 
     # plugin system: runner provides callbacks via PluginManager
     try:
@@ -72,7 +75,7 @@ async def _run_agent_task(
 
         _r = get_runner_or_none()
         if _r is not None:
-            _pm = _r.get_plugin_manager(tracker=tracker, task_state=state)
+            _pm = _r.get_plugin_manager(tracker=tracker, task_state=state, perf_tracker=perf)
             callbacks = _pm.get_callback_handlers()
             # extract UsageAccumulator and Budget handlers from plugin list for backwards compat references
             usage = next((h for h in callbacks if h.__class__.__name__ == "UsageAccumulator"), None)
@@ -93,7 +96,12 @@ async def _run_agent_task(
 
         usage = _UA()
         budget_cb = _BC(tracker, task_state=state)
-        callbacks = [_AL(), usage, budget_cb]
+        callbacks: list[Any] = [_AL(), usage, budget_cb]
+
+    # Perf is measured on every chat run regardless of which branch built the
+    # callback list — a plugin manager from an older runner won't know the kwarg.
+    if not any(h.__class__.__name__ == "PerfCallbackHandler" for h in callbacks):
+        callbacks.append(PerfCallbackHandler(perf))
 
     status = "error"
     project_id: str | None = None
@@ -105,6 +113,7 @@ async def _run_agent_task(
             task_id, content, final_status,
             input_tokens=usage.input_tokens if usage.has_usage else None,
             output_tokens=usage.output_tokens if usage.has_usage else None,
+            perf=perf.message_perf(),
         )
 
     try:

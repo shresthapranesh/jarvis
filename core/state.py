@@ -114,6 +114,8 @@ class TaskState:
     budget_exceeded: bool = False
     budget_reason: str | None = None
     _budget_tracker: object | None = field(default=None, repr=False)  # BudgetTracker, Any to avoid cycle
+    # ── Throughput tracking (prefill / eval tok/s) ─────────────────────────
+    _perf_tracker: object | None = field(default=None, repr=False)  # PerfTracker, Any to avoid cycle
 
 
 _tasks: dict[str, TaskState] = {}

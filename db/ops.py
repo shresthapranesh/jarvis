@@ -90,11 +90,23 @@ async def update_message_usage(
     message_id: str,
     input_tokens: int | None,
     output_tokens: int | None,
+    perf: dict[str, float | None] | None = None,
 ) -> None:
+    """Record token usage and, when measured, throughput for one message.
+
+    `perf` carries the keys produced by `PerfTracker.message_perf()`. Usage and
+    throughput are written together because they come from the same run and a
+    second round trip would just be a second commit on the same row.
+    """
     msg = await session.get(Message, message_id)
     if msg:
         msg.input_tokens = input_tokens
         msg.output_tokens = output_tokens
+        if perf:
+            msg.ttft_ms = perf.get("ttft_ms")
+            msg.llm_ms = perf.get("llm_ms")
+            msg.prefill_tps = perf.get("prefill_tps")
+            msg.eval_tps = perf.get("eval_tps")
         await session.commit()
 
 

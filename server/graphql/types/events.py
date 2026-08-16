@@ -142,6 +142,24 @@ class BudgetUpdateEvent:
 
 
 @strawberry.type
+class PerfUpdateEvent:
+    """Throughput so far in this run. Emitted once per LLM call.
+
+    `ttft_ms` is the first call's time-to-first-token (what the user waited for),
+    not a rolling one — the aggregate rates cover every call including workers.
+    Any field may be null when the split couldn't be measured (non-streaming
+    provider, or a fully cache-served prefill).
+    """
+
+    ttft_ms: float | None
+    llm_ms: float | None
+    prefill_tps: float | None
+    eval_tps: float | None
+    llm_calls: int
+    snapshot: str  # JSON-encoded PerfTracker snapshot (includes per-call records)
+
+
+@strawberry.type
 class ErrorEvent:
     error: str
 
@@ -165,6 +183,7 @@ ChatEvent = Annotated[
         WorkflowToolEvent,
         BudgetExceededEvent,
         BudgetUpdateEvent,
+        PerfUpdateEvent,
         DoneEvent,
         StoppedEvent,
         ErrorEvent,
@@ -179,6 +198,16 @@ def _as_str(value: object) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value)
+
+
+def _safe_float(value: object) -> float | None:
+    """None stays None — an unmeasurable rate must not become 0.0 in the UI."""
+    if value is None:
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_int(value: object, default: int = 0) -> int:
@@ -306,6 +335,15 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
             llm_calls=_safe_int(data.get("llm_calls", 0)),
             tool_calls=_safe_int(data.get("tool_calls", 0)),
             snapshot=_as_str(snap or data),
+        )
+    if event_name == "perf_update":
+        return PerfUpdateEvent(
+            ttft_ms=_safe_float(data.get("ttft_ms")),
+            llm_ms=_safe_float(data.get("llm_ms")),
+            prefill_tps=_safe_float(data.get("prefill_tps")),
+            eval_tps=_safe_float(data.get("eval_tps")),
+            llm_calls=_safe_int(data.get("llm_calls", 0)),
+            snapshot=_as_str(data.get("snapshot") or data),
         )
     if event_name == "done":
         return DoneEvent(

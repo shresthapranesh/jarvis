@@ -157,3 +157,63 @@ async def test_full_chat_turn(jarvis, work_dir: Path):
     assert [m.role for m in msgs] == ["user", "assistant"]
     assert all(m.status == "done" for m in msgs), [m.status for m in msgs]
     assert msgs[1].content.strip(), "assistant message persisted empty"
+
+
+@needs_llm
+async def test_throughput_is_measured_and_persisted(jarvis, work_dir: Path):
+    """Throughput has to survive the whole path, not just the callback.
+
+    The unit tests drive `PerfCallbackHandler` directly with synthetic results;
+    this is the only check that a real provider's stream actually fires
+    `on_llm_new_token` (no TTFT boundary without it), that the handler is
+    attached by whichever branch of the runtime built the callback list, and
+    that the numbers reach the Message row.
+    """
+    from core.state import _tasks, stream_task_events
+    from db import async_session
+    from db.models import Message
+    from db.ops import get_default_model
+    from server.chat_runtime import chat_job_handler, register_chat_task
+    from sqlalchemy import select
+
+    async with async_session() as s:
+        model = await get_default_model(s)
+        # Long enough that generation spans well past _MIN_DECODE_SECONDS —
+        # a one-line reply can legitimately arrive as a single buffered flush,
+        # which reports prefill only and would make this assertion flaky.
+        task_id, conv_id = await register_chat_task(
+            s, query="List the numbers 1 through 60 separated by commas. No other text.",
+            model=model,
+        )
+        await s.commit()
+
+    job = await jarvis.queue.claim(kinds=["chat"], worker_id="test", ttl_seconds=600)
+    assert job is not None
+    run = asyncio.create_task(chat_job_handler(job))
+
+    perf_events = []
+    async with asyncio.timeout(180):
+        async for raw in stream_task_events(_tasks[task_id]):
+            name, data = _decode(raw)
+            if name == "perf_update":
+                perf_events.append(data)
+    await run
+
+    assert perf_events, "no perf_update event streamed"
+    last = perf_events[-1]
+    assert last["ttft_ms"] is not None and last["ttft_ms"] > 0
+    assert last["eval_tps"] is not None and last["eval_tps"] > 0
+
+    async with async_session() as s:
+        assistant = (await s.execute(
+            select(Message).where(Message.conversation_id == conv_id, Message.role == "assistant")
+        )).scalars().one()
+
+    ttft, llm_ms = assistant.ttft_ms, assistant.llm_ms
+    assert ttft is not None and ttft > 0
+    assert assistant.eval_tps is not None and assistant.eval_tps > 0
+    # TTFT is part of the time spent inside LLM calls, so it can't exceed it.
+    assert llm_ms is not None and llm_ms >= ttft
+    # prefill_tps is allowed to be None (a fully cache-served prefill), but not
+    # zero — that would mean the aggregate counted a span against no tokens.
+    assert assistant.prefill_tps is None or assistant.prefill_tps > 0
