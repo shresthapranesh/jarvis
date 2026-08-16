@@ -121,6 +121,27 @@ class BudgetPlugin(BasePlugin):
         return self._handler
 
 
+class PerfPlugin(BasePlugin):
+    """Throughput (prefill / eval tok/s). Inert without a tracker to feed."""
+
+    name: str = "perf"
+
+    def __init__(self, tracker: Any | None = None) -> None:
+        super().__init__(name="perf")
+        self._tracker = tracker
+        self._handler: Any | None = None
+
+    def as_callback_handler(self) -> Any | None:
+        if self._handler is None and self._tracker is not None:
+            try:
+                from core.perf import PerfCallbackHandler
+
+                self._handler = PerfCallbackHandler(self._tracker)
+            except Exception:
+                return None
+        return self._handler
+
+
 class UsagePlugin(BasePlugin):
     name: str = "usage"
 

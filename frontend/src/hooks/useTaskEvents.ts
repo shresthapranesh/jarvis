@@ -3,13 +3,13 @@ import {graphql, requestSubscription} from 'react-relay';
 
 import type {useTaskEventsSubscription} from '../__generated__/useTaskEventsSubscription.graphql';
 import type {ArtifactRef, Step, TodoItem, TodoStatus} from '../lib/types';
-import {refreshRunningTasks} from './useRunningTasks';
 import {refreshArtifactList} from '../relay/ArtifactListQuery';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {loadConversationPage} from '../relay/ConversationPageQuery';
 import {refreshDocumentList} from '../relay/DocumentListQuery';
 import {environment} from '../relay/environment';
 import {refreshTodoList} from '../relay/TodoListQuery';
+import {refreshRunningTasks} from './useRunningTasks';
 
 export interface BrowserStep {
   thought: unknown;
@@ -42,6 +42,16 @@ interface BudgetInfo {
   toolCalls: number;
 }
 
+// Throughput so far in the run. Each field is independently nullable — a
+// non-streaming provider yields no TTFT, a buffered flush no generation rate.
+interface PerfInfo {
+  ttftMs: number | null;
+  llmMs: number | null;
+  prefillTps: number | null;
+  evalTps: number | null;
+  llmCalls: number;
+}
+
 interface StreamState {
   streaming: boolean;
   text: string;
@@ -54,6 +64,7 @@ interface StreamState {
   error: string | null;
   pendingInterrupt: {id: string; question: string} | null;
   budget: BudgetInfo | null;
+  perf: PerfInfo | null;
 }
 
 const EMPTY_STATE: StreamState = {
@@ -68,6 +79,7 @@ const EMPTY_STATE: StreamState = {
   error: null,
   pendingInterrupt: null,
   budget: null,
+  perf: null,
 };
 
 function upsertWorker(workers: WorkerInfo[], next: WorkerInfo): WorkerInfo[] {
@@ -203,6 +215,13 @@ const taskEventsSubscription = graphql`
         llmCalls
         toolCalls
         snapshot
+      }
+      ... on PerfUpdateEvent {
+        ttftMs
+        llmMs
+        prefillTps
+        evalTps
+        llmCalls
       }
       ... on DoneEvent {
         message
@@ -428,6 +447,18 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
                 totalTokens: (evt as any).totalTokens,
                 llmCalls: (evt as any).llmCalls,
                 toolCalls: (evt as any).toolCalls,
+              },
+            }));
+            break;
+          case 'PerfUpdateEvent':
+            setState((s) => ({
+              ...s,
+              perf: {
+                ttftMs: (evt as any).ttftMs ?? null,
+                llmMs: (evt as any).llmMs ?? null,
+                prefillTps: (evt as any).prefillTps ?? null,
+                evalTps: (evt as any).evalTps ?? null,
+                llmCalls: (evt as any).llmCalls ?? 0,
               },
             }));
             break;

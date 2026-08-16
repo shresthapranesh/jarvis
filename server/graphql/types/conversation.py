@@ -61,6 +61,13 @@ class Message(relay.Node):
     status: str
     input_tokens: int | None
     output_tokens: int | None
+    # Throughput for the run behind this message — NULL on user messages, on
+    # rows written before the columns existed, and whenever the provider
+    # streamed nothing to time the prefill/decode split against.
+    ttft_ms: float | None
+    llm_ms: float | None
+    prefill_tps: float | None
+    eval_tps: float | None
     created_at: datetime
     steps: list[Step]
 
@@ -74,6 +81,10 @@ class Message(relay.Node):
             status=row.status,
             input_tokens=row.input_tokens,
             output_tokens=row.output_tokens,
+            ttft_ms=row.ttft_ms,
+            llm_ms=row.llm_ms,
+            prefill_tps=row.prefill_tps,
+            eval_tps=row.eval_tps,
             created_at=row.created_at,
             steps=[Step.from_db(s) for s in sorted(row.steps, key=lambda x: x.seq)],
         )

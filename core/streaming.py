@@ -445,10 +445,11 @@ async def _finalize_message(
     *,
     input_tokens: int | None = None,
     output_tokens: int | None = None,
+    perf: dict[str, float | None] | None = None,
 ) -> None:
     """Short-lived session write for a final message state update."""
     async with async_session() as session:
         await update_message_content(session, task_id, content)
         await update_message_status(session, task_id, status)
-        if input_tokens is not None or output_tokens is not None:
-            await update_message_usage(session, task_id, input_tokens, output_tokens)
+        if input_tokens is not None or output_tokens is not None or perf:
+            await update_message_usage(session, task_id, input_tokens, output_tokens, perf)

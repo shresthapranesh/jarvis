@@ -11,12 +11,29 @@ interface Budget {
   toolCalls: number;
 }
 
+interface Perf {
+  ttftMs: number | null;
+  llmMs: number | null;
+  prefillTps: number | null;
+  evalTps: number | null;
+  llmCalls: number;
+}
+
 interface Props {
   steps: Step[];
   isLive?: boolean;
   todos?: TodoItem[];
   budget?: Budget | null;
+  perf?: Perf | null;
   onClose: () => void;
+}
+
+function fmtRate(tps: number) {
+  return tps >= 100 ? String(Math.round(tps)) : tps.toFixed(1);
+}
+
+function fmtMs(ms: number) {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
 }
 
 function formatStepData(raw: string): string {
@@ -185,7 +202,7 @@ function WorkerGroupRow({group}: {group: WorkerGroup}) {
   );
 }
 
-export function ActivitySidebar({steps, isLive, todos, budget, onClose}: Props) {
+export function ActivitySidebar({steps, isLive, todos, budget, perf, onClose}: Props) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll to bottom when new steps arrive during live streaming
@@ -230,20 +247,81 @@ export function ActivitySidebar({steps, isLive, todos, budget, onClose}: Props) 
       <div className="steps-panel-body" ref={bodyRef}>
         {todos && todos.length > 0 && <TodoList todos={todos} compact />}
         {budget && (
-          <div style={{padding:'8px 12px', margin:'0 0 8px', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, fontSize:'0.78rem'}}>
-            <div style={{display:'flex', justifyContent:'space-between', marginBottom:4}}>
+          <div
+            style={{
+              padding: '8px 12px',
+              margin: '0 0 8px',
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              fontSize: '0.78rem',
+            }}
+          >
+            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 4}}>
               <strong>Budget</strong>
-              <span style={{color: budget.totalTokens > 400000 ? 'var(--error-text)' : budget.totalTokens > 300000 ? 'var(--warning-text)' : 'var(--text-dim)'}}>{budget.totalTokens.toLocaleString()} tokens</span>
+              <span
+                style={{
+                  color:
+                    budget.totalTokens > 400000
+                      ? 'var(--error-text)'
+                      : budget.totalTokens > 300000
+                        ? 'var(--warning-text)'
+                        : 'var(--text-dim)',
+                }}
+              >
+                {budget.totalTokens.toLocaleString()} tokens
+              </span>
             </div>
-            <div style={{height:4, background:'var(--surface2)', borderRadius:4, overflow:'hidden', marginBottom:6}}>
-              <div style={{width:`${Math.min(100, Math.round(budget.totalTokens/500000*100))}%`, height:'100%', background: budget.totalTokens > 400000 ? 'var(--error-text)' : 'var(--accent)', transition:'width 0.3s'}} />
+            <div
+              style={{
+                height: 4,
+                background: 'var(--surface2)',
+                borderRadius: 4,
+                overflow: 'hidden',
+                marginBottom: 6,
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.min(100, Math.round((budget.totalTokens / 500000) * 100))}%`,
+                  height: '100%',
+                  background: budget.totalTokens > 400000 ? 'var(--error-text)' : 'var(--accent)',
+                  transition: 'width 0.3s',
+                }}
+              />
             </div>
-            <div style={{display:'flex', gap:12, color:'var(--text-dim)'}}>
+            <div style={{display: 'flex', gap: 12, color: 'var(--text-dim)'}}>
               <span>{budget.inputTokens.toLocaleString()} in</span>
               <span>{budget.outputTokens.toLocaleString()} out</span>
               <span>{budget.llmCalls} llm</span>
               <span>{budget.toolCalls} tools</span>
             </div>
+            {perf && (perf.ttftMs != null || perf.prefillTps != null || perf.evalTps != null) && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  color: 'var(--text-dim)',
+                  marginTop: 4,
+                  paddingTop: 4,
+                  borderTop: '1px solid var(--border)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+                title={
+                  'Throughput across this run.\n' +
+                  'TTFT: time to the first token of the first LLM call.\n' +
+                  'pp: prompt processing (prefill), cache-read tokens excluded.\n' +
+                  'tg: text generation.' +
+                  (perf.llmMs != null
+                    ? `\nTime in LLM calls: ${fmtMs(perf.llmMs)} (excludes tools).`
+                    : '')
+                }
+              >
+                {perf.ttftMs != null && <span>{fmtMs(perf.ttftMs)} TTFT</span>}
+                {perf.prefillTps != null && <span>{fmtRate(perf.prefillTps)} tok/s pp</span>}
+                {perf.evalTps != null && <span>{fmtRate(perf.evalTps)} tok/s tg</span>}
+              </div>
+            )}
           </div>
         )}
         {items.length === 0 ? (

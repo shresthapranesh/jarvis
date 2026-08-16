@@ -175,7 +175,7 @@ type BudgetUpdateEvent {
   snapshot: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
   """The Globally Unique ID of this object"""
@@ -275,6 +275,10 @@ type Message implements Node {
   status: String!
   inputTokens: Int
   outputTokens: Int
+  ttftMs: Float
+  llmMs: Float
+  prefillTps: Float
+  evalTps: Float
   createdAt: DateTime!
   steps: [Step!]!
 }
@@ -400,6 +404,15 @@ type PageInfo {
 
   """When paginating forwards, the cursor to continue."""
   endCursor: String
+}
+
+type PerfUpdateEvent {
+  ttftMs: Float
+  llmMs: Float
+  prefillTps: Float
+  evalTps: Float
+  llmCalls: Int!
+  snapshot: String!
 }
 
 type Project implements Node {

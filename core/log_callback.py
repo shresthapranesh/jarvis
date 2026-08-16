@@ -108,15 +108,26 @@ class AgentLogger(BaseCallbackHandler):
 
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
         name, started, _ = self._llms.pop(run_id, ("?", time.monotonic(), 0))
-        usage = (response.llm_output or {}).get("token_usage") or {}
-        in_tok = usage.get("prompt_tokens") or usage.get("input_tokens")
-        out_tok = usage.get("completion_tokens") or usage.get("output_tokens")
+        in_tok: int | None = None
+        out_tok: int | None = None
         tool_calls = 0
         for gen_list in response.generations:
             for gen in gen_list:
                 msg = getattr(gen, "message", None)
-                if msg is not None:
-                    tool_calls += len(getattr(msg, "tool_calls", []) or [])
+                if msg is None:
+                    continue
+                tool_calls += len(getattr(msg, "tool_calls", []) or [])
+                # usage_metadata first — the providers we build only populate
+                # llm_output.token_usage on some paths, and reading only that
+                # logged every Gemini/Anthropic call as having no tokens.
+                usage_md = getattr(msg, "usage_metadata", None)
+                if usage_md:
+                    in_tok = (in_tok or 0) + (usage_md.get("input_tokens") or 0)
+                    out_tok = (out_tok or 0) + (usage_md.get("output_tokens") or 0)
+        if in_tok is None and out_tok is None:
+            usage = (response.llm_output or {}).get("token_usage") or {}
+            in_tok = usage.get("prompt_tokens") or usage.get("input_tokens")
+            out_tok = usage.get("completion_tokens") or usage.get("output_tokens")
         if in_tok is not None or out_tok is not None:
             logger.info(
                 "llm[%s] ok %.0fms tokens=%s/%s tool_calls=%d",

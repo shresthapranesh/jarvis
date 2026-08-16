@@ -91,6 +91,15 @@ class Message(Base):
     # produced this message (assistant rows only; NULL = not recorded).
     input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Throughput for the run that produced this message (assistant rows only;
+    # NULL = not measured). ttft_ms is the first LLM call's time-to-first-token
+    # — what the user actually waited for; llm_ms sums every call's round trip,
+    # so it excludes tool/retrieval time and is always < the wall-clock turn.
+    # The two rates are token-weighted over the run — see core/perf.py.
+    ttft_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    llm_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    prefill_tps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    eval_tps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")

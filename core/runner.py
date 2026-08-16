@@ -138,8 +138,13 @@ class JarvisRunner:
 
         return SessionService(self.store)
 
-    def get_plugin_manager(self, tracker: Any | None = None, task_state: Any | None = None):
-        from core.plugins import PluginManager, LoggingPlugin, BudgetPlugin, UsagePlugin
+    def get_plugin_manager(
+        self,
+        tracker: Any | None = None,
+        task_state: Any | None = None,
+        perf_tracker: Any | None = None,
+    ):
+        from core.plugins import PluginManager, LoggingPlugin, BudgetPlugin, PerfPlugin, UsagePlugin
 
         pm = PluginManager()
         if self.runner_config.enable_logging_plugin:
@@ -148,11 +153,18 @@ class JarvisRunner:
         pm.add(UsagePlugin())
         if tracker is not None:
             pm.add(BudgetPlugin(tracker=tracker, task_state=task_state))
+        if perf_tracker is not None:
+            pm.add(PerfPlugin(tracker=perf_tracker))
         return pm
 
-    def get_default_callbacks(self, tracker: Any | None = None, task_state: Any | None = None):
-        """Back-compat: return list of callback handlers (AgentLogger, Usage, Budget)."""
-        pm = self.get_plugin_manager(tracker=tracker, task_state=task_state)
+    def get_default_callbacks(
+        self,
+        tracker: Any | None = None,
+        task_state: Any | None = None,
+        perf_tracker: Any | None = None,
+    ):
+        """Back-compat: return list of callback handlers (AgentLogger, Usage, Budget, Perf)."""
+        pm = self.get_plugin_manager(tracker=tracker, task_state=task_state, perf_tracker=perf_tracker)
         return pm.get_callback_handlers()
 
     # ── Agent factory ─────────────────────────────────────────────────────
@@ -232,16 +244,22 @@ class JarvisRunner:
         }
 
 
-def build_callbacks(tracker: Any | None = None, task_state: Any | None = None) -> list[Any]:
+def build_callbacks(
+    tracker: Any | None = None,
+    task_state: Any | None = None,
+    perf_tracker: Any | None = None,
+) -> list[Any]:
     """Callback handlers for a run — the one entrypoint all runtimes share.
 
     Goes through the active runner's PluginManager when there is one, else
-    falls back to the direct AgentLogger/Usage/Budget trio (CLI, tests).
+    falls back to the direct AgentLogger/Usage/Budget/Perf set (CLI, tests).
     """
     runner = get_runner_or_none()
     if runner is not None:
         try:
-            return runner.get_default_callbacks(tracker=tracker, task_state=task_state)
+            return runner.get_default_callbacks(
+                tracker=tracker, task_state=task_state, perf_tracker=perf_tracker
+            )
         except Exception as exc:
             logger.warning("plugin callback build failed — using direct handlers: %s", exc)
     handlers: list[Any] = []
@@ -255,6 +273,10 @@ def build_callbacks(tracker: Any | None = None, task_state: Any | None = None) -
         from core.budget import BudgetCallbackHandler
 
         handlers.append(BudgetCallbackHandler(tracker, task_state=task_state))
+    if perf_tracker is not None:
+        from core.perf import PerfCallbackHandler
+
+        handlers.append(PerfCallbackHandler(perf_tracker))
     return handlers
 
 

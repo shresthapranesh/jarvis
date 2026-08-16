@@ -3,7 +3,16 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 
 function SpeakerIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
       <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
     </svg>
@@ -12,7 +21,16 @@ function SpeakerIcon() {
 
 function StopIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="6" y="6" width="12" height="12" rx="2" />
     </svg>
   );
@@ -20,14 +38,24 @@ function StopIcon() {
 
 function SpinnerIcon() {
   return (
-    <svg className="mic-spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className="mic-spinner"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
     </svg>
   );
 }
 
-import {describeStep, getStepPreview} from '../lib/steps';
 import type {WorkerInfo} from '../hooks/useTaskEvents';
+import {describeStep, getStepPreview} from '../lib/steps';
 import type {Message, Step} from '../lib/types';
 import {WorkerPanel} from './WorkerPanel';
 
@@ -63,6 +91,14 @@ function formatTokens(n: number) {
   return String(n);
 }
 
+function formatRate(tps: number) {
+  return tps >= 100 ? String(Math.round(tps)) : tps.toFixed(1);
+}
+
+function formatMs(ms: number) {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
+}
+
 function TokenBadge({input, output}: {input: number | null; output: number | null}) {
   if (input == null && output == null) return null;
   return (
@@ -71,6 +107,38 @@ function TokenBadge({input, output}: {input: number | null; output: number | nul
       title={`Tokens for this turn — input: ${(input ?? 0).toLocaleString()} (full context sent), output: ${(output ?? 0).toLocaleString()}`}
     >
       ↑ {formatTokens(input ?? 0)} ↓ {formatTokens(output ?? 0)}
+    </span>
+  );
+}
+
+/** Throughput for the turn. Renders only the halves that were measurable — a
+ *  missing rate means "couldn't be split", which is not the same as slow. */
+function PerfBadge({
+  ttftMs,
+  llmMs,
+  prefillTps,
+  evalTps,
+}: {
+  ttftMs: number | null;
+  llmMs: number | null;
+  prefillTps: number | null;
+  evalTps: number | null;
+}) {
+  if (ttftMs == null && prefillTps == null && evalTps == null) return null;
+  const title = [
+    ttftMs != null && `Time to first token: ${formatMs(ttftMs)}`,
+    prefillTps != null &&
+      `Prompt processing: ${formatRate(prefillTps)} tok/s (cache-read tokens excluded)`,
+    evalTps != null && `Generation: ${formatRate(evalTps)} tok/s`,
+    llmMs != null && `Total time in LLM calls: ${formatMs(llmMs)} (excludes tools and retrieval)`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  return (
+    <span className="token-badge perf-badge" title={title}>
+      {ttftMs != null && <span>{formatMs(ttftMs)} TTFT</span>}
+      {prefillTps != null && <span>{formatRate(prefillTps)} pp</span>}
+      {evalTps != null && <span>{formatRate(evalTps)} tg</span>}
     </span>
   );
 }
@@ -196,7 +264,13 @@ interface StreamingBubbleProps {
   onShowSteps?: (steps: Step[]) => void;
 }
 
-export function StreamingBubble({text, thinkingText, steps, workers, onShowSteps}: StreamingBubbleProps) {
+export function StreamingBubble({
+  text,
+  thinkingText,
+  steps,
+  workers,
+  onShowSteps,
+}: StreamingBubbleProps) {
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
@@ -275,7 +349,16 @@ interface MessageBubbleProps {
 
 function CopyIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
@@ -284,7 +367,16 @@ function CopyIcon() {
 
 function CheckIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
@@ -296,11 +388,14 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    audioRef.current?.pause();
-    window.speechSynthesis?.cancel();
-  }, []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      audioRef.current?.pause();
+      window.speechSynthesis?.cancel();
+    },
+    [],
+  );
 
   function copyText(text: string) {
     navigator.clipboard.writeText(text);
@@ -331,12 +426,21 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
-      audio.onended = () => { URL.revokeObjectURL(url); setTtsState('idle'); };
-      audio.onerror = () => { URL.revokeObjectURL(url); setTtsState('idle'); };
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setTtsState('idle');
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        setTtsState('idle');
+      };
       audio.play();
       setTtsState('playing');
     } catch (e) {
-      if ((e as Error).name === 'AbortError') { setTtsState('idle'); return; }
+      if ((e as Error).name === 'AbortError') {
+        setTtsState('idle');
+        return;
+      }
       window.speechSynthesis?.speak(new SpeechSynthesisUtterance(message.content));
       setTtsState('idle');
     }
@@ -345,7 +449,10 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
   if (message.role === 'user') {
     const parts = parseMultimodal(message.content);
     const plainText = parts
-      ? parts.filter((p) => p.type === 'text').map((p) => (p as {type: 'text'; text: string}).text).join('\n')
+      ? parts
+          .filter((p) => p.type === 'text')
+          .map((p) => (p as {type: 'text'; text: string}).text)
+          .join('\n')
       : message.content;
     return (
       <div className="turn">
@@ -390,10 +497,18 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
         <button
           className={`copy-btn${ttsState === 'playing' ? ' copy-btn--copied' : ''}`}
           onClick={readAloud}
-          title={ttsState === 'loading' ? 'Loading…' : ttsState === 'playing' ? 'Stop' : 'Read aloud'}
+          title={
+            ttsState === 'loading' ? 'Loading…' : ttsState === 'playing' ? 'Stop' : 'Read aloud'
+          }
           type="button"
         >
-          {ttsState === 'loading' ? <SpinnerIcon /> : ttsState === 'playing' ? <StopIcon /> : <SpeakerIcon />}
+          {ttsState === 'loading' ? (
+            <SpinnerIcon />
+          ) : ttsState === 'playing' ? (
+            <StopIcon />
+          ) : (
+            <SpeakerIcon />
+          )}
         </button>
         {message.steps.length > 0 && (
           <button className="activity-btn" onClick={() => onShowSteps?.(message.steps)}>
@@ -413,6 +528,12 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
           </button>
         )}
         <TokenBadge input={message.input_tokens} output={message.output_tokens} />
+        <PerfBadge
+          ttftMs={message.ttft_ms}
+          llmMs={message.llm_ms}
+          prefillTps={message.prefill_tps}
+          evalTps={message.eval_tps}
+        />
       </div>
     </div>
   );
