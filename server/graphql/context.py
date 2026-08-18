@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, TypedDict
 
-from fastapi import Depends, Request
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import HTTPConnection
 
 from db.engine import get_session
 
@@ -39,13 +40,20 @@ CONVERSATION_HEADER = "x-jarvis-conversation"
 
 
 async def get_context(
-    request: Request,
+    # `HTTPConnection`, not `Request`: this getter is resolved by FastAPI's
+    # dependency solver for BOTH the HTTP route and the subscription WebSocket,
+    # and in a websocket scope a `Request` parameter is never filled in --
+    # get_context() then dies with "missing 1 required positional argument",
+    # every subscription fails to connect, and the UI silently loses live
+    # streaming while queries/mutations keep working. HTTPConnection is the
+    # base of both Request and WebSocket and carries `.headers`.
+    connection: HTTPConnection,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GraphQLContext:
-    caller = (request.headers.get(CALLER_HEADER) or "human").strip().lower()
+    caller = (connection.headers.get(CALLER_HEADER) or "human").strip().lower()
     return {
         "session": session,
         SESSION_LOCK_KEY: asyncio.Lock(),
         "caller": "agent" if caller == "agent" else "human",
-        "caller_conversation_id": request.headers.get(CONVERSATION_HEADER) or None,
+        "caller_conversation_id": connection.headers.get(CONVERSATION_HEADER) or None,
     }

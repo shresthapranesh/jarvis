@@ -189,6 +189,12 @@ pnpm build      # pnpm relay && vite build → ../static/dist/ (served by FastAP
 2. Add/extend a Strawberry type in `server/graphql/types/`. DB-backed types are Relay Nodes: `id: relay.NodeID[str]`, a `from_db` classmethod, and `resolve_node` for `Node` lookups. Resolve expensive fields lazily (e.g. `Artifact.content` reads the `.md` file on demand) so list queries stay cheap.
 3. Add the resolver to the relevant `*Query` / `*Mutation` / `*Subscription` mixin under `queries/`·`mutations/`·`subscriptions/`. **Mixins are composed via `merge_types(...)` in `schema.py`** — a brand-new mixin class must be added to that tuple, or its fields won't appear.
 4. Resolvers read the DB session via `info.context["session"]` (see `context.py`).
+   **`get_context` is resolved for the subscription WebSocket too**, so any parameter it takes
+   must exist in a websocket scope: use `starlette.requests.HTTPConnection` (the base of both
+   `Request` and `WebSocket`), never `Request` — FastAPI leaves a `Request` param unfilled on a
+   WS connection, `get_context()` raises `missing 1 required positional argument`, and *every*
+   subscription silently fails to connect while queries/mutations keep working (the UI loses all
+   live streaming and only shows finished messages after a reload).
 5. `cd frontend && pnpm schema && pnpm relay` to regenerate `schema.graphql` + Relay artifacts.
 6. Add a per-operation module under `frontend/src/relay/` (a `graphql\`...\`` literal + a refetch/commit helper) and consume it with `useLazyLoadQuery` / a commit function. Use `encodeGlobalId`/`decodeGlobalId` (`relay/globalId.ts`) to convert between Relay global IDs and raw DB IDs.
 
