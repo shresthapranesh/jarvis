@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
+from db.models import Approval, Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -1605,6 +1605,21 @@ async def list_board_tasks(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def list_board_tasks_awaiting_input(session: AsyncSession) -> list[BoardTask]:
+    """Blocked tasks whose block is a question for a human, newest block first.
+
+    The board's half of the approvals inbox. Unlike the interrupt-based kinds
+    this is durable state, not an in-memory pause — it survives a restart and
+    so must be read from the table rather than the `_tasks` registry.
+    """
+    stmt = (
+        select(BoardTask)
+        .where(BoardTask.status == "blocked", BoardTask.blocked_kind == "needs_input")
+        .order_by(BoardTask.updated_at.desc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def list_board_task_links(session: AsyncSession) -> list[BoardTaskLink]:
     return list((await session.execute(select(BoardTaskLink))).scalars().all())
 
@@ -1689,6 +1704,15 @@ async def update_board_task(session: AsyncSession, task_id: str, **kwargs: Any) 
         setattr(task, key, value)
     task.updated_at = datetime.now(timezone.utc)
     await session.commit()
+    # Every board status change flows through here, which is why the approval
+    # cleanup lives here too: a task that stops waiting for input — answered,
+    # stopped, re-queued, completed — must not leave a question in the inbox.
+    # Scattering this across the six call sites is how they would drift.
+    if not (task.status == "blocked" and task.blocked_kind == "needs_input"):
+        await close_open_approvals(
+            session, board_task_id=task_id, status="cancelled",
+            result=f"The task moved to {task.status}.",
+        )
     return task
 
 
@@ -1793,3 +1817,105 @@ async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
 
     await session.commit()
     return counts
+
+
+# ── Approvals ────────────────────────────────────────────────────────────────
+
+# Statuses that mean "still waiting on a human".
+APPROVAL_OPEN = "pending"
+
+
+async def create_approval(session: AsyncSession, **fields: Any) -> Approval:
+    row = Approval(id=str(uuid4()), **fields)
+    session.add(row)
+    await session.commit()
+    return row
+
+
+async def get_approval(session: AsyncSession, approval_id: str) -> Approval | None:
+    return await session.get(Approval, approval_id)
+
+
+async def list_approvals(
+    session: AsyncSession, *, status: str | None = APPROVAL_OPEN, limit: int = 200,
+) -> list[Approval]:
+    """Approvals, newest request first. `status=None` returns every row."""
+    stmt = select(Approval).order_by(Approval.requested_at.desc()).limit(limit)
+    if status is not None:
+        stmt = stmt.where(Approval.status == status)
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def find_open_approval_for_task(session: AsyncSession, task_id: str) -> Approval | None:
+    """The pending approval a run is suspended on, if any.
+
+    This is what makes a chat run resumable across a restart: the run's own
+    memory of what it asked is gone, but the row still has the question.
+    """
+    result = await session.execute(
+        select(Approval)
+        .where(Approval.task_id == task_id, Approval.status == APPROVAL_OPEN)
+        .order_by(Approval.requested_at.desc())
+    )
+    return result.scalars().first()
+
+
+async def resolve_approval_row(
+    session: AsyncSession,
+    approval_id: str,
+    *,
+    status: str,
+    answer: str | None = None,
+    result: str | None = None,
+) -> Approval | None:
+    """Move a row out of `pending`. Refuses to re-resolve an already-closed row
+    so a double-submit (two tabs, a retried mutation) cannot execute a deferred
+    action twice."""
+    row = await session.get(Approval, approval_id)
+    if row is None:
+        return None
+    if row.status != APPROVAL_OPEN:
+        raise ValueError(f"approval already {row.status}")
+    row.status = status
+    row.answer = answer
+    if result is not None:
+        row.result = result
+    row.resolved_at = datetime.now(timezone.utc)
+    await session.commit()
+    return row
+
+
+async def close_open_approvals(
+    session: AsyncSession,
+    *,
+    task_id: str | None = None,
+    board_task_id: str | None = None,
+    status: str = "cancelled",
+    result: str | None = None,
+    answer: str | None = None,
+) -> int:
+    """Close every pending approval attached to a run or board task.
+
+    Called when the thing that was waiting goes away — the run finished or was
+    stopped, the board task moved off `needs_input`. Without this a resolved
+    question lingers in the inbox as a button that resumes nothing.
+    """
+    if task_id is None and board_task_id is None:
+        raise ValueError("close_open_approvals needs a task_id or a board_task_id")
+    stmt = select(Approval).where(Approval.status == APPROVAL_OPEN)
+    if task_id is not None:
+        stmt = stmt.where(Approval.task_id == task_id)
+    if board_task_id is not None:
+        stmt = stmt.where(Approval.board_task_id == board_task_id)
+    rows = list((await session.execute(stmt)).scalars().all())
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        row.status = status
+        row.resolved_at = now
+        if result is not None:
+            row.result = result
+        if answer is not None:
+            row.answer = answer
+    if rows:
+        await session.commit()
+    return len(rows)

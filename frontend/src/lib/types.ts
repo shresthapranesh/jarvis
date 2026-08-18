@@ -443,6 +443,33 @@ export interface RunningTask {
   budget_reason?: string | null;
 }
 
+// ── Pending approvals (human-in-the-loop inbox) ──────────────────────────────
+
+/** Where the request came from. Board tasks are durable; the rest are live runs. */
+export type ApprovalSource = 'chat' | 'workflow' | 'automation' | 'board_task';
+
+/** Approve/deny gate vs. a free-text question. */
+export type ApprovalKind = 'approval' | 'input';
+
+export interface PendingApproval {
+  id: string;
+  source: ApprovalSource;
+  kind: ApprovalKind;
+  question: string;
+  label: string;
+  tool: string | null;
+  args_json: string | null;
+  requested_at: string;
+  /**
+   * True when approving *is* what performs the operation — nothing is blocked
+   * waiting on it. False means a run is suspended right now.
+   */
+  deferred: boolean;
+  /** Conversation id (chat, board) or workflow id — the "open it" target. */
+  parent_id: string | null;
+  board_task_id: string | null;
+}
+
 export type NodeExecStatus = 'pending' | 'running' | 'done' | 'error';
 
 export interface NodeStatus {

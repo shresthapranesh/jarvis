@@ -361,6 +361,7 @@ type Mutation {
   updateModel(id: String!, label: String!, provider: String = null): ModelCatalog!
   removeModel(id: String!): ModelCatalog!
   setDefaultModel(id: String!): ModelCatalog!
+  resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!
 }
 
 """An object with a Globally Unique ID"""
@@ -404,6 +405,20 @@ type PageInfo {
 
   """When paginating forwards, the cursor to continue."""
   endCursor: String
+}
+
+type PendingApproval {
+  id: String!
+  source: String!
+  kind: String!
+  question: String!
+  label: String!
+  tool: String
+  argsJson: String
+  requestedAt: DateTime!
+  deferred: Boolean!
+  parentId: String
+  boardTaskId: String
 }
 
 type PerfUpdateEvent {
@@ -474,6 +489,13 @@ type Query {
   runningTasks: [RunningTask!]!
   mcpServers: [McpServer!]!
   mcpTools: [String!]!
+  pendingApprovals: [PendingApproval!]!
+}
+
+type ResolveApprovalPayload {
+  id: String!
+  status: String!
+  result: String
 }
 
 type RunningTask {

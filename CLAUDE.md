@@ -378,6 +378,117 @@ Visual graph executor (`workflow/engine.py`):
 - Streaming: `core/streaming.py` forwards `approval_request`/`approval_resolved`/
   `workflow_event` custom events.
 
+## Approvals Inbox (`/approvals`)
+The one place that answers "what is waiting on a human, and where is it from".
+Every request is a durable `Approval` row (`db/models.py`), so it outlives the
+run that raised it; `queries/approval.py` is a single indexed read of that
+table, not a merge of live and stored state.
+
+**Two shapes**, distinguished by whether `Approval.action` is set:
+- **Blocking** (`action IS NULL`) — a run is suspended *right now*: a chat
+  LangGraph interrupt, a paused workflow `approval`/`human_input` node, or a
+  board task with `blocked_kind="needs_input"`. Resolving hands the answer to
+  the waiting run.
+- **Deferred** (`action` set) — nobody is waiting. The operation was *recorded*
+  instead of performed, and approving is what executes it
+  (`core/approvals.py:ACTIONS`). Rendered as "runs on approval".
+
+**Why deferred exists at all:** the `jarvis` SDK runs in a **separate kernel
+process** (`core/kernels.py` uses jupyter_client's `AsyncKernelManager`), where
+`current_ctx()` finds no LangGraph runtime — `request_tool_approval` cannot
+reach it, and would silently auto-approve via `_is_headless`. SDK writes arrive
+as ordinary GraphQL requests, so the gate lives in the resolver, which has
+nothing to suspend. Deferred is also the better shape where blocking *is*
+possible: a human may take hours, and a blocked run pins a worker slot and a
+kernel the whole time.
+
+**`TaskState.pending_interrupt`** (`core/state.InterruptRequest`) still carries
+the live payload beside `pending_interrupt_id`, which alone only says *whether*
+a run is paused. **Set and clear it via `set_interrupt()` / `clear_interrupt()`**
+so the id and payload cannot drift. Producers write the durable row too, via
+`core/approvals.record_blocking_request` — best-effort, because failing to
+record must never take down a run that is already suspended.
+
+### Durability is not uniform — reconcile at startup
+`core/approvals.reconcile_startup()` runs in the lifespan **after** the zombie
+sweep (which is what decides whether a run still has a job to be re-claimed by):
+| Source | On restart | Reconciliation |
+|---|---|---|
+| deferred | nothing was waiting | stays `pending` |
+| board_task | the block is a column on the task | stays `pending`; rows backfilled for tasks blocked before this table existed |
+| chat | LangGraph checkpointed the interrupt | stays `pending` **iff** a `Job` row still exists in `pending`/`running` |
+| workflow / automation | the engine holds its whole run state in memory (BFS frontier, asyncio futures) and checkpoints nothing, so the graph re-runs from the start and asks again | `expired` |
+
+`expired` is the point: an unanswerable row listed as pending is a button that
+resumes nothing. **`_run_agent_task` reads the row to resume chat across a
+restart** (`_pending_approval_for`) — without it the handler re-sends the
+original prompt, discarding the checkpointed pause and replaying the turn.
+
+### Closing rows — the chokepoints
+A row left `pending` after its question is moot is the failure mode, so closing
+is centralized rather than spread across call sites:
+- `db/ops.update_board_task` — **every** board status change flows through it;
+  anything not `blocked`/`needs_input` closes the task's open rows.
+- `core/streaming._finalize_message` — the run ended, so expire what it owed.
+- `resumeTask` / `resumeWorkflowRun` / `resolveWorkflowApproval` — answering in
+  the chat view or on a workflow page also clears the inbox row.
+- `server/task_board_runtime.answer_board_task` — shared by the board card and
+  the inbox. It closes as `answered` **before** calling `update_board_task`,
+  whose own cleanup would otherwise file a genuine answer as `cancelled`.
+
+### Gating the agent's destructive writes
+**Off by default — the framework is wired, the enforcement is opt-in.** Every
+gated call site resolves an `ActionSpec` and consults `required_actions()`, but
+`_DEFAULT_REQUIRED` is empty, so today every action passes straight through and
+auto-approves (logged at debug). Turning it on changes what the agent may do
+unsupervised, which is an install-level decision rather than a default; the
+plumbing being live means enabling it is a config write, not a deploy:
+
+```bash
+uv run python main.py config set approval.required_actions "all"
+uv run python main.py config set approval.required_actions "delete_workflow,delete_skill"
+uv run python main.py config set approval.required_actions "none"   # pass-through
+```
+
+`"all"` resolves through `ACTIONS` at read time, so a new `ActionSpec` is gated
+without editing the setting again.
+
+`core/approvals.gate_action` records and raises `ApprovalRequired` instead of
+performing the operation. Wired into `deleteWorkflow`, `deleteAutomation`,
+`deleteSkill` — the SDK's only destructive writes.
+- **Caller discrimination**: `tools/sdk.py:api()` sends `X-Jarvis-Caller: agent`
+  (+ `X-Jarvis-Conversation`), surfaced as `info.context["caller"]` by
+  `graphql/context.py`. A human clicking Delete in the UI *is* the approval, so
+  only `caller == "agent"` is gated. This is an **ergonomic** boundary, not a
+  security one — the header is self-asserted; deployment isolation is the
+  actual control.
+- Gate **before** any side effect: `deleteAutomation` gates before
+  `_remove_scheduler_job`, or a denied approval would still leave the
+  automation unscheduled.
+- Duplicate requests collapse (`_find_duplicate`), so an agent retrying in a
+  loop does not fill the inbox.
+
+`resolveApproval(id, answer)` (`mutations/approval.py`) is the single entry
+point — `core/approvals.resolve` dispatches on the row, so the inbox never
+needs to know which of the three resume paths applies. Approve/deny parsing is
+`is_affirmative_answer`, which **denies on anything ambiguous**. Deferred
+actions execute *before* the row is closed, so a failure leaves it answerable;
+`resolve_approval_row` refuses an already-closed row, so a double-submit cannot
+delete twice.
+
+Frontend: `routes/approvals.tsx` + `hooks/usePendingApprovals.ts` (an external
+store like `useRunningTasks`, but polling whenever subscribed — an approval can
+appear with no run in flight, so there is no push chokepoint to stop polling
+on; forced refreshes wait out an in-flight poll rather than adopting its
+pre-write snapshot) and a nav badge in `__root.tsx`.
+
+> **Still unreachable:** `core/approval.py:request_tool_approval` (the blocking,
+> in-process helper) is called only by `delete_workflow`/`delete_automation` in
+> `tools/workflows.py`/`tools/automations.py`, both `[unbound]`. The gating that
+> actually fires today is the deferred path above. Board and automation runs
+> also have no resume loop (they `break` on interrupt), which is why
+> `_is_headless` still auto-approves them — deferred sidesteps that entirely.
+
 ## Context Caching + Runner (ADK Runner / ContextCacheConfig analog)
 - `core/context_cache.py`: `CacheSegment` (name, content, cacheable, token_est),
   `ContextCacheConfig` (enabled, max_breakpoints=4, min_chars=50, cache_ttl),

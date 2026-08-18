@@ -21,6 +21,7 @@ from db.ops import (
     add_message,
     board_task_conversation_id,
     get_board_task,
+    update_board_task,
     get_board_task_parents,
     get_default_model,
     get_or_create_conversation,
@@ -571,6 +572,53 @@ async def board_task_job_handler(job: Job) -> None:
 
 
 # ── Stop (shared by GraphQL stopBoardTask) ───────────────────────────────────
+
+async def answer_board_task(session, task_id: str, answer: str):
+    """Deliver a human answer to a blocked task and re-queue it.
+
+    Shared by the board card and the approvals inbox — two entry points for the
+    same act, and the preconditions (non-empty answer, task still blocked) must
+    not drift between them. The answer is consumed at claim time by the next
+    dispatch, which runs `_RESUME_PROMPT` on the same conversation, so the
+    agent still has the context of what it asked.
+    """
+    from db.ops import close_open_approvals
+
+    if not answer.strip():
+        raise ValueError("answer must not be empty")
+    task = await get_board_task(session, task_id)
+    if task is None:
+        raise ValueError("task not found")
+    if task.status != "blocked":
+        raise ValueError("only blocked tasks can be answered")
+    # Close the inbox row first. `update_board_task` closes anything still open
+    # as `cancelled` (the task is no longer waiting), so doing this afterwards
+    # would record a genuine answer as a cancellation. Validation above has
+    # already run, so there is nothing left that can reject the update.
+    await close_open_approvals(
+        session, board_task_id=task_id,
+        status="answered", answer=answer.strip(), result="Task resumed.",
+    )
+    task = await update_board_task(
+        session, task_id,
+        status="ready",
+        pending_answer=answer.strip(),
+        blocked_reason=None,
+        blocked_kind=None,
+        finished_at=None,
+    )
+    assert task is not None
+    await _kick_dispatch_from_runtime()
+    return task
+
+
+async def _kick_dispatch_from_runtime() -> None:
+    """Fire a dispatch pass without waiting for the 15s tick."""
+    try:
+        await dispatch_board_tasks()
+    except Exception:
+        logger.exception("board dispatch after answer failed")
+
 
 async def stop_board_task(task_id: str) -> bool:
     """Cancel the current run of a board task. Returns False when the task

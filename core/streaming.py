@@ -10,14 +10,15 @@ from collections.abc import Sequence
 from typing import Any, TypeAlias
 
 from db import async_session
-from db.ops import add_step, add_steps, update_message_content, update_message_status, update_message_usage
+from db.ops import add_step, add_steps, close_open_approvals, update_message_content, update_message_status, update_message_usage
 
 from langgraph.types import StreamMode
 
 from .doc_index import INLINE_THRESHOLD, embeddings_available, start_indexing
 from .document_extractor import extract_raw_text, format_inline
 from .schemas import AttachmentIn
-from .state import TaskState, emit_event
+from .approvals import record_blocking_request
+from .state import InterruptRequest, TaskState, emit_event
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,26 @@ WORKER_RESULT_PERSIST_CAP = 2000
 
 
 # ── Step data extraction ─────────────────────────────────────────────────────
+
+
+_APPROVAL_ARGS_CAP = 2000
+
+
+def _safe_args_json(args: Any) -> str | None:
+    """Serialize interrupt args for the approvals inbox, never raising.
+
+    Tool args are arbitrary — file bytes, model objects, anything the agent
+    passed — so this is best-effort by design: unserializable values fall back
+    to `repr`, and the whole blob is capped, because a paused run must stay
+    listable even when its arguments are not JSON.
+    """
+    if args is None:
+        return None
+    try:
+        blob = json.dumps(args, default=repr)
+    except Exception:
+        blob = repr(args)
+    return blob[:_APPROVAL_ARGS_CAP]
 
 
 def _subagent_name_from_ns(ns: tuple[str, ...] | None) -> str | None:
@@ -394,10 +415,41 @@ async def _process_chunk(
                 else:
                     question = str(value)
                 interrupt_id = getattr(intr, "id", None) or getattr(intr, "interrupt_id", None) or task_id
-                state.pending_interrupt_id = str(interrupt_id) if interrupt_id is not None else None
+                interrupt_id = str(interrupt_id) if interrupt_id is not None else None
+                # Record the payload, not just the id, so the approvals inbox
+                # can render this pause without tailing the run's event stream.
+                # `request_tool_approval` interrupts with a dict tagged
+                # type="approval" carrying the tool + args; a bare
+                # `request_input` (free-text HITL) carries neither.
+                if interrupt_id is not None:
+                    is_approval = isinstance(value, dict) and value.get("type") == "approval"
+                    request = InterruptRequest(
+                        id=interrupt_id,
+                        question=question,
+                        kind="approval" if is_approval else "input",
+                        tool=value.get("tool") if isinstance(value, dict) else None,
+                        args_json=_safe_args_json(value.get("args")) if isinstance(value, dict) else None,
+                    )
+                    state.set_interrupt(request)
+                    # Persist it too: the in-memory copy dies with the process,
+                    # and the durable row is what lets the run be resumed after
+                    # a restart (see core/approvals.reconcile_startup).
+                    request.approval_id = await record_blocking_request(
+                        source=state.kind,
+                        kind=request.kind,
+                        question=request.question,
+                        label=state.label,
+                        task_id=task_id,
+                        interrupt_id=request.id,
+                        parent_id=conv_id or state.parent_id,
+                        tool=request.tool,
+                        args_json=request.args_json,
+                    )
+                else:
+                    state.pending_interrupt_id = None
                 emit_event(
                     state, "interrupt",
-                    interrupt_id=str(interrupt_id) if interrupt_id is not None else None,
+                    interrupt_id=interrupt_id,
                     question=question,
                 )
             return True
@@ -453,3 +505,10 @@ async def _finalize_message(
         await update_message_status(session, task_id, status)
         if input_tokens is not None or output_tokens is not None or perf:
             await update_message_usage(session, task_id, input_tokens, output_tokens, perf)
+        # The run is over, so anything it was still waiting on is unanswerable.
+        # Leaving the row pending would put a button in the inbox that resumes
+        # nothing — the exact failure `expired` exists to avoid.
+        await close_open_approvals(
+            session, task_id=task_id, status="expired",
+            result=f"The run finished ({status}) before this was answered.",
+        )

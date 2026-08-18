@@ -27,6 +27,7 @@ from core.queue import SqliteJobQueue, Worker
 from core import state
 from core.runner import JarvisRunner, set_runner
 from db import async_session, close_db, get_database, init_db
+from core.approvals import reconcile_startup
 from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
@@ -100,6 +101,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         sweep = await cleanup_zombie_running_rows(session)
         if any(sweep.values()):
             logger.info("startup zombie sweep: %s", sweep)
+    # After the zombie sweep, which is what decides whether a run still has a
+    # job to be re-claimed by — the signal this reads to tell a resumable chat
+    # pause from one the restart destroyed.
+    await reconcile_startup()
+    async with async_session() as session:
         configure_embedding_model(await get_setting(session, "embedding.model"))
         load_custom_models(await get_custom_models(session))
         # Before start() — APScheduler won't reconfigure a running scheduler.

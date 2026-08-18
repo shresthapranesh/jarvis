@@ -437,6 +437,68 @@ class BoardTaskLink(Base):
 
 # ── Durable job queue ──────────────────────────────────────────────────────────
 
+# ── Approvals ─────────────────────────────────────────────────────────────────
+
+class Approval(Base):
+    """One human-in-the-loop request, durable.
+
+    Two shapes share this table, distinguished by whether `action` is set:
+
+    * **Blocking** (`action IS NULL`) — a run is suspended right now waiting on
+      the answer: a LangGraph interrupt (chat), a paused workflow node, or a
+      board task blocked on a question. The resume handle is `task_id` +
+      `interrupt_id`, or `board_task_id`.
+    * **Deferred** (`action` set) — nobody is waiting. The requested operation
+      was recorded instead of performed, and approving it is what executes it
+      (see `core/approvals.py:ACTIONS`). This is the only shape that can work
+      for the `jarvis` SDK, which runs in a separate kernel process where the
+      interrupt mechanism does not reach.
+
+    The row outlives the run deliberately: `status` moves to `expired` when the
+    thing that was waiting is gone, so a restart turns an unanswerable request
+    into an honest tombstone rather than a button that does nothing.
+    """
+
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # "chat" | "workflow" | "automation" | "board_task"
+    source: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    # "approval" (approve/deny gate) | "input" (free-text question)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="approval")
+    # pending | approved | denied | answered | expired | cancelled
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", index=True)
+
+    question: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    label: Mapped[str] = mapped_column(String, nullable=False, default="")
+    tool: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    args_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Resume handles (blocking shape) ──────────────────────────────────
+    # Run/job id — `job.id == task_id` for chat/workflow/automation.
+    task_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    interrupt_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Conversation id (chat, board) or workflow id — the "open it" target.
+    parent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    board_task_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+
+    # ── Deferred shape ───────────────────────────────────────────────────
+    # Key into core/approvals.ACTIONS; NULL for the blocking shape.
+    action: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    action_payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON object
+    # What executing it produced (or why it failed) — the audit half.
+    result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 class Job(Base):
     __tablename__ = "jobs"
 

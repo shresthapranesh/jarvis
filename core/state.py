@@ -91,11 +91,38 @@ def get_queue() -> JobQueue:
 # ── Task registry ────────────────────────────────────────────────────────────
 
 @dataclass
+class InterruptRequest:
+    """The human-in-the-loop request a paused run is currently waiting on.
+
+    ``pending_interrupt_id`` answers *whether* a run is paused; the question
+    itself only ever existed as an emitted event, readable by a subscriber
+    already tailing that one run. The approvals inbox has no such subscription
+    — it polls every run at once — so the payload is carried here too, set and
+    cleared on exactly the same paths as the id (see ``set_interrupt`` /
+    ``clear_interrupt``, which exist so no caller can update one without the
+    other).
+    """
+
+    id: str
+    question: str
+    kind: Literal["approval", "input"] = "input"
+    tool: str | None = None
+    args_json: str | None = None
+    node_id: str | None = None
+    requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Id of the durable `approvals` row backing this pause, when one was
+    # written. None means the persist failed — the run is still resumable by
+    # its own subscriber, it just won't appear in the inbox.
+    approval_id: str | None = None
+
+
+@dataclass
 class TaskState:
     events: list[dict] = field(default_factory=list)
     done: bool = False
     cancelled: bool = False
     pending_interrupt_id: str | None = None
+    pending_interrupt: InterruptRequest | None = None
     resume_future: asyncio.Future | None = None
     # Self-describing fields surfaced by the global /tasks endpoint.
     # Default-initialized for backwards compat; each subsystem sets them
@@ -117,8 +144,34 @@ class TaskState:
     # ── Throughput tracking (prefill / eval tok/s) ─────────────────────────
     _perf_tracker: object | None = field(default=None, repr=False)  # PerfTracker, Any to avoid cycle
 
+    def set_interrupt(self, request: InterruptRequest) -> None:
+        """Mark the run as paused on `request`. Sets id and payload together."""
+        self.pending_interrupt = request
+        self.pending_interrupt_id = request.id
+
+    def clear_interrupt(self) -> None:
+        """Mark the run as no longer paused. Clears id and payload together."""
+        self.pending_interrupt = None
+        self.pending_interrupt_id = None
+
 
 _tasks: dict[str, TaskState] = {}
+
+
+def task_id_of(state: TaskState) -> str | None:
+    """The registry key for `state`, or None if it is not registered.
+
+    A reverse lookup rather than an `id` field on TaskState: the id is assigned
+    by whoever registers the run, and eleven call sites construct a TaskState.
+    A field would be silently empty wherever one was missed — and the sites
+    that would be missed are the nested ones (workflow map children), which is
+    exactly where a wrong-but-present id would attach an approval to the wrong
+    run. None is the correct answer for those.
+    """
+    for key, value in _tasks.items():
+        if value is state:
+            return key
+    return None
 
 
 def _resolve_waiters(state: TaskState) -> None:

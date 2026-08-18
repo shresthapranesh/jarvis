@@ -24,12 +24,14 @@ import {
   MenuIcon,
   MicIcon,
   MoonIcon,
+  ShieldCheckIcon,
   StarIcon,
   SunIcon,
   WorkflowIcon,
 } from '../components/icons';
 import {useHealth} from '../hooks/useHealth';
 import {useIsMobile} from '../hooks/useIsMobile';
+import {usePendingApprovals} from '../hooks/usePendingApprovals';
 import {useRunningTasks} from '../hooks/useRunningTasks';
 import {ToastProvider} from '../lib/toast';
 
@@ -75,8 +77,8 @@ interface NavItem {
   to: string;
   label: string;
   Icon: (p: {size?: number}) => React.ReactElement;
-  /** Only Tasks carries a live count today; keyed so more can opt in. */
-  badge?: 'running';
+  /** Which live count to hang off this row, if any. */
+  badge?: 'running' | 'approvals';
 }
 
 const NAV_GROUPS: {heading: string; items: NavItem[]}[] = [
@@ -88,6 +90,7 @@ const NAV_GROUPS: {heading: string; items: NavItem[]}[] = [
       {to: '/workflow', label: 'Workflows', Icon: WorkflowIcon},
       {to: '/automation', label: 'Automations', Icon: BoltIcon},
       {to: '/tasks', label: 'Tasks', Icon: ClockIcon, badge: 'running'},
+      {to: '/approvals', label: 'Approvals', Icon: ShieldCheckIcon, badge: 'approvals'},
     ],
   },
   {
@@ -112,6 +115,7 @@ function RootLayout() {
   const healthy = useHealth();
 
   const runningCount = useRunningTasks().length;
+  const approvalCount = usePendingApprovals().length;
 
   const [navCollapsed, setNavCollapsed] = useState(
     () => localStorage.getItem('nav-collapsed') === 'true',
@@ -312,7 +316,12 @@ function RootLayout() {
             <div className="nav-group" key={group.heading}>
               {!railCollapsed && <p className="nav-heading">{group.heading}</p>}
               {group.items.map(({to, label, Icon, badge}) => {
-                const count = badge === 'running' ? runningCount : 0;
+                const count =
+                  badge === 'running'
+                    ? runningCount
+                    : badge === 'approvals'
+                      ? approvalCount
+                      : 0;
                 return (
                   <Link
                     key={to}

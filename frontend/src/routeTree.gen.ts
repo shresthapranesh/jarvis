@@ -20,6 +20,7 @@ import { Route as LiveRouteImport } from './routes/live'
 import { Route as BoardRouteImport } from './routes/board'
 import { Route as AutomationRouteImport } from './routes/automation'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
+import { Route as ApprovalsRouteImport } from './routes/approvals'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkflowIndexRouteImport } from './routes/workflow.index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
@@ -84,6 +85,11 @@ const ArtifactsRoute = ArtifactsRouteImport.update({
   path: '/artifacts',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApprovalsRoute = ApprovalsRouteImport.update({
+  id: '/approvals',
+  path: '/approvals',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -127,6 +133,7 @@ const WorkflowIdRunsRunIdRoute = WorkflowIdRunsRunIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/approvals': typeof ApprovalsRoute
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/board': typeof BoardRoute
@@ -148,6 +155,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/approvals': typeof ApprovalsRoute
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/board': typeof BoardRoute
@@ -167,6 +175,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/approvals': typeof ApprovalsRoute
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/board': typeof BoardRoute
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/approvals'
     | '/artifacts'
     | '/automation'
     | '/board'
@@ -211,6 +221,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/approvals'
     | '/artifacts'
     | '/automation'
     | '/board'
@@ -229,6 +240,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/approvals'
     | '/artifacts'
     | '/automation'
     | '/board'
@@ -251,6 +263,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApprovalsRoute: typeof ApprovalsRoute
   ArtifactsRoute: typeof ArtifactsRoute
   AutomationRoute: typeof AutomationRoute
   BoardRoute: typeof BoardRoute
@@ -342,6 +355,13 @@ declare module '@tanstack/react-router' {
       path: '/artifacts'
       fullPath: '/artifacts'
       preLoaderRoute: typeof ArtifactsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/approvals': {
+      id: '/approvals'
+      path: '/approvals'
+      fullPath: '/approvals'
+      preLoaderRoute: typeof ApprovalsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -447,6 +467,7 @@ const WorkflowRouteWithChildren = WorkflowRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApprovalsRoute: ApprovalsRoute,
   ArtifactsRoute: ArtifactsRoute,
   AutomationRoute: AutomationRoute,
   BoardRoute: BoardRoute,
