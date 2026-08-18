@@ -22,16 +22,13 @@ logger = logging.getLogger(__name__)
 
 @tool
 async def remember(text: str, kind: str = "fact") -> str:
-    """Persist a durable fact to long-term memory, recalled in future conversations.
+    """Persist a durable fact, recalled in future conversations.
 
-    Use when the user shares something worth remembering across sessions — a
-    preference, ongoing project, or important fact. Not for transient,
-    conversation-only details.
+    For preferences, ongoing projects, lasting facts — not conversation-only detail.
 
     Args:
         text: One atomic, self-contained fact.
-        kind: "core" for durable identity/preferences always kept in mind, or
-            "fact" (default) for everything else.
+        kind: "core" for identity/preferences always in context; "fact" (default) otherwise.
     """
     if not text.strip():
         return "Nothing to remember (empty text)."

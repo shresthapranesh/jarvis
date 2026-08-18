@@ -43,7 +43,6 @@ from tools.artifacts import (
     list_artifacts as artifact_list,
     read_artifact,
     write_artifact,
-    write_artifact_file,
 )
 from tools.code import run_cell
 from tools.documents import read_document, search_documents
@@ -518,7 +517,9 @@ def close_sync_checkpointer() -> None:
 
 # ── Agent builder ─────────────────────────────────────────────────────────────
 
-def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> CompiledStateGraph:
+def _build_agent(
+    model: str, checkpointer, store: AsyncSqliteStore | None, board: bool = False
+) -> CompiledStateGraph:
     spec = get_model_spec(model)
     llm = spec.build_llm()
     # Use runner's cache config if available (Jarvis runner seam), else local fallback.
@@ -545,10 +546,10 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
         _mcp_tools_for_workers = []
 
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [run_cell, read_file, write_file, list_files, write_artifact, write_artifact_file, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
+        "general":    [run_cell, read_file, write_file, list_files, write_artifact, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
         "researcher": [run_cell, read_file, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
         "coder":      [run_cell, read_file, write_file, list_files],
-        "writer":     [read_file, write_file, write_artifact, write_artifact_file, read_artifact, artifact_list, search_documents, read_document],
+        "writer":     [read_file, write_file, write_artifact, read_artifact, artifact_list, search_documents, read_document],
     }
 
     def _make_role_factory(role: str):
@@ -597,22 +598,27 @@ def _build_agent(model: str, checkpointer, store: AsyncSqliteStore | None) -> Co
     #   run_cell                  the door into the kernel
     #   write_todos/set_todo_*    return Command(update=...) state deltas; a
     #                             separate process cannot write the reducer
-    #   complete_task/block_task  act on the CURRENT run's lifecycle
+    #   complete_task/block_task  act on the CURRENT run's lifecycle (board runs only)
     #   spawn_workers/run_workflow  instantiate subgraphs on this LLM binding
-    #   write_artifact/_file      its live side-panel event is tied to this
+    #   write_artifact            its live side-panel event is tied to this
     #                             run's stream writer
     #   remember                  no createMemory mutation exists to route to
     main_tools = [
         run_cell,
         write_artifact,
-        write_artifact_file,
         write_todos,
         set_todo_status,
         spawn_workers,
-        complete_task,
-        block_task,
         run_workflow,
     ]
+
+    # complete_task/block_task act on ToolContext.board_task_id, which only a
+    # board run sets — everywhere else they can do nothing but return
+    # "only available while executing a board task". Binding them anyway cost
+    # ~340 tokens of schema on every LLM call of every chat/automation/workflow
+    # run, and none of it is cached on providers outside should_use_cache().
+    if board:
+        main_tools += [complete_task, block_task]
 
     # The memory write path is only meaningful with an embedder (the discrete
     # Memory store); keyless setups fall back to the AGENTS.md blob, so don't
@@ -812,15 +818,22 @@ def invalidate_agent_cache() -> None:
     _cache.clear()
 
 
-def _build_cached(model: str, checkpointer, store) -> CompiledStateGraph:
-    key = (model, id(checkpointer), id(store))
+def _build_cached(model: str, checkpointer, store, board: bool = False) -> CompiledStateGraph:
+    # `board` is part of the key because the bound toolset differs: a board run
+    # gets complete_task/block_task, nothing else does. Two graphs per model at
+    # most, and only on installs that actually use the board.
+    key = (model, id(checkpointer), id(store), board)
     if key not in _cache:
-        _cache[key] = _build_agent(model, checkpointer, store)
+        _cache[key] = _build_agent(model, checkpointer, store, board=board)
     return _cache[key]
 
 
-def build_agent(model: str = DEFAULT_MODEL, checkpointer=None, store: AsyncSqliteStore | None = None, invocation_context=None) -> CompiledStateGraph:
-    """Build the agent. Defaults to sync SqliteSaver for CLI; server passes async variants."""
+def build_agent(model: str = DEFAULT_MODEL, checkpointer=None, store: AsyncSqliteStore | None = None, invocation_context=None, board: bool = False) -> CompiledStateGraph:
+    """Build the agent. Defaults to sync SqliteSaver for CLI; server passes async variants.
+
+    Set ``board=True`` for a task-board run so the board lifecycle tools
+    (complete_task/block_task) are bound; they are inert anywhere else.
+    """
     if checkpointer is None:
         checkpointer = _get_sync_checkpointer()
-    return _build_cached(model, checkpointer, store)
+    return _build_cached(model, checkpointer, store, board=board)

@@ -210,14 +210,11 @@ async def manage_workflows(
 
 @tool
 async def run_workflow(workflow_id: str, inputs_json: str | None = None) -> str:
-    """Run a saved workflow as a sub-agent, returning its final outputs as JSON.
-
-    Delegates multi-step work to a reusable workflow you or the user built.
+    """Run a saved workflow as a sub-agent; returns its final outputs as JSON.
 
     Args:
         workflow_id: ID of the workflow to run.
-        inputs_json: Optional JSON object string of inputs for the start
-            nodes, e.g. '{"topic": "AI news"}'. Defaults to {}.
+        inputs_json: JSON object of start-node inputs, e.g. '{"topic": "AI news"}'.
     """
     # Recursion guard: prevent workflow AgentNode -> run_workflow -> same workflow -> ...
     depth = _workflow_depth.get()

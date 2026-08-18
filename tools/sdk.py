@@ -20,8 +20,8 @@ Two transports, chosen by what the operation needs:
 
 What deliberately stays a bound tool: anything coupled to the agent graph —
 todos (`Command` state deltas), complete/block_task (current-run lifecycle),
-spawn_workers/run_workflow (subgraphs on the parent's LLM), write_artifact/
-write_artifact_file (their live side-panel event is tied to this run's
+spawn_workers/run_workflow (subgraphs on the parent's LLM), write_artifact
+(its live side-panel event is tied to this run's
 stream writer), and `remember` (there is no createMemory mutation to route to).
 
 A third kind of helper (e.g. `text_to_speech`) is neither a DB read nor a
@@ -952,7 +952,7 @@ def text_to_speech(text: str) -> str:
     """Synthesize speech from text using the local Piper TTS voice.
 
     Writes a scratch .wav file and returns its path — pass that path to the
-    write_artifact_file tool (kind="audio") to save it as a shareable artifact.
+    write_artifact(file_path=...) tool to save it as a shareable artifact.
     Raises if piper-tts isn't installed in this build, or the voice model file
     is missing (set PIPER_VOICE env var).
     """
@@ -973,7 +973,7 @@ def text_to_speech(text: str) -> str:
 
 _CATEGORIES: dict[str, tuple[str, list]] = {
     "artifacts": (
-        "read/list saved deliverables (write_artifact/write_artifact_file stay tools)",
+        "read/list saved deliverables (write_artifact stays a tool)",
         [list_artifacts, read_artifact, list_artifact_versions],
     ),
     "documents": (
@@ -1005,7 +1005,7 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
         [search_memory, project_memory],
     ),
     "media": (
-        "local audio synthesis (write_artifact_file stays a tool to save the result)",
+        "local audio synthesis (write_artifact saves the result)",
         [text_to_speech],
     ),
 }
