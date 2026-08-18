@@ -176,4 +176,19 @@ async def block_task(reason: str, needs_input: bool = False) -> str:
         )
     if task is None:
         return "Error: current board task not found."
+    if needs_input:
+        # The block itself is durable (it is a column on the task), but the
+        # inbox reads one table, so mirror it there. Failing to write the row
+        # must not fail the block — the board card still shows the question.
+        from core.approvals import record_blocking_request
+        from db.ops import board_task_conversation_id
+
+        await record_blocking_request(
+            source="board_task",
+            kind="input",
+            question=reason,
+            label=task.title,
+            board_task_id=task.id,
+            parent_id=board_task_conversation_id(task.id),
+        )
     return "Task marked blocked. Wrap up with a short final reply explaining the blocker."

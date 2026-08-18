@@ -569,9 +569,18 @@ def api(query: str, variables: dict | None = None) -> dict:
     import httpx
 
     url = os.environ.get("JARVIS_API_URL") or DEFAULT_API_URL
+    # Identify the caller so the server can gate destructive writes. A write
+    # the agent initiates needs a human's say-so; the same mutation from the
+    # web UI *is* the human's say-so and must not be gated.
+    headers = {"X-Jarvis-Caller": "agent"}
+    if _conversation_id:
+        headers["X-Jarvis-Conversation"] = _conversation_id
     try:
         resp = httpx.post(
-            url, json={"query": query, "variables": variables or {}}, timeout=30.0
+            url,
+            json={"query": query, "variables": variables or {}},
+            headers=headers,
+            timeout=30.0,
         )
     except httpx.HTTPError as exc:
         raise RuntimeError(f"Could not reach the Jarvis API at {url}: {exc}") from exc

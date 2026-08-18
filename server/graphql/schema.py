@@ -7,6 +7,7 @@ from strawberry.tools import merge_types
 
 from .extensions import SerializeSessionResolvers
 
+from .mutations.approval import ApprovalMutation
 from .mutations.artifact import ArtifactMutation
 from .mutations.automation import AutomationMutation
 from .mutations.board_task import BoardTaskMutation
@@ -19,6 +20,7 @@ from .mutations.project import ProjectMutation
 from .mutations.skill import SkillMutation
 from .mutations.task_run import TaskRunMutation
 from .mutations.workflow import WorkflowMutation
+from .queries.approval import ApprovalQuery
 from .queries.artifact import ArtifactQuery
 from .queries.automation import AutomationQuery
 from .queries.board_task import BoardTaskQuery
@@ -39,13 +41,13 @@ from .subscriptions.workflow import WorkflowSubscription
 Query = merge_types("Query", (
     ModelsQuery, MemoryQuery, ConversationQuery, ArtifactQuery,
     AutomationQuery, BoardTaskQuery, WorkflowQuery, NotificationQuery,
-    ProjectQuery, SkillQuery, TaskRunQuery, McpQuery,
+    ProjectQuery, SkillQuery, TaskRunQuery, McpQuery, ApprovalQuery,
 ))
 Mutation = merge_types("Mutation", (
     MemoryMutation, ConversationMutation, ArtifactMutation,
     AutomationMutation, BoardTaskMutation, WorkflowMutation,
     NotificationMutation, ProjectMutation, SkillMutation, TaskRunMutation,
-    McpMutation, ModelsMutation,
+    McpMutation, ModelsMutation, ApprovalMutation,
 ))
 Subscription = merge_types("Subscription", (
     ChatSubscription, AutomationSubscription, BoardTaskSubscription,

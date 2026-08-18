@@ -8,6 +8,7 @@ import strawberry
 from strawberry import relay
 from strawberry.scalars import JSON
 
+from core.approvals import gate_action
 from core.state import _tasks
 from db.ops import (
     create_workflow as db_create_workflow,
@@ -34,6 +35,23 @@ class WorkflowUpdateInput:
     description: str | None = None
     definition: str | None = None  # JSON string
     notifications: str | None = None  # JSON string
+
+
+async def _close_run_approvals(
+    info: strawberry.Info, run_id: str, *, status: str = "answered",
+) -> None:
+    """Clear the run's durable approval row after resuming it in-process.
+
+    Resuming and recording are separate steps on purpose: the in-process
+    handoff is what actually unblocks the node, and it must not be held up (or
+    undone) by a bookkeeping failure.
+    """
+    from db.ops import close_open_approvals
+
+    await close_open_approvals(
+        info.context["session"], task_id=run_id,
+        status=status, result="Delivered to the run.",
+    )
 
 
 @strawberry.type
@@ -88,6 +106,15 @@ class WorkflowMutation:
         id: relay.GlobalID,
     ) -> bool:
         session = info.context["session"]
+        if info.context.get("caller") == "agent":
+            existing = await get_workflow(session, id.node_id)
+            if existing is None:
+                raise ValueError("workflow not found")
+            await gate_action(
+                session, "delete_workflow",
+                {"workflow_id": id.node_id, "name": existing.name},
+                source="chat", parent_id=info.context.get("caller_conversation_id"),
+            )
         deleted = await db_delete_workflow(session, id.node_id)
         if not deleted:
             raise ValueError("workflow not found")
@@ -123,7 +150,7 @@ class WorkflowMutation:
         return True
 
     @strawberry.mutation
-    async def resume_workflow_run(self, run_id: str, answer: str) -> bool:
+    async def resume_workflow_run(self, info: strawberry.Info, run_id: str, answer: str) -> bool:
         """Resume a workflow paused at an approval/human_input node.
 
         The answer is delivered to the pending node: for approval nodes,
@@ -140,11 +167,14 @@ class WorkflowMutation:
         pending_id = state.pending_interrupt_id
         state.resume_future.set_result(answer)
         emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
+        await _close_run_approvals(info, run_id)
+        state.clear_interrupt()
         return True
 
     @strawberry.mutation
     async def resolve_workflow_approval(
         self,
+        info: strawberry.Info,
         run_id: str,
         approved: bool,
         answer: str | None = None,
@@ -162,4 +192,8 @@ class WorkflowMutation:
         payload = {"approved": approved, "answer": answer or ("approved" if approved else "denied")}
         state.resume_future.set_result(payload)
         emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
+        await _close_run_approvals(
+            info, run_id, status="approved" if approved else "denied",
+        )
+        state.clear_interrupt()
         return True

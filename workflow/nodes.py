@@ -17,7 +17,8 @@ from uuid import uuid4
 
 from core.agents import build_agent
 from core.model_catalog import DEFAULT_MODEL, get_model_spec
-from core.state import TaskState, emit_event as _emit
+from core.approvals import record_blocking_request
+from core.state import InterruptRequest, TaskState, emit_event as _emit, task_id_of
 from db.ops import resolve_model
 from core.streaming import STREAM_MODES
 
@@ -1029,7 +1030,20 @@ class ApprovalNode(BaseNode):
 
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
-        task_state.pending_interrupt_id = self.node_id
+        request = InterruptRequest(
+            id=self.node_id,
+            question=reason,
+            kind="approval",
+            tool=tool,
+            args_json=json.dumps(inputs, default=repr)[:2000],
+            node_id=self.node_id,
+        )
+        task_state.set_interrupt(request)
+        request.approval_id = await record_blocking_request(
+            source=task_state.kind, kind="approval", question=reason,
+            label=task_state.label, task_id=task_id_of(task_state), interrupt_id=self.node_id,
+            parent_id=task_state.parent_id, tool=tool, args_json=request.args_json,
+        )
         task_state.resume_future = fut
         try:
             if timeout:
@@ -1052,7 +1066,7 @@ class ApprovalNode(BaseNode):
             )
             raise RuntimeError(f"Approval timed out for {tool}: {reason}")
         finally:
-            task_state.pending_interrupt_id = None
+            task_state.clear_interrupt()
             task_state.resume_future = None
 
         # Parse approval
@@ -1129,7 +1143,20 @@ class HumanInputNode(BaseNode):
 
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
-        task_state.pending_interrupt_id = self.node_id
+        request = InterruptRequest(
+            id=self.node_id,
+            question=prompt,
+            kind="input",
+            tool=self.node_id,
+            args_json=json.dumps(inputs, default=repr)[:2000],
+            node_id=self.node_id,
+        )
+        task_state.set_interrupt(request)
+        request.approval_id = await record_blocking_request(
+            source=task_state.kind, kind="input", question=prompt,
+            label=task_state.label, task_id=task_id_of(task_state), interrupt_id=self.node_id,
+            parent_id=task_state.parent_id, tool=self.node_id, args_json=request.args_json,
+        )
         task_state.resume_future = fut
         try:
             if timeout:
@@ -1148,7 +1175,7 @@ class HumanInputNode(BaseNode):
             )
             raise RuntimeError(f"Human input timed out for {self.node_id}: {prompt}")
         finally:
-            task_state.pending_interrupt_id = None
+            task_state.clear_interrupt()
             task_state.resume_future = None
 
         answer_str = str(answer) if answer is not None else ""

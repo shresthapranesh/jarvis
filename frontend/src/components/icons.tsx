@@ -228,6 +228,13 @@ export const StarIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const ShieldCheckIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 3l7.5 3v5.2c0 4.4-3.1 8.4-7.5 9.8-4.4-1.4-7.5-5.4-7.5-9.8V6L12 3z" />
+    <polyline points="9 11.8 11.2 14 15 10" />
+  </Icon>
+);
+
 export const ListIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M4 6h16" />

@@ -107,6 +107,11 @@ def _migrate(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_locked_until ON jobs (locked_until)"))
+    # The inbox reads pending rows constantly (nav badge polls); the two
+    # composite indexes cover both the list and the per-run reconciliation.
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_approvals_status_requested ON approvals (status, requested_at)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_approvals_task_status ON approvals (task_id, status)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_approvals_board_task_status ON approvals (board_task_id, status)"))
     conv_cols = {c["name"] for c in inspector.get_columns("conversations")}
     if "pinned" not in conv_cols:
         conn.execute(text("ALTER TABLE conversations ADD COLUMN pinned BOOLEAN DEFAULT 0"))

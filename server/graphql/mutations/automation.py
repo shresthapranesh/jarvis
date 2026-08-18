@@ -7,10 +7,12 @@ from strawberry import relay
 
 
 from core.agents import is_valid_model
+from core.approvals import gate_action
 from core.state import _tasks, get_queue
 from core.scheduler import _cron, _register_scheduler_job, _remove_scheduler_job
 from db.ops import (
     create_automation as db_create_automation,
+    get_automation,
     delete_automation as db_delete_automation,
     update_automation as db_update_automation,
 )
@@ -119,8 +121,20 @@ class AutomationMutation:
         info: strawberry.Info,
         id: relay.GlobalID,
     ) -> bool:
-        _remove_scheduler_job(id.node_id)
         session = info.context["session"]
+        if info.context.get("caller") == "agent":
+            existing = await get_automation(session, id.node_id)
+            if existing is None:
+                raise ValueError("automation not found")
+            # Gate BEFORE unregistering the scheduler job: raising after it
+            # would leave the automation in the DB but silently unscheduled —
+            # a denied approval that still broke the thing it protected.
+            await gate_action(
+                session, "delete_automation",
+                {"automation_id": id.node_id, "name": existing.name},
+                source="chat", parent_id=info.context.get("caller_conversation_id"),
+            )
+        _remove_scheduler_job(id.node_id)
         deleted = await db_delete_automation(session, id.node_id)
         if not deleted:
             raise ValueError("automation not found")

@@ -159,25 +159,10 @@ class BoardTaskMutation:
         """Answer a blocked task's question and resume it. The answer is
         delivered to the resumed run (same conversation thread, so the agent
         keeps the context of what it asked)."""
-        if not answer.strip():
-            raise ValueError("answer must not be empty")
+        from server.task_board_runtime import answer_board_task
+
         session = info.context["session"]
-        task = await get_board_task(session, id.node_id)
-        if task is None:
-            raise ValueError("task not found")
-        if task.status != "blocked":
-            raise ValueError("only blocked tasks can be answered")
-        task = await db_update_board_task(
-            session, id.node_id,
-            status="ready",
-            pending_answer=answer.strip(),
-            blocked_reason=None,
-            blocked_kind=None,
-            finished_at=None,
-        )
-        assert task is not None
-        await _kick_dispatch()
-        return BoardTask.from_db(task)
+        return BoardTask.from_db(await answer_board_task(session, id.node_id, answer))
 
     @strawberry.mutation
     async def delete_board_task(

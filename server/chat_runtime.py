@@ -28,6 +28,7 @@ from core.perf import PerfCallbackHandler, PerfTracker
 from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
 from core.schemas import AttachmentIn
 from core.state import (
+    InterruptRequest,
     TaskState,
     _notify,
     _tasks,
@@ -51,6 +52,30 @@ from db.ops import (
 
 
 # ── Agent task runner ────────────────────────────────────────────────────────
+
+async def _pending_approval_for(task_id: str) -> InterruptRequest | None:
+    """The durable pause this run left behind, if it is picking one up.
+
+    Returns None on the overwhelmingly common path (a fresh run), so this costs
+    one indexed lookup per turn. Restored as an `InterruptRequest` rather than
+    re-deriving the question from the graph: LangGraph keeps the interrupt, but
+    not the human-readable prompt that was streamed alongside it.
+    """
+    from db.ops import find_open_approval_for_task
+
+    async with async_session() as session:
+        row = await find_open_approval_for_task(session, task_id)
+    if row is None:
+        return None
+    return InterruptRequest(
+        id=row.interrupt_id or row.id,
+        question=row.question,
+        kind=row.kind,  # type: ignore[arg-type]
+        tool=row.tool,
+        args_json=row.args_json,
+        approval_id=row.id,
+    )
+
 
 async def _run_agent_task(
     task_id: str, query: str, model: str, conv_id: str,
@@ -165,7 +190,32 @@ async def _run_agent_task(
         stream_input: Any = {"messages": [HumanMessage(content=content, id=user_msg_id)], "todos": []}
         emit_event(state, "todos_updated", todos=[], source="main")
 
+        # Restart-resume. A job re-claimed after the server died may belong to a
+        # run that was suspended on an interrupt. Re-sending the prompt would
+        # discard the checkpointed pause and replay the whole turn; the durable
+        # approval row is what lets us tell the difference, and it still holds
+        # the question the in-memory copy lost. Re-await the answer instead,
+        # then continue with Command(resume=...) exactly as the live path does.
+        pending = await _pending_approval_for(task_id)
+        if pending is not None:
+            state.set_interrupt(pending)
+            emit_event(
+                state, "interrupt",
+                interrupt_id=pending.id, question=pending.question,
+            )
+            state.resume_future = asyncio.get_running_loop().create_future()
+            try:
+                stream_input = Command(resume=await state.resume_future)
+            except asyncio.CancelledError:
+                state.cancelled = True
+                stream_input = None
+            finally:
+                state.resume_future = None
+                state.clear_interrupt()
+
         while True:
+            if stream_input is None:
+                break
             interrupted = False
             async for raw_chunk in agent.astream(  # type: ignore[call-overload]
                 stream_input,
@@ -195,7 +245,7 @@ async def _run_agent_task(
                 break
             finally:
                 state.resume_future = None
-                state.pending_interrupt_id = None
+                state.clear_interrupt()
 
             stream_input = Command(resume=answer)
 

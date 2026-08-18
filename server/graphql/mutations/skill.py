@@ -5,6 +5,7 @@ from __future__ import annotations
 import strawberry
 from strawberry import relay
 
+from core.approvals import gate_action
 from core.skill_store import save_new_skill, save_skill_update
 from db.ops import (
     delete_skill as db_delete_skill,
@@ -102,5 +103,11 @@ class SkillMutation:
         existing = await get_skill(session, id.node_id)
         if existing is None:
             raise ValueError("skill not found")
+        if info.context.get("caller") == "agent":
+            await gate_action(
+                session, "delete_skill",
+                {"skill_id": id.node_id, "name": existing.name},
+                source="chat", parent_id=info.context.get("caller_conversation_id"),
+            )
         await db_delete_skill(session, id.node_id)
         return True

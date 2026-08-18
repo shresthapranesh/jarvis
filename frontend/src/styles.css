@@ -5710,6 +5710,199 @@ audio.artifact-media {
   cursor: not-allowed;
 }
 
+/* ── Approvals page ── */
+.approval-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.approval-count-total {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.approval-count-chip {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.approval-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+}
+
+.approval-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.approval-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Board is the one durable source, so it gets its own hue rather than
+   borrowing a run kind's. */
+.task-kind-badge--board_task {
+  background: rgba(var(--ok-rgb), 0.16);
+  color: var(--ok);
+}
+
+.approval-origin {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.approval-tool {
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text-dim);
+}
+
+.approval-deferred {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(var(--ok-rgb), 0.14);
+  color: var(--ok);
+  flex-shrink: 0;
+}
+
+.approval-age {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.approval-open {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
+}
+.approval-open:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.approval-question {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.approval-args-toggle {
+  font-size: 0.74rem;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.approval-args pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.74rem;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.84rem;
+  padding: 7px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+.approval-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.approval-btn {
+  font-size: 0.8rem;
+  padding: 7px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: filter 0.12s;
+}
+.approval-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+.approval-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.approval-btn--approve {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--accent-contrast);
+}
+.approval-btn--deny {
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+}
+
 /* ── Nav badge (count chip on sidebar links) ── */
 .nav-badge {
   margin-left: auto;
