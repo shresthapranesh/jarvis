@@ -169,7 +169,7 @@ class JarvisRunner:
 
     # ── Agent factory ─────────────────────────────────────────────────────
 
-    def build_agent(self, model: str, checkpointer=None, store=None, invocation_context=None):
+    def build_agent(self, model: str, checkpointer=None, store=None, invocation_context=None, board: bool = False):
         """Delegate to core.agents.build_agent with runner's defaults."""
         from core.agents import build_agent as _build_agent
 
@@ -180,6 +180,7 @@ class JarvisRunner:
             model=model,
             checkpointer=checkpointer or self.checkpointer,
             store=store or self.store,
+            board=board,
         )
 
     # ── Cache config (ContextCacheConfig analog) ──────────────────────

@@ -90,16 +90,11 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
 
     @tool
     async def spawn_workers(tasks: list[dict]) -> str:
-        """Spawn worker agents to run independent tasks concurrently; returns when all complete.
+        """Run independent tasks concurrently on worker agents; returns when all finish.
 
-        Each task is a dict:
-          "task":    (required) what to do
-          "context": (optional) extra background for the worker
-          "role":    (optional) "researcher", "coder", "writer", or "general"
-                     (default) — tunes the worker's prompt and tool subset
-
-        Workers are separate agents and can't see your kernel variables — put
-        everything each one needs in its task/context.
+        Each task is a dict: "task" (required), "context" (optional background),
+        "role" (optional: researcher/coder/writer/general). Workers can't see
+        your kernel variables — put what each needs in its task/context.
         """
 
         # Propagate the parent's conversation_id so worker-side tools (e.g.

@@ -4,6 +4,7 @@ Artifacts are markdown documents the agent produces as deliverables (reports,
 drafts, resumes, etc.) — distinct from `write_file`, which is for scratch work.
 The frontend renders them in a side panel; the agent should call
 `write_artifact` whenever the user asked for a document-shaped result.
+Binary deliverables (audio/video/image) go through the same tool via `file_path`.
 
 Files are stored on disk under ``AppConfig.artifacts_dir`` as ``{uuid}.md``;
 the DB row in ``artifacts`` tracks metadata (title, conversation, timestamps).
@@ -46,22 +47,40 @@ def _version_path(artifact_id: str, version: int) -> Path:
 @tool
 async def write_artifact(
     title: str,
-    content: str,
+    content: str | None = None,
+    file_path: str | None = None,
     artifact_id: str | None = None,
 ) -> str:
-    """Save a markdown deliverable (report, draft, document, resume, etc.).
+    """Save a deliverable the user keeps. Shown in a side panel; auto-versioned.
 
-    Use this — not write_file — for a finished document the user will keep.
-    The frontend renders it in a side panel to read, edit, copy, or download.
-    Each write is versioned automatically.
+    Pass `content` for a markdown document (report, draft, resume), or
+    `file_path` for an already-written audio/video/image file. Not for scratch
+    work — use write_file for that.
 
     Args:
-        title: Short human-readable title (shown in the side panel and library).
-        content: Markdown body — render-ready (headings, lists, tables).
-        artifact_id: Pass to update an existing artifact in place; omit to create.
+        title: Short human-readable title.
+        content: Markdown body. Mutually exclusive with file_path.
+        file_path: Path to an existing file to register instead of content.
+        artifact_id: Update this artifact in place; omit to create a new one.
 
     Returns the artifact id and title as JSON.
     """
+    if (content is None) == (file_path is None):
+        return json.dumps(
+            {"error": "pass exactly one of content= (markdown) or file_path= (a file on disk)"}
+        )
+    if file_path is not None:
+        return await _write_file_artifact(title, file_path, artifact_id)
+    assert content is not None
+    return await _write_markdown_artifact(title, content, artifact_id)
+
+
+async def _write_markdown_artifact(
+    title: str,
+    content: str,
+    artifact_id: str | None = None,
+) -> str:
+    """Write a markdown artifact. Reached via `write_artifact(content=...)`."""
     ctx = current_ctx()
     conversation_id = ctx.conversation_id
 
@@ -137,32 +156,18 @@ async def write_artifact(
     return json.dumps({"id": art.id, "title": title, "action": action})
 
 
-@tool
-async def write_artifact_file(
+async def _write_file_artifact(
     title: str,
     file_path: str,
+    artifact_id: str | None = None,
     kind: str | None = None,
     mime_type: str | None = None,
-    artifact_id: str | None = None,
 ) -> str:
-    """Save a binary deliverable (audio, video, image, or other file) as an artifact.
+    """Register an on-disk file as a binary artifact.
 
-    Use this — not write_artifact — when the deliverable isn't markdown text:
-    e.g. audio synthesized via jarvis.text_to_speech(), a downloaded video clip,
-    or an image. The source file must already exist on disk (produced via
-    run_cell). The frontend renders it in the side panel with an audio/video/
-    image player as appropriate. Each write is versioned automatically, same
-    as write_artifact.
-
-    Args:
-        title: Short human-readable title (shown in the side panel and library).
-        file_path: Path to the already-written source file to register.
-        kind: One of "audio", "video", "image", "binary". Inferred from the
-            file extension / mime_type if omitted.
-        mime_type: MIME type of the file. Inferred from the extension if omitted.
-        artifact_id: Pass to update an existing artifact in place; omit to create.
-
-    Returns the artifact id, title, kind, and size as JSON.
+    Reached via `write_artifact(file_path=...)`. ``kind``/``mime_type`` are not
+    on the tool surface (they cost schema tokens on every LLM call and are
+    inferable from the extension); they stay here for internal callers.
     """
     ctx = current_ctx()
     conversation_id = ctx.conversation_id

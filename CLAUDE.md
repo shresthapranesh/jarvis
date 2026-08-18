@@ -116,7 +116,8 @@ jarvis/
 │   ├── documents.py      # [workers] search_documents, read_document — main agent uses jarvis SDK
 │   ├── workers.py        # [bound] spawn_workers (parallel role-templated subagents)
 │   ├── automations.py    # [unbound] manage_automations — superseded by jarvis.create_automation etc.
-│   ├── board.py          # [bound] complete_task/block_task (current-run lifecycle); create/list via jarvis SDK
+│   ├── board.py          # [bound, board runs only] complete_task/block_task (current-run
+│                         #   lifecycle); create/list via jarvis SDK
 │   ├── workflows.py      # [bound] run_workflow (Agent-as-Tool); CRUD via jarvis SDK
 │   ├── skills.py         # [unbound] superseded by jarvis.use_skill / create_skill / …
 │   ├── projects.py       # [unbound] superseded by jarvis.project_memory
@@ -266,7 +267,10 @@ Custom events (anything except `token`/`thinking_token`/`step`) are dispatched f
 `node_start`, `node_token`, `node_condition`, `node_done`, `node_error`, `map_start`, `map_item_done`, `workflow_done`, `workflow_error`
 
 ## Lazy tool loading (`tools/sdk.py`)
-Tool schemas are re-sent on **every** LLM call, and `should_use_cache()` only returns true for `bedrock`/`anthropic` — so on any other provider the whole bound set is re-billed each iteration. To keep that small, only graph-coupled tools stay bound; the rest live in the kernel-preloaded `jarvis` SDK and are **discovered on demand** (`jarvis.help()` → categories, `jarvis.help("<category>")` → signatures). First-turn input went 9,051 → 5,690 tokens (bound schemas 5,781 → 2,118).
+Tool schemas are re-sent on **every** LLM call, and `should_use_cache()` only returns true for `bedrock`/`anthropic` — so on any other provider the whole bound set is re-billed each iteration. To keep that small, only graph-coupled tools stay bound; the rest live in the kernel-preloaded `jarvis` SDK and are **discovered on demand** (`jarvis.help()` → categories, `jarvis.help("<category>")` → signatures). First-turn input went 9,051 → 5,690 tokens (bound schemas 5,781 → 2,118), and a later pass
+(merging `write_artifact_file` into `write_artifact`, binding the board tools only for board runs, and
+trimming descriptions + the system prompt) took the chat floor to **~3,100** — 996 tokens of bound
+schema + 2,099 of system prompt.
 
 **Two transports, chosen by what the operation needs:**
 - **Reads** → direct `mode=ro` sqlite connection (cannot take write locks against the server) + `core.doc_index.get_embedder()` for semantic search.
@@ -277,9 +281,9 @@ Tool schemas are re-sent on **every** LLM call, and `should_use_cache()` only re
 |---|---|
 | `run_cell` | the door into the kernel |
 | `write_todos` / `set_todo_status` | return `Command(update=...)` state deltas; a separate process cannot write the reducer |
-| `complete_task` / `block_task` | act on the **current run's** lifecycle via `ToolContext.board_task_id` |
+| `complete_task` / `block_task` | act on the **current run's** lifecycle via `ToolContext.board_task_id` — and so are bound **only when `build_agent(board=True)`**, since anywhere else they can do nothing but return "only available while executing a board task". `board` is part of the `_build_cached` key. |
 | `spawn_workers` / `run_workflow` | instantiate subgraphs bound to this agent's LLM |
-| `write_artifact` | its live side-panel event goes through this run's stream writer |
+| `write_artifact` | its live side-panel event goes through this run's stream writer. One tool for both shapes: `content=` writes markdown, `file_path=` registers an on-disk audio/video/image file (`kind`/`mime_type` are inferred, not on the tool surface). |
 | `remember` | there is no `createMemory` mutation to route to (only `updateMemoryItem`) |
 
 Scope (`conversation_id`, `project_id`) is injected per kernel by `core/kernels.py:KernelSession.run()`, fed from `ToolContext` by `tools/code.py`, and re-injected after a kernel restart (`_sdk_scope`). Note it uses `conversation_id`, **not** the kernel key — workers override the key but must still resolve the parent conversation.
@@ -354,7 +358,7 @@ Visual graph executor (`workflow/engine.py`):
 ## Artifact Versioning (ADK ArtifactService analog)
 - `db/models.py`: `ArtifactVersion` (artifact_id FK cascade, version int unique per artifact, title, filename, created_at). `Artifact.versions` relationship.
 - `db/ops.py`: `create_artifact_version()`, `list_artifact_versions()`, `get_artifact_version()`, `get_latest_artifact_version_number()`. `delete_conversation` + `delete_artifact` collect version file paths before cascade and unlink them.
-- `tools/artifacts.py`: `write_artifact()` versions: on create writes live `{id}.md` + versioned `{id}_v1.md` + DB row v1; on update migrates old file without history (saves as v1) then writes live + new version file `_v{latest+1}.md`. `read_artifact(artifact_id, version=None)` reads specific version when provided, otherwise live. `list_artifacts()` includes `versions` count, new tool `list_artifact_versions(artifact_id)`.
+- `tools/artifacts.py`: `write_artifact()` dispatches to `_write_markdown_artifact` / `_write_file_artifact` and versions: on create writes live `{id}.md` + versioned `{id}_v1.md` + DB row v1; on update migrates old file without history (saves as v1) then writes live + new version file `_v{latest+1}.md`. `read_artifact(artifact_id, version=None)` reads specific version when provided, otherwise live. `list_artifacts()` includes `versions` count, new tool `list_artifact_versions(artifact_id)`.
 - `core/agents.py`: binds `list_artifact_versions` alongside other artifact tools.
 - GraphQL: `ArtifactVersion` type with `content` resolver, `Artifact.versions` field + `version_count`, query `artifactVersions(artifactId)`. Files cleaned up on conversation/artifact delete.
 - Frontend: schema regenerated; artifact UI can show version history via `versions` field.

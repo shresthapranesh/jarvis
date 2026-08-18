@@ -26,13 +26,11 @@ logger = logging.getLogger(__name__)
 
 @tool
 async def run_cell(code: str) -> str:
-    """Run Python in a STATEFUL notebook session (this conversation's IPython kernel) and return its output.
+    """Run Python in this conversation's stateful IPython kernel; returns its output.
 
-    Variables, imports, and loaded data PERSIST across calls like Jupyter
-    cells — define once, reuse later. The last expression's value is echoed
-    (no print needed), alongside prints and tracebacks. Timeout 60s per cell;
-    on timeout the kernel is interrupted but state survives. Preloaded:
-    search(query), read(url), and the `jarvis` SDK (run `jarvis.help()`).
+    Variables and imports persist across calls, like Jupyter cells. The last
+    expression is echoed (no print needed). 60s timeout; state survives it.
+    Preloaded: search(query), read(url), jarvis SDK (`jarvis.help()`).
     """
     ctx = current_ctx()
     key = ctx.code_session_key

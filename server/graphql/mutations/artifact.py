@@ -40,7 +40,7 @@ class ArtifactMutation:
         if content is not None:
             if art.kind != "markdown":
                 raise ValueError(
-                    "binary artifacts can't be edited inline — recreate via write_artifact_file"
+                    "binary artifacts can't be edited inline — recreate via write_artifact(file_path=...)"
                 )
             # Version the old content before overwriting, mirroring write_artifact tool
             live_path = artifact_path(id.node_id, ".md")

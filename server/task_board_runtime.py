@@ -212,6 +212,7 @@ async def _run_agent(
         checkpointer=cp,
         store=st,
         invocation_context=invocation_context,
+        board=True,
     )
     # Annotated rather than inlined: an inline dict literal infers a
     # heterogeneous value type that doesn't match the RunnableConfig TypedDict,

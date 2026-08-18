@@ -33,7 +33,7 @@ def infer_kind(mime_type: str | None, ext: str) -> str:
     """Coarse artifact category from a mime type (preferred) or file extension.
 
     Markdown artifacts never go through this — write_artifact always passes
-    kind="markdown" explicitly. This is only for write_artifact_file.
+    kind="markdown" explicitly. This is only for the file path.
     """
     if mime_type:
         prefix = mime_type.split("/", 1)[0]
