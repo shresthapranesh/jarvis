@@ -1,14 +1,7 @@
-import {useEffect, useState} from 'react';
-import {graphql, requestSubscription} from 'react-relay';
+import {graphql} from 'react-relay';
 
 import type {useBoardTaskEventsSubscription} from '../__generated__/useBoardTaskEventsSubscription.graphql';
-import {environment} from '../relay/environment';
-
-interface State {
-  streaming: boolean;
-  text: string;
-  error: string | null;
-}
+import {useRunTokenStream} from './useRunTokenStream';
 
 const subscription = graphql`
   subscription useBoardTaskEventsSubscription($runId: String!) {
@@ -39,40 +32,10 @@ const subscription = graphql`
  * for the next poll.
  */
 export function useBoardTaskEvents(runId: string | null, onFinished?: () => void) {
-  const [state, setState] = useState<State>({streaming: false, text: '', error: null});
-
-  useEffect(() => {
-    if (!runId) return;
-    setState({streaming: true, text: '', error: null});
-
-    const disposable = requestSubscription<useBoardTaskEventsSubscription>(environment, {
-      subscription,
-      variables: {runId},
-      onNext: (response) => {
-        const evt = response?.boardTaskEvents;
-        if (!evt) return;
-        switch (evt.__typename) {
-          case 'TokenEvent':
-            setState((s) => ({...s, text: s.text + evt.text}));
-            break;
-          case 'AutomationDoneEvent':
-          case 'AutomationStoppedEvent':
-            setState((s) => ({...s, streaming: false}));
-            onFinished?.();
-            break;
-          case 'ErrorEvent':
-            setState((s) => ({...s, streaming: false, error: evt.error}));
-            onFinished?.();
-            break;
-        }
-      },
-      onError: (err) => setState((s) => ({...s, streaming: false, error: err.message})),
-      onCompleted: () => setState((s) => ({...s, streaming: false})),
-    });
-
-    return () => disposable.dispose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId]);
-
-  return state;
+  return useRunTokenStream<useBoardTaskEventsSubscription>(
+    subscription,
+    runId,
+    (response) => response.boardTaskEvents,
+    {onFinished},
+  );
 }
