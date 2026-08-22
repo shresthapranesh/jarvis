@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import json
 import logging
 import os
@@ -20,22 +19,24 @@ from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from core.agents import build_agent, prefetch_retrieval
-from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
 from core.config import get_config
 from core.invocation_context import InvocationContext
-from core.log_callback import AgentLogger, UsageAccumulator
-from core.perf import PerfCallbackHandler, PerfTracker
-from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
+from core.queue import Job
+from core.run_scaffold import (
+    finish_task_state,
+    get_or_create_task_state,
+    new_invocation_context,
+    queue_cancel_watch,
+    start_run_callbacks,
+)
 from core.schemas import AttachmentIn
 from core.state import (
     InterruptRequest,
     TaskState,
-    _notify,
     _tasks,
     emit_event,
     get_async_checkpointer,
     get_store,
-    log_task_complete,
     log_task_created,
     log_task_received,
 )
@@ -88,50 +89,14 @@ async def _run_agent_task(
     accumulated: list[str] = []
     step_seq_ref = [0]
     coalescer = TokenCoalescer(state)
-    limits = get_budget_limits_for_task("chat")
-    tracker = BudgetTracker(limits, task_state=state)
-    state._budget_tracker = tracker
-    perf = PerfTracker(task_state=state)
-    state._perf_tracker = perf
-
-    # plugin system: runner provides callbacks via PluginManager
-    try:
-        from core.runner import get_runner_or_none
-
-        _r = get_runner_or_none()
-        if _r is not None:
-            _pm = _r.get_plugin_manager(tracker=tracker, task_state=state, perf_tracker=perf)
-            callbacks = _pm.get_callback_handlers()
-            # extract UsageAccumulator and Budget handlers from plugin list for backwards compat references
-            usage = next((h for h in callbacks if h.__class__.__name__ == "UsageAccumulator"), None)
-            if usage is None:
-                from core.log_callback import UsageAccumulator as _UA
-                usage = _UA()
-                callbacks.append(usage)
-            budget_cb = next((h for h in callbacks if h.__class__.__name__ == "BudgetCallbackHandler"), None)
-            if budget_cb is None:
-                from core.budget import BudgetCallbackHandler as _BC
-                budget_cb = _BC(tracker, task_state=state)
-                callbacks.append(budget_cb)
-        else:
-            raise RuntimeError("no runner")
-    except Exception:
-        from core.budget import BudgetCallbackHandler as _BC
-        from core.log_callback import AgentLogger as _AL, UsageAccumulator as _UA
-
-        usage = _UA()
-        budget_cb = _BC(tracker, task_state=state)
-        callbacks: list[Any] = [_AL(), usage, budget_cb]
-
-    # Perf is measured on every chat run regardless of which branch built the
-    # callback list — a plugin manager from an older runner won't know the kwarg.
-    if not any(h.__class__.__name__ == "PerfCallbackHandler" for h in callbacks):
-        callbacks.append(PerfCallbackHandler(perf))
+    run_cb = start_run_callbacks(state, "chat", with_perf=True)
+    callbacks = run_cb.handlers
+    usage = run_cb.usage
+    perf = run_cb.perf
 
     status = "error"
     project_id: str | None = None
     ephemeral: bool = False
-    _plugin_manager = locals().get("_pm", None)
 
     async def finalize(content: str, final_status: str) -> None:
         await _finalize_message(
@@ -319,13 +284,7 @@ async def _run_agent_task(
                 await ctx.persist_state_deltas()
             except Exception:
                 pass
-        log_task_complete(task_id, state, status)
-        state.done = True
-        _notify(state)
-        # Delay popping the task so the frontend UI can show the "done" or
-        # "stopped" state for a few seconds before the row vanishes.
-        loop = asyncio.get_running_loop()
-        loop.call_later(5.0, lambda tid=task_id: _tasks.pop(tid, None))
+        finish_task_state(task_id, state, status)
 
 
 async def _resolve_conv_scope(conv_id: str) -> tuple[str | None, bool]:
@@ -366,65 +325,30 @@ async def chat_job_handler(job: Job) -> None:
     # trigger is gone (post-restart resume path). Otherwise reuse the entry the
     # trigger pre-created so SSE subscribers connected before the worker
     # claimed see the live stream.
-    # Build InvocationContext from runner (Jarvis runner -> InvocationContext)
-    invocation_context: InvocationContext | None = None
-    try:
-        from core.runner import get_runner_or_none
+    invocation_context = await new_invocation_context(
+        kind="chat",
+        session_id=conv_id,
+        invocation_id=task_id,
+        model=model,
+        initial_state={"query": query[:500]},
+        load_persisted=True,
+    )
 
-        runner = get_runner_or_none()
-        if runner is not None:
-            invocation_context = runner.new_invocation_context(
-                session_id=conv_id,
-                kind="chat",
-                model=model,
-                initial_state={"query": query[:500]},
-            )
-            invocation_context.invocation_id = task_id
-            try:
-                await invocation_context.load_persisted_state()
-            except Exception:
-                pass
-    except Exception:
-        invocation_context = None
-
-    state = _tasks.get(task_id)
-    if state is None:
+    if task_id not in _tasks:
         async with async_session() as session:
-            from db.models import Conversation
             conv = await session.get(Conversation, conv_id)
         label = (conv.title if conv and conv.title else query[:60])
-        state = TaskState(kind="chat", label=label, parent_id=conv_id)
-        _tasks[task_id] = state
-        log_task_created(task_id, state, model)
+    else:
+        label = query[:60]
+    state = get_or_create_task_state(
+        task_id, kind="chat", label=label, parent_id=conv_id, model=model,
+    )
 
-    from core.state import get_queue
-    queue = get_queue()
-    cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, task_id, state))
-    try:
-        await _run_agent_task(task_id, query, model, conv_id, attachments, invocation_context=invocation_context)
-    finally:
-        cancel_watcher.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cancel_watcher
-
-
-async def _watch_queue_cancel(
-    queue: JobQueue, job_id: str, state: TaskState,
-) -> None:
-    """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event /
-    resume_future so the existing in-runtime observers see it.
-
-    This covers only the durable/cross-process path — a same-process stop
-    mutation already flips these flags itself. See CANCEL_POLL_INTERVAL_SECONDS.
-    """
-    while not state.done and not state.cancelled:
-        if await queue.is_cancel_requested(job_id):
-            state.cancelled = True
-            state._stop_event.set()
-            if state.resume_future and not state.resume_future.done():
-                state.resume_future.cancel()
-            return
-        await asyncio.sleep(CANCEL_POLL_INTERVAL_SECONDS)
+    async with queue_cancel_watch(task_id, state):
+        await _run_agent_task(
+            task_id, query, model, conv_id, attachments,
+            invocation_context=invocation_context,
+        )
 
 
 # ── Task registration (shared by GraphQL startTask, Telegram, Discord) ───────

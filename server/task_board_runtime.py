@@ -11,9 +11,14 @@ from uuid import uuid4
 
 from core.agents import build_agent
 from core.invocation_context import InvocationContext
-from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
-from core.log_callback import AgentLogger
 from core.queue import Job
+from core.run_scaffold import (
+    finish_task_state,
+    get_or_create_task_state,
+    new_invocation_context,
+    queue_cancel_watch,
+    start_run_callbacks,
+)
 from db import async_session
 from db.models import BoardTask
 from db.models import Job as JobRow
@@ -35,14 +40,12 @@ from core.state import (
     get_async_checkpointer,
     get_queue,
     get_store,
-    log_task_complete,
     log_task_created,
 )
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables import RunnableConfig
 
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_chunk
-from server.automation_runtime import _watch_queue_cancel
 
 logger = logging.getLogger(__name__)
 
@@ -178,28 +181,10 @@ async def _run_agent(
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
-    limits = get_budget_limits_for_task("board_task")
-    tracker = BudgetTracker(limits, task_state=state)
-    state._budget_tracker = tracker
-
-    # Declared up front as the base type: `list` is invariant, so a list built
-    # from the concrete handler classes below is not assignable to
-    # RunnableConfig's `list[BaseCallbackHandler]` without this.
-    callbacks: list[BaseCallbackHandler]
-    try:
-        from core.runner import get_runner_or_none
-
-        _r = get_runner_or_none()
-        if _r is not None:
-            _pm = _r.get_plugin_manager(tracker=tracker, task_state=state)
-            callbacks = _pm.get_callback_handlers()
-        else:
-            raise RuntimeError("no runner")
-    except Exception:
-        from core.budget import BudgetCallbackHandler as _BC
-        from core.log_callback import AgentLogger as _AL
-
-        callbacks = [_AL(), _BC(tracker, task_state=state)]
+    # Declared as the base type: `list` is invariant, so the concrete handler
+    # list is not assignable to RunnableConfig's `list[BaseCallbackHandler]`
+    # without this.
+    callbacks: list[BaseCallbackHandler] = start_run_callbacks(state, "board_task").handlers
 
     if invocation_context is not None and invocation_context.store is not None:
         cp = invocation_context.checkpointer
@@ -377,11 +362,7 @@ async def _run_board_task_inner(
             raise
 
     finally:
-        log_task_complete(run_id, state, final_status)
-        state.done = True
-        _notify(state)
-        loop = asyncio.get_running_loop()
-        loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
+        finish_task_state(run_id, state, final_status)
 
 
 # ── Auto-decompose ───────────────────────────────────────────────────────────
@@ -526,19 +507,12 @@ async def board_task_job_handler(job: Job) -> None:
     run id (== BoardTask.job_id at dispatch time)."""
     task_id: str = job.payload["task_id"]
     run_id = job.id
-    invocation_context = None
-    try:
-        from core.runner import get_runner_or_none
-        _r = get_runner_or_none()
-        if _r is not None:
-            invocation_context = _r.new_invocation_context(
-                session_id=task_id,
-                kind="board_task",
-                initial_state={"board_task_id": task_id},
-            )
-            invocation_context.invocation_id = run_id
-    except Exception:
-        invocation_context = None
+    invocation_context = await new_invocation_context(
+        kind="board_task",
+        session_id=task_id,
+        invocation_id=run_id,
+        initial_state={"board_task_id": task_id},
+    )
 
     async with async_session() as session:
         task = await get_board_task(session, task_id)
@@ -556,20 +530,16 @@ async def board_task_job_handler(job: Job) -> None:
         task.pending_answer = None
         await session.commit()
 
-    state = _tasks.get(run_id)
-    if state is None:
-        state = TaskState(kind="board_task", label=task.title, parent_id=task.id)
-        _tasks[run_id] = state
-        log_task_created(run_id, state, task.model)
+    state = get_or_create_task_state(
+        run_id, kind="board_task", label=task.title, parent_id=task.id,
+        model=task.model,
+    )
 
-    queue = get_queue()
-    cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
-    try:
-        await _run_board_task_inner(task, state, run_id, pending_answer, invocation_context=invocation_context)
-    finally:
-        cancel_watcher.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cancel_watcher
+    async with queue_cancel_watch(run_id, state):
+        await _run_board_task_inner(
+            task, state, run_id, pending_answer,
+            invocation_context=invocation_context,
+        )
 
 
 # ── Stop (shared by GraphQL stopBoardTask) ───────────────────────────────────

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -17,9 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.agents import build_agent
 from core.invocation_context import InvocationContext
-from core.budget import BudgetTracker, get_budget_limits_for_task
-from core.runner import build_callbacks
-from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
+from core.queue import Job
+from core.run_scaffold import (
+    finish_task_state,
+    get_or_create_task_state,
+    new_invocation_context,
+    queue_cancel_watch,
+    start_run_callbacks,
+)
 from db import async_session
 from db.models import Automation, AutomationRun
 from db.ops import (
@@ -35,13 +39,11 @@ from core.notifications import send_notifications
 from core.scheduler import _cron, get_scheduler_timezone
 from core.state import (
     TaskState,
-    _notify,
     _tasks,
     emit_event,
     get_async_checkpointer,
     get_http_client,
     get_store,
-    log_task_complete,
     log_task_created,
     log_task_received,
 )
@@ -79,10 +81,7 @@ async def _execute_prompt_type(
 ) -> str:
     accumulated: list[str] = []
     coalescer = TokenCoalescer(state)
-    limits = get_budget_limits_for_task("automation")
-    tracker = BudgetTracker(limits, task_state=state)
-    state._budget_tracker = tracker
-    callbacks = build_callbacks(tracker, task_state=state)
+    callbacks = start_run_callbacks(state, "automation").handlers
     _store = invocation_context.store if invocation_context and invocation_context.store else get_store()
     model = model_id or await _resolve_model(auto)
     agent = build_agent(model, checkpointer=checkpointer, store=_store, invocation_context=invocation_context)
@@ -422,11 +421,7 @@ async def _run_automation_inner(
                 await invocation_context.persist_state_deltas()
             except Exception:
                 pass
-        log_task_complete(run_id, state, final_status)
-        state.done = True
-        _notify(state)
-        loop = asyncio.get_running_loop()
-        loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
+        finish_task_state(run_id, state, final_status)
 
 
 # ── Queue handler ────────────────────────────────────────────────────────────
@@ -443,19 +438,12 @@ async def automation_job_handler(job: Job) -> None:
     automation_id: str = payload["automation_id"]
     triggered_by: str = payload.get("triggered_by", "manual")
     run_id = job.id
-    invocation_context = None
-    try:
-        from core.runner import get_runner_or_none
-        _r = get_runner_or_none()
-        if _r is not None:
-            invocation_context = _r.new_invocation_context(
-                session_id=automation_id,
-                kind="automation",
-                initial_state={"automation_id": automation_id},
-            )
-            invocation_context.invocation_id = run_id
-    except Exception:
-        invocation_context = None
+    invocation_context = await new_invocation_context(
+        kind="automation",
+        session_id=automation_id,
+        invocation_id=run_id,
+        initial_state={"automation_id": automation_id},
+    )
 
     async with async_session() as session:
         auto = await get_automation(session, automation_id)
@@ -472,47 +460,15 @@ async def automation_job_handler(job: Job) -> None:
             existing.status = "running"
             await session.commit()
 
-    state = _tasks.get(run_id)
-    if state is None:
-        state = TaskState(
-            kind="automation",
-            label=auto.name,
-            parent_id=automation_id,
-        )
-        _tasks[run_id] = state
-        # Log the resolved model, not `auto.model` — a bare "model=-" is what
-        # hid a null-model run falling back to the wrong provider.
-        log_task_created(run_id, state, await _resolve_model(auto))
+    # Log the resolved model, not `auto.model` — a bare "model=-" is what hid a
+    # null-model run falling back to the wrong provider.
+    state = get_or_create_task_state(
+        run_id, kind="automation", label=auto.name, parent_id=automation_id,
+        model=await _resolve_model(auto),
+    )
 
-    # Import here to avoid a circular dependency at module load — state owns
-    # the queue accessor, and the queue is only set after the lifespan starts.
-    from core.state import get_queue
-    queue = get_queue()
-    cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
-    try:
+    async with queue_cancel_watch(run_id, state):
         await _run_automation_inner(auto, state, run_id, invocation_context)
-    finally:
-        cancel_watcher.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cancel_watcher
-
-
-async def _watch_queue_cancel(
-    queue: JobQueue, job_id: str, state: TaskState,
-) -> None:
-    """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event
-    so the existing in-runtime observers (state.cancelled checks, the code-type
-    cancel watcher) see it without any other plumbing.
-
-    This covers only the durable/cross-process path — a same-process stop
-    mutation already flips these flags itself. See CANCEL_POLL_INTERVAL_SECONDS.
-    """
-    while not state.done and not state.cancelled:
-        if await queue.is_cancel_requested(job_id):
-            state.cancelled = True
-            state._stop_event.set()
-            return
-        await asyncio.sleep(CANCEL_POLL_INTERVAL_SECONDS)
 
 
 # ── Manual trigger (shared by GraphQL triggerAutomation) ─────────────────────
