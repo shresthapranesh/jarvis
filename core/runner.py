@@ -281,6 +281,16 @@ def build_callbacks(
     return handlers
 
 
+def find_handler(handlers: list[Any], cls: type) -> Any | None:
+    """The first handler of type `cls`, or None.
+
+    Runtimes that need a specific handler back (chat reads the UsageAccumulator
+    for the Message row's token counts) used to sniff `h.__class__.__name__`
+    against a string literal, which a rename would silently break.
+    """
+    return next((h for h in handlers if isinstance(h, cls)), None)
+
+
 # ── Global accessor (set by lifespan, read elsewhere) ───────────────────────
 
 _runner: JarvisRunner | None = None

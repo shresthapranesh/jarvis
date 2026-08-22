@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 from typing import Any
@@ -13,8 +12,14 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.budget import BudgetTracker, get_budget_limits_for_task
-from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
+from core.queue import Job
+from core.run_scaffold import (
+    finish_task_state,
+    get_or_create_task_state,
+    new_invocation_context,
+    queue_cancel_watch,
+    start_budget,
+)
 from db import async_session
 from db.models import Workflow, WorkflowRun
 from db.ops import (
@@ -25,10 +30,8 @@ from db.ops import (
 from core.notifications import send_notifications
 from core.state import (
     TaskState,
-    _notify,
     _tasks,
     emit_event,
-    log_task_complete,
     log_task_created,
     log_task_received,
 )
@@ -48,10 +51,9 @@ async def _run_workflow_inner(
     cleanup. Caller created the WorkflowRun row and registered `state`."""
     final_status = "error"
     try:
-        # Budget for workflow overall
-        limits = get_budget_limits_for_task("workflow")
-        tracker = BudgetTracker(limits, task_state=state)
-        state._budget_tracker = tracker
+        # Budget for workflow overall. Nodes build their own callback sets
+        # (workflow/nodes.py:_run_agent_text), so only the tracker is needed here.
+        start_budget(state, "workflow")
 
         definition = json.loads(wf.definition or "{}")
         # Early abort if budget already exceeded before any node
@@ -106,11 +108,7 @@ async def _run_workflow_inner(
             raise
 
     finally:
-        log_task_complete(run_id, state, final_status)
-        state.done = True
-        _notify(state)
-        loop = asyncio.get_running_loop()
-        loop.call_later(5.0, lambda rid=run_id: _tasks.pop(rid, None))
+        finish_task_state(run_id, state, final_status)
 
 
 # ── Queue handler ────────────────────────────────────────────────────────────
@@ -141,58 +139,21 @@ async def workflow_job_handler(job: Job) -> None:
             existing.status = "running"
             await session.commit()
 
-    invocation_context = None
-    try:
-        from core.runner import get_runner_or_none
-        from core.invocation_context import InvocationContext
-        r = get_runner_or_none()
-        if r is not None:
-            invocation_context = r.new_invocation_context(
-                session_id=run_id,
-                kind="workflow",
-                initial_state={"workflow_id": workflow_id},
-            )
-            invocation_context.invocation_id = run_id
-    except Exception:
-        invocation_context = None
+    # Built but not passed to _run_workflow_inner: the engine resolves its own
+    # infra per node. Kept so the run still registers with the runner.
+    await new_invocation_context(
+        kind="workflow",
+        session_id=run_id,
+        invocation_id=run_id,
+        initial_state={"workflow_id": workflow_id},
+    )
 
-    state = _tasks.get(run_id)
-    if state is None:
-        state = TaskState(
-            kind="workflow",
-            label=wf.name,
-            parent_id=workflow_id,
-        )
-        _tasks[run_id] = state
-        log_task_created(run_id, state, None)
+    state = get_or_create_task_state(
+        run_id, kind="workflow", label=wf.name, parent_id=workflow_id,
+    )
 
-    from core.state import get_queue
-    queue = get_queue()
-    cancel_watcher = asyncio.create_task(_watch_queue_cancel(queue, job.id, state))
-    try:
+    async with queue_cancel_watch(run_id, state):
         await _run_workflow_inner(wf, state, run_id, inputs)
-    finally:
-        cancel_watcher.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cancel_watcher
-
-
-async def _watch_queue_cancel(
-    queue: JobQueue, job_id: str, state: TaskState,
-) -> None:
-    """Poll the queue for cancel; mirror into TaskState.cancelled / _stop_event.
-
-    This covers only the durable/cross-process path — a same-process stop
-    mutation already flips these flags itself. See CANCEL_POLL_INTERVAL_SECONDS.
-    """
-    while not state.done and not state.cancelled:
-        if await queue.is_cancel_requested(job_id):
-            state.cancelled = True
-            state._stop_event.set()
-            if state.resume_future and not state.resume_future.done():
-                state.resume_future.cancel()
-            return
-        await asyncio.sleep(CANCEL_POLL_INTERVAL_SECONDS)
 
 
 # ── Manual trigger (shared by GraphQL runWorkflow) ───────────────────────────
