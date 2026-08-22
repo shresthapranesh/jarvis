@@ -49,7 +49,9 @@ const TAB_INFO: Record<SettingsTab, {label: string; subtitle: React.ReactNode}> 
     subtitle: (
       <>
         Connect external tools via the Model Context Protocol. Servers run as subprocesses
-        or HTTP endpoints and expose their tools to the agent. Config merges from env{' '}
+        or HTTP endpoints and expose their tools to the agent — either bound to every LLM
+        call, or loaded on demand to keep their schemas out of the prompt. Config merges
+        from env{' '}
         <code>JARVIS_MCP_SERVERS</code>, file <code>~/.jarvis/mcp.json</code>, and this UI
         (which wins).
       </>
@@ -841,7 +843,8 @@ function McpTab() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const servers = data.mcpServers;
-  const tools = data.mcpTools;
+  const totalTools = servers.reduce((n, s) => n + s.toolCount, 0);
+  const boundTools = servers.reduce((n, s) => n + (s.loadMode === 'lazy' ? 0 : s.toolCount), 0);
 
   const refresh = refreshMcpServers;
 
@@ -898,17 +901,28 @@ function McpTab() {
     {onError: (e) => toast.push(e.message, 'error')},
   );
 
-  function toolsForServer(server: {name: string}): string[] {
-    if (servers.length === 1) return [...tools];
-    const matching = tools.filter((t) => t.toLowerCase().includes(server.name.toLowerCase()));
-    return matching.length ? matching : [];
-  }
+  const loadModeMut = useAsyncAction(
+    async ({name, mode}: {name: string; mode: 'always' | 'lazy'}) => {
+      const {commitSetMcpServerLoadMode} = await import('../relay/SetMcpServerLoadModeMutation');
+      await commitSetMcpServerLoadMode(name, mode);
+      toast.push(
+        mode === 'lazy'
+          ? 'Tools unbound — the agent loads them on demand'
+          : 'Tools bound to the agent',
+        'success',
+      );
+      await refresh();
+    },
+    {onError: (e) => toast.push(e.message || String(e), 'error')},
+  );
 
   return (
     <div className="memory-section">
       <h2 className="memory-section-title">
         Servers <span className="memory-count">{servers.length}</span>
-        <span className="memory-section-hint">{tools.length} tools loaded</span>
+        <span className="memory-section-hint">
+          {totalTools} tools loaded · {boundTools} in every prompt
+        </span>
         <span className="settings-section-actions">
           <button
             className="artifact-btn"
@@ -938,7 +952,8 @@ function McpTab() {
       ) : (
         <ul className="memory-list">
           {servers.map((s: any) => {
-            const serverTools = toolsForServer(s);
+            const serverTools: string[] = s.tools ?? [];
+            const lazy = s.loadMode === 'lazy';
             return (
               <li key={s.name} className="skill-card">
                 <div className="skill-card-head">
@@ -953,7 +968,31 @@ function McpTab() {
                   ) : (
                     <span className="settings-badge">not loaded</span>
                   )}
+                  <span
+                    className="settings-badge"
+                    title={
+                      lazy
+                        ? 'Tool schemas stay out of the prompt. The agent discovers and calls them on demand via jarvis.mcp_call.'
+                        : 'Tool schemas are sent to the model on every call of every run in this conversation.'
+                    }
+                  >
+                    {lazy ? 'on demand' : 'always loaded'}
+                  </span>
                   <div className="skill-card-controls">
+                    <button
+                      className="artifact-btn small"
+                      disabled={loadModeMut.pending}
+                      title={
+                        lazy
+                          ? 'Bind these tools to the agent'
+                          : 'Keep these tool schemas out of the prompt'
+                      }
+                      onClick={() =>
+                        void loadModeMut.run({name: s.name, mode: lazy ? 'always' : 'lazy'})
+                      }
+                    >
+                      {lazy ? 'Always load' : 'Load on demand'}
+                    </button>
                     <button
                       className="icon-btn"
                       title="Edit server"
@@ -984,6 +1023,13 @@ function McpTab() {
                     <p className="memory-section-empty">
                       Server not loaded — tools appear after a successful connection. Try
                       Reload after adding.
+                    </p>
+                  )}
+                  {lazy && s.toolCount > 0 && (
+                    <p className="memory-section-empty">
+                      Loaded but not bound: these schemas cost nothing per LLM call. The
+                      agent sees the server name and tool list, and calls one with{' '}
+                      <code>jarvis.mcp_call(&quot;{s.name}&quot;, &quot;tool&quot;, {'{…}'})</code>.
                     </p>
                   )}
                   <pre>{prettyJson(s.config)}</pre>
