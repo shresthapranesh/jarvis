@@ -298,6 +298,10 @@ Scope (`conversation_id`, `project_id`) is injected per kernel by `core/kernels.
 
 `list_conversations` **raises outside a project**, and takes no `surface`. A project is a bounded set of same-topic conversations, so enumerating it answers something; without one the "list" is just the user's entire chat history, which is a search with no question attached. No surface arg because only `surface="web"` conversations can join a project (`db/ops.py:set_conversation_project`). Scope reaches the SDK as the module global `_project_id`, injected per kernel by `core/kernels.py` from `ToolContext` — the agent cannot pick a project, and outside chat (automations, board, bots, CLI) nothing sets one.
 
+**MCP servers choose per server** whether their tools are bound (`always`) or discovered through
+the SDK's `mcp` category (`lazy`) — see "Load modes" under MCP Tool Loader. It is the same trade
+this section makes, applied to third-party tools nobody here wrote the schemas for.
+
 **Adding to the SDK:** define the function in `tools/sdk.py`, then register it in `_CATEGORIES` — `help()` renders signatures from `inspect.signature` + the docstring, so the docstring is the only documentation and costs zero tokens until discovered. If it needs a server-side side effect, add/route through a GraphQL mutation rather than writing the DB directly.
 
 ## Safety Posture
@@ -352,7 +356,8 @@ Visual graph executor (`workflow/engine.py`):
 ## MCP Dynamic Management (ADK McpToolset runtime CRUD)
 - `core/mcp.py`: new constant `MCP_DB_KEY="mcp.servers"`, helpers `_parse_db_raw`, `load_mcp_server_configs_with_db(db_cfg)`, `get_mcp_servers_from_db(session)`, `set_mcp_servers_in_db`, `add_mcp_server_to_db`, `remove_mcp_server_from_db`, `load_mcp_server_configs_async`. Merging order env < file < DB (DB wins). `McpManager.reload(connections?)` method clears client/tools and re-initializes (avoids dead-lock by releasing lock before re-init).
 - `server/entrypoint.py`: lifespan now loads DB mcp config via `async_session` + `get_mcp_servers_from_db` and merges via `load_mcp_server_configs_with_db` before `McpManager.initialize(merged)`.
-- GraphQL: new type `McpServer(name, config JSON string, transport, command, url, tool_count, enabled)` in `types/mcp.py`, query `mcpServers` + `mcpTools` in `queries/mcp.py` (merges env+file+DB, reports tool count heuristically), mutations `addMcpServer(name, configJson)`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers` in `mutations/mcp.py` (persist to DB, reload manager). Wired in `schema.py`.
+- GraphQL: type `McpServer(name, config JSON string, transport, command, url, tool_count, enabled, load_mode, tools)` in `types/mcp.py` (+ `McpTool`, `McpToolResult`), queries `mcpServers` + `mcpTools(server)` in `queries/mcp.py`, mutations `addMcpServer(name, configJson)`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` in `mutations/mcp.py` (persist to DB, reload manager). Wired in `schema.py`.
+- `mcpServers` returns the **union** of configured and connected servers — a server the manager still holds but config no longer names is live and still billing tools, so hiding it until restart would be a lie.
 - Frontend: `schema.graphql` includes `McpServer` and `WorkflowNodeRetryEvent`; `pnpm relay` compiles.
 
 ## Planning Mode (ADK planning analog)
@@ -593,13 +598,84 @@ through `build_callbacks` when they pass a tracker.
 - `core/mcp.py`: `load_mcp_server_configs()` merges env `JARVIS_MCP_SERVERS` (JSON dict or list)
   + file `~/.jarvis/mcp.json` / `$WORK_DIR/mcp.json` / `./mcp.json` (supports Claude Desktop's
   `mcpServers` key, or `{servers: {...}}`). Normalized to `dict[name -> connection dict]`
-  for `langchain_mcp_adapters.client.MultiServerMCPClient`. `McpManager` singleton holds
-  cached tools, `initialize()` loads via `client.get_tools()`, `get_tools_sync()` sync accessor.
+  for `langchain_mcp_adapters.client.MultiServerMCPClient`.
+- **Tools are loaded per server**, not via one flat `get_tools()`. The adapter puts annotations
+  in a tool's `metadata` and never the server name, so `get_tools(server_name=...)` is the only
+  source of attribution — and everything downstream needs it: load-mode filtering, honest tool
+  counts (the old UI guessed by substring-matching the server name against tool names), and
+  `callMcpTool` routing. It also downgrades one unreachable server from "no MCP tools at all"
+  to "that server has none".
 - Lifespan: `server/entrypoint.py` calls `initialize_mcp()` early; `close()` on shutdown.
-- Agent: `core/agents.py` `_build_agent` loads via `get_mcp_tools_sync()` and appends to
+- Agent: `core/agents.py` `_build_agent` binds `get_mcp_tools_sync()` (see load modes below) to
   main + general/researcher worker tools (`_ROLE_TOOLS`). If no config, returns [] (no-op).
 - Dependency: `langchain-mcp-adapters>=0.3.0` (+ `mcp` transitive). Optional — safe fallback.
-- GraphQL/events unchanged; MCP tool calls flow as normal `tool` steps.
+- GraphQL/events unchanged; bound MCP tool calls flow as normal `tool` steps.
+
+### Load modes: `always` (bound) vs `lazy` (on demand)
+Tool schemas are re-sent on **every** LLM call and `should_use_cache()` is only true for
+anthropic/bedrock, so a chatty MCP server is billed on every iteration of every run. Each server
+picks its own mode:
+- **`always`** (the default — unchanged behaviour): tools are bound to the agent, appear as normal
+  `tool` steps, and the model gets their schemas without asking.
+- **`lazy`**: connected and callable, but unbound. Nothing of the server's schemas enters the
+  prompt; the agent reaches it through the `jarvis` SDK's `mcp` category.
+
+The mode is a jarvis-only key **inside the connection dict** (`"x-jarvis-load": "always"|"lazy"`),
+so it round-trips through all three config sources with no extra plumbing — plus a per-server DB
+override (`mcp.load_modes`, written by `setMcpServerLoadMode`) kept as a *separate map* so
+flipping a server defined in env or `mcp.json` doesn't snapshot the rest of that config into the
+DB, where it would win forever and silently ignore later edits to the source file. Fallback for
+servers that declare nothing: `mcp.default_load_mode` (or `JARVIS_MCP_DEFAULT_LOAD`), default
+`always`. **`strip_jarvis_keys()` removes the key before the dict reaches the client** —
+`create_session` splats every non-`transport` key into the transport constructor, so a leaked key
+is a `TypeError` at connect time, not an ignored field.
+- Flipping a mode changes what is bound, and the compiled agent graphs bake that in, so
+  `McpManager.set_load_mode` drops them (`_invalidate_agent_graphs`) without reconnecting — the
+  tools are already loaded, only the binding decision changed.
+- **A lazy server must still be advertised, or it is invisible**: the agent cannot ask for a
+  capability it has never heard of. `_mcp_volatile_parts()` (`core/agents.py`) injects a
+  `## MCP Servers (on demand)` cache segment with *names and tool names only* — the same trade
+  skills make, where the body stays behind `use_skill`. Segment name `mcp_servers`, ranked in
+  `_SEGMENT_STABILITY`. Returns [] when every server is `always` (their bound schemas already
+  describe them) or when a lazy server loaded no tools.
+
+### `jarvis.mcp_call` — how a lazy tool actually runs
+The SDK runs in a **separate kernel process**; the MCP client and the stdio subprocesses it owns
+live in the server. A second client in the kernel would double-launch every server, so the kernel
+routes through the API instead — the same write transport as the rest of the SDK:
+
+```
+run_cell → kernel → jarvis.mcp_call(...) → api() POST /graphql (X-Jarvis-Caller: agent)
+        → callMcpTool resolver (server process) → McpManager.call_tool → tool.ainvoke
+```
+
+`mcp_servers()` / `mcp_tools(server)` / `mcp_help(server, tool)` / `mcp_call(server, tool, args)`
+are the `mcp` category in `tools/sdk.py`. Discovery is deliberately two hops: the listing carries
+descriptions only, and `mcp_help` is the one that pays for the JSON Schema.
+- The adapter opens **a fresh MCP session per tool call** (tools are built with
+  `session=None, connection=...`), so a lazy call costs the same as a bound one and there is no
+  session state to thread through the request.
+- `call_tool` invokes with a **ToolCall payload, not a bare dict**: with `handle_tool_errors=True`
+  (the adapter default) an MCP-level failure comes back as ordinary *content*, and the resulting
+  `ToolMessage.status` is the only thing that distinguishes it from success. Hence
+  `(text, is_error)` → `McpToolResult { content, isError }` → `"MCP tool error: …"` text the agent
+  can read and correct, rather than an exception.
+- `api()` takes a `timeout` (MCP calls can outlast its 30s default); the server-side
+  `asyncio.wait_for` is set below the client's so a hang returns a clean error instead of a
+  dropped connection.
+- **What lazy costs**: calls are code inside a `run_cell` step, so the activity sidebar shows
+  `run_cell`, not the tool name; the model builds args without the schema in context (hence the
+  "check `mcp_help` before the first call" instruction); and interactive elicitation/auth
+  callbacks can't drive an interrupt from the kernel path.
+- Gating gets *better*, though: `callMcpTool` is wired to the `call_mcp_tool` `ActionSpec`
+  (`core/approvals.py`) for `caller == "agent"`, so MCP writes are gateable through the same
+  deferred-approval path as the SDK's other destructive writes. Off unless the operator opts in
+  (`approval.required_actions`), like everything else in `ACTIONS`.
+
+Tests: `tests/test_mcp_load_modes.py` (modes, filtering, the manager) and
+`tests/test_mcp_integration.py`, which spawns **real** stdio MCP servers
+(`tests/fixtures/*_mcp_server.py`) and drives the GraphQL resolvers — every assumption here is a
+contract with langchain-mcp-adapters that a mock would happily agree with while being wrong.
 
 ## Memory Feature
 Agent memory has **two layers**, selected by whether an embedder is configured (`embeddings_available()`):

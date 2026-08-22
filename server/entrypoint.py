@@ -146,16 +146,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from core.mcp import get_mcp_manager, load_mcp_server_configs_with_db
 
             db_cfg: dict = {}
+            load_modes: dict = {}
             try:
-                from core.mcp import get_mcp_servers_from_db
+                from core.mcp import (
+                    get_mcp_load_modes_from_db,
+                    get_mcp_servers_from_db,
+                    sync_default_load_mode_from_db,
+                )
                 from db import async_session as _async_session
 
                 async with _async_session() as _sess:
                     db_cfg = await get_mcp_servers_from_db(_sess)
+                    load_modes = await get_mcp_load_modes_from_db(_sess)
+                    # Applied to this process before the first agent is built —
+                    # the bound tool set is baked into the compiled graph.
+                    await sync_default_load_mode_from_db(_sess)
             except Exception:
                 db_cfg = {}
+                load_modes = {}
 
-            merged = load_mcp_server_configs_with_db(db_cfg=db_cfg)
+            merged = load_mcp_server_configs_with_db(db_cfg=db_cfg, load_modes=load_modes)
             mcp_tools = await get_mcp_manager().initialize(merged if merged else None)
             logger.info("MCP initialized: %d tools from %d servers", len(mcp_tools), len(merged))
         except Exception as exc:

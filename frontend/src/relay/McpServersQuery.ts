@@ -13,8 +13,9 @@ export const mcpServersQuery = graphql`
       url
       toolCount
       enabled
+      loadMode
+      tools
     }
-    mcpTools
   }
 `;
 
@@ -22,7 +23,6 @@ export async function fetchMcpServers() {
   const data = await fetchQuery<McpServersQuery>(environment, mcpServersQuery, {}, {fetchPolicy: 'network-only'}).toPromise();
   return {
     servers: data?.mcpServers ?? [],
-    tools: data?.mcpTools ?? [],
   };
 }
 

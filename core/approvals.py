@@ -75,6 +75,28 @@ async def _exec_delete_skill(session: AsyncSession, payload: dict[str, Any]) -> 
     return "Deleted." if deleted else "Skill no longer exists."
 
 
+async def _exec_call_mcp_tool(session: AsyncSession, payload: dict[str, Any]) -> str:
+    """Run the MCP tool the agent asked for once a human approves it."""
+    from core.mcp import call_mcp_tool
+
+    content, is_error = await call_mcp_tool(
+        payload["server"], payload["tool"], payload.get("args") or {}
+    )
+    prefix = "MCP tool failed: " if is_error else ""
+    return f"{prefix}{content}"[:4000]
+
+
+def _describe_mcp_call(payload: dict[str, Any]) -> str:
+    args = payload.get("args") or {}
+    try:
+        rendered = json.dumps(args, default=str)
+    except Exception:
+        rendered = str(args)
+    if len(rendered) > 300:
+        rendered = rendered[:300] + "…"
+    return f"Call MCP tool {payload.get('server')}.{payload.get('tool')} with {rendered}?"
+
+
 ACTIONS: dict[str, ActionSpec] = {
     "delete_workflow": ActionSpec(
         label="Delete workflow",
@@ -90,6 +112,15 @@ ACTIONS: dict[str, ActionSpec] = {
         label="Delete skill",
         describe=lambda p: f"Delete skill {p.get('name') or p.get('skill_id')}? This cannot be undone.",
         execute=_exec_delete_skill,
+    ),
+    # An MCP server is third-party code doing arbitrary work; a lazy call from
+    # the kernel can't route through the blocking in-process approval helper
+    # (no LangGraph runtime there), so this is the gate for it. Off unless the
+    # operator opts in, like everything else in ACTIONS.
+    "call_mcp_tool": ActionSpec(
+        label="Call MCP tool",
+        describe=_describe_mcp_call,
+        execute=_exec_call_mcp_tool,
     ),
 }
 

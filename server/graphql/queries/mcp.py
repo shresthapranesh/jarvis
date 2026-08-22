@@ -1,16 +1,41 @@
-"""MCP tool loader."""
+"""MCP queries — configured servers and the tools they expose."""
 
 from __future__ import annotations
+
+import json
 
 import strawberry
 
 from core.mcp import (
+    get_mcp_load_modes_from_db,
     get_mcp_manager,
     get_mcp_servers_from_db,
-    load_mcp_server_configs,
     load_mcp_server_configs_with_db,
+    sync_default_load_mode_from_db,
 )
-from server.graphql.types.mcp import McpServer
+from server.graphql.types.mcp import McpServer, McpTool
+
+
+def _tool_type(tool, server: str) -> McpTool:
+    # The adapter passes the server's raw JSON Schema straight through as
+    # args_schema; older//converted tools carry a pydantic model instead, whose
+    # `.args` is the equivalent properties dict.
+    schema = getattr(tool, "args_schema", None)
+    if not isinstance(schema, dict):
+        try:
+            schema = {"properties": tool.args}
+        except Exception:
+            schema = {}
+    try:
+        schema_json = json.dumps(schema, default=str)
+    except Exception:
+        schema_json = "{}"
+    return McpTool(
+        name=getattr(tool, "name", "?"),
+        server=server,
+        description=(getattr(tool, "description", "") or ""),
+        input_schema=schema_json,
+    )
 
 
 @strawberry.type
@@ -18,38 +43,59 @@ class McpQuery:
     @strawberry.field
     async def mcpServers(self, info: strawberry.Info) -> list[McpServer]:
         session = info.context["session"]
-        # Merge env + file + DB (DB wins)
+        # Applied before load_mode_for() resolves any server that doesn't
+        # declare a mode of its own.
+        await sync_default_load_mode_from_db(session)
         db_cfg = await get_mcp_servers_from_db(session)
-        file_env_cfg = load_mcp_server_configs()
-        merged = {**file_env_cfg, **db_cfg}
+        load_modes = await get_mcp_load_modes_from_db(session)
+        merged = load_mcp_server_configs_with_db(db_cfg=db_cfg, load_modes=load_modes)
 
-        # Tool counts from manager (cached)
+        # Tool counts come from the manager's per-server index — real
+        # attribution, not the substring guess this used to do. A server present
+        # in config but absent from the index simply hasn't loaded (never
+        # connected, or added since the last reload) and reports 0.
         mgr = get_mcp_manager()
-        # Map tool name -> server? We don't have per-server breakdown from MCP client,
-        # so distribute total count or keep 0. For now approximate: total tools if server present.
-        tools = mgr.get_tools_sync()
-        # If manager not yet initialized with DB config, tool counts may be stale for DB servers.
-        # We'll attempt to count per-server via tool's origin if available? Fallback to total per present.
+        by_server = {s["name"]: s for s in mgr.server_summaries()}
 
         result: list[McpServer] = []
         for name, cfg in merged.items():
-            # tool_count: count tools whose server prefix matches? MCP tools usually have namespaced?
-            # For simplicity, if single server, all tools belong to it; else distribute evenly or 0.
-            # We'll report len(tools) if name matches any tool's metadata? Best-effort: len(tools) if merged==1 else 0 unless we have more info.
-            # To be useful, we show total tool count for each server when manager has tools, else 0.
-            # Better: if mgr has connections matching name, assume tools count is total if only one server.
-            tc = 0
-            if mgr.connections and name in mgr.connections:
-                if len(mgr.connections) == 1:
-                    tc = len(tools)
-                else:
-                    # Try to guess by filtering tool names containing server name? Heuristic.
-                    tc = sum(1 for t in tools if name.lower() in getattr(t, "name", "").lower()) or 0
-            result.append(McpServer.from_entry(name, cfg, tool_count=tc, enabled=True))
+            summary = by_server.get(name)
+            result.append(
+                McpServer.from_entry(
+                    name,
+                    cfg,
+                    tool_count=summary["tool_count"] if summary else 0,
+                    tools=summary["tools"] if summary else [],
+                )
+            )
+        # Union, not just the config: a server the manager is connected to but
+        # that config no longer names is still live and still billing tools —
+        # listing only the config would hide it until the next restart.
+        for name, summary in by_server.items():
+            if name in merged:
+                continue
+            result.append(
+                McpServer.from_entry(
+                    name,
+                    summary["config"],
+                    tool_count=summary["tool_count"],
+                    tools=summary["tools"],
+                )
+            )
         return result
 
     @strawberry.field
-    async def mcpTools(self, info: strawberry.Info) -> list[str]:
-        """List loaded MCP tool names."""
+    async def mcpTools(self, info: strawberry.Info, server: str | None = None) -> list[McpTool]:
+        """Loaded MCP tools, optionally narrowed to one server.
+
+        Select `inputSchema` only when you intend to call the tool — it is the
+        expensive half, and keeping it out of the listing is the whole point of
+        the lazy path.
+        """
         mgr = get_mcp_manager()
-        return [getattr(t, "name", str(t)) for t in mgr.get_tools_sync()]
+        if server is not None:
+            return [_tool_type(t, server) for t in mgr.tools_for_server(server)]
+        out: list[McpTool] = []
+        for summary in mgr.server_summaries():
+            out.extend(_tool_type(t, summary["name"]) for t in mgr.tools_for_server(summary["name"]))
+        return out

@@ -22,7 +22,7 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 from .config import get_config
 from .compaction import apply_per_call_compaction, compact_threshold, maybe_compact
 from .context_cache import CacheSegment, resolve_cache_ttl
-from .mcp import get_mcp_tools_sync
+from .mcp import get_mcp_server_summaries, get_mcp_tools_sync
 from .messages import (
     build_llm_messages,
     message_text,
@@ -68,6 +68,7 @@ _SEGMENT_STABILITY: dict[str, int] = {
     "project_header": 2,        # project identity + standing instructions prose
     "project_instructions": 3,  # user-owned, edited rarely
     "skills": 4,                # re-ranked per turn, stable within one turn
+    "mcp_servers": 5,           # lazy MCP catalog; changes only on config edit
 }
 _SEGMENT_STABILITY_DEFAULT = 50  # unknown names sort after all known ones
 
@@ -347,6 +348,49 @@ async def _skills_volatile_parts(query: str) -> list[CacheSegment]:
     ]
 
 
+_MCP_NAMES_SHOWN = 12
+
+
+def _mcp_volatile_parts() -> list[CacheSegment]:
+    """Advertise `lazy` MCP servers without paying for their tool schemas.
+
+    A lazy server is unbound, so nothing in the prompt would otherwise reveal
+    that it exists — and the agent cannot ask for a capability it has never
+    heard of. Same trade as skills: names and counts are cheap, the schemas
+    stay behind a `jarvis.mcp_help` call. Returns [] when every server is
+    `always` (their tools are bound and self-describing).
+    """
+    try:
+        summaries = get_mcp_server_summaries()
+    except Exception as exc:
+        logger.warning("MCP server summary failed: %s", exc)
+        return []
+    lazy = [s for s in summaries if s["load_mode"] == "lazy" and s["tool_count"]]
+    if not lazy:
+        return []
+    lines = []
+    for s in lazy:
+        names = s["tools"][:_MCP_NAMES_SHOWN]
+        extra = s["tool_count"] - len(names)
+        listed = ", ".join(names) + (f", +{extra} more" if extra > 0 else "")
+        lines.append(f"- **{s['name']}** ({s['tool_count']} tools): {listed}")
+    return [
+        CacheSegment(
+            name="mcp_servers",
+            content=(
+                "## MCP Servers (on demand)\n\n"
+                "External tool servers that are connected but NOT loaded as tools. "
+                "Reach them from run_cell:\n"
+                '`jarvis.mcp_help("<server>", "<tool>")` for the argument schema, then '
+                '`jarvis.mcp_call("<server>", "<tool>", {...})` to run it. '
+                "Check the schema before the first call to a tool — don't guess argument "
+                "names.\n\n"
+                + "\n".join(lines)
+            ),
+        )
+    ]
+
+
 async def _project_volatile_parts(project_id: str | None) -> list[CacheSegment]:
     """Project header, instructions, and shared memory as tagged cache segments.
 
@@ -444,7 +488,7 @@ async def _compute_retrieval(store, query: str) -> list[CacheSegment]:
             )
         except Exception:
             pass
-        return mem_parts + skill_parts
+        return mem_parts + skill_parts + _mcp_volatile_parts()
     except Exception as exc:
         # Never let a cached failed task poison every iteration of the turn —
         # degrade to no retrieved context, matching the per-part fallbacks.

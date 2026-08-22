@@ -560,7 +560,7 @@ def _global_id(type_name: str, raw_id: str) -> str:
     return base64.b64encode(f"{type_name}:{raw_id}".encode()).decode()
 
 
-def api(query: str, variables: dict | None = None) -> dict:
+def api(query: str, variables: dict | None = None, timeout: float = 30.0) -> dict:
     """POST a GraphQL query/mutation to the local server and return `data`.
 
     The endpoint comes from $JARVIS_API_URL (default http://127.0.0.1:8000/graphql).
@@ -580,7 +580,7 @@ def api(query: str, variables: dict | None = None) -> dict:
             url,
             json={"query": query, "variables": variables or {}},
             headers=headers,
-            timeout=30.0,
+            timeout=timeout,
         )
     except httpx.HTTPError as exc:
         raise RuntimeError(f"Could not reach the Jarvis API at {url}: {exc}") from exc
@@ -969,6 +969,92 @@ def text_to_speech(text: str) -> str:
     return path
 
 
+# ── MCP (external tool servers) ───────────────────────────────────────────────
+# Servers set to `lazy` are connected but unbound: their tool schemas are kept
+# out of every LLM call, and reached from here instead. The call itself runs in
+# the SERVER process (the MCP client, and any stdio subprocess it owns, live
+# there) — this is an API round-trip, not a second MCP client.
+
+_MCP_CALL_TIMEOUT = 120.0
+
+
+def mcp_servers() -> list[dict]:
+    """List connected MCP servers: name, load mode, and tool count.
+
+    load_mode "always" means that server's tools are already bound as normal
+    tools — call them directly instead of going through mcp_call.
+    """
+    data = api("{ mcpServers { name transport loadMode toolCount } }")
+    return data["mcpServers"]
+
+
+def mcp_tools(server: str | None = None) -> list[dict]:
+    """Tool names + descriptions for one MCP server (or all of them).
+
+    Descriptions only — call mcp_help(server, tool) for the argument schema.
+    """
+    if server:
+        data = api(
+            "query($s: String) { mcpTools(server: $s) { name server description } }",
+            {"s": server},
+        )
+    else:
+        data = api("{ mcpTools { name server description } }")
+    return data["mcpTools"]
+
+
+def mcp_help(server: str, tool: str) -> str:
+    """Full description + JSON argument schema for one MCP tool.
+
+    Read this before the first call to a tool — argument names are the server's,
+    not something to guess.
+    """
+    import json as _json
+
+    data = api(
+        "query($s: String) { mcpTools(server: $s) { name description inputSchema } }",
+        {"s": server},
+    )
+    for entry in data["mcpTools"]:
+        if entry["name"] == tool:
+            try:
+                schema = _json.dumps(_json.loads(entry["inputSchema"]), indent=2)
+            except Exception:
+                schema = entry["inputSchema"]
+            return f"{server}.{tool}\n\n{entry['description']}\n\nArguments (JSON Schema):\n{schema}"
+    available = ", ".join(e["name"] for e in data["mcpTools"]) or "(none)"
+    return f"No tool {tool!r} on MCP server {server!r}. Available: {available}"
+
+
+def mcp_call(server: str, tool: str, args: dict | None = None, **kwargs) -> str:
+    """Call one MCP tool and return its output as text.
+
+    Arguments go in `args` (or as keywords). A failure *inside* the tool comes
+    back as text prefixed with "MCP tool error:" rather than raising, so you can
+    read the server's own message and retry with corrected arguments. An unknown
+    server or tool name raises — check mcp_tools(server) for the real names.
+    """
+    import json as _json
+
+    payload = {**(args or {}), **kwargs}
+    data = api(
+        "mutation($server: String!, $tool: String!, $args: String!, $t: Float!) {"
+        " callMcpTool(server: $server, tool: $tool, argsJson: $args, timeoutSeconds: $t)"
+        " { content isError } }",
+        {
+            "server": server,
+            "tool": tool,
+            "args": _json.dumps(payload, default=str),
+            "t": _MCP_CALL_TIMEOUT,
+        },
+        timeout=_MCP_CALL_TIMEOUT + 15.0,
+    )
+    result = data["callMcpTool"]
+    if result["isError"]:
+        return f"MCP tool error: {result['content']}"
+    return result["content"]
+
+
 # ── Discovery ─────────────────────────────────────────────────────────────────
 
 _CATEGORIES: dict[str, tuple[str, list]] = {
@@ -1003,6 +1089,10 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     "memory": (
         "long-term facts and per-project shared memory",
         [search_memory, project_memory],
+    ),
+    "mcp": (
+        "external MCP tool servers loaded on demand",
+        [mcp_servers, mcp_tools, mcp_help, mcp_call],
     ),
     "media": (
         "local audio synthesis (write_artifact saves the result)",

@@ -237,6 +237,20 @@ type McpServer {
   url: String
   toolCount: Int!
   enabled: Boolean!
+  loadMode: String!
+  tools: [String!]!
+}
+
+type McpTool {
+  name: String!
+  server: String!
+  description: String!
+  inputSchema: String!
+}
+
+type McpToolResult {
+  content: String!
+  isError: Boolean!
 }
 
 type Memory {
@@ -357,6 +371,9 @@ type Mutation {
   updateMcpServer(name: String!, configJson: String!): McpServer!
   removeMcpServer(name: String!): Boolean!
   reloadMcpServers: [McpServer!]!
+  setMcpServerLoadMode(name: String!, mode: String!): McpServer!
+  setMcpDefaultLoadMode(mode: String!): String!
+  callMcpTool(server: String!, tool: String!, argsJson: String! = "{}", timeoutSeconds: Float! = 120): McpToolResult!
   addModel(id: String!, label: String!, provider: String = null): ModelCatalog!
   updateModel(id: String!, label: String!, provider: String = null): ModelCatalog!
   removeModel(id: String!): ModelCatalog!
@@ -488,7 +505,7 @@ type Query {
   skills: [Skill!]!
   runningTasks: [RunningTask!]!
   mcpServers: [McpServer!]!
-  mcpTools: [String!]!
+  mcpTools(server: String = null): [McpTool!]!
   pendingApprovals: [PendingApproval!]!
 }
 
