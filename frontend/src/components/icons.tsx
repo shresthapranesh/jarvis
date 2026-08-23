@@ -108,6 +108,15 @@ export const CheckIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const SyncIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="21 4 21 10 15 10" />
+    <polyline points="3 20 3 14 9 14" />
+    <path d="M19 14a7.5 7.5 0 0 1-12.6 3.1L3 14" />
+    <path d="M5 10a7.5 7.5 0 0 1 12.6-3.1L21 10" />
+  </Icon>
+);
+
 export const AlertIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="9" />

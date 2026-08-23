@@ -354,6 +354,11 @@ def model_add(
         str | None,
         typer.Option(help="Provider; inferred from the ID prefix (text before ':') when omitted."),
     ] = None,
+    context_window: Annotated[
+        int | None,
+        typer.Option(help="Input token limit, when you know it — sizes this model's compaction "
+                          "threshold. Omit rather than guess; unknown falls back to a flat 80k."),
+    ] = None,
 ) -> None:
     """Add a model to the catalog at runtime — no code change needed.
 
@@ -372,8 +377,9 @@ def model_add(
             f"Must be one of: {', '.join(sorted(KNOWN_PROVIDERS))}"
         )
         raise typer.Exit(code=1)
-    _run_db(lambda s: add_custom_model(s, model_id, label, prov))
-    rprint(f"[green]✓[/green] Added model: {model_id} ({label}) [{prov}]")
+    _run_db(lambda s: add_custom_model(s, model_id, label, prov, context_window))
+    win = f" [{context_window:,} ctx]" if context_window else ""
+    rprint(f"[green]✓[/green] Added model: {model_id} ({label}) [{prov}]{win}")
     rprint("[dim]Web UI picks it up on the next 'models' query; a running server validates it after that.[/dim]")
 
 
@@ -492,7 +498,9 @@ def model_sync(
             if add_new:
                 to_add = report.new if include_non_chat else chat_new
                 for m in to_add:
-                    _run_db(lambda s, m=m: add_custom_model(s, m.id, m.label, m.provider))
+                    _run_db(lambda s, m=m: add_custom_model(
+                        s, m.id, m.label, m.provider, m.context_window,
+                    ))
                 rprint(f"  [green]✓[/green] added {len(to_add)} model(s) to the custom layer")
 
     if any_drift and not add_new:

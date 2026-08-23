@@ -27,8 +27,9 @@ class RunnerConfig:
 
     # Only providers that honor Anthropic-style cache_control blocks.
     # google_genai has its own implicit caching, not the ephemeral blocks we emit.
+    # openrouter is listed but resolves per model — see honors_cache_control().
     cache_enabled_providers: set[str] = field(
-        default_factory=lambda: {"bedrock", "anthropic"}
+        default_factory=lambda: {"bedrock", "anthropic", "openrouter"}
     )
     max_cache_breakpoints: int = 4
     context_cache_min_chars: int = 50
@@ -187,9 +188,11 @@ class JarvisRunner:
 
     def should_use_cache(self, model: str) -> bool:
         """Whether this model/provider benefits from prompt caching."""
+        from core.model_catalog import honors_cache_control
+
         try:
             spec: ModelSpec = get_model_spec(model)
-            return spec.provider in self.runner_config.cache_enabled_providers
+            return honors_cache_control(spec, self.runner_config.cache_enabled_providers)
         except Exception:
             # Unknown model — assume no cache (safe)
             return False

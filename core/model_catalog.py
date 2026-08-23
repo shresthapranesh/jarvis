@@ -41,6 +41,30 @@ class ModelSpec:
             from langchain_anthropic import ChatAnthropic
             return ChatAnthropic(model_name=model_name, timeout=None, stop=None)
 
+        if self.provider == "openrouter":
+            import os
+            from langchain_openai import ChatOpenAI
+            # OpenRouter speaks the OpenAI wire format, so the OpenAI client is
+            # the whole integration — `model_name` is the upstream id verbatim
+            # ("anthropic/claude-sonnet-4.5", "deepseek/deepseek-r1:free"). The
+            # id splits on the FIRST colon, so a `:free`/`:nitro` variant suffix
+            # survives into the model name intact.
+            api_key = os.environ.get("OPENROUTER_API_KEY")
+            if not api_key:
+                raise ValueError(f"OPENROUTER_API_KEY is not set (required for '{self.id}')")
+            return ChatOpenAI(
+                model=model_name,
+                base_url=OPENROUTER_BASE_URL,
+                api_key=api_key,
+                # NOT optional here: ChatOpenAI's `stream_usage` defaults to
+                # None, which resolves to False, and every run in this app
+                # streams. Without it `usage_metadata` is absent on streamed
+                # calls and BudgetTracker/UsageAccumulator/PerfTracker all see
+                # zero tokens — the budget would never trip and the perf badge
+                # would read as unknown forever.
+                stream_usage=True,
+            )
+
         if self.provider == "meta":
             import os
             from langchain_meta import ChatMetaModel
@@ -59,8 +83,36 @@ class ModelSpec:
 # one of these as its `provider:` prefix — there is no per-model code, only
 # per-provider, so any model from one of these backends is supported.
 KNOWN_PROVIDERS: frozenset[str] = frozenset(
-    {"ollama", "google_genai", "bedrock", "anthropic", "meta"}
+    {"ollama", "google_genai", "bedrock", "anthropic", "meta", "openrouter"}
 )
+
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+# OpenRouter fronts many upstreams behind one OpenAI-shaped API, so the provider
+# alone doesn't say whether prompt caching applies — the *upstream* does, and it
+# is the prefix of the model name. The `cache_control: ephemeral` blocks this app
+# emits (core/context_cache.py) are Anthropic's spelling; OpenRouter forwards
+# them to Anthropic upstreams and ignores them elsewhere, where caching is either
+# automatic (OpenAI, DeepSeek) or absent. Marking a non-Anthropic route as cached
+# wouldn't fail the call, it would just log cache stats that never materialize.
+_OPENROUTER_CACHE_CONTROL_PREFIXES: tuple[str, ...] = ("anthropic/",)
+
+
+def honors_cache_control(spec: "ModelSpec", enabled_providers: Iterable[str]) -> bool:
+    """Whether to emit `cache_control` blocks for `spec`.
+
+    `enabled_providers` is the operator-facing knob (`RunnerConfig.
+    cache_enabled_providers`); this adds the one sub-provider rule the knob
+    can't express, since an openrouter id names its upstream in the model name.
+    """
+    if spec.provider not in set(enabled_providers):
+        return False
+    if spec.provider == "openrouter":
+        # A leading `~` marks an alias route (`~anthropic/claude-sonnet-latest`),
+        # which resolves to the same upstream as the pinned ids beside it.
+        name = spec.id.partition(":")[2].lower().lstrip("~")
+        return name.startswith(_OPENROUTER_CACHE_CONTROL_PREFIXES)
+    return True
 
 
 # `context_window` is left None wherever the effective number isn't known — see

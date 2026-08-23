@@ -35,8 +35,14 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     DEFAULT_MODEL,
     ModelSpec,
     get_model_spec,
+    honors_cache_control,
     is_valid_model,
 )
+
+# Fallback for the no-runner path (CLI, tests). Mirrors
+# RunnerConfig.cache_enabled_providers; honors_cache_control() narrows
+# openrouter to the upstreams that actually honor cache_control blocks.
+_DEFAULT_CACHE_PROVIDERS = frozenset({"bedrock", "anthropic", "openrouter"})
 from .schemas import TodoItem, _normalise_todos, reduce_todos
 from core.doc_index import embeddings_available
 from core.memory_store import load_core, search_memory
@@ -596,9 +602,9 @@ def _build_agent(
         if runner is not None:
             use_cache = runner.should_use_cache(model)
         else:
-            use_cache = spec.provider in ("bedrock", "anthropic")
+            use_cache = honors_cache_control(spec, _DEFAULT_CACHE_PROVIDERS)
     except Exception:
-        use_cache = spec.provider in ("bedrock", "anthropic")
+        use_cache = honors_cache_control(spec, _DEFAULT_CACHE_PROVIDERS)
 
     # ── Worker pool — role-typed, bound to THIS agent's model ────────────────
     # spawn_workers is built per agent (not a process-global registry) so a

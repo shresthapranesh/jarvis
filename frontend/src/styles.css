@@ -7446,6 +7446,163 @@ audio.artifact-media {
   margin-top: 0;
 }
 
+/* ── Model sync (Settings → Models → Sync) ────────────────────────────────── */
+
+.settings-badge--warn {
+  background: rgba(var(--warn-rgb), 0.12);
+  color: var(--warn);
+  border-color: rgba(var(--warn-rgb), 0.24);
+}
+
+.settings-model-window {
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.model-sync-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(84vh, 820px);
+}
+.model-sync-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0 0 4px;
+}
+.model-sync-controls .auto-form-select {
+  flex: 0 1 240px;
+}
+.model-sync-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.model-sync-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.model-sync-note--warn {
+  color: var(--warn);
+  font-size: 0.8rem;
+}
+/* The report is the scrolling region — the controls above and the add button
+   below stay reachable no matter how much drift a provider reports. */
+.model-sync-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 120px;
+}
+.model-sync-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.model-sync-section:first-child {
+  border-top: none;
+}
+.model-sync-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.model-sync-finding {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.model-sync-finding-title {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.model-sync-plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.model-sync-plain li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+.model-sync-reason {
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+.model-sync-window .artifact-btn {
+  margin-left: auto;
+}
+.model-sync-filter {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.model-sync-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.model-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+}
+.model-sync-row:first-child {
+  border-top: none;
+}
+.model-sync-row:hover {
+  background: var(--surface2);
+}
+.model-sync-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.model-sync-row-label {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-sync-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .settings-config-pre {
   margin: 0;
   padding: 10px 12px;
