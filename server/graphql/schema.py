@@ -19,6 +19,7 @@ from .mutations.notification import NotificationMutation
 from .mutations.project import ProjectMutation
 from .mutations.skill import SkillMutation
 from .mutations.task_run import TaskRunMutation
+from .mutations.tool import ToolMutation
 from .mutations.workflow import WorkflowMutation
 from .queries.approval import ApprovalQuery
 from .queries.artifact import ArtifactQuery
@@ -32,6 +33,7 @@ from .queries.notification import NotificationQuery
 from .queries.project import ProjectQuery
 from .queries.skill import SkillQuery
 from .queries.task_run import TaskRunQuery
+from .queries.tool import ToolQuery
 from .queries.workflow import WorkflowQuery
 from .subscriptions.automation import AutomationSubscription
 from .subscriptions.board_task import BoardTaskSubscription
@@ -42,12 +44,13 @@ Query = merge_types("Query", (
     ModelsQuery, MemoryQuery, ConversationQuery, ArtifactQuery,
     AutomationQuery, BoardTaskQuery, WorkflowQuery, NotificationQuery,
     ProjectQuery, SkillQuery, TaskRunQuery, McpQuery, ApprovalQuery,
+    ToolQuery,
 ))
 Mutation = merge_types("Mutation", (
     MemoryMutation, ConversationMutation, ArtifactMutation,
     AutomationMutation, BoardTaskMutation, WorkflowMutation,
     NotificationMutation, ProjectMutation, SkillMutation, TaskRunMutation,
-    McpMutation, ModelsMutation, ApprovalMutation,
+    McpMutation, ModelsMutation, ApprovalMutation, ToolMutation,
 ))
 Subscription = merge_types("Subscription", (
     ChatSubscription, AutomationSubscription, BoardTaskSubscription,

@@ -8312,3 +8312,96 @@ audio.artifact-media {
     background: rgba(var(--shadow-rgb), 0.72);
   }
 }
+
+/* ── Settings → Tools ─────────────────────────────────────────────────────── */
+.tool-kind {
+  margin-top: 18px;
+}
+.tool-kind-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.tool-kind-blurb {
+  font-size: 0.74rem;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.tool-group + .tool-group {
+  margin-top: 10px;
+}
+.tool-group-name {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  padding: 4px 0;
+}
+.tool-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tool-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.tool-row--off {
+  opacity: 0.55;
+}
+.tool-row-main {
+  min-width: 0;
+}
+.tool-row-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.tool-row-name {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.tool-row-desc {
+  margin: 3px 0 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.tool-row-controls {
+  display: flex;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+.tool-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.tool-toggle input {
+  cursor: pointer;
+}
+.tool-toggle input:disabled {
+  cursor: not-allowed;
+}

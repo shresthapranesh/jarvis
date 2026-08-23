@@ -8,6 +8,8 @@ from typing import Any
 import strawberry
 
 from core.approvals import gate_action
+from core.tool_gate import await_tool_approval, denial_message
+from core.tool_policy import is_enabled, mcp_key, needs_approval
 from core.mcp import (
     LOAD_MODES,
     _normalize_servers,
@@ -164,12 +166,35 @@ class McpMutation:
             raise ValueError("args_json must be a JSON object")
 
         if info.context.get("caller") == "agent":
+            conversation_id = info.context.get("caller_conversation_id")
+            key = mcp_key(server, tool)
+            if not is_enabled(key):
+                raise ValueError(
+                    f"MCP tool {server}.{tool} is switched off in Settings → Tools."
+                )
+            if needs_approval(key):
+                # Blocks this request until a human answers. The kernel-side
+                # caller (`jarvis.mcp_call`) waits with a matching client
+                # timeout, and its `run_cell` cell is held open meanwhile.
+                approved, answer = await await_tool_approval(
+                    tool_key=key,
+                    tool_name=f"{server}.{tool}",
+                    args=args,
+                    conversation_id=conversation_id,
+                )
+                if not approved:
+                    return McpToolResult(
+                        content=denial_message(f"{server}.{tool}", answer), is_error=True
+                    )
+            # The blanket `call_mcp_tool` action stays for installs that gate
+            # every MCP call through `approval.required_actions`; the per-tool
+            # switch above is the finer-grained one and runs first.
             await gate_action(
                 session,
                 "call_mcp_tool",
                 {"server": server, "tool": tool, "args": args},
                 source="chat",
-                parent_id=info.context.get("caller_conversation_id"),
+                parent_id=conversation_id,
             )
 
         content, is_error = await call_mcp_tool(server, tool, args, timeout=timeout_seconds)

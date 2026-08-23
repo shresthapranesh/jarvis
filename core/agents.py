@@ -16,13 +16,15 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import tools_condition
 from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from .config import get_config
 from .compaction import apply_per_call_compaction, compact_threshold, maybe_compact
 from .context_cache import CacheSegment, resolve_cache_ttl
 from .mcp import get_mcp_server_summaries, get_mcp_tools_sync
+from .tool_gate_node import make_gated_tool_node, tool_key_for
+from .tool_policy import is_enabled
 from .messages import (
     build_llm_messages,
     message_text,
@@ -561,6 +563,25 @@ def close_sync_checkpointer() -> None:
 
 # ── Agent builder ─────────────────────────────────────────────────────────────
 
+def _allowed(tools: list) -> list:
+    """Drop tools a human has switched off in Settings → Tools.
+
+    Applied at build time rather than per call: the toolset is baked into the
+    graph by `bind_tools`, so a disabled tool must not reach the model's schema
+    list at all. `core/tool_policy.set_tool_policy` drops the compiled-graph
+    cache on every write, which is what makes a toggle take effect on the next
+    run instead of the next restart.
+    """
+    kept = []
+    for tool in tools:
+        name = getattr(tool, "name", "")
+        if name and not is_enabled(tool_key_for(name)):
+            logger.info("tool %s is disabled by policy — not binding it", name)
+            continue
+        kept.append(tool)
+    return kept
+
+
 def _build_agent(
     model: str, checkpointer, store: AsyncSqliteStore | None, board: bool = False
 ) -> CompiledStateGraph:
@@ -598,7 +619,10 @@ def _build_agent(
 
     def _make_role_factory(role: str):
         prompt = _ROLE_PROMPTS[role]
-        tools = _ROLE_TOOLS[role]
+        # Workers get the same policy as the main agent: a tool a human
+        # switched off must not come back through a subagent, and a gated one
+        # must still ask.
+        tools = _allowed(_ROLE_TOOLS[role])
         role_llm = _with_llm_retry(llm.bind_tools(tools))
 
         def factory():
@@ -620,7 +644,7 @@ def _build_agent(
 
             g = StateGraph(AgentState)  # type: ignore[type-var]
             g.add_node("agent", role_model)
-            g.add_node("tools", ToolNode(tools))
+            g.add_node("tools", make_gated_tool_node(tools))
             g.add_edge(START, "agent")
             g.add_conditional_edges("agent", tools_condition)
             g.add_edge("tools", "agent")
@@ -676,6 +700,8 @@ def _build_agent(
     if _mcp_tools_for_workers:
         main_tools += _mcp_tools_for_workers
         logger.info("Added %d MCP tools to main agent", len(_mcp_tools_for_workers))
+
+    main_tools = _allowed(main_tools)
 
     # Bind tools so the LLM knows their schemas and emits structured tool_calls.
     # Without this, models hallucinate function-call syntax and fail validation
@@ -838,7 +864,7 @@ def _build_agent(
 
     graph = StateGraph(AgentState)  # type: ignore[type-var]
     graph.add_node("model_request", model_request_node)
-    graph.add_node("tools", ToolNode(main_tools))
+    graph.add_node("tools", make_gated_tool_node(main_tools))
 
     graph.add_edge(START, "model_request")
     graph.add_conditional_edges("model_request", tools_condition)

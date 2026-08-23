@@ -5,13 +5,16 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {McpServersQuery as TMcpServersQuery} from '../__generated__/McpServersQuery.graphql';
 import type {ModelCatalogQuery as TModelCatalogQuery} from '../__generated__/ModelCatalogQuery.graphql';
 import type {NotificationChannelsQuery as TNotificationChannelsQuery} from '../__generated__/NotificationChannelsQuery.graphql';
+import type {ToolsQuery as TToolsQuery} from '../__generated__/ToolsQuery.graphql';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
 import {McpTab} from '../components/settings/McpTab';
 import {ModelsTab} from '../components/settings/ModelsTab';
 import {NotificationsTab} from '../components/settings/NotificationsTab';
+import {ToolsTab} from '../components/settings/ToolsTab';
 import {mcpServersQuery} from '../relay/McpServersQuery';
 import {modelCatalogQuery} from '../relay/ModelCatalogQuery';
 import {notificationChannelsQuery} from '../relay/NotificationChannelsQuery';
+import {toolsQuery} from '../relay/ToolsQuery';
 
 export const Route = createFileRoute('/settings')({component: SettingsRoute});
 
@@ -26,7 +29,7 @@ function SettingsRoute() {
   );
 }
 
-type SettingsTab = 'mcp' | 'notifications' | 'models';
+type SettingsTab = 'mcp' | 'tools' | 'notifications' | 'models';
 
 const TAB_INFO: Record<SettingsTab, {label: string; subtitle: React.ReactNode}> = {
   mcp: {
@@ -38,6 +41,17 @@ const TAB_INFO: Record<SettingsTab, {label: string; subtitle: React.ReactNode}> 
         demand to keep their schemas out of the prompt. Config merges from env{' '}
         <code>JARVIS_MCP_SERVERS</code>, file <code>~/.jarvis/mcp.json</code>, and this UI (which
         wins).
+      </>
+    ),
+  },
+  tools: {
+    label: 'Tools',
+    subtitle: (
+      <>
+        Every tool the agent can reach — the ones bound to its graph, the <code>jarvis</code> SDK it
+        calls from <code>run_cell</code>, and each MCP server&apos;s tools. Switch one off to remove
+        it entirely, or require approval: a gated call blocks until you answer it here or in{' '}
+        <code>/approvals</code>, on every surface including automations and board tasks.
       </>
     ),
   },
@@ -65,7 +79,7 @@ const TAB_INFO: Record<SettingsTab, {label: string; subtitle: React.ReactNode}> 
 function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>(() => {
     const saved = localStorage.getItem('settings-tab') as SettingsTab | null;
-    if (saved && ['notifications', 'mcp', 'models'].includes(saved)) return saved;
+    if (saved && ['notifications', 'mcp', 'models', 'tools'].includes(saved)) return saved;
     return 'mcp';
   });
 
@@ -91,9 +105,15 @@ function SettingsPage() {
     {},
     {fetchPolicy: 'store-and-network', fetchKey: retry},
   );
+  const toolData = useLazyLoadQuery<TToolsQuery>(
+    toolsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: retry},
+  );
 
   const counts: Record<SettingsTab, number> = {
     mcp: mcpData.mcpServers.length,
+    tools: toolData.tools.length,
     notifications: channelData.notificationChannels.length,
     models: modelData?.models?.available?.length ?? 0,
   };
@@ -122,6 +142,7 @@ function SettingsPage() {
 
       {tab === 'notifications' && <NotificationsTab />}
       {tab === 'mcp' && <McpTab />}
+      {tab === 'tools' && <ToolsTab />}
       {tab === 'models' && <ModelsTab />}
     </div>
   );

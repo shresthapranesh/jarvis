@@ -8,6 +8,7 @@ import re
 import sys
 import tempfile
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -47,6 +48,8 @@ IDLE_TIMEOUT_SECONDS = 30 * 60  # reap a kernel untouched for this long
 DEFAULT_CELL_TIMEOUT = 60      # per-cell wall-clock limit
 STARTUP_TIMEOUT = 60           # kernel boot budget
 INTERRUPT_DRAIN_TIMEOUT = 5    # after interrupting, how long to wait for the kernel to settle
+HOLD_POLL_SECONDS = 5          # while parked on an approval, how often to re-check
+MAX_HOLD_SECONDS = 30 * 60     # hard ceiling on that park (see `hold_check` in run())
 MAX_OUTPUT_CHARS = 30_000      # cap a single cell's captured output
 
 
@@ -133,18 +136,60 @@ class KernelSession:
             elif mtype == "status" and content.get("execution_state") == "idle":
                 return
 
+    async def _hold_for_approval(
+        self,
+        msg_id: str,
+        out: list[str],
+        hold_check: Callable[[], Awaitable[bool]] | None,
+    ) -> bool:
+        """Keep waiting while a human approval for this run is still open.
+
+        Returns True if the cell finished during the hold (so the caller must
+        not interrupt), False to fall through to the normal timeout handling —
+        including when nothing is waiting on a human at all.
+        """
+        if hold_check is None:
+            return False
+        waited = 0.0
+        while waited < MAX_HOLD_SECONDS:
+            try:
+                if not await hold_check():
+                    return False
+            except Exception:
+                logger.debug("approval hold check failed", exc_info=True)
+                return False
+            if waited == 0.0:
+                logger.info("cell held past its timeout: waiting on a tool approval")
+            try:
+                await asyncio.wait_for(
+                    self._drain_until_idle(msg_id, out), HOLD_POLL_SECONDS
+                )
+                return True
+            except asyncio.TimeoutError:
+                waited += HOLD_POLL_SECONDS
+        logger.warning("approval hold hit its %ds ceiling — interrupting the cell", MAX_HOLD_SECONDS)
+        return False
+
     async def run(
         self,
         code: str,
         timeout: float = DEFAULT_CELL_TIMEOUT,
         conversation_id: str | None = None,
         project_id: str | None = None,
+        hold_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> str:
         """Execute one cell, returning combined stdout/stderr/result/traceback text.
 
         Serialized via ``self.lock``. On timeout the kernel is interrupted
         (not killed) so the session's variables survive, then we drain the
         interrupted cell's trailing messages before returning.
+
+        ``hold_check`` is the exception to that timeout: a cell blocked on a
+        human approval (``core/tool_gate.py`` — the ``jarvis`` SDK waits for one
+        in-process, since it cannot raise an interrupt from the kernel) is not a
+        runaway loop, and interrupting it would make "this tool needs approval"
+        mean "and you have 60 seconds to answer". While the check says a request
+        is still open, the cell is left alone, up to ``MAX_HOLD_SECONDS``.
         """
         async with self.lock:
             await self._ensure_started()
@@ -173,14 +218,15 @@ class KernelSession:
             try:
                 await asyncio.wait_for(self._drain_until_idle(msg_id, out), timeout)
             except asyncio.TimeoutError:
-                interrupted = True
-                await km.interrupt_kernel()
-                try:
-                    await asyncio.wait_for(
-                        self._drain_until_idle(msg_id, out), INTERRUPT_DRAIN_TIMEOUT
-                    )
-                except asyncio.TimeoutError:
-                    pass
+                if not await self._hold_for_approval(msg_id, out, hold_check):
+                    interrupted = True
+                    await km.interrupt_kernel()
+                    try:
+                        await asyncio.wait_for(
+                            self._drain_until_idle(msg_id, out), INTERRUPT_DRAIN_TIMEOUT
+                        )
+                    except asyncio.TimeoutError:
+                        pass
             except asyncio.CancelledError:
                 # The agent run was cancelled mid-cell — interrupt so the
                 # kernel doesn't keep churning, then propagate.
@@ -250,6 +296,7 @@ class KernelRegistry:
         timeout: float = DEFAULT_CELL_TIMEOUT,
         conversation_id: str | None = None,
         project_id: str | None = None,
+        hold_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> str:
         session = await self._get_or_create(key)
         return await session.run(
@@ -257,6 +304,7 @@ class KernelRegistry:
             timeout=timeout,
             conversation_id=conversation_id,
             project_id=project_id,
+            hold_check=hold_check,
         )
 
     async def shutdown(self, key: str) -> None:

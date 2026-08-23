@@ -522,6 +522,77 @@ pre-write snapshot) and a nav badge in `__root.tsx`.
 > also have no resume loop (they `break` on interrupt), which is why
 > `_is_headless` still auto-approves them — deferred sidesteps that entirely.
 
+## Tool Policy (Settings → Tools)
+One page listing **every** tool the agent can reach and two switches per tool:
+`enabled` (may it be called at all) and `requires approval` (a human must say
+yes first). `core/tool_policy.py` owns the inventory and the storage; the
+families it merges have nothing else in common:
+
+| kind | key | where it lives | in the prompt? |
+|---|---|---|---|
+| `bound` | `bound:<name>` | the graph's `main_tools` (`core/agents.py`) | yes — schema on every LLM call |
+| `sdk` | `sdk:<name>` | `tools/sdk.py` `_CATEGORIES`, called from a kernel | no — discovered on demand |
+| `mcp` | `mcp:<server>/<tool>` | MCP servers | only for `always` servers |
+
+**Storage is one `config_settings` row** (`tools.policy`), a JSON map holding
+*only non-default entries* — a fresh install stores nothing. It is a settings
+row rather than a table because the `jarvis` SDK must read it from a separate
+process over its read-only sqlite connection, with no ORM and no HTTP hop.
+Reads are sync and cached for 2s (hot path: every agent build, every SDK call).
+
+**Disabled means unbound, not refused.** `_allowed()` filters the toolset in
+`_build_agent` (main agent *and* worker roles), so a disabled tool never enters
+the model's schema list; `set_tool_policy` drops the compiled-graph cache
+(`invalidate_agent_cache`) so the change lands on the next run, not the next
+restart. In the SDK it is also hidden from `jarvis.help()` — advertising a
+locked door only invites a call that raises.
+
+### Blocking approval that works on every surface (`core/tool_gate.py`)
+The pre-existing mechanisms each cover one caller: `core/approval.py` blocks by
+raising a LangGraph **interrupt** (chat only — `_is_headless` auto-approves
+board/automation/bot/workflow), and `core/approvals.py`'s deferred shape blocks
+nothing. The gate makes the durable `Approval` row itself the rendezvous, so it
+does not depend on the caller's runtime:
+- **In-process** (the graph's gate node, `callMcpTool`) — create the row, then
+  `await` an `asyncio.Event` registered by approval id, with a DB poll under it
+  so an answer that arrives from another path still lands.
+- **In the kernel** (`tools/sdk.py:_await_gate`) — the row is created through
+  `requestToolApproval` and then *polled* over the read-only connection. Same
+  row, same resolution path, no new transport.
+
+`core/approvals.resolve` dispatches `source == "tool"` to `_resolve_tool_gate`,
+which only closes the row — nothing is executed and no `resume_future` is woken,
+because the waiter is watching the row. That is exactly what lets a board task,
+an automation and a kernel call block the same way a chat does. A restart
+`expire`s these rows: the waiter died with the process.
+
+**Gating happens at the graph node, not by wrapping tools** (`core/tool_gate_node.py`
+replaces `ToolNode`). `write_todos`/`set_todo_status` take `InjectedToolCallId`/
+`InjectedState` and return `Command` deltas, so a wrapper that re-declared their
+schema would break injection or the reducer write. The AI message in history
+keeps **all** its tool calls; only the copy handed to `ToolNode` is narrowed to
+the approved ones, so every `tool_use` still gets exactly one `tool_result` —
+a denial must not leave the orphan pairing Anthropic/Bedrock reject on the
+*next* call.
+
+**`run_cell`'s 60s cell timeout is suspended while a request is open.** Without
+that, "this tool needs approval" would mean "and you have 60 seconds to answer":
+`core/kernels.py:_hold_for_approval` re-checks `has_open_gate(conversation_id)`
+every 5s and only interrupts once nothing is waiting, capped at
+`MAX_HOLD_SECONDS` (30 min, matching `JARVIS_TOOL_GATE_TIMEOUT`). A stop still
+interrupts immediately — that path is `CancelledError`, not the timeout.
+
+The cost is real and deliberate: a waiting run holds its worker slot (and, for
+an SDK call, its kernel) until answered or timed out. A timeout denies.
+
+**Frontend:** `components/settings/ToolsTab.tsx` (a fourth Settings tab, grouped
+by family then server/category, with search). `AgentTool` carries a plain `id`
+(the policy key) so Relay normalizes `setToolPolicy`'s response onto the records
+already rendered — without it the toggle shows stale until a refetch. In chat,
+`ApprovalRequestEvent.approvalId` marks a gate: `InterruptPrompt` then answers
+with `resolveApproval` instead of `resumeTask`, since there is no interrupt to
+resume — the run is parked inside the tool call.
+
 ## Context Caching + Runner (ADK Runner / ContextCacheConfig analog)
 - `core/context_cache.py`: `CacheSegment` (name, content, cacheable, token_est),
   `ContextCacheConfig` (enabled, max_breakpoints=4, min_chars=50, cache_ttl),

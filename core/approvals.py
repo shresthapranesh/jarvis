@@ -32,6 +32,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.tool_gate import GATE_SOURCE
 from db import models as db_models
 from db import ops
 
@@ -309,9 +310,38 @@ async def resolve(
 
     if row.action:
         return await _resolve_deferred(session, row, answer, approved)
+    if row.source == GATE_SOURCE:
+        return await _resolve_tool_gate(session, row, answer, approved)
     if row.board_task_id:
         return await _resolve_board(session, row, answer)
     return await _resolve_blocking(session, row, answer, approved)
+
+
+async def _resolve_tool_gate(
+    session: AsyncSession, row: db_models.Approval, answer: str, approved: bool,
+) -> db_models.Approval:
+    """A per-tool gate (`core/tool_gate.py`): the caller is blocked on the row.
+
+    Nothing is executed here and no future is woken through the run — closing
+    the row *is* the answer, because the waiter is watching the row. That is
+    what lets the same gate work for a chat, a board task and a call made from
+    the kernel process, which have nothing else in common.
+    """
+    from core.tool_gate import notify_resolved
+
+    status = "approved" if approved else "denied"
+    resolved = await ops.resolve_approval_row(
+        session,
+        row.id,
+        status=status,
+        answer=answer,
+        result="Released the waiting call." if approved else "The call was not run.",
+    )
+    assert resolved is not None
+    # After the commit: an in-process waiter that wakes early would otherwise
+    # re-read the row and still see `pending`.
+    notify_resolved(row.id, approved=approved, answer=answer)
+    return resolved
 
 
 async def _resolve_deferred(
@@ -396,6 +426,10 @@ async def reconcile_startup() -> dict[str, int]:
       state in memory (BFS frontier, asyncio futures) and checkpoints nothing,
       so a restart re-runs the graph from the start and asks again. The old
       request is dead; marking it `expired` is the honest outcome.
+    * **tool gate** (`core/tool_gate.py`) — the waiter was an in-flight call, in
+      this process or in a kernel that died with it. Nothing is left to release,
+      so it expires with the workflow rows rather than becoming a button that
+      unblocks a caller that no longer exists.
     """
     from db import async_session
 

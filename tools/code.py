@@ -41,12 +41,23 @@ async def run_cell(code: str) -> str:
     # conversation_id (not the kernel key — workers override that) scopes the
     # kernel-preloaded `jarvis` SDK to this conversation; project_id gates its
     # project_memory the same way the bound tool was gated.
+    # A cell parked on a tool approval is not a hung cell: without this the
+    # 60s timeout would interrupt the kernel out from under a `jarvis` call
+    # that is waiting for a human (core/tool_gate.py).
+    conversation_id = ctx.conversation_id
+
+    async def _held_on_approval() -> bool:
+        from core.tool_gate import has_open_gate
+
+        return await has_open_gate(conversation_id)
+
     result = await get_kernel_registry().run_cell(
         key,
         code,
         timeout=DEFAULT_CELL_TIMEOUT,
-        conversation_id=ctx.conversation_id,
+        conversation_id=conversation_id,
         project_id=ctx.project_id,
+        hold_check=_held_on_approval,
     )
     logger.info("← run_cell [%s] (%d chars, %.0fms)", key, len(result), (time.monotonic() - start) * 1000)
     return result

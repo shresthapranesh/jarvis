@@ -482,7 +482,11 @@ function ConversationPage() {
       )}
       <footer className="page-footer">
         {pendingInterrupt && runningMsg && (
-          <InterruptPrompt taskId={runningMsg.id} question={pendingInterrupt.question} />
+          <InterruptPrompt
+            taskId={runningMsg.id}
+            question={pendingInterrupt.question}
+            approvalId={pendingInterrupt.approvalId}
+          />
         )}
         <InputBox
           onSubmit={handleSubmit}
