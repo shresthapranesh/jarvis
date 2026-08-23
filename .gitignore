@@ -16,5 +16,7 @@ wheels/
 .env
 .vscode
 backups/
+# macOS Finder metadata — written into any directory you open in Finder
+.DS_Store
 # TypeScript incremental build cache — local only, rewritten by every build
 frontend/*.tsbuildinfo
