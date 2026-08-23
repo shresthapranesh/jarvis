@@ -62,7 +62,10 @@ interface StreamState {
   artifacts: ArtifactRef[];
   todos: TodoItem[] | null;
   error: string | null;
-  pendingInterrupt: {id: string; question: string} | null;
+  // `approvalId` marks a per-tool gate (core/tool_gate.py): the run is blocked
+  // inside the tool call rather than on a LangGraph interrupt, so answering it
+  // means resolving the durable row, not resuming the task.
+  pendingInterrupt: {id: string; question: string; approvalId?: string} | null;
   budget: BudgetInfo | null;
   perf: PerfInfo | null;
 }
@@ -193,6 +196,7 @@ const taskEventsSubscription = graphql`
         tool
         reason
         args
+        approvalId
       }
       ... on ApprovalResolvedEvent {
         tool
@@ -413,14 +417,17 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             );
             break;
           case 'ApprovalRequestEvent': {
-            // Approval piggy-backs on interrupt mechanism; but if interrupt
-            // hasn't arrived yet, show a pending prompt immediately from the
-            // approval event. This gives richer UI (tool + reason) while still
-            // letting the interrupt be the source of truth for resume.
+            // Two shapes arrive here. An interrupt-backed approval is resumed
+            // through the run (the InterruptEvent is the source of truth for
+            // its id), while a per-tool gate carries `approvalId` and is
+            // answered by resolving that row — the run is parked inside the
+            // tool call and has no interrupt to resume.
             const q = `${evt.tool}: ${evt.reason}\n${evt.args ? `Args: ${evt.args}` : ''}`;
             setState((s) => ({
               ...s,
-              pendingInterrupt: s.pendingInterrupt ?? {id: `approval-${evt.tool}`, question: q},
+              pendingInterrupt: evt.approvalId
+                ? {id: evt.approvalId, question: q, approvalId: evt.approvalId}
+                : (s.pendingInterrupt ?? {id: `approval-${evt.tool}`, question: q}),
             }));
             break;
           }

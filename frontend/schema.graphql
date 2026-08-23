@@ -1,7 +1,22 @@
+type AgentTool {
+  id: ID!
+  key: String!
+  kind: String!
+  name: String!
+  description: String!
+  group: String!
+  enabled: Boolean!
+  requiresApproval: Boolean!
+  inPrompt: Boolean!
+  available: Boolean!
+  detail: String!
+}
+
 type ApprovalRequestEvent {
   tool: String!
   reason: String!
   args: String!
+  approvalId: String
 }
 
 type ApprovalResolvedEvent {
@@ -379,6 +394,8 @@ type Mutation {
   removeModel(id: String!): ModelCatalog!
   setDefaultModel(id: String!): ModelCatalog!
   resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!
+  setToolPolicy(key: String!, enabled: Boolean = null, requiresApproval: Boolean = null): [AgentTool!]!
+  requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = "{}", conversationId: String = null): ToolApprovalRequest!
 }
 
 """An object with a Globally Unique ID"""
@@ -507,6 +524,7 @@ type Query {
   mcpServers: [McpServer!]!
   mcpTools(server: String = null): [McpTool!]!
   pendingApprovals: [PendingApproval!]!
+  tools: [AgentTool!]!
 }
 
 type ResolveApprovalPayload {
@@ -625,6 +643,11 @@ type TodosUpdatedEvent {
 type TokenEvent {
   text: String!
   source: String!
+}
+
+type ToolApprovalRequest {
+  id: String!
+  status: String!
 }
 
 input UploadReferenceInput {

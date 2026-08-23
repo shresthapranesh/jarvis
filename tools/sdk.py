@@ -1037,6 +1037,18 @@ def mcp_call(server: str, tool: str, args: dict | None = None, **kwargs) -> str:
     import json as _json
 
     payload = {**(args or {}), **kwargs}
+    # A gated MCP tool blocks inside the resolver until a human answers, so the
+    # client has to be willing to wait that long. Checked here rather than
+    # always waiting the ceiling: an ungated call that hangs should still fail
+    # in seconds, not in half an hour.
+    client_timeout = _MCP_CALL_TIMEOUT + 15.0
+    try:
+        from core.tool_policy import mcp_key, needs_approval
+
+        if needs_approval(mcp_key(server, tool)):
+            client_timeout = _gate_timeout() + _MCP_CALL_TIMEOUT + 15.0
+    except Exception:
+        pass
     data = api(
         "mutation($server: String!, $tool: String!, $args: String!, $t: Float!) {"
         " callMcpTool(server: $server, tool: $tool, argsJson: $args, timeoutSeconds: $t)"
@@ -1047,12 +1059,110 @@ def mcp_call(server: str, tool: str, args: dict | None = None, **kwargs) -> str:
             "args": _json.dumps(payload, default=str),
             "t": _MCP_CALL_TIMEOUT,
         },
-        timeout=_MCP_CALL_TIMEOUT + 15.0,
+        timeout=client_timeout,
     )
     result = data["callMcpTool"]
     if result["isError"]:
         return f"MCP tool error: {result['content']}"
     return result["content"]
+
+
+# ── Tool policy ───────────────────────────────────────────────────────────────
+# Every function below is reachable from a `run_cell` kernel, i.e. from a
+# separate process with no LangGraph runtime — the reason the SDK could never
+# use `core/approval.py`'s interrupt. The gate here is the other half of
+# `core/tool_gate.py`: the server records a durable request, and this side
+# *blocks on the row* until a human answers it, polling over the same read-only
+# connection every other read uses. `run_cell`'s 60s cell timeout is suspended
+# while that request is open (see `core/kernels.py:_hold_for_approval`), which
+# is what makes the wait real rather than a minute long.
+
+_GATE_POLL_SECONDS = 1.5
+
+
+def _gate_timeout() -> float:
+    from core.tool_gate import gate_timeout_seconds
+
+    return gate_timeout_seconds()
+
+
+def _await_gate(approval_id: str, deadline: float) -> tuple[bool, str]:
+    """Poll the approval row until it leaves `pending`. (approved, answer)."""
+    while time.time() < deadline:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT status, answer FROM approvals WHERE id = ?", (approval_id,)
+            ).fetchone()
+        if row is None:
+            return (False, "the approval request no longer exists")
+        if row["status"] != "pending":
+            return (row["status"] == "approved", row["answer"] or "")
+        time.sleep(_GATE_POLL_SECONDS)
+    return (False, "timed out waiting for approval")
+
+
+def _request_gate(tool_key: str, tool_name: str, args: dict) -> str:
+    """Record the request server-side and return its id.
+
+    Through the API rather than the DB for the usual reason: this connection is
+    read-only, and the row has to be visible to the inbox and to whatever
+    in-process waiter might resolve it.
+    """
+    data = api(
+        "mutation($k: String!, $t: String!, $a: String!, $c: String) {"
+        " requestToolApproval(toolKey: $k, tool: $t, argsJson: $a, conversationId: $c)"
+        " { id status } }",
+        {
+            "k": tool_key,
+            "t": tool_name,
+            "a": json.dumps(args, default=str)[:8000],
+            "c": _conversation_id,
+        },
+    )
+    return data["requestToolApproval"]["id"]
+
+
+def _enforce_policy(fn_name: str, args: dict) -> None:
+    """Raise unless this SDK call is allowed to proceed right now."""
+    from core.tool_policy import policy_for, sdk_key
+
+    key = sdk_key(fn_name)
+    policy = policy_for(key)
+    if not policy.enabled:
+        raise RuntimeError(
+            f"jarvis.{fn_name} is switched off in Settings → Tools. "
+            "Do not retry it; use another approach or tell the user what you need."
+        )
+    if not policy.approval:
+        return
+
+    approval_id = _request_gate(key, f"jarvis.{fn_name}", args)
+    approved, answer = _await_gate(approval_id, time.time() + _gate_timeout())
+    if not approved:
+        from core.tool_gate import denial_message
+
+        raise RuntimeError(denial_message(f"jarvis.{fn_name}", answer))
+
+
+def _policed(fn):
+    """Wrap one SDK function with its policy check, preserving its signature —
+    `help()` renders from `inspect.signature`, so the wrapper must be transparent."""
+    import functools
+    import inspect
+
+    signature = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        try:
+            bound = signature.bind_partial(*a, **kw)
+            shown = dict(bound.arguments)
+        except TypeError:
+            shown = dict(kw)
+        _enforce_policy(fn.__name__, shown)
+        return fn(*a, **kw)
+
+    return wrapper
 
 
 # ── Discovery ─────────────────────────────────────────────────────────────────
@@ -1101,19 +1211,55 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
 }
 
 
+def _apply_policy_wrappers() -> None:
+    """Route every discoverable function through `_policed`, in one place.
+
+    Decorating each definition would be ~30 identical lines and one silent
+    omission away from a gate that does not apply; doing it from the catalogue
+    means a function is policed exactly when it is discoverable.
+    """
+    for category, (blurb, funcs) in list(_CATEGORIES.items()):
+        wrapped = [_policed(fn) for fn in funcs]
+        _CATEGORIES[category] = (blurb, wrapped)
+        for fn in wrapped:
+            globals()[fn.__name__] = fn
+
+
+_apply_policy_wrappers()
+
+
+def _is_enabled(fn_name: str) -> bool:
+    from core.tool_policy import is_enabled, sdk_key
+
+    try:
+        return is_enabled(sdk_key(fn_name))
+    except Exception:
+        return True
+
+
 def help(category: str | None = None) -> str:  # noqa: A001 — deliberate `jarvis.help`
     """List what the jarvis SDK can do. Call with a category name for signatures."""
     import inspect
 
     if category is None:
         lines = ["jarvis SDK — call jarvis.help('<category>') for full signatures.", ""]
-        lines += [f"  {name:<14}{blurb}" for name, (blurb, _) in _CATEGORIES.items()]
+        lines += [
+            f"  {name:<14}{blurb}"
+            for name, (blurb, funcs) in _CATEGORIES.items()
+            if any(_is_enabled(fn.__name__) for fn in funcs)
+        ]
         return "\n".join(lines)
 
     key = category.strip().lower()
     if key not in _CATEGORIES:
         return f"Unknown category {category!r}. Available: {', '.join(_CATEGORIES)}"
     blurb, funcs = _CATEGORIES[key]
+    # A disabled function is omitted rather than listed as unavailable: the
+    # point of the catalogue is what you can do, and advertising a locked door
+    # only invites a call that raises.
+    funcs = [fn for fn in funcs if _is_enabled(fn.__name__)]
+    if not funcs:
+        return f"jarvis.{key} — every tool in this category is switched off."
     out = [f"jarvis.{key} — {blurb}", ""]
     for fn in funcs:
         out.append(f"jarvis.{fn.__name__}{inspect.signature(fn)}")

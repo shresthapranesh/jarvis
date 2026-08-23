@@ -109,6 +109,11 @@ class ApprovalRequestEvent:
     tool: str
     reason: str
     args: str  # JSON-encoded
+    # Set when the request is a durable per-tool gate (core/tool_gate.py) — the
+    # run is blocked inside the tool call, not on a LangGraph interrupt, so the
+    # chat prompt must answer it with `resolveApproval(id)` rather than
+    # `resumeTask`. None for the older interrupt-backed approvals.
+    approval_id: str | None = None
 
 
 @strawberry.type
@@ -308,6 +313,7 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
             tool=data.get("tool", ""),
             reason=data.get("reason", ""),
             args=_as_str(data.get("args", {})),
+            approval_id=data.get("approval_id") or None,
         )
     if event_name == "approval_resolved":
         return ApprovalResolvedEvent(

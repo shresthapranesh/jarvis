@@ -1,13 +1,21 @@
 import {useRef, useState} from 'react';
 
+import {commitResolveApproval} from '../relay/ResolveApprovalMutation';
 import {commitResumeTask} from '../relay/ResumeTaskMutation';
 
 interface Props {
   taskId: string;
   question: string;
+  /**
+   * Set when the pause is a per-tool approval gate (core/tool_gate.py). The run
+   * is blocked inside the tool call, not on a LangGraph interrupt, so the
+   * answer goes to the durable row — `resumeTask` would find no interrupt to
+   * resume and the call would stay parked until it times out.
+   */
+  approvalId?: string;
 }
 
-export function InterruptPrompt({taskId, question}: Props) {
+export function InterruptPrompt({taskId, question, approvalId}: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -18,8 +26,13 @@ export function InterruptPrompt({taskId, question}: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      await commitResumeTask(taskId, answer);
-      // The SSE interrupt_resolved event will clear this prompt — no local state needed.
+      if (approvalId) {
+        await commitResolveApproval(approvalId, answer);
+      } else {
+        await commitResumeTask(taskId, answer);
+      }
+      // The approval_resolved / interrupt_resolved event clears this prompt —
+      // no local state needed.
     } catch (e) {
       setError((e as Error).message);
       setSubmitting(false);
@@ -68,12 +81,7 @@ export function InterruptPrompt({taskId, question}: Props) {
         {error && <div className="interrupt-error">{error}</div>}
         <div className="interrupt-footer">
           <span className="interrupt-hint">Enter to submit · Shift+Enter for newline</span>
-          <button
-            type="button"
-            className="interrupt-submit"
-            disabled={submitting}
-            onClick={submit}
-          >
+          <button type="button" className="interrupt-submit" disabled={submitting} onClick={submit}>
             {submitting ? 'Sending…' : 'Send'}
           </button>
         </div>
