@@ -390,6 +390,116 @@ def model_remove(
         rprint(f"[yellow]Not a custom model:[/yellow] {model_id} (built-ins can't be removed)")
 
 
+@model_app.command("sync")
+def model_sync(
+    provider: Annotated[
+        str | None,
+        typer.Argument(help="Provider to sync; omit to sync every discoverable provider."),
+    ] = None,
+    probe: Annotated[
+        bool,
+        typer.Option("--probe", help="Also issue a real one-token call per catalog model. "
+                                     "Listing is not entitlement — this is what catches a "
+                                     "model that is published but 404s for your account."),
+    ] = False,
+    add_new: Annotated[
+        bool,
+        typer.Option("--add-new", help="Register newly discovered models into the custom-model "
+                                       "layer (same store as 'model add')."),
+    ] = False,
+    include_non_chat: Annotated[
+        bool,
+        typer.Option("--include-non-chat", help="Include models whose names suggest they generate "
+                                                "speech/images/music. Shown either way; this only "
+                                                "affects what --add-new registers."),
+    ] = False,
+) -> None:
+    """Diff the catalog against what each provider actually offers.
+
+    Read-only by default: discovery reports drift and supplies metadata, but what
+    the catalog *says* stays with BUILTIN_MODELS + the custom layer. See
+    core/model_discovery.py for why it can't simply be the source of truth.
+    """
+    from core.model_catalog import KNOWN_PROVIDERS
+    from core.model_discovery import (
+        DISCOVERABLE, DiscoveryError, build_report, discover, probe as probe_model,
+    )
+    from db.ops import add_custom_model, get_default_model
+
+    if provider is not None and provider not in KNOWN_PROVIDERS:
+        rprint(f"[red]Unknown provider:[/red] {provider}\n"
+               f"Must be one of: {', '.join(sorted(KNOWN_PROVIDERS))}")
+        raise typer.Exit(code=1)
+    if provider is not None and provider not in DISCOVERABLE:
+        rprint(f"[yellow]No discovery adapter for '{provider}'.[/yellow] "
+               f"Discoverable: {', '.join(sorted(DISCOVERABLE))}")
+        raise typer.Exit(code=1)
+
+    targets = [provider] if provider else sorted(DISCOVERABLE)
+    # Hydrates the custom-model cache so available_models() sees runtime additions.
+    _run_db(lambda s: get_default_model(s))
+
+    any_drift = False
+    for prov in targets:
+        try:
+            found = discover(prov)
+        except DiscoveryError as exc:
+            rprint(f"\n[bold]{prov}[/bold]  [yellow]skipped:[/yellow] {exc}")
+            continue
+
+        report = build_report(prov, found)
+        if probe:
+            from core.model_catalog import available_models
+            for spec in [m for m in available_models() if m.provider == prov]:
+                ok, why = probe_model(spec.id)
+                if not ok:
+                    report.unreachable.append((spec.id, why))
+
+        rprint(f"\n[bold]{prov}[/bold]  [dim]{len(found)} model(s) offered[/dim]")
+        if report.clean:
+            rprint("  [green]✓[/green] catalog matches the provider")
+            continue
+        any_drift = True
+
+        if report.missing:
+            rprint("  [red]gone[/red] — in the catalog, no longer offered:")
+            for mid in report.missing:
+                rprint(f"      {mid}")
+        if report.unreachable:
+            rprint("  [red]unreachable[/red] — offered but this credential cannot call it:")
+            for mid, why in report.unreachable:
+                rprint(f"      {mid}\n        [dim]{why}[/dim]")
+        if report.window_backfill:
+            rprint("  [cyan]context_window available[/cyan] — catalog has None:")
+            for mid, win in report.window_backfill:
+                rprint(f"      {mid}  →  {win:,}")
+        if report.window_drift:
+            rprint("  [yellow]context_window differs[/yellow]:")
+            for mid, ours, theirs in report.window_drift:
+                rprint(f"      {mid}  catalog={ours:,}  provider={theirs:,}")
+        if report.new:
+            chat_new = [m for m in report.new if m.likely_chat]
+            other_new = [m for m in report.new if not m.likely_chat]
+            rprint(f"  [green]new[/green] — offered, not in the catalog ({len(chat_new)}):")
+            for m in chat_new:
+                win = f"  [{m.context_window:,} ctx]" if m.context_window else ""
+                rprint(f"      {m.id}  [dim]{m.label}[/dim]{win}")
+            if other_new:
+                rprint(f"  [dim]non-chat (name suggests speech/image/music), "
+                       f"not added unless --include-non-chat ({len(other_new)}):[/dim]")
+                for m in other_new:
+                    rprint(f"      [dim]{m.id}  {m.label}[/dim]")
+            if add_new:
+                to_add = report.new if include_non_chat else chat_new
+                for m in to_add:
+                    _run_db(lambda s, m=m: add_custom_model(s, m.id, m.label, m.provider))
+                rprint(f"  [green]✓[/green] added {len(to_add)} model(s) to the custom layer")
+
+    if any_drift and not add_new:
+        rprint("\n[dim]Read-only. Re-run with --add-new to register the new models; "
+               "'gone' entries in BUILTIN_MODELS need a code change.[/dim]")
+
+
 @model_app.command("set-default")
 def model_set_default(
     model_id: Annotated[str, typer.Argument(help="Model ID (copy from 'model list')")],
