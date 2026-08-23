@@ -221,6 +221,24 @@ The catalog merges two layers in `core/model_catalog.py`: `BUILTIN_MODELS` (comp
 - **`ModelSpec.context_window`** (optional) sizes the destructive-summarization trigger per model: `compact_threshold(model)` in `core/compaction.py` returns `40%` of the window, clamped to `[12k, 200k]`, and `_build_agent` resolves it once per compiled agent. **Leave it `None` unless the number is known** — the error is asymmetric: too small only summarizes early, too large disables the trigger until the provider rejects the call. `ollama:*` entries stay `None` on purpose, because `ChatOllama` sends no `num_ctx` and the server's own default (not the model card's window) is what actually truncates. Unknown → flat 80k. `JARVIS_COMPACT_TOKEN_THRESHOLD` overrides the derivation entirely.
 - All consumers go through `available_models()` / `get_model_spec()` / `is_valid_model()` (built-in ∪ custom, deduped). The frontend reads the catalog via the GraphQL `models` query (`queries/models.py`, async — re-hydrates from DB so runtime additions show without a restart) — dropdowns populate automatically. `ModelSpec` normalizes on its `id` field in the Relay store, so the settings page's `network-only` refetch also refreshes the chat model dropdown (`useModels`, `store-or-network`) without a reload.
 
+### Keeping the catalog honest (`model sync`)
+`core/model_discovery.py` enumerates a provider's live models and diffs them against the catalog. It is a **lint, not a source of truth** — the catalog stays `BUILTIN_MODELS` + the `models.custom` layer, because `BUILTIN_MODELS[0]` is the compile-time `DEFAULT_MODEL` and has to resolve with no network, no key, and no provider outage.
+
+```bash
+uv run python main.py model sync                 # every discoverable provider
+uv run python main.py model sync google_genai    # one provider
+uv run python main.py model sync google_genai --probe     # + a real one-token call per catalog model
+uv run python main.py model sync google_genai --add-new   # register new models into models.custom
+```
+
+Read-only by default. It reports four kinds of drift: catalog entries the provider no longer offers, models offered but absent from the catalog, `context_window` values the provider states where the catalog has `None`, and disagreements between the two.
+
+- **Listing is not entitlement.** Measured against Google: `gemini-2.5-pro` is still returned by `ListModels` but 404s with *"no longer available to new users"* on an account that lacks it. A listing reports what the provider publishes, not what this credential may call — only `--probe` separates them. That is why probing is opt-in rather than the default: it costs one request per catalog model.
+- **`--probe` must never let its own argument handling decide the verdict.** The output cap is not portable (`ChatGoogleGenerativeAI` rejects `max_tokens` with "Extra inputs are not permitted"), so `probe()` retries uncapped when the rejection is a *signature* error and judges on that call. Without this every Google model reads as unreachable.
+- **The chat/non-chat split is a name heuristic, and deliberately advisory.** Google's `ListModels` publishes no output-modality field — `lyria-3-pro-preview` (music) and `gemini-2.5-flash-preview-tts` (speech) are structurally identical to `gemini-3.5-flash`, same `supportedGenerationMethods` and all. `looks_like_chat()` flags them so they can be skipped by `--add-new`, but they stay visible in the report; a heuristic that silently dropped models would reintroduce exactly the listing-disagrees-with-reality failure this command exists to catch.
+- `context_window` backfill is the quiet win: most entries are `None`, so `compact_threshold()` falls back to a flat 80k. Google states the real number as `inputTokenLimit`. `ollama:*` stays `None` regardless, for the `num_ctx` reason above.
+- Discovery adapters exist for `google_genai`, `anthropic`, `bedrock` and `ollama`. A provider in `KNOWN_PROVIDERS` but not in `DISCOVERABLE` (`meta`) is reported as unsupported rather than as "no models found", so a gap here can't read as a gap at the provider. Each provider degrades on its own — a missing key or unreachable host skips that one and the rest still run.
+
 ### Adding a new frontend route
 - Create a file in `frontend/src/routes/` using TanStack Router file-based naming.
 - `routeTree.gen.ts` is auto-generated — never edit it manually, just run `pnpm dev`.
