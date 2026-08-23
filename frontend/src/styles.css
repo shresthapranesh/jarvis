@@ -1751,26 +1751,6 @@ body {
   border-color: rgba(var(--accent-rgb), 0.45);
   background: rgba(var(--accent-rgb), 0.12);
 }
-.attach-btn--artifact {
-  position: relative;
-}
-.artifact-btn-count {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 0.6rem;
-  font-weight: 700;
-  line-height: 14px;
-  text-align: center;
-  pointer-events: none;
-}
-
 /* ── Attachment preview strip ── */
 .attachment-strip {
   display: flex;
@@ -5254,6 +5234,72 @@ body {
   max-height: 30%;
   overflow-y: auto;
   flex-shrink: 0;
+}
+
+/* ── Inline artifact cards (under the message that produced them) ── */
+.message-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 9px 13px 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.14s,
+    background 0.14s,
+    transform 0.14s;
+}
+.artifact-card:hover {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: var(--accent-dim);
+  transform: translateY(-1px);
+}
+.artifact-card--active {
+  border-color: rgba(var(--accent-rgb), 0.65);
+  background: var(--accent-dim);
+}
+
+.artifact-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+}
+
+.artifact-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.artifact-card-title {
+  font-size: 0.83rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artifact-card-meta {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  text-transform: lowercase;
 }
 
 .artifact-list-item {

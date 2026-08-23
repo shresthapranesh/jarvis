@@ -1,5 +1,5 @@
 import type {WorkerInfo} from '../hooks/useTaskEvents';
-import type {Message, Step, TodoItem} from '../lib/types';
+import type {ArtifactCard, Message, Step, TodoItem} from '../lib/types';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
 import {TodoList} from './TodoList';
 
@@ -17,6 +17,12 @@ interface Props {
   containerRef?: React.RefObject<HTMLDivElement | null>;
   isLoadingOlder?: boolean;
   onShowSteps?: (steps: Step[]) => void;
+  /** Artifacts keyed by the assistant message that produced them. */
+  artifactsByMessage?: Map<string, ArtifactCard[]>;
+  /** Artifacts the in-flight run has produced so far. */
+  streamingArtifacts?: ArtifactCard[];
+  onOpenArtifact?: (id: string) => void;
+  openArtifactId?: string | null;
 }
 
 export function MessageThread({
@@ -33,6 +39,10 @@ export function MessageThread({
   containerRef,
   isLoadingOlder,
   onShowSteps,
+  artifactsByMessage,
+  streamingArtifacts,
+  onOpenArtifact,
+  openArtifactId,
 }: Props) {
   return (
     <div id="messages" ref={containerRef}>
@@ -41,7 +51,14 @@ export function MessageThread({
         <div className="messages-loading-older">Loading older messages…</div>
       )}
       {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} onShowSteps={onShowSteps} />
+        <MessageBubble
+          key={msg.id}
+          message={msg}
+          onShowSteps={onShowSteps}
+          artifacts={artifactsByMessage?.get(msg.id)}
+          onOpenArtifact={onOpenArtifact}
+          openArtifactId={openArtifactId}
+        />
       ))}
       {todos && todos.length > 0 && (
         <div className="turn">
@@ -55,6 +72,9 @@ export function MessageThread({
           steps={streamingSteps ?? []}
           workers={streamingWorkers ?? []}
           onShowSteps={onShowSteps}
+          artifacts={streamingArtifacts}
+          onOpenArtifact={onOpenArtifact}
+          openArtifactId={openArtifactId}
         />
       )}
       {streamError && !isStreaming && (

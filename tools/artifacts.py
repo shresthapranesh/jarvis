@@ -2,8 +2,10 @@
 
 Artifacts are markdown documents the agent produces as deliverables (reports,
 drafts, resumes, etc.) — distinct from `write_file`, which is for scratch work.
-The frontend renders them in a side panel; the agent should call
-`write_artifact` whenever the user asked for a document-shaped result.
+The frontend renders each one as a card under the assistant message that
+produced it (hence the ``message_id`` stamp), opening into a side panel; the
+agent should call `write_artifact` whenever the user asked for a
+document-shaped result.
 Binary deliverables (audio/video/image) go through the same tool via `file_path`.
 
 Files are stored on disk under ``AppConfig.artifacts_dir`` as ``{uuid}.md``;
@@ -129,6 +131,7 @@ async def _write_markdown_artifact(
                 filename="",  # set after we know the id
                 kind="markdown",
                 conversation_id=conversation_id,
+                message_id=ctx.message_id,
             )
             live_path = _artifact_path(art.id)
             await update_artifact(session, art.id, filename=str(live_path))
@@ -150,6 +153,7 @@ async def _write_markdown_artifact(
         action=action,
         id=art.id,
         title=title,
+        kind="markdown",
         preview=content[:300],
         conversation_id=conversation_id,
     )
@@ -215,6 +219,7 @@ async def _write_file_artifact(
                 kind=kind,
                 mime_type=mime_type,
                 conversation_id=conversation_id,
+                message_id=ctx.message_id,
             )
             live_path = artifact_path(art.id, ext)
             await update_artifact(session, art.id, filename=str(live_path))
@@ -232,6 +237,7 @@ async def _write_file_artifact(
         action=action,
         id=art.id,
         title=title,
+        kind=kind,
         preview=f"[{kind} · {mime_type or 'unknown'} · {size} bytes]",
         conversation_id=conversation_id,
     )

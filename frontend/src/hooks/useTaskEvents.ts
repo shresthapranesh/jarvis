@@ -176,6 +176,7 @@ const taskEventsSubscription = graphql`
         artifactId
         title
         action
+        kind
         preview
       }
       ... on TodosUpdatedEvent {
@@ -389,6 +390,7 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
               id: evt.artifactId,
               title: evt.title,
               action: (evt.action as 'created' | 'updated') ?? 'created',
+              kind: evt.kind ?? 'markdown',
               preview: evt.preview ?? undefined,
             };
             setState((s) => ({

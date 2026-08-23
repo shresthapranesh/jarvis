@@ -153,7 +153,42 @@ def _migrate(conn: Connection) -> None:
     art_cols = {c["name"] for c in inspector.get_columns("artifacts")}
     if "mime_type" not in art_cols:
         conn.execute(text("ALTER TABLE artifacts ADD COLUMN mime_type VARCHAR"))
+    _backfill_artifact_message_ids(conn)
     _ensure_fts(conn)
+
+
+# One-shot: the column existed long before anything wrote it, so every
+# pre-existing artifact is unattached and would render under no message at all.
+# The assistant Message row is inserted when the run starts and the artifact is
+# written during it, so the owning message is the newest assistant message in
+# that conversation at or before the artifact's created_at. Guarded by a marker
+# row rather than re-run each boot: after this, NULL means "genuinely has no
+# message" (a run that produced no assistant row), which is a state to preserve,
+# not to keep re-guessing at.
+_ARTIFACT_BACKFILL_KEY = "migration.artifact_message_ids"
+
+
+def _backfill_artifact_message_ids(conn: Connection) -> None:
+    done = conn.execute(
+        text("SELECT 1 FROM config_settings WHERE key = :k"),
+        {"k": _ARTIFACT_BACKFILL_KEY},
+    ).first()
+    if done:
+        return
+    conn.execute(text(
+        "UPDATE artifacts SET message_id = ("
+        "  SELECT m.id FROM messages m"
+        "  WHERE m.conversation_id = artifacts.conversation_id"
+        "    AND m.role = 'assistant'"
+        "    AND m.created_at <= artifacts.created_at"
+        "  ORDER BY m.created_at DESC LIMIT 1"
+        ") WHERE message_id IS NULL AND conversation_id IS NOT NULL"
+    ))
+    conn.execute(
+        text("INSERT INTO config_settings (key, value, updated_at) "
+             "VALUES (:k, '1', CURRENT_TIMESTAMP)"),
+        {"k": _ARTIFACT_BACKFILL_KEY},
+    )
 
 def _set_sqlite_pragmas(dbapi_conn: object, _record: object) -> None:
     """journal_mode is persisted in the file; synchronous and busy_timeout are

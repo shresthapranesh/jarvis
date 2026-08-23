@@ -18,6 +18,7 @@ import {RunSpine} from '../components/RunSpine';
 import {refreshRunningTasks} from '../hooks/useRunningTasks';
 import {useTaskEvents} from '../hooks/useTaskEvents';
 import type {
+  ArtifactCard,
   MediaAttachment,
   Message,
   PersistedDocument,
@@ -132,6 +133,50 @@ function ConversationPage() {
   );
   const totalArtifactCount = Math.max(artifactListData.artifacts.length, artifacts.length);
 
+  // Artifacts render under the assistant message that produced them, keyed by
+  // the `messageId` the write stamps (tools/artifacts.py). Rows predating that
+  // stamp — and anything written outside a chat turn — carry no message, so
+  // they fall back to the newest assistant message rather than becoming
+  // unreachable: the card is the only way into the side panel.
+  const artifactsByMessage = useMemo(() => {
+    const lastAssistantId = [...allMessages]
+      .reverse()
+      .find((m) => m.role === 'assistant')?.id;
+    const byMessage = new Map<string, ArtifactCard[]>();
+    for (const a of artifactListData.artifacts) {
+      const owner = a.messageId ?? lastAssistantId;
+      if (!owner) continue;
+      const card: ArtifactCard = {
+        id: decodeGlobalId(a.id),
+        title: a.title,
+        kind: a.kind,
+        mimeType: a.mimeType,
+      };
+      const bucket = byMessage.get(owner);
+      if (bucket) bucket.push(card);
+      else byMessage.set(owner, [card]);
+    }
+    return byMessage;
+  }, [artifactListData.artifacts, allMessages]);
+
+  // Mid-run the assistant message is still a placeholder, so the live refs
+  // carry the cards until the stream finishes and the list query refetches.
+  const streamingArtifacts = useMemo<ArtifactCard[]>(
+    () =>
+      artifacts.map((a: any) => ({
+        id: a.id,
+        title: a.title,
+        kind: a.kind ?? 'markdown',
+        action: a.action,
+      })),
+    [artifacts],
+  );
+
+  function handleOpenArtifact(artifactId: string) {
+    setSelectedArtifactId(artifactId);
+    setArtifactPanelOpen(true);
+  }
+
   const documentListData = useLazyLoadQuery<DocumentListQuery>(
     documentListQuery,
     {conversationId: id},
@@ -173,14 +218,6 @@ function ConversationPage() {
       console.error('Failed to delete document:', err);
     }
   }
-
-  useEffect(() => {
-    if (artifacts.length > 0) {
-      const latest = artifacts[artifacts.length - 1];
-      setSelectedArtifactId(latest.id);
-      setArtifactPanelOpen(true);
-    }
-  }, [artifacts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if ((streaming || !!runningMsg) && panelOpen && steps.length > 0) {
@@ -451,6 +488,10 @@ function ConversationPage() {
         containerRef={containerRef}
         isLoadingOlder={isLoadingPrevious}
         onShowSteps={handleShowSteps}
+        artifactsByMessage={artifactsByMessage}
+        streamingArtifacts={isActive ? streamingArtifacts : undefined}
+        onOpenArtifact={handleOpenArtifact}
+        openArtifactId={artifactPanelOpen ? selectedArtifactId : null}
       />
       {showSpine && (
         <RunSpine
@@ -492,9 +533,6 @@ function ConversationPage() {
           onSubmit={handleSubmit}
           disabled={isActive}
           onStop={handleStop}
-          artifactCount={totalArtifactCount}
-          artifactPanelOpen={artifactPanelOpen}
-          onToggleArtifacts={() => setArtifactPanelOpen((v) => !v)}
           conversationId={id}
           initialModel={conversationModel}
           persistedDocuments={persistedDocuments}

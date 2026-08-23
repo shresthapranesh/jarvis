@@ -72,6 +72,7 @@ class ArtifactEvent:
     artifact_id: str
     title: str
     action: str  # "created" | "updated"
+    kind: str  # "markdown" | "audio" | "video" | "image" | "binary"
     preview: str | None
 
 
@@ -289,6 +290,7 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
             artifact_id=data.get("id", ""),
             title=data.get("title", ""),
             action=data.get("action", ""),
+            kind=data.get("kind") or "markdown",
             preview=data.get("preview"),
         )
     if event_name == "todos_updated":

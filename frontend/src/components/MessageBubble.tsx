@@ -56,7 +56,8 @@ function SpinnerIcon() {
 
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep, getStepPreview} from '../lib/steps';
-import type {Message, Step} from '../lib/types';
+import type {ArtifactCard, Message, Step} from '../lib/types';
+import {MessageArtifacts} from './MessageArtifacts';
 import {WorkerPanel} from './WorkerPanel';
 
 // Rendering for historical messages persisted with status "blocked" by the
@@ -262,6 +263,9 @@ interface StreamingBubbleProps {
   steps: Step[];
   workers?: WorkerInfo[];
   onShowSteps?: (steps: Step[]) => void;
+  artifacts?: ArtifactCard[];
+  onOpenArtifact?: (id: string) => void;
+  openArtifactId?: string | null;
 }
 
 export function StreamingBubble({
@@ -270,6 +274,9 @@ export function StreamingBubble({
   steps,
   workers,
   onShowSteps,
+  artifacts,
+  onOpenArtifact,
+  openArtifactId,
 }: StreamingBubbleProps) {
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
@@ -336,6 +343,15 @@ export function StreamingBubble({
           {stepsButton}
         </div>
       )}
+      {/* Artifacts land mid-run, so they show as soon as the tool returns
+          rather than waiting for the turn to finalize. */}
+      {artifacts && artifacts.length > 0 && (
+        <MessageArtifacts
+          artifacts={artifacts}
+          onOpen={onOpenArtifact}
+          selectedId={openArtifactId}
+        />
+      )}
       {/* After text starts streaming, still show step count */}
       {text && stepsButton}
     </div>
@@ -345,6 +361,10 @@ export function StreamingBubble({
 interface MessageBubbleProps {
   message: Message;
   onShowSteps?: (steps: Step[]) => void;
+  /** Artifacts this message produced, rendered as cards beneath it. */
+  artifacts?: ArtifactCard[];
+  onOpenArtifact?: (id: string) => void;
+  openArtifactId?: string | null;
 }
 
 function CopyIcon() {
@@ -382,7 +402,13 @@ function CheckIcon() {
   );
 }
 
-export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  onShowSteps,
+  artifacts,
+  onOpenArtifact,
+  openArtifactId,
+}: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [ttsState, setTtsState] = useState<'idle' | 'loading' | 'playing'>('idle');
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -485,6 +511,13 @@ export function MessageBubble({message, onShowSteps}: MessageBubbleProps) {
         className={`agent-bubble${blocked ? ' agent-bubble--blocked' : ''}`}
         dangerouslySetInnerHTML={{__html: html}}
       />
+      {artifacts && artifacts.length > 0 && (
+        <MessageArtifacts
+          artifacts={artifacts}
+          onOpen={onOpenArtifact}
+          selectedId={openArtifactId}
+        />
+      )}
       <div className={`turn-actions${ttsState !== 'idle' ? ' turn-actions--tts-active' : ''}`}>
         <button
           className={`copy-btn${copied ? ' copy-btn--copied' : ''}`}

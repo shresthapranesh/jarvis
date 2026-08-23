@@ -132,7 +132,14 @@ async def _run_agent_task(
 
         agent = build_agent(model, checkpointer=checkpointer, store=store, invocation_context=ctx)
         project_id, ephemeral = await scope_task
-        configurable: dict[str, Any] = {"thread_id": conv_id, "conversation_id": conv_id}
+        # message_id == task_id: the assistant Message row this turn writes.
+        # Artifacts stamp it so the UI can render each one under the message
+        # that produced it (tools/artifacts.py).
+        configurable: dict[str, Any] = {
+            "thread_id": conv_id,
+            "conversation_id": conv_id,
+            "message_id": task_id,
+        }
         if project_id:
             configurable["project_id"] = project_id
         if ephemeral:

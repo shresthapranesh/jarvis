@@ -47,6 +47,7 @@ type ArtifactEvent {
   artifactId: String!
   title: String!
   action: String!
+  kind: String!
   preview: String
 }
 
