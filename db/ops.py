@@ -969,10 +969,25 @@ async def get_custom_models(session: AsyncSession) -> list[dict]:
 
 async def add_custom_model(
     session: AsyncSession, model_id: str, label: str, provider: str,
+    context_window: int | None = None,
 ) -> None:
-    """Add (or replace, by id) a custom model in the catalog."""
-    models = [m for m in await get_custom_models(session) if m.get("id") != model_id]
-    models.append({"id": model_id, "label": label, "provider": provider})
+    """Add (or replace, by id) a custom model in the catalog.
+
+    `context_window` sizes this model's compaction threshold (see
+    ModelSpec.context_window). Passing None *keeps* whatever the existing row
+    had rather than clearing it: this function is the upsert behind both "add"
+    and "edit", and an edit that only changes a label must not silently drop a
+    window discovery took a round trip to learn.
+    """
+    existing = await get_custom_models(session)
+    prior = next((m for m in existing if m.get("id") == model_id), None)
+    if context_window is None and prior is not None:
+        context_window = prior.get("context_window")
+    row: dict = {"id": model_id, "label": label, "provider": provider}
+    if context_window:
+        row["context_window"] = int(context_window)
+    models = [m for m in existing if m.get("id") != model_id]
+    models.append(row)
     await set_setting(session, _CUSTOM_MODELS_KEY, json.dumps(models))
 
 

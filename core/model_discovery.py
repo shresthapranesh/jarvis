@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 # Providers whose discovery is implemented here. A provider in KNOWN_PROVIDERS
 # but missing from this map is reported as unsupported rather than as "no models
 # found", so a gap in this file can't read as a gap at the provider.
-DISCOVERABLE: frozenset[str] = frozenset({"google_genai", "anthropic", "bedrock", "ollama"})
+DISCOVERABLE: frozenset[str] = frozenset(
+    {"google_genai", "anthropic", "bedrock", "ollama", "openrouter"}
+)
 
 _TIMEOUT = 30.0
 
@@ -196,11 +198,59 @@ def _discover_ollama() -> list[DiscoveredModel]:
     ]
 
 
+def _discover_openrouter() -> list[DiscoveredModel]:
+    import httpx
+
+    from core.model_catalog import OPENROUTER_BASE_URL
+
+    # The listing is public — no key required. That is deliberate here: it means
+    # `model sync openrouter` works before an install has credentials, and the
+    # models it reports are the ones the router publishes. Entitlement is still a
+    # separate question (some routes need your own upstream key or a credit
+    # balance), which only --probe answers.
+    try:
+        r = httpx.get(f"{OPENROUTER_BASE_URL}/models", timeout=_TIMEOUT)
+        r.raise_for_status()
+    except Exception as exc:
+        raise DiscoveryError(f"could not reach OpenRouter: {exc}") from exc
+
+    out: list[DiscoveredModel] = []
+    for m in r.json().get("data", []):
+        mid = m.get("id")
+        if not mid:
+            continue
+        arch = m.get("architecture") or {}
+        # OpenRouter *does* publish output modalities, so unlike Google this is a
+        # fact rather than the name heuristic. Fall back to the heuristic only
+        # when the field is missing, so a schema change degrades instead of
+        # marking every model non-chat.
+        out_mods = arch.get("output_modalities")
+        likely_chat = (
+            "text" in out_mods if isinstance(out_mods, list) and out_mods
+            else looks_like_chat(mid)
+        )
+        # `context_length` is the total window (input + output), where the
+        # catalog's field is nominally input-only. It is the only number the
+        # router states, and compact_threshold() takes 40% of it and clamps, so
+        # the slack is absorbed rather than acted on.
+        window = m.get("context_length") or (m.get("top_provider") or {}).get("context_length")
+        out.append(DiscoveredModel(
+            id=f"openrouter:{mid}",
+            label=m.get("name") or mid,
+            provider="openrouter",
+            context_window=int(window) if isinstance(window, (int, float)) and window > 0 else None,
+            description=(m.get("description") or "").strip() or None,
+            likely_chat=likely_chat,
+        ))
+    return out
+
+
 _ADAPTERS = {
     "google_genai": _discover_google,
     "anthropic": _discover_anthropic,
     "bedrock": _discover_bedrock,
     "ollama": _discover_ollama,
+    "openrouter": _discover_openrouter,
 }
 
 

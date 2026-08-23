@@ -29,6 +29,7 @@ from db.ops import (
 )
 
 from ..types.model_catalog import ModelCatalog, load_model_catalog
+from ..types.model_sync import DiscoveredModelInput
 
 _DEFAULT_MODEL_KEY = "default.model"
 
@@ -88,6 +89,44 @@ class ModelsMutation:
             raise ValueError(f"No custom model '{model_id}'")
         # add_custom_model upserts by id.
         await add_custom_model(session, model_id, label.strip() or model_id, prov)
+        return await load_model_catalog(session)
+
+    @strawberry.mutation
+    async def add_discovered_models(
+        self,
+        info: strawberry.Info,
+        models: list[DiscoveredModelInput],
+    ) -> ModelCatalog:
+        """Register models found by `modelSync` into the custom layer.
+
+        The UI counterpart of `model sync --add-new`, except the operator picks
+        which ones. Every entry is validated *before* anything is written, so a
+        bad id in a batch of thirty can't leave half of them registered.
+
+        Also the apply path for a context_window finding: `add_custom_model`
+        upserts by id, so re-sending an existing custom model with the
+        provider's window is how that gets corrected. A built-in's window is
+        compiled in and is rejected here — it needs a code change.
+        """
+        session = info.context["session"]
+        if not models:
+            raise ValueError("No models given")
+
+        validated: list[tuple[str, str, str, int | None]] = []
+        for m in models:
+            model_id, prov = _validated(m.id, m.provider)
+            if is_builtin_model(model_id):
+                raise ValueError(
+                    f"'{model_id}' is a built-in model — its catalog entry, "
+                    "including context_window, is compiled in and needs a code change"
+                )
+            window = m.context_window
+            if window is not None and window <= 0:
+                raise ValueError(f"'{model_id}': context_window must be positive")
+            validated.append((model_id, m.label.strip() or model_id, prov, window))
+
+        for model_id, label, prov, window in validated:
+            await add_custom_model(session, model_id, label, prov, window)
         return await load_model_catalog(session)
 
     @strawberry.mutation

@@ -26,7 +26,9 @@ type ApprovalResolvedEvent {
 }
 
 type Artifact implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   title: String!
   filename: String!
@@ -59,7 +61,9 @@ type ArtifactVersion {
 }
 
 type Automation implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   name: String!
   description: String
@@ -110,7 +114,9 @@ input AutomationInput {
 }
 
 type AutomationRun implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   automationId: String!
   status: String!
@@ -127,7 +133,9 @@ type AutomationStoppedEvent {
 }
 
 type BoardTask implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   title: String!
   body: String
@@ -190,10 +198,33 @@ type BudgetUpdateEvent {
   snapshot: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent =
+  | TokenEvent
+  | ThinkingTokenEvent
+  | StepEvent
+  | BrowserStepEvent
+  | WorkerStartEvent
+  | WorkerStepEvent
+  | WorkerTokenEvent
+  | WorkerDoneEvent
+  | ArtifactEvent
+  | TodosUpdatedEvent
+  | InterruptEvent
+  | InterruptResolvedEvent
+  | ApprovalRequestEvent
+  | ApprovalResolvedEvent
+  | WorkflowToolEvent
+  | BudgetExceededEvent
+  | BudgetUpdateEvent
+  | PerfUpdateEvent
+  | DoneEvent
+  | StoppedEvent
+  | ErrorEvent
 
 type Conversation implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   title: String
   model: String!
@@ -207,11 +238,31 @@ type Conversation implements Node {
   messages(last: Int! = 10, before: String = null): MessageConnection!
 }
 
-"""Date with time (isoformat)"""
+"""
+Date with time (isoformat)
+"""
 scalar DateTime
 
+type DiscoveredModel {
+  id: String!
+  label: String!
+  provider: String!
+  contextWindow: Int
+  description: String
+  likelyChat: Boolean!
+}
+
+input DiscoveredModelInput {
+  id: String!
+  label: String!
+  provider: String = null
+  contextWindow: Int = null
+}
+
 type Document implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   conversationId: String!
   messageId: String
@@ -242,7 +293,10 @@ type InterruptResolvedEvent {
 """
 The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
 """
-scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
+scalar JSON
+  @specifiedBy(
+    url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf"
+  )
 
 type McpServer {
   name: String!
@@ -296,7 +350,9 @@ type MemoryItem {
 }
 
 type Message implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   role: String!
   content: String!
@@ -326,6 +382,7 @@ type ModelCatalog {
   default: String!
   available: [ModelSpec!]!
   providers: [String!]!
+  discoverableProviders: [String!]!
 }
 
 type ModelSpec {
@@ -333,6 +390,19 @@ type ModelSpec {
   label: String!
   provider: String!
   builtin: Boolean!
+  contextWindow: Int
+}
+
+type ModelSyncReport {
+  provider: String!
+  offered: Int!
+  skipped: String
+  probed: Boolean!
+  missing: [String!]!
+  unreachable: [UnreachableModel!]!
+  windows: [WindowFinding!]!
+  newModels: [DiscoveredModel!]!
+  clean: Boolean!
 }
 
 type Mutation {
@@ -344,7 +414,12 @@ type Mutation {
   startTask(input: StartTaskInput!): StartTaskPayload!
   stopTask(taskId: String!): Boolean!
   resumeTask(taskId: String!, answer: String!): Boolean!
-  updateConversation(id: ID!, title: String = null, model: String = null, pinned: Boolean = null): Conversation!
+  updateConversation(
+    id: ID!
+    title: String = null
+    model: String = null
+    pinned: Boolean = null
+  ): Conversation!
   deleteConversation(id: ID!): Boolean!
   discardConversation(id: ID!): Boolean!
   updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!
@@ -388,24 +463,45 @@ type Mutation {
   reloadMcpServers: [McpServer!]!
   setMcpServerLoadMode(name: String!, mode: String!): McpServer!
   setMcpDefaultLoadMode(mode: String!): String!
-  callMcpTool(server: String!, tool: String!, argsJson: String! = "{}", timeoutSeconds: Float! = 120): McpToolResult!
+  callMcpTool(
+    server: String!
+    tool: String!
+    argsJson: String! = "{}"
+    timeoutSeconds: Float! = 120
+  ): McpToolResult!
   addModel(id: String!, label: String!, provider: String = null): ModelCatalog!
   updateModel(id: String!, label: String!, provider: String = null): ModelCatalog!
+  addDiscoveredModels(models: [DiscoveredModelInput!]!): ModelCatalog!
   removeModel(id: String!): ModelCatalog!
   setDefaultModel(id: String!): ModelCatalog!
   resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!
-  setToolPolicy(key: String!, enabled: Boolean = null, requiresApproval: Boolean = null): [AgentTool!]!
-  requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = "{}", conversationId: String = null): ToolApprovalRequest!
+  setToolPolicy(
+    key: String!
+    enabled: Boolean = null
+    requiresApproval: Boolean = null
+  ): [AgentTool!]!
+  requestToolApproval(
+    toolKey: String!
+    tool: String!
+    argsJson: String! = "{}"
+    conversationId: String = null
+  ): ToolApprovalRequest!
 }
 
-"""An object with a Globally Unique ID"""
+"""
+An object with a Globally Unique ID
+"""
 interface Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
 }
 
 type NotificationChannel implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   name: String!
   type: String!
@@ -426,18 +522,28 @@ input NotificationChannelUpdateInput {
   target: String = null
 }
 
-"""Information to aid in pagination."""
+"""
+Information to aid in pagination.
+"""
 type PageInfo {
-  """When paginating forwards, are there more items?"""
+  """
+  When paginating forwards, are there more items?
+  """
   hasNextPage: Boolean!
 
-  """When paginating backwards, are there more items?"""
+  """
+  When paginating backwards, are there more items?
+  """
   hasPreviousPage: Boolean!
 
-  """When paginating backwards, the cursor to continue."""
+  """
+  When paginating backwards, the cursor to continue.
+  """
   startCursor: String
 
-  """When paginating forwards, the cursor to continue."""
+  """
+  When paginating forwards, the cursor to continue.
+  """
   endCursor: String
 }
 
@@ -465,7 +571,9 @@ type PerfUpdateEvent {
 }
 
 type Project implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   name: String!
   description: String
@@ -492,12 +600,15 @@ input ProjectUpdateInput {
 
 type Query {
   models: ModelCatalog!
+  modelSync(provider: String = null, probe: Boolean! = false): [ModelSyncReport!]!
   agentMemory: Memory!
   memories(kind: String = null): [MemoryItem!]!
   memoryActivities(memoryId: String!, limit: Int! = 50): [MemoryActivity!]!
   memoryUsage: [MemoryItem!]!
   node(
-    """The ID of the object."""
+    """
+    The ID of the object.
+    """
     id: ID!
   ): Node!
   conversations(surface: String = "web"): [Conversation!]!
@@ -552,7 +663,9 @@ type RunningTask {
 }
 
 type Skill implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   name: String!
   description: String!
@@ -650,8 +763,22 @@ type ToolApprovalRequest {
   status: String!
 }
 
+type UnreachableModel {
+  id: String!
+  reason: String!
+}
+
 input UploadReferenceInput {
   uploadId: String!
+}
+
+type WindowFinding {
+  id: String!
+  label: String!
+  provider: String!
+  catalogWindow: Int
+  providerWindow: Int!
+  builtin: Boolean!
 }
 
 type WorkerDoneEvent {
@@ -681,7 +808,9 @@ type WorkerTokenEvent {
 }
 
 type Workflow implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   name: String!
   description: String
@@ -736,7 +865,24 @@ type WorkflowErrorEvent {
   runId: String!
 }
 
-union WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowApprovalRequestEvent | WorkflowApprovalResolvedEvent | WorkflowInterruptEvent | WorkflowInterruptResolvedEvent | WorkflowBudgetExceededEvent | WorkflowBudgetUpdateEvent | WorkflowNodeRetryEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent
+union WorkflowEvent =
+  | WorkflowNodeStartEvent
+  | WorkflowNodeTokenEvent
+  | WorkflowNodeConditionEvent
+  | WorkflowNodeDoneEvent
+  | WorkflowNodeErrorEvent
+  | WorkflowMapStartEvent
+  | WorkflowMapItemDoneEvent
+  | WorkflowApprovalRequestEvent
+  | WorkflowApprovalResolvedEvent
+  | WorkflowInterruptEvent
+  | WorkflowInterruptResolvedEvent
+  | WorkflowBudgetExceededEvent
+  | WorkflowBudgetUpdateEvent
+  | WorkflowNodeRetryEvent
+  | WorkflowDoneEvent
+  | WorkflowErrorEvent
+  | WorkflowStoppedEvent
 
 type WorkflowInterruptEvent {
   interruptId: String!
@@ -792,7 +938,9 @@ type WorkflowNodeTokenEvent {
 }
 
 type WorkflowRun implements Node {
-  """The Globally Unique ID of this object"""
+  """
+  The Globally Unique ID of this object
+  """
   id: ID!
   workflowId: String!
   status: String!

@@ -9,11 +9,13 @@ export const modelCatalogQuery = graphql`
     models {
       default
       providers
+      discoverableProviders
       available {
         id
         label
         provider
         builtin
+        contextWindow
       }
     }
   }
@@ -24,11 +26,14 @@ export interface CatalogModel {
   label: string;
   provider: string;
   builtin: boolean;
+  contextWindow: number | null;
 }
 
 export interface ModelCatalogData {
   default: string;
   providers: readonly string[];
+  /** Providers that can enumerate their own models — drives the sync picker. */
+  discoverableProviders: readonly string[];
   available: readonly CatalogModel[];
 }
 

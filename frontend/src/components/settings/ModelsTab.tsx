@@ -8,8 +8,9 @@ import type {CatalogModel, ModelCatalogData} from '../../relay/ModelCatalogQuery
 import {modelCatalogQuery, refreshModelCatalog} from '../../relay/ModelCatalogQuery';
 import {ConfirmDialog} from '../ConfirmDialog';
 import {FormModal} from '../FormModal';
-import {CheckIcon, EditIcon, PlusIcon, SearchIcon, TrashIcon} from '../icons';
+import {CheckIcon, EditIcon, PlusIcon, SearchIcon, SyncIcon, TrashIcon} from '../icons';
 import {useQueryRetry} from '../QueryBoundary';
+import {ModelSyncModal} from './ModelSyncModal';
 
 type ModelEditor = {mode: 'add'} | {mode: 'edit'; model: CatalogModel};
 
@@ -26,6 +27,7 @@ export function ModelsTab() {
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [editor, setEditor] = useState<ModelEditor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CatalogModel | null>(null);
+  const [syncOpen, setSyncOpen] = useState(false);
 
   const refresh = refreshModelCatalog;
 
@@ -102,6 +104,13 @@ export function ModelsTab() {
           {customCount} custom · default: <code>{data?.default ?? '—'}</code>
         </span>
         <span className="settings-section-actions">
+          <button
+            className="artifact-btn"
+            title="Diff the catalog against what each provider offers"
+            onClick={() => setSyncOpen(true)}
+          >
+            <SyncIcon size={14} /> Sync
+          </button>
           <button className="artifact-btn primary" onClick={() => setEditor({mode: 'add'})}>
             <PlusIcon size={14} /> Add model
           </button>
@@ -165,7 +174,15 @@ export function ModelsTab() {
                   )}
                 </div>
                 <span className="skill-card-name settings-model-id">{m.id}</span>
-                <p className="skill-card-desc">{m.label}</p>
+                <p className="skill-card-desc">
+                  {m.label}
+                  {m.contextWindow ? (
+                    <span className="settings-model-window">
+                      {' · '}
+                      {m.contextWindow.toLocaleString()} ctx
+                    </span>
+                  ) : null}
+                </p>
                 <div className="settings-model-actions">
                   {isDefault ? (
                     <span className="auto-form-hint">
@@ -185,6 +202,14 @@ export function ModelsTab() {
             );
           })}
         </ul>
+      )}
+
+      {syncOpen && (
+        <ModelSyncModal
+          providers={data?.discoverableProviders ?? []}
+          onClose={() => setSyncOpen(false)}
+          onCatalogChanged={refresh}
+        />
       )}
 
       {editor && (
