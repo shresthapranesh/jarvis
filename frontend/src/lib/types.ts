@@ -364,7 +364,18 @@ export interface ArtifactRef {
   id: string;
   title: string;
   action: 'created' | 'updated';
+  kind: string;
   preview?: string;
+}
+
+/** What an inline artifact card under a message needs. Built from the
+ *  persisted `artifacts` query, or from a live ArtifactRef mid-run. */
+export interface ArtifactCard {
+  id: string;
+  title: string;
+  kind: string;
+  mimeType?: string | null;
+  action?: 'created' | 'updated';
 }
 
 // ── Memory ────────────────────────────────────────────────────────────────────

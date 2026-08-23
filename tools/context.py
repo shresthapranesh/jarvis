@@ -61,6 +61,10 @@ class ToolContext:
     conversation_id: str | None = None
     thread_id: str | None = None
     kernel_key: str | None = None
+    # The assistant Message row this run is writing (chat only — task_id ==
+    # message id). Artifacts stamp it so the UI can render each one under the
+    # message that produced it; None outside chat (automation/board/CLI).
+    message_id: str | None = None
     # Set only while executing a board task (server/task_board_runtime.py);
     # complete_task/block_task refuse to run without it.
     board_task_id: str | None = None
@@ -126,6 +130,7 @@ def current_ctx() -> ToolContext:
     conversation_id: Any = None
     thread_id: Any = None
     kernel_key: Any = None
+    message_id: Any = None
     board_task_id: Any = None
     project_id: Any = None
     ephemeral: Any = False
@@ -134,6 +139,7 @@ def current_ctx() -> ToolContext:
         conversation_id = configurable.get("conversation_id")
         thread_id = configurable.get("thread_id")
         kernel_key = configurable.get("kernel_key")
+        message_id = configurable.get("message_id")
         board_task_id = configurable.get("board_task_id")
         project_id = configurable.get("project_id")
         ephemeral = configurable.get("ephemeral", False)
@@ -156,6 +162,7 @@ def current_ctx() -> ToolContext:
         conversation_id=str(conversation_id) if conversation_id else None,
         thread_id=str(thread_id) if thread_id else None,
         kernel_key=str(kernel_key) if kernel_key else None,
+        message_id=str(message_id) if message_id else None,
         board_task_id=str(board_task_id) if board_task_id else None,
         project_id=str(project_id) if project_id else None,
         ephemeral=bool(ephemeral),
