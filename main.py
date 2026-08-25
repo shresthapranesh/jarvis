@@ -193,65 +193,49 @@ def download_voice():
     """Download the Piper TTS voice model into the voices/ directory."""
     import httpx
     from core.config import get_config
+    from rich.progress import TaskID
+
+    from core.voice import download_voice as _download, voice_status
 
     cfg = get_config()
-    voice_path = Path(cfg.piper_voice)
-
-    # Resolve relative paths against work_dir
-    if not voice_path.is_absolute():
-        voice_path = cfg.work_dir / voice_path
-
-    voice_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Parse voice name into HuggingFace URL components.
-    # Format: {lang_region}-{speaker}-{quality}.onnx
-    # e.g. en_US-hfc_female-medium → lang=en, region=en_US, speaker=hfc_female, quality=medium
-    stem = voice_path.stem
-    parts = stem.split("-")
-    if len(parts) < 3:
-        rprint(f"[bold red]Cannot parse voice name:[/bold red] {stem!r} (expected lang_region-speaker-quality)")
+    status = voice_status(cfg.piper_voice, cfg.work_dir)
+    if status.error:
+        rprint(f"[bold red]{status.error}[/bold red]")
         raise typer.Exit(code=1)
-    lang_region, speaker, quality = parts[0], parts[1], parts[2]
-    lang = lang_region.split("_")[0]
 
-    base = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
-    prefix = f"{base}/{lang}/{lang_region}/{speaker}/{quality}"
+    console.print(f"[dim]Voice directory:[/dim] {status.directory}")
+    for f in status.files:
+        if f.exists:
+            console.print(f"[green]✓[/green] Already exists: {f.name}")
 
-    files = [
-        (voice_path, f"{prefix}/{voice_path.name}"),
-        (voice_path.parent / f"{voice_path.name}.json", f"{prefix}/{voice_path.name}.json"),
-    ]
+    pending = [f for f in status.files if not f.exists]
+    if not pending:
+        console.print("[bold green]Done.[/bold green]")
+        return
 
-    console.print(f"[dim]Voice directory:[/dim] {voice_path.parent}")
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        console=console,
+    ) as progress:
+        tasks: dict[str, TaskID] = {}
 
-    for dest, url in files:
-        if dest.exists():
-            console.print(f"[green]✓[/green] Already exists: {dest.name}")
-            continue
+        def on_progress(name: str, seen: int, total: int | None) -> None:
+            if name not in tasks:
+                tasks[name] = progress.add_task(name, total=total)
+            progress.update(tasks[name], completed=seen, total=total)
 
-        console.print(f"[blue]↓[/blue] Downloading {dest.name} ...")
         try:
-            with httpx.stream("GET", url, follow_redirects=True, timeout=30) as r:
-                r.raise_for_status()
-                total = int(r.headers.get("content-length", 0)) or None
-                with Progress(
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    DownloadColumn(),
-                    TransferSpeedColumn(),
-                    console=console,
-                ) as progress:
-                    task = progress.add_task(dest.name, total=total)
-                    with open(dest, "wb") as f:
-                        for chunk in r.iter_bytes(chunk_size=65536):
-                            f.write(chunk)
-                            progress.update(task, advance=len(chunk))
+            result = _download(cfg.piper_voice, cfg.work_dir, progress=on_progress)
         except httpx.HTTPStatusError as exc:
-            rprint(f"[bold red]HTTP {exc.response.status_code}:[/bold red] {url}")
+            rprint(f"[bold red]HTTP {exc.response.status_code}:[/bold red] {exc.request.url}")
             raise typer.Exit(code=1)
 
-        console.print(f"[green]✓[/green] Saved: {dest}")
-
+    for f in result.files:
+        if f.downloaded:
+            console.print(f"[green]✓[/green] Saved: {f.path}")
     console.print("[bold green]Done.[/bold green]")
 
 

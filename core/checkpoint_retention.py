@@ -261,3 +261,55 @@ async def prune_checkpoints(
         active=active,
         dry_run=dry_run,
     )
+
+
+def _stats_sync(db_path: Path) -> dict:
+    """Size/shape of the checkpoint DB. Read-only, no locks held beyond SELECTs."""
+    out = {
+        "db_path": str(db_path),
+        "exists": db_path.exists(),
+        "size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+        "threads": 0,
+        "checkpoints": 0,
+        "subgraph_checkpoints": 0,
+        "active_threads": len(active_thread_ids()),
+    }
+    if not out["exists"]:
+        return out
+    con = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        con.execute("PRAGMA busy_timeout=30000")
+        out["threads"] = con.execute(
+            "SELECT count(DISTINCT thread_id) FROM checkpoints"
+        ).fetchone()[0]
+        out["checkpoints"] = con.execute("SELECT count(*) FROM checkpoints").fetchone()[0]
+        out["subgraph_checkpoints"] = con.execute(
+            "SELECT count(*) FROM checkpoints WHERE checkpoint_ns <> ''"
+        ).fetchone()[0]
+    except sqlite3.Error as exc:
+        # A DB that exists but has no schema yet (server never started) is a
+        # legitimate state, not an error worth failing the whole query over.
+        logger.debug("checkpoint_stats: %s", exc)
+    finally:
+        con.close()
+    return out
+
+
+async def checkpoint_stats(db_path: Path | str | None = None) -> dict:
+    """What a prune would find, without deleting anything.
+
+    Combines the DB's shape with a dry-run sweep, so a UI can show the same
+    numbers the sweep would act on — including the two guards, which is the
+    part a raw row count cannot convey ("14 of 900 prunable" is the *point*,
+    not a disappointment).
+    """
+    from core.config import get_config
+
+    path = Path(db_path) if db_path is not None else Path(get_config().checkpoints_db)
+    stats = await asyncio.to_thread(_stats_sync, path)
+    dry = await prune_checkpoints(path, dry_run=True)
+    stats["prunable_root"] = dry["root_pruned"]
+    stats["prunable_subgraph"] = dry["subgraph_pruned"]
+    stats["reclaimable_bytes"] = dry["bytes_freed"]
+    stats["threads_skipped_active"] = dry["threads_skipped_active"]
+    return stats

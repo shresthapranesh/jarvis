@@ -9,8 +9,10 @@ import type {MemoryItem, MemoryKind} from '../lib/types';
 import {commitAddMemory} from '../relay/AddMemoryMutation';
 import {agentMemoryQuery, refreshAgentMemory} from '../relay/AgentMemoryQuery';
 import {commitConsolidateMemory} from '../relay/ConsolidateMemoryMutation';
+import {commitDeleteAgentMemory} from '../relay/DeleteAgentMemoryMutation';
 import {commitDeleteMemory} from '../relay/DeleteMemoryMutation';
 import {memoriesQuery, refreshMemories} from '../relay/MemoriesQuery';
+import {commitUpdateMemory} from '../relay/UpdateMemoryMutation';
 import {commitUpdateMemoryItem} from '../relay/UpdateMemoryItemMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
@@ -192,18 +194,7 @@ export function MemoryView() {
       {actionError && !editorOpen && <div className="memory-error">{actionError}</div>}
 
       {showBlobFallback ? (
-        <div className="memory-section">
-          <h2 className="memory-section-title">Legacy memory</h2>
-          <p className="memory-subtitle">
-            No discrete items yet (no embedding model configured). Showing the legacy{' '}
-            <code>AGENTS.md</code> blob. It will be split into items on the next
-            consolidation once embeddings are available.
-          </p>
-          <div
-            className="artifact-detail-content agent-bubble"
-            dangerouslySetInnerHTML={{__html: marked.parse(blob.content) as string}}
-          />
-        </div>
+        <LegacyBlob blob={blob} primary />
       ) : all.length === 0 ? (
         <div className="memory-empty">
           <p>No memories yet.</p>
@@ -221,6 +212,12 @@ export function MemoryView() {
           {renderSection('Facts', 'fact', facts)}
         </>
       )}
+
+      {/* The blob is still the whole of memory on a keyless setup, and the only
+          copy of anything consolidation hasn't split yet — so it needs the same
+          view / replace / clear the `memory` CLI subcommands give it, not just a
+          read-only fallback when the discrete list happens to be empty. */}
+      {!showBlobFallback && blob.exists && <LegacyBlob blob={blob} />}
 
       <FormModal
         open={editorOpen}
@@ -292,6 +289,145 @@ export function MemoryView() {
         danger
         onConfirm={() => deleteTarget && void deleteAction.run(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
+      />
+    </div>
+  );
+}
+
+function LegacyBlob({
+  blob,
+  primary = false,
+}: {
+  blob: TAgentMemoryQuery['response']['agentMemory'];
+  primary?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(blob.content);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await commitUpdateMemory(draft);
+      await refreshAgentMemory();
+      setEditing(false);
+    } catch (e) {
+      setError((e as Error).message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear() {
+    setBusy(true);
+    setError(null);
+    try {
+      await commitDeleteAgentMemory();
+      await refreshAgentMemory();
+      setDraft('');
+      setEditing(false);
+    } catch (e) {
+      setError((e as Error).message || String(e));
+    } finally {
+      setBusy(false);
+      setConfirmClear(false);
+    }
+  }
+
+  return (
+    <div className="memory-section">
+      <h2 className="memory-section-title">
+        Legacy AGENTS.md
+        <span className="memory-section-hint">{blob.content.length} chars</span>
+      </h2>
+      <p className="memory-subtitle">
+        {primary ? (
+          <>
+            No discrete items yet (no embedding model configured), so this blob <em>is</em> the
+            agent&apos;s memory. It will be split into items on the next consolidation once
+            embeddings are available.
+          </>
+        ) : (
+          <>
+            The free-text blob kept in the LangGraph store — the keyless fallback, and whatever
+            predates the split into discrete items. Same entry as{' '}
+            <code>main.py memory show/set/reset</code>.
+          </>
+        )}
+      </p>
+
+      {error && <div className="memory-error">{error}</div>}
+
+      {editing ? (
+        <>
+          <textarea
+            className="config-input config-input--multiline"
+            rows={16}
+            value={draft}
+            disabled={busy}
+            spellCheck={false}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="config-actions">
+            <button
+              className="artifact-btn primary"
+              disabled={busy || !draft.trim()}
+              title={draft.trim() ? '' : 'Use Clear to remove the entry — an empty blob is not the same as no blob.'}
+              onClick={() => void save()}
+            >
+              Save
+            </button>
+            <button
+              className="artifact-btn"
+              disabled={busy}
+              onClick={() => {
+                setDraft(blob.content);
+                setEditing(false);
+                setError(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div
+            className="artifact-detail-content agent-bubble"
+            dangerouslySetInnerHTML={{__html: marked.parse(blob.content) as string}}
+          />
+          <div className="config-actions">
+            <button
+              className="artifact-btn"
+              onClick={() => {
+                setDraft(blob.content);
+                setEditing(true);
+              }}
+            >
+              <EditIcon size={14} /> Edit
+            </button>
+            <button
+              className="artifact-btn"
+              disabled={!blob.exists}
+              onClick={() => setConfirmClear(true)}
+            >
+              <TrashIcon size={14} /> Clear
+            </button>
+          </div>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear AGENTS.md memory"
+        message="Deletes the blob entry outright. The agent falls back to its system prompt alone. Discrete memory items are untouched."
+        confirmLabel="Clear"
+        danger
+        onConfirm={() => void clear()}
+        onCancel={() => setConfirmClear(false)}
       />
     </div>
   );

@@ -5,8 +5,11 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {McpServersQuery as TMcpServersQuery} from '../__generated__/McpServersQuery.graphql';
 import type {ModelCatalogQuery as TModelCatalogQuery} from '../__generated__/ModelCatalogQuery.graphql';
 import type {NotificationChannelsQuery as TNotificationChannelsQuery} from '../__generated__/NotificationChannelsQuery.graphql';
+import type {SettingsQuery as TSettingsQuery} from '../__generated__/SettingsQuery.graphql';
 import type {ToolsQuery as TToolsQuery} from '../__generated__/ToolsQuery.graphql';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
+import {ConfigTab} from '../components/settings/ConfigTab';
+import {MaintenanceTab} from '../components/settings/MaintenanceTab';
 import {McpTab} from '../components/settings/McpTab';
 import {ModelsTab} from '../components/settings/ModelsTab';
 import {NotificationsTab} from '../components/settings/NotificationsTab';
@@ -14,6 +17,7 @@ import {ToolsTab} from '../components/settings/ToolsTab';
 import {mcpServersQuery} from '../relay/McpServersQuery';
 import {modelCatalogQuery} from '../relay/ModelCatalogQuery';
 import {notificationChannelsQuery} from '../relay/NotificationChannelsQuery';
+import {settingsQuery} from '../relay/SettingsQuery';
 import {toolsQuery} from '../relay/ToolsQuery';
 
 export const Route = createFileRoute('/settings')({component: SettingsRoute});
@@ -29,7 +33,7 @@ function SettingsRoute() {
   );
 }
 
-type SettingsTab = 'mcp' | 'tools' | 'notifications' | 'models';
+type SettingsTab = 'mcp' | 'tools' | 'notifications' | 'models' | 'config' | 'maintenance';
 
 const TAB_INFO: Record<SettingsTab, {label: string; subtitle: React.ReactNode}> = {
   mcp: {
@@ -74,12 +78,33 @@ const TAB_INFO: Record<SettingsTab, {label: string; subtitle: React.ReactNode}> 
       </>
     ),
   },
+  config: {
+    label: 'Config',
+    subtitle: (
+      <>
+        The <code>config_settings</code> table — bot allowlists, the embedding model, the scheduler
+        timezone, which agent actions need approval. The same rows{' '}
+        <code>main.py config set/get/list/delete</code> writes, except that a write here is also
+        pushed into the running server instead of waiting for a restart. Keys another tab owns are
+        shown read-only.
+      </>
+    ),
+  },
+  maintenance: {
+    label: 'Maintenance',
+    subtitle: (
+      <>
+        Housekeeping that used to need a terminal on the box: prune superseded LangGraph
+        checkpoints, and download the Piper voice model that <code>POST /tts</code> needs.
+      </>
+    ),
+  },
 };
 
 function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>(() => {
     const saved = localStorage.getItem('settings-tab') as SettingsTab | null;
-    if (saved && ['notifications', 'mcp', 'models', 'tools'].includes(saved)) return saved;
+    if (saved && saved in TAB_INFO) return saved;
     return 'mcp';
   });
 
@@ -110,12 +135,21 @@ function SettingsPage() {
     {},
     {fetchPolicy: 'store-and-network', fetchKey: retry},
   );
+  const settingData = useLazyLoadQuery<TSettingsQuery>(
+    settingsQuery,
+    {},
+    {fetchPolicy: 'store-and-network', fetchKey: retry},
+  );
 
-  const counts: Record<SettingsTab, number> = {
+  // null = nothing countable; the tab renders without a badge. Maintenance is
+  // two actions, not a list, so a number there would be noise.
+  const counts: Record<SettingsTab, number | null> = {
     mcp: mcpData.mcpServers.length,
     tools: toolData.tools.length,
     notifications: channelData.notificationChannels.length,
     models: modelData?.models?.available?.length ?? 0,
+    config: settingData.settings.filter((s) => s.isSet).length,
+    maintenance: null,
   };
 
   return (
@@ -135,7 +169,7 @@ function SettingsPage() {
             onClick={() => setTab(t)}
           >
             {TAB_INFO[t].label}
-            <span className="memory-count">{counts[t]}</span>
+            {counts[t] !== null && <span className="memory-count">{counts[t]}</span>}
           </button>
         ))}
       </nav>
@@ -144,6 +178,8 @@ function SettingsPage() {
       {tab === 'mcp' && <McpTab />}
       {tab === 'tools' && <ToolsTab />}
       {tab === 'models' && <ModelsTab />}
+      {tab === 'config' && <ConfigTab />}
+      {tab === 'maintenance' && <MaintenanceTab />}
     </div>
   );
 }

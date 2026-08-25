@@ -12,11 +12,13 @@ from .mutations.artifact import ArtifactMutation
 from .mutations.automation import AutomationMutation
 from .mutations.board_task import BoardTaskMutation
 from .mutations.conversation import ConversationMutation
+from .mutations.maintenance import MaintenanceMutation
 from .mutations.mcp import McpMutation
 from .mutations.memory import MemoryMutation
 from .mutations.models import ModelsMutation
 from .mutations.notification import NotificationMutation
 from .mutations.project import ProjectMutation
+from .mutations.setting import SettingMutation
 from .mutations.skill import SkillMutation
 from .mutations.task_run import TaskRunMutation
 from .mutations.tool import ToolMutation
@@ -26,11 +28,13 @@ from .queries.artifact import ArtifactQuery
 from .queries.automation import AutomationQuery
 from .queries.board_task import BoardTaskQuery
 from .queries.conversation import ConversationQuery
+from .queries.maintenance import MaintenanceQuery
 from .queries.mcp import McpQuery
 from .queries.memory import MemoryQuery
 from .queries.models import ModelsQuery
 from .queries.notification import NotificationQuery
 from .queries.project import ProjectQuery
+from .queries.setting import SettingQuery
 from .queries.skill import SkillQuery
 from .queries.task_run import TaskRunQuery
 from .queries.tool import ToolQuery
@@ -44,13 +48,14 @@ Query = merge_types("Query", (
     ModelsQuery, MemoryQuery, ConversationQuery, ArtifactQuery,
     AutomationQuery, BoardTaskQuery, WorkflowQuery, NotificationQuery,
     ProjectQuery, SkillQuery, TaskRunQuery, McpQuery, ApprovalQuery,
-    ToolQuery,
+    ToolQuery, SettingQuery, MaintenanceQuery,
 ))
 Mutation = merge_types("Mutation", (
     MemoryMutation, ConversationMutation, ArtifactMutation,
     AutomationMutation, BoardTaskMutation, WorkflowMutation,
     NotificationMutation, ProjectMutation, SkillMutation, TaskRunMutation,
     McpMutation, ModelsMutation, ApprovalMutation, ToolMutation,
+    SettingMutation, MaintenanceMutation,
 ))
 Subscription = merge_types("Subscription", (
     ChatSubscription, AutomationSubscription, BoardTaskSubscription,

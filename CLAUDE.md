@@ -49,6 +49,10 @@ jarvis/
 │   ├── schemas.py        # Pydantic + Strawberry input models (AttachmentIn, etc.)
 │   ├── scheduler.py      # APScheduler setup, cron registration
 │   ├── config.py         # AppConfig (DATABASE_URL, work_dir, artifacts_dir, documents_dir, staging_dir)
+│   ├── settings_admin.py # config_settings as an administrable surface — KNOWN_SETTINGS registry
+│   │                     #   + apply_setting() in-process side effects (Settings → Config)
+│   ├── voice.py          # Piper TTS voice download, shared by `main.py download-voice`
+│   │                     #   and the downloadVoice mutation
 │   ├── document_extractor.py  # PDF/DOCX/XLSX text extraction
 │   ├── doc_index.py      # chunk-index large attachments + cosine search (Gemini embeddings)
 │   ├── kernels.py        # per-session IPython kernels (stateful run_cell) + idle reaper
@@ -70,10 +74,10 @@ jarvis/
 │   │   │                 #     automation, workflow, memory, notification, project, task_run,
 │   │   │                 #     model_catalog, events, automation_events, workflow_events, todo
 │   │   ├── queries/      #   *Query mixins: artifact, automation, conversation, memory, models,
-│   │   │                 #     notification, project, task_run, workflow
+│   │   │                 #     notification, project, task_run, workflow, setting, maintenance
 │   │   ├── mutations/    #   *Mutation mixins: artifact, automation, conversation (start/stop/resume_task),
 │   │   │                 #     memory, notification, project (+setConversationProject),
-│   │   │                 #     task_run (stop_running_task), workflow
+│   │   │                 #     task_run (stop_running_task), workflow, setting, maintenance
 │   │   └── subscriptions/#   chat (taskEvents), automation (automationRunEvents),
 │   │                     #     board_task (boardTaskEvents), workflow (workflowRunEvents)
 │   │                     #     — all wrap stream_task_events
@@ -531,6 +535,58 @@ pre-write snapshot) and a nav badge in `__root.tsx`.
 > actually fires today is the deferred path above. Board and automation runs
 > also have no resume loop (they `break` on interrupt), which is why
 > `_is_headless` still auto-approves them — deferred sidesteps that entirely.
+
+## Config + Maintenance (Settings → Config / Maintenance)
+Everything `main.py` can do is also reachable from the web UI. Two tabs close
+the gap the dedicated tabs left:
+
+**Settings → Config** is the generic editor over `config_settings` — the table
+`config set/get/list/delete` writes. `core/settings_admin.py` owns two things:
+- `KNOWN_SETTINGS`, a registry of label/description/kind per key, so the page
+  lists a key **before** anyone sets it (`Setting.isSet: false`). A page that
+  only showed stored rows would never tell you the Telegram allowlist exists,
+  which is exactly what the CLI made you read the docs for. Unknown keys stay
+  allowed — the table is open-ended and the CLI never validated keys either.
+- `apply_setting(session, key)`, the in-process side effects. **This is why the
+  resolver exists rather than a raw row write**: the CLI writes from a process
+  that then exits, but these run *inside* the server, where several keys are
+  cached in memory (`tools.policy` → the tool-policy cache + every compiled
+  agent graph, `mcp.*` → the connected client, `embedding.model` → the embedder
+  override) and a plain write would be ignored by the very process serving the
+  page that made it. Delete goes through the same path — the caches never knew
+  a row was involved, only that the effective value changed.
+  `scheduler.timezone` is the one key that cannot be applied live (APScheduler
+  won't reconfigure a running scheduler), and it says so instead of lying.
+
+Keys another tab owns (`tools.policy`, `models.custom`, `mcp.*`) carry
+`managedBy` and are refused unless `allowManaged: true`: they hold serialized
+state that tab rewrites wholesale, so a hand edit here is silently discarded on
+its next write. Shown read-only, behind a "Show managed keys" toggle.
+
+**Settings → Maintenance** covers the two subcommands that previously needed a
+terminal on the box:
+- `pruneCheckpoints(dryRun)` runs the **online** sweep
+  (`core/checkpoint_retention.py`), not the CLI's offline one — it is safe
+  against a live server because it skips threads with an in-flight run and
+  anything under an hour old. `checkpointStats` reports the post-guard numbers
+  (it includes a dry run), so "3 of 100 prunable" is the guards working, not a
+  bug. The result `note` says the file will not shrink: freed pages go on
+  SQLite's freelist, and VACUUM stays `main.py maintenance prune-checkpoints`
+  with the server stopped.
+- `downloadVoice(force)` fetches the Piper voice `POST /tts` 404s without.
+  `core/voice.py` is shared with the CLI (one implementation, two front ends);
+  it writes to a `.part` sibling and renames, because `exists` is all the
+  status check can cheaply do and a truncated `.onnx` would read as ready
+  forever. Blocking IO, so the resolver runs it on a worker thread.
+
+`memory show/set/reset` land on `/memory`: the legacy `AGENTS.md` blob renders
+with Edit (`updateMemory`) and Clear (`deleteAgentMemory`) below the discrete
+items. `deleteAgentMemory` is distinct from `updateMemory("")` — the agent's
+fallback branches on `exists`, so an empty blob and a missing one differ.
+
+Not ported, deliberately: `start` (it boots the server that serves the UI) and
+`reports` / `view`, which read loose `.md` files from a `./reports` directory
+nothing in the app has written since artifacts replaced it.
 
 ## Tool Policy (Settings → Tools)
 One page listing **every** tool the agent can reach and two switches per tool:
