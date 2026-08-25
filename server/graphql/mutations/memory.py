@@ -43,6 +43,19 @@ class MemoryMutation:
         return Memory(content=content, exists=True, modified_at=now_iso)
 
     @strawberry.mutation
+    async def delete_agent_memory(self) -> Memory:
+        """Delete the free-text blob entirely — `main.py memory reset`.
+
+        Distinct from `updateMemory("")`, which leaves an empty entry behind:
+        the agent's fallback reads `exists`, so an empty-but-present blob and a
+        missing one are not the same state.
+        """
+        store = get_store()
+        await _migrate_legacy_key(store)
+        await store.adelete(_MEMORY_NS, _MEMORY_KEY)
+        return Memory(content="", exists=False, modified_at=None)
+
+    @strawberry.mutation
     async def consolidate_memory(self, model: str | None = None) -> str:
         model_id = await resolve_model(model)
         if not is_valid_model(model_id):

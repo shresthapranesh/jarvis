@@ -8608,3 +8608,122 @@ audio.artifact-media {
 .tool-toggle input:disabled {
   cursor: not-allowed;
 }
+
+/* ── Settings → Config / Maintenance ──────────────────────────────────────── */
+.config-row {
+  /* The value editor sits under the description rather than beside it: a
+     JSON blob or a comma list needs the full row width, unlike the two
+     checkboxes a tool row carries. */
+  flex-direction: column;
+  align-items: stretch;
+}
+.config-key {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.config-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.config-input {
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.config-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.config-input--multiline {
+  resize: vertical;
+  line-height: 1.5;
+}
+.config-readonly {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 180px;
+  overflow: auto;
+}
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.config-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.config-meta {
+  margin: 6px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.config-new {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.config-new .config-input {
+  flex: 1 1 200px;
+  width: auto;
+}
+.maint-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin: 10px 0 4px;
+}
+.maint-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.maint-stats dt {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.maint-stats dd {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.maint-sub {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.maint-result {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
