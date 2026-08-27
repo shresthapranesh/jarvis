@@ -1,8 +1,10 @@
+import * as stylex from '@stylexjs/stylex';
 import {useEffect, useRef} from 'react';
 
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {compactNumber} from '../lib/format';
 import type {Step} from '../lib/types';
+import {foot, node as nodeStyles, rail, track} from './RunSpine.styles';
 
 interface Budget {
   inputTokens: number;
@@ -93,82 +95,101 @@ export function RunSpine({
   const runningWorkers = workers.filter((w) => w.status === 'running').length;
 
   return (
-    <aside className="run-spine" aria-label="Run activity">
-      <header className="spine-head">
-        <span className="spine-eyebrow">Run</span>
-        <span className={`spine-state${isLive ? ' spine-state--live' : ''}`}>
+    <aside {...stylex.props(rail.root)} aria-label="Run activity">
+      <header {...stylex.props(rail.head)}>
+        <span {...stylex.props(rail.eyebrow)}>Run</span>
+        <span {...stylex.props(rail.state, isLive && rail.stateLive)}>
           {isLive ? 'live' : 'settled'}
         </span>
       </header>
 
-      <div className="spine-track" ref={trackRef}>
+      <div {...stylex.props(track.root)} ref={trackRef}>
         {hidden > 0 && (
-          <button className="spine-earlier" onClick={onExpand}>
+          <button {...stylex.props(track.earlier)} onClick={onExpand}>
             {hidden} earlier
           </button>
         )}
 
-        {visible.length === 0 && !isLive && <p className="spine-empty">No activity yet.</p>}
+        {visible.length === 0 && !isLive && <p {...stylex.props(track.empty)}>No activity yet.</p>}
 
         {/* The connecting hairline lives on this wrapper, not the scroll
             container, so it ends at the last node instead of dangling. */}
-        <div className="spine-nodes">
+        <div {...stylex.props(track.nodes)}>
           {visible.map((step, i) => {
             const kind = stepKind(step);
             const isLast = i === visible.length - 1;
             return (
               <button
                 key={step.id}
-                className={`spine-node spine-node--${kind}${
-                  isLive && isLast ? ' spine-node--active' : ''
-                }`}
+                {...stylex.props(nodeStyles.root)}
                 onClick={onExpand}
                 title={spineLabel(step)}
               >
-                <span className="spine-mark" aria-hidden="true" />
-                <span className="spine-label">{spineLabel(step)}</span>
+                <span
+                  {...stylex.props(
+                    nodeStyles.mark,
+                    markForKind(kind),
+                    isLive && isLast && nodeStyles.markActive,
+                  )}
+                  aria-hidden="true"
+                />
+                <span {...stylex.props(nodeStyles.label)}>{spineLabel(step)}</span>
               </button>
             );
           })}
 
           {isLive && (
-            <div className="spine-node spine-node--pending">
-              <span className="spine-mark" aria-hidden="true" />
-              <span className="spine-label">working…</span>
+            <div {...stylex.props(nodeStyles.root, nodeStyles.pending)}>
+              <span {...stylex.props(nodeStyles.mark, nodeStyles.markActive)} aria-hidden="true" />
+              <span {...stylex.props(nodeStyles.label)}>working…</span>
             </div>
           )}
         </div>
       </div>
 
-      <footer className="spine-foot">
-        <dl className="spine-stats">
-          <div className="spine-stat">
-            <dt>steps</dt>
-            <dd>{steps.length}</dd>
+      <footer {...stylex.props(foot.root)}>
+        <dl {...stylex.props(foot.stats)}>
+          <div {...stylex.props(foot.stat)}>
+            <dt {...stylex.props(foot.key)}>steps</dt>
+            <dd {...stylex.props(foot.value)}>{steps.length}</dd>
           </div>
           {runningWorkers > 0 && (
-            <div className="spine-stat spine-stat--workers">
-              <dt>workers</dt>
-              <dd>{runningWorkers}</dd>
+            <div {...stylex.props(foot.stat)}>
+              <dt {...stylex.props(foot.key)}>workers</dt>
+              <dd {...stylex.props(foot.value, foot.valueWorkers)}>{runningWorkers}</dd>
             </div>
           )}
           {artifactCount > 0 && (
-            <div className="spine-stat">
-              <dt>artifacts</dt>
-              <dd>{artifactCount}</dd>
+            <div {...stylex.props(foot.stat)}>
+              <dt {...stylex.props(foot.key)}>artifacts</dt>
+              <dd {...stylex.props(foot.value)}>{artifactCount}</dd>
             </div>
           )}
           {budget && budget.totalTokens > 0 && (
-            <div className="spine-stat">
-              <dt>tokens</dt>
-              <dd>{compactNumber(budget.totalTokens)}</dd>
+            <div {...stylex.props(foot.stat)}>
+              <dt {...stylex.props(foot.key)}>tokens</dt>
+              <dd {...stylex.props(foot.value)}>{compactNumber(budget.totalTokens)}</dd>
             </div>
           )}
         </dl>
-        <button className="spine-expand" onClick={onExpand}>
+        <button {...stylex.props(foot.expand)} onClick={onExpand}>
           Open details
         </button>
       </footer>
     </aside>
   );
+}
+
+/** Node kind → mark colour. Declared beside the styles it selects from. */
+function markForKind(kind: SpineKind) {
+  switch (kind) {
+    case 'tool':
+      return nodeStyles.markTool;
+    case 'worker':
+      return nodeStyles.markWorker;
+    case 'artifact':
+      return nodeStyles.markArtifact;
+    default:
+      return nodeStyles.markThink;
+  }
 }

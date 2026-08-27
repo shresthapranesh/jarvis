@@ -940,10 +940,54 @@ Optional — enabled by setting `DISCORD_BOT_TOKEN` before starting the server. 
 - Voice/audio attachments are transcribed via `transcribe_bytes`; image attachments flow through the same vision path as the web UI.
 - User IDs: enable Developer Mode → right-click user → Copy User ID.
 
+## Frontend styling (StyleX)
+No UI library and no global stylesheet: every rule is a `stylex.create` object
+compiled to atomic classes, colocated with the component and dead-code-eliminated
+with it. The palette lives in `frontend/src/theme/`.
+
+- **Tokens** — `theme/tokens.stylex.ts`. `channels` holds raw hue triples and
+  `colors` derives from them (two `defineVars` calls, because a single
+  self-referencing one is a TS circularity error), plus `type` / `space` /
+  `radii` / `layout`. `themes.stylex.ts` is the light `createTheme`;
+  `keyframes.stylex.ts` re-exports every keyframe through `defineVars`, which is
+  the documented way to use one across files.
+- **Every export of a `.stylex.ts` file is treated as a StyleX constant.** A
+  plain `export const X = 'var(--kb-inset, 0px)'` compiles to a *hashed
+  identifier*, producing invalid CSS the browser drops silently. Raw CSS syntax
+  goes in `stylex.defineConsts` — that is what `css` and `bp` are for.
+- **Shorthands are split into longhands**, so `background: 'none'` only sets
+  `background-image`. Always write `backgroundColor` / `backgroundImage`, and
+  `animationName` / `animationDuration` / … rather than `animation`.
+- **Where styles live**: colocated at the bottom of the component when small; in
+  a sibling `*.styles.ts` when large; in `components/ui/` when shared (`btn`,
+  `field`, `page`, `badge`, `modal`, `Switch`, `prose`, …). Import from `./ui`,
+  not its parts.
+- **Combinators do not exist.** A parent styling a child becomes a prop, or a
+  CSS custom property the parent publishes and the child reads
+  (`--item-actions-opacity`, `--md-*`, `--rf-*`, `--btn-icon-opacity`). Sibling
+  selectors become components — that is why `Switch` is one.
+- **Responsive rules fold inward** as per-property conditions
+  (`width: {default: 480, '@media (max-width: 860px)': '100%'}`), not a separate
+  media section.
+- **`base.css` (~285 lines) is the whole global stylesheet**, and only holds what
+  StyleX structurally cannot express: the reset, the pre-paint theme block, the
+  `::view-transition-*` animations, `[data-md]` rules for `marked` output
+  injected as HTML, and the `.react-flow__*` / `.wf-handle` overrides for DOM
+  `@xyflow/react` renders itself. Those last ones are prefixed `:root` because
+  the library's own stylesheet loads after this file and would otherwise win.
+- **The theme is a hashed class**, so the pre-paint script in `index.html` cannot
+  apply it: it stamps `data-theme` only, and `theme/applyTheme.ts` adds the real
+  class (plus the body styles, since `<body>` is React's parent) at boot. The
+  four `--pp-*` literals in `base.css` cover the window before the bundle runs
+  and must track `colors.bg` / `colors.text`.
+- `vite.config.ts` sets `cssInjectionTarget` explicitly — the plugin's default
+  picks the first `.css` asset, which here is the lazy WorkflowEditor chunk.
+  `.browserslistrc` must target browsers with native `light-dark()`.
+
 ## Environment
 - Python 3.13, managed with `uv`.
 - Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI — used for OpenRouter, Meta), `langgraph-checkpoint-sqlite`, APScheduler, Playwright (the `read()` fallback in `tools/research.py`), faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
-- Frontend stack: React 19, TanStack Router/Query, **Relay** (`babel-plugin-relay` run as a standalone Vite transform — see `vite.config.ts`), Vite, TypeScript.
+- Frontend stack: React 19, TanStack Router/Query, **Relay** (`babel-plugin-relay` run as a standalone Vite transform — see `vite.config.ts`), **StyleX** (`@stylexjs/unplugin`, a second independent Babel pass in the same config), Vite, TypeScript.
 - Tests: `uv run pytest` (pytest + pytest-asyncio, `asyncio_mode = "auto"`). Tests live in `tests/` and run against a throwaway `WORK_DIR` — never `~/.jarvis`. The `jarvis` fixture (`tests/conftest.py`) boots a full `JarvisRunner` in-process without uvicorn, the scheduler, or queue workers, so handlers can be driven directly and synchronously. Tests that call a real model are marked `llm` and skip without `GOOGLE_API_KEY`; run just those with `-m llm`.
 - No linter configured; use `uvx pyrefly check --summarize-errors` for Python type checking and `pnpm typecheck` for the frontend. Frontend formatting via `pnpm fmt` (oxfmt).
-- Frontend: no UI library — pure CSS with dark-theme CSS variables in `styles.css`.
+- Frontend: no UI library. Styling is **StyleX** — see "Frontend styling" below.

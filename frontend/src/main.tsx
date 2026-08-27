@@ -5,8 +5,20 @@ import {RelayEnvironmentProvider} from 'react-relay';
 
 import {environment} from './relay/environment';
 import {routeTree} from './routeTree.gen';
+import {applyBodyStyles, applyTheme, resolvedTheme} from './theme/applyTheme';
 
-import './styles.css';
+import './base.css';
+
+// StyleX's compiled CSS is appended to Vite's stylesheet asset in a build, but
+// in dev there is no such asset yet — this runtime fetches /virtual:stylex.css
+// and re-injects it on HMR. It also disables any stale <link> to that path, so
+// index.html needs no markup of its own.
+if (import.meta.env.DEV) void import('virtual:stylex:runtime');
+
+// Before first render: the pre-paint script in index.html has already stamped
+// `data-theme`, but the hashed theme class it cannot compute goes on here.
+applyTheme(resolvedTheme());
+applyBodyStyles();
 
 const router = createRouter({
   routeTree,

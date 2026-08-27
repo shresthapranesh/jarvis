@@ -1,0 +1,198 @@
+import * as stylex from '@stylexjs/stylex';
+
+import {channels, colors, type} from '../theme/tokens.stylex';
+
+/* ── Styles for routes/approvals.tsx ───────────────────────────────────
+   The inbox of everything waiting on a human: a count strip under the
+   page header, then one card per request. */
+
+/** The `N pending` total and the per-source breakdown beside it. */
+export const counts = stylex.create({
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginBlockStart: 12,
+  },
+  total: {
+    fontSize: '0.78rem',
+    fontWeight: 600,
+    color: colors.accent,
+    backgroundColor: colors.accentDim,
+    paddingBlock: 3,
+    paddingInline: 10,
+    borderRadius: 999,
+  },
+  chip: {
+    fontSize: '0.72rem',
+    color: colors.textDim,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    paddingBlock: 3,
+    paddingInline: 9,
+    borderRadius: 999,
+  },
+});
+
+/** One request. The accent stripe down its left edge marks it as open. */
+export const card = stylex.create({
+  list: {
+    listStyle: 'none',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    padding: 0,
+    margin: 0,
+  },
+  root: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderInlineStartWidth: 3,
+    borderInlineStartColor: colors.accent,
+    borderRadius: 8,
+    paddingBlock: 12,
+    paddingInline: 14,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
+  head: {display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap'},
+  origin: {
+    fontSize: '0.85rem',
+    fontWeight: 500,
+    color: colors.text,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: 320,
+  },
+  tool: {
+    fontSize: '0.74rem',
+    fontFamily: type.mono,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderRadius: 4,
+    paddingBlock: 1,
+    paddingInline: 6,
+    color: colors.textDim,
+  },
+  /** Marks the deferred shape — nothing is blocked, approving is what runs it. */
+  deferred: {
+    fontSize: '0.68rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    paddingBlock: 2,
+    paddingInline: 7,
+    borderRadius: 999,
+    backgroundColor: `rgba(${channels.ok}, 0.14)`,
+    color: colors.ok,
+    flexShrink: 0,
+  },
+  age: {
+    marginInlineStart: 'auto',
+    fontSize: '0.75rem',
+    color: colors.textDim,
+    flexShrink: 0,
+  },
+  open: {
+    fontSize: '0.75rem',
+    fontFamily: 'inherit',
+    paddingBlock: 4,
+    paddingInline: 10,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {default: colors.border, ':hover': colors.accent},
+    borderRadius: 6,
+    color: {default: colors.textDim, ':hover': colors.text},
+    cursor: 'pointer',
+    flexShrink: 0,
+    transition: 'color 0.12s, border-color 0.12s',
+  },
+  question: {
+    margin: 0,
+    fontSize: '0.88rem',
+    lineHeight: 1.5,
+    color: colors.text,
+    whiteSpace: 'pre-wrap',
+  },
+
+  argsToggle: {
+    fontSize: '0.74rem',
+    fontFamily: 'inherit',
+    backgroundColor: 'transparent',
+    borderStyle: 'none',
+    padding: 0,
+    color: colors.textDim,
+    cursor: 'pointer',
+    textDecorationLine: 'underline',
+  },
+  argsPre: {
+    marginBlock: '6px 0',
+    marginInline: 0,
+    paddingBlock: 8,
+    paddingInline: 10,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderRadius: 6,
+    fontSize: '0.74rem',
+    maxHeight: 220,
+    overflow: 'auto',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+});
+
+/** Approve / Deny, and the free-text answer box for a human-input request. */
+export const answer = stylex.create({
+  row: {display: 'flex', alignItems: 'center', gap: 8},
+  input: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: '0.84rem',
+    fontFamily: 'inherit',
+    paddingBlock: 7,
+    paddingInline: 10,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {default: colors.border, ':focus': colors.accent},
+    borderRadius: 6,
+    color: colors.text,
+    outline: 'none',
+  },
+  btn: {
+    fontSize: '0.8rem',
+    fontFamily: 'inherit',
+    paddingBlock: 7,
+    paddingInline: 16,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    cursor: {default: 'pointer', ':disabled': 'not-allowed'},
+    opacity: {default: 1, ':disabled': 0.5},
+    flexShrink: 0,
+    filter: {default: null, ':hover:not(:disabled)': 'brightness(1.15)'},
+    transition: 'filter 0.12s',
+  },
+  approve: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+    color: colors.accentContrast,
+  },
+  deny: {
+    backgroundColor: colors.errorBg,
+    borderColor: colors.errorBorder,
+    color: colors.errorText,
+  },
+});

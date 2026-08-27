@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {
   createRootRouteWithContext,
   Link,
@@ -9,7 +10,6 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import type {Environment} from 'relay-runtime';
 
 import {ConversationList} from '../components/ConversationList';
-import {QueryBoundary} from '../components/QueryBoundary';
 import {
   BookIcon,
   BoltIcon,
@@ -29,11 +29,14 @@ import {
   SunIcon,
   WorkflowIcon,
 } from '../components/icons';
+import {QueryBoundary} from '../components/QueryBoundary';
 import {useHealth} from '../hooks/useHealth';
 import {useIsMobile} from '../hooks/useIsMobile';
 import {usePendingApprovals} from '../hooks/usePendingApprovals';
 import {useRunningTasks} from '../hooks/useRunningTasks';
 import {ToastProvider} from '../lib/toast';
+import {applyTheme, resolvedTheme, type Theme} from '../theme/applyTheme';
+import {brand, control, mobile, nav, rail, shell} from './__root.styles';
 
 interface RouterContext {
   environment: Environment;
@@ -76,7 +79,7 @@ function useKeyboardInset() {
 interface NavItem {
   to: string;
   label: string;
-  Icon: (p: {size?: number}) => React.ReactElement;
+  Icon: (p: {size?: number; style?: stylex.StyleXStyles}) => React.ReactElement;
   /** Which live count to hang off this row, if any. */
   badge?: 'running' | 'approvals';
 }
@@ -180,16 +183,15 @@ function RootLayout() {
 
   // Theme is resolved before first paint by the inline script in index.html;
   // seed state from the attribute it set, then persist the user's choice.
-  const [theme, setTheme] = useState<'light' | 'dark'>(
-    () => (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') ?? 'dark',
-  );
+  const [theme, setTheme] = useState<Theme>(resolvedTheme);
 
   // Installed as a PWA the browser paints its own chrome (the Android status
   // bar, the iOS safe areas) in theme-color, so a stale value frames the app in
-  // the wrong theme. Read it back off --bg rather than restating the hex here:
-  // index.html carries a literal only because it runs before any stylesheet.
+  // the wrong theme. Read it back off --pp-bg rather than restating the hex
+  // here: base.css carries that literal because it has to apply before the
+  // bundle (and so the hashed StyleX theme class) exists.
   const syncThemeColor = useCallback(() => {
-    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--pp-bg').trim();
     if (bg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
   }, []);
 
@@ -198,7 +200,7 @@ function RootLayout() {
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next = prev === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
+      applyTheme(next);
       syncThemeColor();
       try {
         localStorage.setItem('theme', next);
@@ -221,7 +223,7 @@ function RootLayout() {
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       e.preventDefault();
       document.startViewTransition(() => {
-        navigate({to: url.pathname + url.search as any});
+        navigate({to: (url.pathname + url.search) as any});
       });
     };
     document.addEventListener('click', handler);
@@ -247,11 +249,11 @@ function RootLayout() {
           document.startViewTransition(doNav);
         else doNav();
         setTimeout(() => {
-          (document.querySelector('.input-textarea') as HTMLElement | null)?.focus();
+          document.querySelector<HTMLElement>('[data-input-textarea]')?.focus();
         }, 50);
       } else if (e.key === '/') {
         e.preventDefault();
-        (document.querySelector('.input-textarea') as HTMLElement | null)?.focus();
+        document.querySelector<HTMLElement>('[data-input-textarea]')?.focus();
       } else if (e.key === '[') {
         e.preventDefault();
         toggleNav();
@@ -262,140 +264,167 @@ function RootLayout() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [navigate, toggleNav]);
 
+  const status = (
+    <span {...stylex.props(brand.status, runningCount > 0 && brand.statusBusy)}>
+      <span
+        {...stylex.props(
+          brand.dot,
+          healthy ? brand.dotOk : brand.dotErr,
+          healthy && runningCount > 0 && brand.dotPulsing,
+        )}
+      />
+      {!healthy ? 'offline' : runningCount > 0 ? `${runningCount} running` : 'idle'}
+    </span>
+  );
+
+  const themeButton = (size: number) => (
+    <button
+      {...stylex.props(control.ghost, control.themeToggle)}
+      onClick={toggleTheme}
+      title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+      aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+    >
+      {theme === 'dark' ? (
+        <SunIcon size={size} style={control.themeIcon} />
+      ) : (
+        <MoonIcon size={size} style={control.themeIcon} />
+      )}
+    </button>
+  );
+
   return (
     <ToastProvider>
-    <div className="app-shell">
-      <aside
-        className={`left-panel${railCollapsed ? ' collapsed' : ''}${navResizing ? ' resizing' : ''}${navOpen ? ' nav-open' : ''}`}
-        style={railCollapsed ? undefined : {width: navWidth}}
-        aria-hidden={isMobile && !navOpen}
-        inert={isMobile && !navOpen}
-      >
-        <div className="left-panel-header">
-          <span className="brand-mark" aria-hidden="true">
-            <BrandMark size={railCollapsed ? 18 : 20} />
-          </span>
-          {!railCollapsed && (
-            <div className="brand-block">
-              <span className="brand">Jarvis</span>
-              <span className={`brand-status${runningCount > 0 ? ' brand-status--busy' : ''}`}>
-                <span className={`status-dot ${healthy ? 'ok' : 'err'}`} />
-                {!healthy
-                  ? 'offline'
-                  : runningCount > 0
-                    ? `${runningCount} running`
-                    : 'idle'}
-              </span>
-            </div>
+      <div {...stylex.props(shell.appShell)}>
+        <aside
+          {...stylex.props(
+            rail.root,
+            railCollapsed && rail.collapsed,
+            navResizing && rail.resizing,
+            navOpen && rail.open,
           )}
-          {!railCollapsed && (
+          // Only on desktop: the drawer takes its width from the stylesheet, and
+          // an inline width would beat it (which is what the old rule needed an
+          // !important to undo).
+          style={!railCollapsed && !isMobile ? {width: navWidth} : undefined}
+          aria-hidden={isMobile && !navOpen}
+          inert={isMobile && !navOpen}
+        >
+          <div {...stylex.props(rail.header, railCollapsed && rail.headerCollapsed)}>
+            <span {...stylex.props(brand.mark)} aria-hidden="true">
+              <BrandMark size={railCollapsed ? 18 : 20} />
+            </span>
+            {!railCollapsed && (
+              <div {...stylex.props(brand.block)}>
+                <span {...stylex.props(brand.name)}>Jarvis</span>
+                {status}
+              </div>
+            )}
+            {!railCollapsed && themeButton(14)}
+            {/* On mobile the rail cannot collapse — it is either open or off
+                canvas — so the chevron closes the drawer instead. */}
             <button
-              className="icon-ghost-btn theme-toggle"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              {...stylex.props(control.ghost)}
+              onClick={isMobile ? () => setNavOpen(false) : toggleNav}
+              title={
+                isMobile ? 'Close menu' : railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+              }
+              aria-label={
+                isMobile ? 'Close menu' : railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+              }
             >
-              {theme === 'dark' ? <SunIcon size={14} /> : <MoonIcon size={14} />}
+              <ChevronLeftIcon
+                size={14}
+                style={[control.chevron, railCollapsed && control.chevronFlipped]}
+              />
             </button>
+          </div>
+          <div {...stylex.props(nav.list, railCollapsed && nav.listCollapsed)}>
+            {NAV_GROUPS.map((group) => (
+              <div {...stylex.props(nav.group)} key={group.heading}>
+                {!railCollapsed && <p {...stylex.props(nav.heading)}>{group.heading}</p>}
+                {group.items.map(({to, label, Icon, badge}) => {
+                  const count =
+                    badge === 'running' ? runningCount : badge === 'approvals' ? approvalCount : 0;
+                  // Prefix match, matching the router's default non-exact
+                  // behaviour: /workflow stays lit on /workflow/<id>.
+                  const active = pathname === to || pathname.startsWith(`${to}/`);
+                  return (
+                    <Link
+                      key={to}
+                      to={to}
+                      {...stylex.props(
+                        nav.link,
+                        active && nav.linkActive,
+                        railCollapsed && nav.linkCollapsed,
+                        active && !railCollapsed && nav.linkActiveBar,
+                      )}
+                      title={label}
+                    >
+                      <Icon size={15} style={nav.icon} />
+                      {!railCollapsed && <span>{label}</span>}
+                      {count > 0 && (
+                        <span {...stylex.props(nav.badge, railCollapsed && nav.badgeCompact)}>
+                          {count}
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          {/* The sidebar renders outside every route, so an unguarded throw
+              here blanks the whole app rather than one page. */}
+          {!railCollapsed && (
+            <QueryBoundary label="Failed to load conversations">
+              <ConversationList />
+            </QueryBoundary>
           )}
-          {/* On mobile the rail cannot collapse — it is either open or off
-              canvas — so the chevron closes the drawer instead. */}
+          {!railCollapsed && (
+            <div
+              {...stylex.props(rail.handle, navResizing && rail.handleActive)}
+              onPointerDown={startNavResize}
+              onDoubleClick={resetNavWidth}
+              title="Drag to resize · double-click to reset"
+            />
+          )}
+        </aside>
+        {isMobile && navOpen && (
           <button
-            className={`icon-ghost-btn nav-toggle${railCollapsed ? ' nav-toggle--collapsed' : ''}`}
-            onClick={isMobile ? () => setNavOpen(false) : toggleNav}
-            title={isMobile ? 'Close menu' : railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={
-              isMobile ? 'Close menu' : railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
-            }
-          >
-            <ChevronLeftIcon size={14} />
-          </button>
-        </div>
-        <div className="left-panel-nav">
-          {NAV_GROUPS.map((group) => (
-            <div className="nav-group" key={group.heading}>
-              {!railCollapsed && <p className="nav-heading">{group.heading}</p>}
-              {group.items.map(({to, label, Icon, badge}) => {
-                const count =
-                  badge === 'running'
-                    ? runningCount
-                    : badge === 'approvals'
-                      ? approvalCount
-                      : 0;
-                return (
-                  <Link
-                    key={to}
-                    to={to}
-                    className="nav-link"
-                    activeProps={{className: 'nav-link active'}}
-                    title={label}
-                  >
-                    <Icon size={15} />
-                    {!railCollapsed && <span>{label}</span>}
-                    {count > 0 && (
-                      <span className={`nav-badge${railCollapsed ? ' nav-badge--compact' : ''}`}>
-                        {count}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-        {/* The sidebar renders outside every route, so an unguarded throw
-            here blanks the whole app rather than one page. */}
-        {!railCollapsed && (
-          <QueryBoundary label="Failed to load conversations">
-            <ConversationList />
-          </QueryBoundary>
-        )}
-        {!railCollapsed && (
-          <div
-            className="nav-resize-handle"
-            onPointerDown={startNavResize}
-            onDoubleClick={resetNavWidth}
-            title="Drag to resize · double-click to reset"
+            {...stylex.props(mobile.scrim)}
+            aria-label="Close menu"
+            onClick={() => setNavOpen(false)}
           />
         )}
-      </aside>
-      {isMobile && navOpen && (
-        <button className="nav-scrim" aria-label="Close menu" onClick={() => setNavOpen(false)} />
-      )}
-      <main className="main-panel">
-        {/* Always rendered; CSS hides it above the 860px breakpoint. */}
-        <header className="mobile-topbar">
-          <button
-            className="icon-ghost-btn"
-            onClick={() => setNavOpen(true)}
-            aria-label="Open menu"
-            aria-expanded={navOpen}
-            title="Menu"
-          >
-            <MenuIcon size={18} />
-          </button>
-          <span className="brand-mark" aria-hidden="true">
-            <BrandMark size={18} />
-          </span>
-          <div className="mobile-topbar-brand">
-            <span className="brand">Jarvis</span>
-            <span className={`brand-status${runningCount > 0 ? ' brand-status--busy' : ''}`}>
-              <span className={`status-dot ${healthy ? 'ok' : 'err'}`} />
-              {!healthy ? 'offline' : runningCount > 0 ? `${runningCount} running` : 'idle'}
+        <main {...stylex.props(shell.mainPanel)}>
+          {/* Always rendered; hidden above the 860px breakpoint. */}
+          <header {...stylex.props(mobile.topbar)}>
+            <button
+              {...stylex.props(control.ghost)}
+              onClick={() => setNavOpen(true)}
+              aria-label="Open menu"
+              aria-expanded={navOpen}
+              title="Menu"
+            >
+              <MenuIcon size={18} />
+            </button>
+            <span {...stylex.props(brand.mark)} aria-hidden="true">
+              <BrandMark size={18} />
             </span>
+            <div {...stylex.props(mobile.topbarBrand)}>
+              <span {...stylex.props(brand.name, mobile.topbarName)}>Jarvis</span>
+              {status}
+            </div>
+            {themeButton(16)}
+          </header>
+          {/* Hosts the route so it is a flex child with a definite height in
+              both layouts — which is what lets route roots keep `height: 100%`
+              whether or not the topbar above is showing. */}
+          <div {...stylex.props(shell.outletHost)}>
+            <Outlet />
           </div>
-          <button
-            className="icon-ghost-btn theme-toggle"
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          >
-            {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
-          </button>
-        </header>
-        <Outlet />
-      </main>
-    </div>
+        </main>
+      </div>
     </ToastProvider>
   );
 }

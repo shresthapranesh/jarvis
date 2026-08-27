@@ -1,5 +1,9 @@
+import * as stylex from '@stylexjs/stylex';
 import {useEffect} from 'react';
 import {createPortal} from 'react-dom';
+
+import {colors} from '../theme/tokens.stylex';
+import {btn, modal, page} from './ui';
 
 interface Props {
   open: boolean;
@@ -49,33 +53,33 @@ export function FormModal({
   if (!open) return null;
 
   return createPortal(
-    <div className="confirm-backdrop" onClick={onClose}>
+    <div {...stylex.props(modal.backdrop)} onClick={onClose}>
       <div
-        className={`form-modal${wide ? ' form-modal--wide' : ''}`}
+        {...stylex.props(modal.panel, formModal.panel, wide && formModal.panelWide)}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="form-modal-title"
       >
-        <header className="form-modal-head">
-          <h2 className="form-modal-title" id="form-modal-title">
+        <header>
+          <h2 {...stylex.props(modal.title)} id="form-modal-title">
             {title}
           </h2>
-          {subtitle && <p className="form-modal-subtitle">{subtitle}</p>}
+          {subtitle && <p {...stylex.props(modal.subtitle)}>{subtitle}</p>}
         </header>
-        <div className="form-modal-fields">{children}</div>
-        {error && <div className="memory-error">{error}</div>}
-        <footer className="form-modal-footer">
-          <div className="form-modal-footer-extra">{footerExtra}</div>
-          <div className="form-modal-footer-actions">
-            <span className="form-modal-kbd-hint" aria-hidden="true">
-              <kbd>⌘↩</kbd> to save
+        <div {...stylex.props(formModal.fields)}>{children}</div>
+        {error && <div {...stylex.props(page.error)}>{error}</div>}
+        <footer {...stylex.props(formModal.footer)}>
+          <div>{footerExtra}</div>
+          <div {...stylex.props(formModal.footerActions)}>
+            <span {...stylex.props(formModal.kbdHint)} aria-hidden="true">
+              <kbd {...stylex.props(modal.kbd)}>⌘↩</kbd> to save
             </span>
-            <button className="artifact-btn" onClick={onClose}>
+            <button {...stylex.props(btn.base)} onClick={onClose}>
               Cancel
             </button>
             <button
-              className="artifact-btn primary"
+              {...stylex.props(btn.base, btn.primary)}
               onClick={onSubmit}
               disabled={submitDisabled || pending}
             >
@@ -88,3 +92,26 @@ export function FormModal({
     document.body,
   );
 }
+
+/**
+ * The shell's own styles, exported because ModelSyncModal hand-rolls the
+ * same dialog — its body is a scrolling report rather than a field stack,
+ * so it cannot use this component, but it should not look different.
+ */
+export const formModal = stylex.create({
+  panel: {
+    borderColor: colors.borderStrong,
+    maxWidth: 520,
+    // 100vh does not account for a phone's collapsing URL bar; 100dvh does.
+    maxHeight: {default: 'calc(100vh - 64px)', '@media (hover: none)': 'calc(100dvh - 64px)'},
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 16,
+  },
+  panelWide: {maxWidth: 680},
+  fields: {display: 'flex', flexDirection: 'column', gap: 14},
+  footer: {display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  footerActions: {display: 'flex', alignItems: 'center', gap: 8, marginInlineStart: 'auto'},
+  kbdHint: {fontSize: '0.7rem', color: colors.textFaint, marginInlineEnd: 4},
+});

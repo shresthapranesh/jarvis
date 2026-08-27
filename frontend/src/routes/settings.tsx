@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute} from '@tanstack/react-router';
 import {useEffect, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
@@ -13,7 +14,9 @@ import {MaintenanceTab} from '../components/settings/MaintenanceTab';
 import {McpTab} from '../components/settings/McpTab';
 import {ModelsTab} from '../components/settings/ModelsTab';
 import {NotificationsTab} from '../components/settings/NotificationsTab';
+import {settings} from '../components/settings/settings.styles';
 import {ToolsTab} from '../components/settings/ToolsTab';
+import {page} from '../components/ui';
 import {mcpServersQuery} from '../relay/McpServersQuery';
 import {modelCatalogQuery} from '../relay/ModelCatalogQuery';
 import {notificationChannelsQuery} from '../relay/NotificationChannelsQuery';
@@ -26,7 +29,7 @@ function SettingsRoute() {
   return (
     <QueryBoundary
       label="Failed to load settings"
-      fallback={<div className="memory-empty">Loading…</div>}
+      fallback={<div {...stylex.props(page.empty)}>Loading…</div>}
     >
       <SettingsPage />
     </QueryBoundary>
@@ -153,23 +156,23 @@ function SettingsPage() {
   };
 
   return (
-    <div className="page memory-page">
-      <header className="memory-header">
-        <div>
-          <h1>Settings</h1>
-          <p className="memory-subtitle">{TAB_INFO[tab].subtitle}</p>
+    <div {...stylex.props(page.scroll)}>
+      <header {...stylex.props(page.header)}>
+        <div {...stylex.props(page.headerMain)}>
+          <h1 {...stylex.props(page.title)}>Settings</h1>
+          <p {...stylex.props(page.subtitle)}>{TAB_INFO[tab].subtitle}</p>
         </div>
       </header>
 
-      <nav className="settings-tabs" aria-label="Settings sections">
+      <nav {...stylex.props(settings.tabs)} aria-label="Settings sections">
         {(Object.keys(TAB_INFO) as SettingsTab[]).map((t) => (
           <button
             key={t}
-            className={`settings-tab${tab === t ? ' settings-tab--active' : ''}`}
+            {...stylex.props(settings.tab, tab === t && settings.tabActive)}
             onClick={() => setTab(t)}
           >
             {TAB_INFO[t].label}
-            {counts[t] !== null && <span className="memory-count">{counts[t]}</span>}
+            {counts[t] !== null && <span {...stylex.props(page.count)}>{counts[t]}</span>}
           </button>
         ))}
       </nav>

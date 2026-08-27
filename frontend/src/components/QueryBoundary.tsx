@@ -1,5 +1,9 @@
+import * as stylex from '@stylexjs/stylex';
 import {Component, createContext, useContext, useState, type ReactNode} from 'react';
 import {Suspense} from 'react';
+
+import {colors} from '../theme/tokens.stylex';
+import {btn} from './ui';
 
 /**
  * Retry counter published to the subtree. Screens must feed it into their
@@ -63,20 +67,35 @@ export function QueryBoundary({children, fallback, label = 'Failed to load'}: Pr
       <ErrorBoundary
         key={attempt}
         fallback={(error) => (
-          <div className="query-boundary-error">
-            <p>
+          <div {...stylex.props(styles.state)}>
+            <p {...stylex.props(styles.errorText)}>
               {label}: {error.message}
             </p>
-            <button className="artifact-btn" onClick={() => setAttempt((n) => n + 1)}>
+            <button {...stylex.props(btn.base)} onClick={() => setAttempt((n) => n + 1)}>
               Retry
             </button>
           </div>
         )}
       >
-        <Suspense fallback={fallback ?? <div className="query-boundary-loading">Loading…</div>}>
+        <Suspense fallback={fallback ?? <div {...stylex.props(styles.state)}>Loading…</div>}>
           {children}
         </Suspense>
       </ErrorBoundary>
     </RetryContext.Provider>
   );
 }
+
+const styles = stylex.create({
+  state: {
+    paddingBlock: 40,
+    paddingInline: 24,
+    color: colors.textDim,
+    fontSize: '0.9rem',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 12,
+    textAlign: 'center',
+  },
+  errorText: {margin: 0, color: colors.errorText},
+});

@@ -1,5 +1,7 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 
+import {kindBadge, kindBadgeStyle, page} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {
   refreshRunningTasks,
@@ -7,8 +9,9 @@ import {
   useRunningTasksLoaded,
 } from '../hooks/useRunningTasks';
 import {formatRelativeTime} from '../lib/api';
-import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
 import type {RunningTask, TaskKind} from '../lib/types';
+import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
+import {channels, colors} from '../theme/tokens.stylex';
 
 export const Route = createFileRoute('/tasks')({
   component: TasksPage,
@@ -27,8 +30,8 @@ function TasksPage() {
   const loaded = useRunningTasksLoaded();
 
   // Stopping is the one case the 2s poll would show late, so re-read at once.
-  const stopAction = useAsyncAction(
-    (id: string) => commitStopRunningTask(id).then(refreshRunningTasks),
+  const stopAction = useAsyncAction((id: string) =>
+    commitStopRunningTask(id).then(refreshRunningTasks),
   );
 
   function goTo(task: RunningTask) {
@@ -43,70 +46,193 @@ function TasksPage() {
   }
 
   return (
-    <div className="page tasks-page">
-      <header className="tasks-header">
-        <h1>Tasks</h1>
-        <p className="tasks-subtitle">
-          Currently running across chat, automations, and workflows. Tasks
-          disappear when they finish or stop.
+    <div {...stylex.props(page.scroll, styles.page)}>
+      <header {...stylex.props(styles.header)}>
+        <h1 {...stylex.props(page.title)}>Tasks</h1>
+        <p {...stylex.props(page.subtitle, styles.subtitle)}>
+          Currently running across chat, automations, and workflows. Tasks disappear when they
+          finish or stop.
         </p>
       </header>
 
       {!loaded ? (
-        <div className="tasks-empty">Loading…</div>
+        <div {...stylex.props(page.empty)}>Loading…</div>
       ) : tasks.length === 0 ? (
-        <div className="tasks-empty">No active tasks.</div>
+        <div {...stylex.props(page.empty)}>No active tasks.</div>
       ) : (
-        <ul className="tasks-list">
+        <ul {...stylex.props(page.list, styles.list)}>
           {tasks.map((task) => {
-            const pct = task.total_tokens ? Math.min(100, Math.round(((task.total_tokens || 0) / 500000) * 100)) : 0;
-            const budgetColor = (task.budget_exceeded ? 'var(--error-text)' : pct > 80 ? 'var(--warning-text)' : 'var(--text-dim)');
+            const pct = task.total_tokens
+              ? Math.min(100, Math.round(((task.total_tokens || 0) / 500000) * 100))
+              : 0;
             return (
-            <li key={task.id} className="task-row">
-              <div style={{flex:1, display:'flex', flexDirection:'column', gap:4}}>
-                <button
-                  className="task-row-main"
-                  type="button"
-                  onClick={() => goTo(task)}
-                  disabled={!task.parent_id}
-                >
-                  <span className={`task-kind-badge task-kind-badge--${task.kind}`}>
-                    {KIND_LABEL[task.kind]}
-                  </span>
-                  <span className="task-label">{task.label || task.id}</span>
-                  <span className="task-elapsed">
-                    started {formatRelativeTime(task.started_at)}
-                  </span>
-                  {task.has_interrupt && (
-                    <span className="task-flag task-flag--interrupt">awaiting input</span>
-                  )}
-                  {task.cancelled && (
-                    <span className="task-flag task-flag--cancelling">stopping…</span>
-                  )}
-                  {task.budget_exceeded && (
-                    <span className="task-flag" style={{background:'var(--error-bg)', color:'var(--error-text)'}}>budget exceeded</span>
-                  )}
-                </button>
-                <div style={{display:'flex', alignItems:'center', gap:10, padding:'0 4px 4px 12px', fontSize:'0.72rem', color:'var(--text-dim)'}}>
-                  <span title={`${task.input_tokens} in / ${task.output_tokens} out`}>{task.total_tokens?.toLocaleString() ?? 0} tokens · {task.llm_calls} llm · {task.tool_calls} tools</span>
-                  <div style={{flex:1, maxWidth:160, height:4, background:'var(--surface2)', borderRadius:4, overflow:'hidden'}} title={`${pct}% of 500k default budget`}>
-                    <div style={{width:`${pct}%`, height:'100%', background:budgetColor, transition:'width 0.3s'}} />
+              <li key={task.id} {...stylex.props(styles.row)}>
+                <div {...stylex.props(styles.rowBody)}>
+                  <button
+                    {...stylex.props(styles.rowMain)}
+                    type="button"
+                    onClick={() => goTo(task)}
+                    disabled={!task.parent_id}
+                  >
+                    <span {...stylex.props(kindBadge.base, kindBadgeStyle(task.kind))}>
+                      {KIND_LABEL[task.kind]}
+                    </span>
+                    <span {...stylex.props(styles.label)}>{task.label || task.id}</span>
+                    <span {...stylex.props(styles.elapsed)}>
+                      started {formatRelativeTime(task.started_at)}
+                    </span>
+                    {task.has_interrupt && (
+                      <span {...stylex.props(styles.flag, styles.flagInterrupt)}>
+                        awaiting input
+                      </span>
+                    )}
+                    {task.cancelled && (
+                      <span {...stylex.props(styles.flag, styles.flagCancelling)}>stopping…</span>
+                    )}
+                    {task.budget_exceeded && (
+                      <span {...stylex.props(styles.flag, styles.flagCancelling)}>
+                        budget exceeded
+                      </span>
+                    )}
+                  </button>
+                  <div {...stylex.props(styles.budget)}>
+                    <span title={`${task.input_tokens} in / ${task.output_tokens} out`}>
+                      {task.total_tokens?.toLocaleString() ?? 0} tokens · {task.llm_calls} llm ·{' '}
+                      {task.tool_calls} tools
+                    </span>
+                    <div {...stylex.props(styles.bar)} title={`${pct}% of 500k default budget`}>
+                      {/* Width is the live proportion, so it stays inline; the
+                          colour is a threshold, so it is a style variant. */}
+                      <div
+                        {...stylex.props(
+                          styles.barFill,
+                          task.budget_exceeded
+                            ? styles.barOver
+                            : pct > 80
+                              ? styles.barWarn
+                              : styles.barOk,
+                        )}
+                        style={{width: `${pct}%`}}
+                      />
+                    </div>
+                    {task.budget_reason && (
+                      <span {...stylex.props(styles.budgetReason)}>{task.budget_reason}</span>
+                    )}
                   </div>
-                  {task.budget_reason && <span style={{color:'var(--error-text)', maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{task.budget_reason}</span>}
                 </div>
-              </div>
-              <button
-                className="task-stop-btn"
-                type="button"
-                disabled={task.cancelled || stopAction.pending}
-                onClick={() => void stopAction.run(task.id)}
-              >
-                Stop
-              </button>
-            </li>
-          )})}
+                <button
+                  {...stylex.props(styles.stopBtn)}
+                  type="button"
+                  disabled={task.cancelled || stopAction.pending}
+                  onClick={() => void stopAction.run(task.id)}
+                >
+                  Stop
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
   );
 }
+
+const styles = stylex.create({
+  // The header carries its own bottom margin, so the flex gap is off.
+  page: {gap: 0},
+  header: {marginBlockEnd: 24},
+  subtitle: {maxWidth: 540},
+  list: {gap: 8},
+
+  row: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: {default: colors.surface, ':hover': colors.surface2},
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingBlock: 4,
+    paddingInlineStart: 12,
+    paddingInlineEnd: 6,
+    transition: 'background 0.12s, border-color 0.12s',
+  },
+  rowBody: {flex: 1, display: 'flex', flexDirection: 'column', gap: 4},
+  rowMain: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderStyle: 'none',
+    color: colors.text,
+    fontSize: '0.88rem',
+    fontFamily: 'inherit',
+    textAlign: 'left',
+    paddingBlock: 8,
+    paddingInline: 4,
+    cursor: {default: 'pointer', ':disabled': 'default'},
+  },
+  label: {
+    fontWeight: 500,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    flex: 1,
+  },
+  elapsed: {fontSize: '0.78rem', color: colors.textDim, flexShrink: 0},
+
+  flag: {fontSize: '0.7rem', paddingBlock: 2, paddingInline: 6, borderRadius: 4, flexShrink: 0},
+  flagInterrupt: {backgroundColor: `rgba(${channels.accent}, 0.18)`, color: colors.accent},
+  flagCancelling: {backgroundColor: colors.errorBg, color: colors.errorText},
+
+  budget: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    paddingBlockEnd: 4,
+    paddingInlineStart: 12,
+    paddingInlineEnd: 4,
+    fontSize: '0.72rem',
+    color: colors.textDim,
+  },
+  bar: {
+    flex: 1,
+    maxWidth: 160,
+    height: 4,
+    backgroundColor: colors.surface2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  barFill: {height: '100%', transition: 'width 0.3s'},
+  barOk: {backgroundColor: colors.textDim},
+  barWarn: {backgroundColor: colors.warningText},
+  barOver: {backgroundColor: colors.errorText},
+  budgetReason: {
+    color: colors.errorText,
+    maxWidth: 220,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+
+  stopBtn: {
+    fontSize: '0.78rem',
+    fontFamily: 'inherit',
+    paddingBlock: 6,
+    paddingInline: 14,
+    backgroundColor: colors.errorBg,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.errorBorder,
+    borderRadius: 6,
+    color: colors.errorText,
+    cursor: {default: 'pointer', ':disabled': 'not-allowed'},
+    opacity: {default: 1, ':disabled': 0.5},
+    flexShrink: 0,
+    filter: {default: null, ':hover:not(:disabled)': 'brightness(1.15)'},
+    transition: 'filter 0.12s',
+  },
+});

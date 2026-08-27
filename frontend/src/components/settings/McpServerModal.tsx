@@ -1,9 +1,12 @@
+import * as stylex from '@stylexjs/stylex';
 import {useMemo, useState} from 'react';
 
 import {FormModal} from '../FormModal';
 import {PlusIcon, TrashIcon} from '../icons';
+import {btn, field, iconBtn, Switch} from '../ui';
 import type {McpFormState, McpPreset, McpTransport} from './mcpConfig';
 import {MCP_PRESETS, configToForm, emptyForm, formToConfigJson, prettyJson} from './mcpConfig';
+import {settings} from './settings.styles';
 
 export function McpServerModal({
   title,
@@ -85,43 +88,39 @@ export function McpServerModal({
       pending={submitting}
       error={advancedJsonError}
       footerExtra={
-        <label className="switch switch--labeled">
-          <input
-            type="checkbox"
-            checked={form.useAdvanced}
-            onChange={(e) => update('useAdvanced', e.target.checked)}
-          />
-          <span className="switch-track" aria-hidden="true" />
-          Raw JSON
-        </label>
+        <Switch
+          checked={form.useAdvanced}
+          onChange={(next) => update('useAdvanced', next)}
+          label="Raw JSON"
+        />
       }
       onSubmit={() => canSubmit && onSubmit(form)}
       onClose={onClose}
     >
       {!initial && (
-        <div className="auto-form-group">
-          <span className="auto-form-label">Quick presets</span>
-          <div className="settings-preset-strip">
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Quick presets</span>
+          <div {...stylex.props(settings.presetStrip)}>
             {MCP_PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
-                className="settings-preset"
+                {...stylex.props(settings.preset)}
                 onClick={() => applyPreset(p)}
               >
-                <span className="settings-preset-name">{p.name}</span>
-                <span className="settings-preset-desc">{p.desc}</span>
+                <span {...stylex.props(settings.presetName)}>{p.name}</span>
+                <span {...stylex.props(settings.presetDesc)}>{p.desc}</span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      <div className="settings-form-row">
-        <div className="auto-form-group settings-form-grow">
-          <span className="auto-form-label">Name</span>
+      <div {...stylex.props(settings.formRow)}>
+        <div {...stylex.props(field.group, settings.formGrow)}>
+          <span {...stylex.props(field.label)}>Name</span>
           <input
-            className="auto-form-input settings-mono"
+            {...stylex.props(field.input, settings.mono)}
             placeholder="e.g. filesystem"
             value={form.name}
             onChange={(e) => update('name', e.target.value)}
@@ -130,10 +129,10 @@ export function McpServerModal({
             autoFocus={!initial}
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Transport</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Transport</span>
           <select
-            className="auto-form-select"
+            {...stylex.props(field.select)}
             value={form.transport}
             onChange={(e) => update('transport', e.target.value as McpTransport)}
             disabled={form.useAdvanced}
@@ -148,10 +147,10 @@ export function McpServerModal({
 
       {!form.useAdvanced && form.transport === 'stdio' && (
         <>
-          <div className="auto-form-group">
-            <span className="auto-form-label">Command</span>
+          <div {...stylex.props(field.group)}>
+            <span {...stylex.props(field.label)}>Command</span>
             <input
-              className="auto-form-input settings-mono"
+              {...stylex.props(field.input, settings.mono)}
               placeholder="npx or python or /path/to/binary"
               value={form.command}
               onChange={(e) => update('command', e.target.value)}
@@ -159,12 +158,12 @@ export function McpServerModal({
             />
           </div>
 
-          <div className="auto-form-group">
-            <span className="auto-form-label">Arguments</span>
+          <div {...stylex.props(field.group)}>
+            <span {...stylex.props(field.label)}>Arguments</span>
             {form.args.map((a, i) => (
-              <div key={i} className="settings-kv-row">
+              <div key={i} {...stylex.props(settings.kvRow)}>
                 <input
-                  className="auto-form-input settings-mono"
+                  {...stylex.props(field.input, settings.mono)}
                   value={a}
                   onChange={(e) =>
                     setForm((f) => {
@@ -178,7 +177,7 @@ export function McpServerModal({
                 />
                 <button
                   type="button"
-                  className="icon-btn"
+                  {...stylex.props(iconBtn.base)}
                   title="Remove argument"
                   onClick={() => removeAt('args', i)}
                 >
@@ -188,26 +187,26 @@ export function McpServerModal({
             ))}
             <button
               type="button"
-              className="artifact-btn small settings-add-row-btn"
+              {...stylex.props(btn.base, btn.small, settings.addRowBtn)}
               onClick={() => setForm((f) => ({...f, args: [...f.args, '']}))}
             >
               <PlusIcon size={12} /> Add argument
             </button>
           </div>
 
-          <div className="auto-form-group">
-            <span className="auto-form-label">Environment variables</span>
+          <div {...stylex.props(field.group)}>
+            <span {...stylex.props(field.label)}>Environment variables</span>
             {form.env.map((pair, i) => (
-              <div key={i} className="settings-kv-row">
+              <div key={i} {...stylex.props(settings.kvRow)}>
                 <input
-                  className="auto-form-input settings-mono settings-kv-key"
+                  {...stylex.props(field.input, settings.mono, settings.kvKey)}
                   value={pair.k}
                   onChange={(e) => updateList('env', i, 'k', e.target.value)}
                   placeholder="KEY"
                   spellCheck={false}
                 />
                 <input
-                  className="auto-form-input settings-mono"
+                  {...stylex.props(field.input, settings.mono)}
                   value={pair.v}
                   onChange={(e) => updateList('env', i, 'v', e.target.value)}
                   placeholder="value"
@@ -215,7 +214,7 @@ export function McpServerModal({
                 />
                 <button
                   type="button"
-                  className="icon-btn"
+                  {...stylex.props(iconBtn.base)}
                   title="Remove variable"
                   onClick={() => removeAt('env', i)}
                 >
@@ -224,11 +223,11 @@ export function McpServerModal({
               </div>
             ))}
             {form.env.length === 0 && (
-              <span className="auto-form-hint">Secrets like API keys go here.</span>
+              <span {...stylex.props(field.hint)}>Secrets like API keys go here.</span>
             )}
             <button
               type="button"
-              className="artifact-btn small settings-add-row-btn"
+              {...stylex.props(btn.base, btn.small, settings.addRowBtn)}
               onClick={() => setForm((f) => ({...f, env: [...f.env, {k: '', v: ''}]}))}
             >
               <PlusIcon size={12} /> Add variable
@@ -239,29 +238,29 @@ export function McpServerModal({
 
       {!form.useAdvanced && form.transport !== 'stdio' && (
         <>
-          <div className="auto-form-group">
-            <span className="auto-form-label">URL</span>
+          <div {...stylex.props(field.group)}>
+            <span {...stylex.props(field.label)}>URL</span>
             <input
-              className="auto-form-input settings-mono"
+              {...stylex.props(field.input, settings.mono)}
               placeholder="https://example.com/mcp"
               value={form.url}
               onChange={(e) => update('url', e.target.value)}
               spellCheck={false}
             />
           </div>
-          <div className="auto-form-group">
-            <span className="auto-form-label">Headers</span>
+          <div {...stylex.props(field.group)}>
+            <span {...stylex.props(field.label)}>Headers</span>
             {form.headers.map((pair, i) => (
-              <div key={i} className="settings-kv-row">
+              <div key={i} {...stylex.props(settings.kvRow)}>
                 <input
-                  className="auto-form-input settings-mono settings-kv-key"
+                  {...stylex.props(field.input, settings.mono, settings.kvKey)}
                   value={pair.k}
                   onChange={(e) => updateList('headers', i, 'k', e.target.value)}
                   placeholder="Authorization"
                   spellCheck={false}
                 />
                 <input
-                  className="auto-form-input settings-mono"
+                  {...stylex.props(field.input, settings.mono)}
                   value={pair.v}
                   onChange={(e) => updateList('headers', i, 'v', e.target.value)}
                   placeholder="Bearer …"
@@ -269,7 +268,7 @@ export function McpServerModal({
                 />
                 <button
                   type="button"
-                  className="icon-btn"
+                  {...stylex.props(iconBtn.base)}
                   title="Remove header"
                   onClick={() => removeAt('headers', i)}
                 >
@@ -278,11 +277,11 @@ export function McpServerModal({
               </div>
             ))}
             {form.headers.length === 0 && (
-              <span className="auto-form-hint">Optional — auth tokens etc.</span>
+              <span {...stylex.props(field.hint)}>Optional — auth tokens etc.</span>
             )}
             <button
               type="button"
-              className="artifact-btn small settings-add-row-btn"
+              {...stylex.props(btn.base, btn.small, settings.addRowBtn)}
               onClick={() => setForm((f) => ({...f, headers: [...f.headers, {k: '', v: ''}]}))}
             >
               <PlusIcon size={12} /> Add header
@@ -292,10 +291,10 @@ export function McpServerModal({
       )}
 
       {form.useAdvanced ? (
-        <div className="auto-form-group">
-          <span className="auto-form-label">Raw config JSON</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Raw config JSON</span>
           <textarea
-            className="auto-form-textarea auto-form-code"
+            {...stylex.props(field.textarea, settings.mono)}
             rows={8}
             value={form.advancedJson}
             onChange={(e) => update('advancedJson', e.target.value)}
@@ -303,9 +302,9 @@ export function McpServerModal({
           />
         </div>
       ) : (
-        <div className="auto-form-group">
-          <span className="auto-form-label">Preview JSON</span>
-          <pre className="settings-config-pre">{prettyJson(formToConfigJson(form))}</pre>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Preview JSON</span>
+          <pre {...stylex.props(settings.configPre)}>{prettyJson(formToConfigJson(form))}</pre>
         </div>
       )}
     </FormModal>

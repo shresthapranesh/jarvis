@@ -1,7 +1,9 @@
+import * as stylex from '@stylexjs/stylex';
 import {useRef, useState} from 'react';
 
 import {commitResolveApproval} from '../relay/ResolveApprovalMutation';
 import {commitResumeTask} from '../relay/ResumeTaskMutation';
+import {channels, colors} from '../theme/tokens.stylex';
 
 interface Props {
   taskId: string;
@@ -47,9 +49,9 @@ export function InterruptPrompt({taskId, question, approvalId}: Props) {
   }
 
   return (
-    <div className="interrupt-wrap">
-      <div className="interrupt-card">
-        <div className="interrupt-header">
+    <div {...stylex.props(styles.wrap)}>
+      <div {...stylex.props(styles.card)}>
+        <div {...stylex.props(styles.header)}>
           <svg
             width="14"
             height="14"
@@ -66,22 +68,27 @@ export function InterruptPrompt({taskId, question, approvalId}: Props) {
           </svg>
           <span>Agent needs your input</span>
         </div>
-        <div className="interrupt-question">{question}</div>
+        <div {...stylex.props(styles.question)}>{question}</div>
         <textarea
           ref={(el) => {
             textareaRef.current = el;
             el?.focus();
           }}
-          className="interrupt-textarea"
+          {...stylex.props(styles.textarea)}
           rows={2}
           placeholder="Type your answer…"
           disabled={submitting}
           onKeyDown={handleKeyDown}
         />
-        {error && <div className="interrupt-error">{error}</div>}
-        <div className="interrupt-footer">
-          <span className="interrupt-hint">Enter to submit · Shift+Enter for newline</span>
-          <button type="button" className="interrupt-submit" disabled={submitting} onClick={submit}>
+        {error && <div {...stylex.props(styles.error)}>{error}</div>}
+        <div {...stylex.props(styles.footer)}>
+          <span {...stylex.props(styles.hint)}>Enter to submit · Shift+Enter for newline</span>
+          <button
+            type="button"
+            {...stylex.props(styles.submit)}
+            disabled={submitting}
+            onClick={submit}
+          >
             {submitting ? 'Sending…' : 'Send'}
           </button>
         </div>
@@ -89,3 +96,76 @@ export function InterruptPrompt({taskId, question, approvalId}: Props) {
     </div>
   );
 }
+
+const styles = stylex.create({
+  wrap: {maxWidth: 760, marginBlock: '0 10px', marginInline: 'auto'},
+  card: {
+    backgroundColor: colors.glassBg,
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: `rgba(${channels.accent}, 0.35)`,
+    borderRadius: 14,
+    display: 'flex',
+    flexDirection: 'column',
+    paddingBlock: 12,
+    paddingInline: 14,
+    gap: 8,
+    boxShadow: `0 4px 24px rgba(${channels.shadow}, 0.3)`,
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    fontSize: '0.75rem',
+    color: colors.accent,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+  },
+  question: {color: colors.text, fontSize: '0.92rem', lineHeight: 1.45, whiteSpace: 'pre-wrap'},
+  textarea: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {default: colors.border, ':focus': colors.accent},
+    borderRadius: 8,
+    outline: 'none',
+    resize: 'none',
+    color: colors.text,
+    fontSize: '0.9rem',
+    fontFamily: 'inherit',
+    lineHeight: 1.5,
+    paddingBlock: 8,
+    paddingInline: 10,
+    minHeight: 40,
+    maxHeight: 120,
+    '::placeholder': {color: colors.textDim},
+  },
+  error: {color: colors.errorText, fontSize: '0.78rem'},
+  footer: {display: 'flex', alignItems: 'center', gap: 8},
+  hint: {flex: 1, fontSize: '0.68rem', color: colors.textDim},
+  submit: {
+    backgroundImage: `linear-gradient(135deg, ${colors.accentStrong}, ${colors.accent})`,
+    color: colors.accentContrast,
+    borderStyle: 'none',
+    borderRadius: 8,
+    paddingBlock: 6,
+    paddingInline: 14,
+    fontSize: '0.78rem',
+    fontWeight: 600,
+    cursor: {default: 'pointer', ':disabled': 'not-allowed'},
+    opacity: {default: 1, ':disabled': 0.45},
+    boxShadow: {
+      default: `0 2px 10px rgba(${channels.accent}, 0.3)`,
+      ':hover:not(:disabled)': `0 4px 16px rgba(${channels.accent}, 0.45)`,
+    },
+    transform: {
+      default: null,
+      ':hover:not(:disabled)': 'translateY(-1px)',
+      ':active:not(:disabled)': 'scale(0.97)',
+    },
+    transition: 'box-shadow 0.2s, transform 0.15s, opacity 0.15s',
+  },
+});

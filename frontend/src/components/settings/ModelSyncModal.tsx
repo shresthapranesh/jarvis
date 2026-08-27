@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useCallback, useMemo, useState} from 'react';
 import {createPortal} from 'react-dom';
 
@@ -6,7 +7,10 @@ import {useToast} from '../../lib/toast';
 import type {DiscoveredModelDraft} from '../../relay/AddDiscoveredModelsMutation';
 import type {SyncReport} from '../../relay/ModelSyncQuery';
 import {fetchModelSync} from '../../relay/ModelSyncQuery';
+import {formModal} from '../FormModal';
 import {AlertIcon, CheckIcon, PlusIcon, SearchIcon, SyncIcon} from '../icons';
+import {badge, btn, field, modal, page} from '../ui';
+import {models, settings, settingsBadge, sync} from './settings.styles';
 
 /**
  * `model sync` in the UI: diff the catalog against what each provider actually
@@ -103,28 +107,31 @@ export function ModelSyncModal({
   const busy = syncAct.pending || addAct.pending;
 
   return createPortal(
-    <div className="confirm-backdrop" onClick={onClose}>
+    <div {...stylex.props(modal.backdrop)} onClick={onClose}>
+      {/* Not a `FormModal`: the body here is a scrolling report rather than a
+          field stack. It borrows that component's shell styles so the two
+          dialogs still read as the same thing. */}
       <div
-        className="form-modal form-modal--wide model-sync-modal"
+        {...stylex.props(modal.panel, formModal.panel, formModal.panelWide, sync.modal)}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="model-sync-title"
       >
-        <header className="form-modal-head">
-          <h2 className="form-modal-title" id="model-sync-title">
+        <header>
+          <h2 {...stylex.props(modal.title)} id="model-sync-title">
             Sync catalog with providers
           </h2>
-          <p className="form-modal-subtitle">
+          <p {...stylex.props(modal.subtitle)}>
             Compares the catalog against what each provider currently offers. Read-only until you
             add something — a listing reports what a provider publishes, not what your credentials
             can actually call.
           </p>
         </header>
 
-        <div className="model-sync-controls">
+        <div {...stylex.props(sync.controls)}>
           <select
-            className="auto-form-select"
+            {...stylex.props(field.select, sync.providerSelect)}
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
             disabled={busy}
@@ -137,7 +144,7 @@ export function ModelSyncModal({
             ))}
           </select>
           <label
-            className="model-sync-check"
+            {...stylex.props(sync.check)}
             title="Issues one real one-token call per catalog model"
           >
             <input
@@ -149,7 +156,7 @@ export function ModelSyncModal({
             Probe entitlement
           </label>
           <button
-            className="artifact-btn primary"
+            {...stylex.props(btn.base, btn.primary)}
             disabled={busy}
             onClick={() => void syncAct.run(provider, probe)}
           >
@@ -157,15 +164,15 @@ export function ModelSyncModal({
           </button>
         </div>
         {probe && (
-          <p className="auto-form-hint model-sync-note">
+          <p {...stylex.props(field.hint, sync.note)}>
             Probing costs one request per catalog model and can take a while — it is the only thing
             that separates “published” from “callable by this account”.
           </p>
         )}
 
-        <div className="form-modal-fields model-sync-body">
+        <div {...stylex.props(formModal.fields, sync.body)}>
           {reports === null ? (
-            <div className="memory-empty">
+            <div {...stylex.props(page.empty)}>
               {syncAct.pending ? 'Asking each provider…' : 'Run a sync to see catalog drift.'}
             </div>
           ) : (
@@ -175,24 +182,27 @@ export function ModelSyncModal({
               ))}
 
               {newRows.length > 0 && (
-                <section className="model-sync-section">
-                  <h3 className="model-sync-heading">
+                <section {...stylex.props(sync.section)}>
+                  <h3 {...stylex.props(sync.heading)}>
                     New models
-                    <span className="memory-count">{newRows.length}</span>
-                    <span className="settings-section-actions">
+                    <span {...stylex.props(page.count)}>{newRows.length}</span>
+                    <span {...stylex.props(settings.sectionActions)}>
                       <button
-                        className="artifact-btn small"
+                        {...stylex.props(btn.base, btn.small)}
                         onClick={() => setSelected(new Set(newRows.map((m) => m.modelId)))}
                       >
                         Select all
                       </button>
-                      <button className="artifact-btn small" onClick={() => setSelected(new Set())}>
+                      <button
+                        {...stylex.props(btn.base, btn.small)}
+                        onClick={() => setSelected(new Set())}
+                      >
                         Clear
                       </button>
                     </span>
                   </h3>
-                  <div className="model-sync-filter">
-                    <div className="settings-search">
+                  <div {...stylex.props(sync.filter)}>
+                    <div {...stylex.props(settings.search)}>
                       <SearchIcon size={14} />
                       <input
                         placeholder="Filter new models…"
@@ -201,7 +211,7 @@ export function ModelSyncModal({
                       />
                     </div>
                     {hiddenNonChat > 0 && (
-                      <label className="model-sync-check">
+                      <label {...stylex.props(sync.check)}>
                         <input
                           type="checkbox"
                           checked={showNonChat}
@@ -211,29 +221,29 @@ export function ModelSyncModal({
                       </label>
                     )}
                   </div>
-                  <ul className="model-sync-list">
+                  <ul {...stylex.props(sync.list)}>
                     {newRows.map((m) => (
-                      <li key={m.modelId} className="model-sync-row">
-                        <label className="model-sync-row-main">
+                      <li key={m.modelId} {...stylex.props(sync.row)}>
+                        <label {...stylex.props(sync.rowMain)}>
                           <input
                             type="checkbox"
                             checked={selected.has(m.modelId)}
                             onChange={() => toggle(m.modelId)}
                           />
-                          <span className="settings-model-id">{m.modelId}</span>
-                          <span className="model-sync-row-label">{m.label}</span>
+                          <span {...stylex.props(models.id)}>{m.modelId}</span>
+                          <span {...stylex.props(sync.rowLabel)}>{m.label}</span>
                         </label>
-                        <span className="model-sync-row-meta">
+                        <span {...stylex.props(sync.rowMeta)}>
                           {!m.likelyChat && (
                             <span
-                              className="settings-badge"
+                              {...stylex.props(badge.base)}
                               title="Name/modality suggests it is not a text model"
                             >
                               non-chat
                             </span>
                           )}
                           {m.contextWindow ? (
-                            <span className="settings-badge">{fmt(m.contextWindow)} ctx</span>
+                            <span {...stylex.props(badge.base)}>{fmt(m.contextWindow)} ctx</span>
                           ) : null}
                         </span>
                       </li>
@@ -245,16 +255,14 @@ export function ModelSyncModal({
           )}
         </div>
 
-        <footer className="form-modal-footer">
-          <div className="form-modal-footer-extra">
-            {selected.size > 0 && `${selected.size} selected`}
-          </div>
-          <div className="form-modal-footer-actions">
-            <button className="artifact-btn" onClick={onClose} disabled={addAct.pending}>
+        <footer {...stylex.props(formModal.footer)}>
+          <div>{selected.size > 0 && `${selected.size} selected`}</div>
+          <div {...stylex.props(formModal.footerActions)}>
+            <button {...stylex.props(btn.base)} onClick={onClose} disabled={addAct.pending}>
               Close
             </button>
             <button
-              className="artifact-btn primary"
+              {...stylex.props(btn.base, btn.primary)}
               disabled={selectedDrafts.length === 0 || busy}
               onClick={() => void addAct.run(selectedDrafts)}
             >
@@ -287,31 +295,31 @@ function ReportBlock({report: r}: {report: SyncReport}) {
   const newCount = r.newModels.length;
 
   return (
-    <section className="model-sync-section">
-      <h3 className="model-sync-heading">
+    <section {...stylex.props(sync.section)}>
+      <h3 {...stylex.props(sync.heading)}>
         {r.provider}
-        <span className="memory-count">{r.offered} offered</span>
+        <span {...stylex.props(page.count)}>{r.offered} offered</span>
         {r.skipped ? (
-          <span className="settings-badge settings-badge--warn">skipped</span>
+          <span {...stylex.props(badge.base, settingsBadge.warn)}>skipped</span>
         ) : r.clean ? (
-          <span className="settings-badge settings-badge--live">
+          <span {...stylex.props(badge.base, badge.live)}>
             <CheckIcon size={11} /> in sync
           </span>
         ) : null}
       </h3>
 
       {r.skipped && (
-        <p className="model-sync-note model-sync-note--warn">
+        <p {...stylex.props(sync.note, sync.noteWarn)}>
           <AlertIcon size={13} /> {r.skipped}
         </p>
       )}
 
       {r.missing.length > 0 && (
-        <div className="model-sync-finding">
-          <span className="model-sync-finding-title">Gone — in the catalog, no longer offered</span>
-          <ul className="model-sync-plain">
+        <div {...stylex.props(sync.finding)}>
+          <span {...stylex.props(sync.findingTitle)}>Gone — in the catalog, no longer offered</span>
+          <ul {...stylex.props(sync.plain)}>
             {r.missing.map((id) => (
-              <li key={id} className="settings-model-id">
+              <li key={id} {...stylex.props(sync.plainItem, models.id)}>
                 {id}
               </li>
             ))}
@@ -320,15 +328,15 @@ function ReportBlock({report: r}: {report: SyncReport}) {
       )}
 
       {r.unreachable.length > 0 && (
-        <div className="model-sync-finding">
-          <span className="model-sync-finding-title">
+        <div {...stylex.props(sync.finding)}>
+          <span {...stylex.props(sync.findingTitle)}>
             Unreachable — offered, but this credential cannot call it
           </span>
-          <ul className="model-sync-plain">
+          <ul {...stylex.props(sync.plain)}>
             {r.unreachable.map((u) => (
-              <li key={u.modelId}>
-                <span className="settings-model-id">{u.modelId}</span>
-                <span className="model-sync-reason">{u.reason}</span>
+              <li key={u.modelId} {...stylex.props(sync.plainItem)}>
+                <span {...stylex.props(models.id)}>{u.modelId}</span>
+                <span {...stylex.props(sync.reason)}>{u.reason}</span>
               </li>
             ))}
           </ul>
@@ -336,24 +344,24 @@ function ReportBlock({report: r}: {report: SyncReport}) {
       )}
 
       {r.windows.length > 0 && (
-        <div className="model-sync-finding">
-          <span className="model-sync-finding-title">
+        <div {...stylex.props(sync.finding)}>
+          <span {...stylex.props(sync.findingTitle)}>
             Context window — sizes this model’s compaction threshold
           </span>
-          <ul className="model-sync-plain">
+          <ul {...stylex.props(sync.plain)}>
             {r.windows.map((w) => (
-              <li key={w.modelId} className="model-sync-window">
-                <span className="settings-model-id">{w.modelId}</span>
-                <span className="model-sync-reason">
+              <li key={w.modelId} {...stylex.props(sync.plainItem, models.window)}>
+                <span {...stylex.props(models.id)}>{w.modelId}</span>
+                <span {...stylex.props(sync.reason)}>
                   catalog {fmt(w.catalogWindow)} → provider {fmt(w.providerWindow)}
                 </span>
                 {w.builtin ? (
-                  <span className="settings-badge" title="Built-in entries are compiled in">
+                  <span {...stylex.props(badge.base)} title="Built-in entries are compiled in">
                     built-in
                   </span>
                 ) : (
                   <button
-                    className="artifact-btn small"
+                    {...stylex.props(btn.base, btn.small, sync.rowEndBtn)}
                     disabled={applyAct.pending}
                     onClick={() =>
                       void applyAct.run({
@@ -374,7 +382,9 @@ function ReportBlock({report: r}: {report: SyncReport}) {
       )}
 
       {newCount > 0 && (
-        <p className="auto-form-hint">{newCount} offered but not in the catalog — listed below.</p>
+        <p {...stylex.props(field.hint)}>
+          {newCount} offered but not in the catalog — listed below.
+        </p>
       )}
     </section>
   );

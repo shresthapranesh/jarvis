@@ -1,17 +1,20 @@
+import * as stylex from '@stylexjs/stylex';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {SkillsQuery as TSkillsQuery} from '../__generated__/SkillsQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
+import type {Skill} from '../lib/types';
 import {commitCreateSkill} from '../relay/CreateSkillMutation';
 import {commitDeleteSkill} from '../relay/DeleteSkillMutation';
 import {mapSkill, refreshSkills, skillsQuery} from '../relay/SkillsQuery';
 import {commitUpdateSkill} from '../relay/UpdateSkillMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
-import {useQueryRetry} from './QueryBoundary';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
-import type {Skill} from '../lib/types';
+import {item, skill as skillStyles} from './memory.styles';
+import {useQueryRetry} from './QueryBoundary';
+import {btn, field, iconBtn, page, Switch} from './ui';
 
 interface Draft {
   name: string;
@@ -36,7 +39,6 @@ export function SkillsView() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
-
 
   function closeEditor() {
     setEditor(null);
@@ -109,33 +111,26 @@ export function SkillsView() {
     }
   }
 
-  const draftValid = Boolean(
-    draft.name.trim() && draft.description.trim() && draft.body.trim(),
-  );
+  const draftValid = Boolean(draft.name.trim() && draft.description.trim() && draft.body.trim());
   const editorOpen = editor !== null;
 
   function renderSkill(s: Skill) {
     return (
-      <li key={s.id} className={`skill-card${s.enabled ? '' : ' skill-card--disabled'}`}>
-        <div className="skill-card-head">
-          <span className="skill-card-name">{s.name}</span>
-          <div className="skill-card-controls">
-            <label className="switch" title={s.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}>
-              <input
-                type="checkbox"
-                checked={s.enabled}
-                disabled={updateAction.pending}
-                onChange={(e) =>
-                  void updateAction.run(s.id, {enabled: e.target.checked})
-                }
-              />
-              <span className="switch-track" aria-hidden="true" />
-            </label>
-            <button className="icon-btn" title="Edit skill" onClick={() => openEdit(s)}>
+      <li {...stylex.props(skillStyles.card, !s.enabled && skillStyles.cardDisabled)} key={s.id}>
+        <div {...stylex.props(skillStyles.head)}>
+          <span {...stylex.props(skillStyles.name)}>{s.name}</span>
+          <div {...stylex.props(skillStyles.controls)}>
+            <Switch
+              checked={s.enabled}
+              disabled={updateAction.pending}
+              onChange={(next) => void updateAction.run(s.id, {enabled: next})}
+              title={s.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}
+            />
+            <button {...stylex.props(iconBtn.base)} title="Edit skill" onClick={() => openEdit(s)}>
               <EditIcon size={14} />
             </button>
             <button
-              className="icon-btn icon-btn--danger"
+              {...stylex.props(iconBtn.base, iconBtn.danger)}
               title="Delete skill"
               onClick={() => setDeleteTarget(s)}
             >
@@ -143,12 +138,12 @@ export function SkillsView() {
             </button>
           </div>
         </div>
-        <p className="skill-card-desc">{s.description}</p>
-        <details className="skill-card-body">
-          <summary>Procedure</summary>
-          <pre>{s.body}</pre>
+        <p {...stylex.props(skillStyles.desc)}>{s.description}</p>
+        <details {...stylex.props(skillStyles.body)}>
+          <summary {...stylex.props(skillStyles.summary)}>Procedure</summary>
+          <pre {...stylex.props(skillStyles.pre)}>{s.body}</pre>
         </details>
-        <span className="memory-item-meta">
+        <span {...stylex.props(item.meta)}>
           Updated {new Date(s.updated_at).toLocaleDateString()}
         </span>
       </li>
@@ -156,43 +151,42 @@ export function SkillsView() {
   }
 
   return (
-    <div className="page memory-page">
-      <header className="memory-header">
-        <div>
-          <h1>Skills</h1>
-          <p className="memory-subtitle">
-            Reusable, named capabilities the agent can invoke. The{' '}
-            <strong>description</strong> is the routing key — matched against what you ask
-            to decide when a skill is relevant — while the <strong>body</strong> holds the
-            full procedure, loaded only when the skill is actually used. The agent can also
-            author its own via <code>create_skill(…)</code>.
+    <div {...stylex.props(page.scroll)}>
+      <header {...stylex.props(page.header)}>
+        <div {...stylex.props(page.headerMain)}>
+          <h1 {...stylex.props(page.title)}>Skills</h1>
+          <p {...stylex.props(page.subtitle)}>
+            Reusable, named capabilities the agent can invoke. The <strong>description</strong> is
+            the routing key — matched against what you ask to decide when a skill is relevant —
+            while the <strong>body</strong> holds the full procedure, loaded only when the skill is
+            actually used. The agent can also author its own via <code>create_skill(…)</code>.
           </p>
         </div>
-        <div className="memory-header-actions">
-          <button className="artifact-btn primary" onClick={openAdd}>
+        <div {...stylex.props(page.headerActions)}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> New skill
           </button>
         </div>
       </header>
 
-      {actionError && !editorOpen && <div className="memory-error">{actionError}</div>}
+      {actionError && !editorOpen && <div {...stylex.props(page.error)}>{actionError}</div>}
 
       {all.length === 0 ? (
-        <div className="memory-empty">
+        <div {...stylex.props(page.empty)}>
           <p>No skills yet.</p>
           <p>
             Create one, or ask the agent to <code>create_skill</code> something reusable.
           </p>
-          <button className="artifact-btn primary" onClick={openAdd}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> New skill
           </button>
         </div>
       ) : (
-        <div className="memory-section">
-          <h2 className="memory-section-title">
-            All <span className="memory-count">{all.length}</span>
+        <div {...stylex.props(page.section)}>
+          <h2 {...stylex.props(page.sectionTitle)}>
+            All <span {...stylex.props(page.count)}>{all.length}</span>
           </h2>
-          <ul className="memory-list">{all.map(renderSkill)}</ul>
+          <ul {...stylex.props(page.list)}>{all.map(renderSkill)}</ul>
         </div>
       )}
 
@@ -206,23 +200,19 @@ export function SkillsView() {
         pending={createAction.pending || updateAction.pending}
         error={actionError}
         footerExtra={
-          <label className="switch switch--labeled">
-            <input
-              type="checkbox"
-              checked={draft.enabled}
-              onChange={(e) => setDraft({...draft, enabled: e.target.checked})}
-            />
-            <span className="switch-track" aria-hidden="true" />
-            Enabled
-          </label>
+          <Switch
+            checked={draft.enabled}
+            onChange={(next) => setDraft({...draft, enabled: next})}
+            label="Enabled"
+          />
         }
         onSubmit={submitEditor}
         onClose={closeEditor}
       >
-        <div className="auto-form-group">
-          <span className="auto-form-label">Name</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Name</span>
           <input
-            className="auto-form-input skill-name-input"
+            {...stylex.props(field.input, skillStyles.monoField)}
             value={draft.name}
             onChange={(e) => setDraft({...draft, name: e.target.value})}
             autoFocus={editor?.mode === 'add'}
@@ -230,19 +220,19 @@ export function SkillsView() {
             placeholder="weekly-market-recap"
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Description — when to use it</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Description — when to use it</span>
           <input
-            className="auto-form-input"
+            {...stylex.props(field.input)}
             value={draft.description}
             onChange={(e) => setDraft({...draft, description: e.target.value})}
             placeholder="When asked for a recap of this week's market moves…"
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Body — the full procedure (markdown)</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Body — the full procedure (markdown)</span>
           <textarea
-            className="auto-form-textarea skill-body-textarea"
+            {...stylex.props(field.textarea, skillStyles.monoField)}
             value={draft.body}
             onChange={(e) => setDraft({...draft, body: e.target.value})}
             spellCheck={false}
@@ -257,8 +247,8 @@ export function SkillsView() {
         title="Delete skill"
         message={
           <p>
-            Delete <strong>{deleteTarget?.name}</strong>? The agent will no longer be able
-            to use it.
+            Delete <strong>{deleteTarget?.name}</strong>? The agent will no longer be able to use
+            it.
           </p>
         }
         confirmLabel="Delete"

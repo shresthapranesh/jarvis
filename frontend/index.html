@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <!-- viewport-fit=cover lets the shell paint under the notch/home indicator; the
-         env(safe-area-inset-*) padding in styles.css is what keeps content off them.
+         env(safe-area-inset-*) padding (theme/tokens.stylex.ts `css`) keeps content off them.
          interactive-widget=resizes-content shrinks the layout viewport when the virtual
          keyboard opens, so the composer stays visible. Safari ignores the latter — the
          visualViewport listener in __root.tsx covers it there via --kb-inset. -->
@@ -15,7 +15,7 @@
     <!-- Dark is the default and matches the manifest's background_color, so the
          standalone splash does not flash. The pre-paint script below corrects it
          when the resolved theme is light; __root.tsx keeps it in sync after that,
-         sourcing the value from --bg so the colour is defined only in CSS. -->
+         sourcing the value from --pp-bg so the colour is defined only in CSS. -->
     <meta name="theme-color" content="#141110" />
     <script>
       // Resolve theme before first paint to avoid a flash of the wrong mode.
@@ -26,8 +26,9 @@
             t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
           }
           document.documentElement.setAttribute('data-theme', t);
-          // Stylesheets have not loaded yet, so --bg is not readable here; this
-          // one literal must track [data-theme='light'] { --bg } in styles.css.
+          // Stylesheets have not loaded yet, so --pp-bg is not readable here;
+          // this one literal must track :root[data-theme='light'] --pp-bg in
+          // src/base.css, which in turn tracks `colors.bg` in the light theme.
           if (t === 'light') {
             document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f6f3ee');
           }

@@ -1,7 +1,16 @@
+import * as stylex from '@stylexjs/stylex';
 import {useEffect, useRef, useState} from 'react';
 
 import type {Step, TodoItem} from '../lib/types';
+import {
+  budget as budgetStyles,
+  empty,
+  group as groupStyles,
+  panel,
+  row,
+} from './ActivitySidebar.styles';
 import {TodoList} from './TodoList';
+import {closeBtn, stream, worker as workerStyles} from './ui';
 
 interface Budget {
   inputTokens: number;
@@ -118,24 +127,26 @@ function buildRenderList(steps: Step[], isLive: boolean): RenderItem[] {
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
 
-function StepRow({step}: {step: Step}) {
+/** `nested` indents a row that sits inside a worker group. */
+function StepRow({step, nested = false}: {step: Step; nested?: boolean}) {
   const [open, setOpen] = useState(false);
   const hasData = !!step.data && step.data !== '{}';
 
   return (
-    <div className={`step-row${open ? ' open' : ''}`}>
+    <div {...stylex.props(row.root, nested && row.nested)}>
       <div
-        className="step-summary"
+        {...stylex.props(row.summary, nested && row.inset, hasData ? row.clickable : row.plain)}
         onClick={() => hasData && setOpen((o) => !o)}
-        style={{cursor: hasData ? 'pointer' : 'default'}}
       >
-        <span className={`step-source ${step.source === 'subagent' ? 'sub' : 'main'}`}>
+        <span
+          {...stylex.props(row.source, step.source === 'subagent' ? row.sourceSub : row.sourceMain)}
+        >
           {step.source}
         </span>
-        <span className="step-node">{step.node}</span>
+        <span {...stylex.props(row.node)}>{step.node}</span>
         {hasData && (
           <svg
-            className="step-chevron"
+            {...stylex.props(row.chevron, open && row.chevronOpen)}
             width="12"
             height="12"
             viewBox="0 0 24 24"
@@ -150,33 +161,40 @@ function StepRow({step}: {step: Step}) {
         )}
       </div>
       {hasData && open && (
-        <div className="step-detail">
-          <pre>{formatStepData(step.data!)}</pre>
+        <div {...stylex.props(row.detail, nested && row.inset)}>
+          <pre {...stylex.props(row.pre)}>{formatStepData(step.data!)}</pre>
         </div>
       )}
     </div>
   );
 }
 
+function dotStyle(status: WorkerStatus) {
+  if (status === 'running') return workerStyles.dotRunning;
+  if (status === 'done') return workerStyles.dotDone;
+  if (status === 'error') return workerStyles.dotError;
+  return workerStyles.dotUnknown;
+}
+
 function WorkerGroupRow({group}: {group: WorkerGroup}) {
   const [open, setOpen] = useState(group.status === 'running');
 
   return (
-    <div className={`worker-group${open ? ' open' : ''}`}>
-      <div className="worker-group-head" onClick={() => setOpen((o) => !o)}>
-        <span className={`worker-status-dot worker-status-dot--${group.status}`} />
-        <span className="worker-role">
+    <div {...stylex.props(groupStyles.root)}>
+      <div {...stylex.props(groupStyles.head)} onClick={() => setOpen((o) => !o)}>
+        <span {...stylex.props(workerStyles.dot, dotStyle(group.status))} />
+        <span {...stylex.props(workerStyles.role)}>
           {group.role}
           {group.idx != null && ` #${group.idx}`}
         </span>
         {group.task && (
-          <span className="worker-task" title={group.task}>
+          <span {...stylex.props(workerStyles.task)} title={group.task}>
             {group.task}
           </span>
         )}
-        <span className="worker-group-count">{group.steps.length}</span>
+        <span {...stylex.props(groupStyles.count)}>{group.steps.length}</span>
         <svg
-          className="step-chevron"
+          {...stylex.props(row.chevron, row.chevronFlush, open && row.chevronOpen)}
           width="12"
           height="12"
           viewBox="0 0 24 24"
@@ -190,11 +208,11 @@ function WorkerGroupRow({group}: {group: WorkerGroup}) {
         </svg>
       </div>
       {open && (
-        <div className="worker-group-body">
+        <div>
           {group.steps.length === 0 ? (
-            <div className="sidebar-empty">Starting…</div>
+            <div {...stylex.props(empty.block, empty.inline)}>Starting…</div>
           ) : (
-            group.steps.map((s, i) => <StepRow key={i} step={s} />)
+            group.steps.map((s, i) => <StepRow key={i} step={s} nested />)
           )}
         </div>
       )}
@@ -215,20 +233,20 @@ export function ActivitySidebar({steps, isLive, todos, budget, perf, onClose}: P
   const items = buildRenderList(steps, !!isLive);
 
   return (
-    <div className="steps-panel">
-      <div className="steps-panel-header">
-        <div className="steps-panel-title">
+    <div {...stylex.props(panel.root)}>
+      <div {...stylex.props(panel.header)}>
+        <div {...stylex.props(panel.title)}>
           <span>
             {steps.length} step{steps.length !== 1 ? 's' : ''}
           </span>
           {isLive && (
-            <span className="live-badge">
-              <span className="live-dot" />
+            <span {...stylex.props(panel.live)}>
+              <span {...stylex.props(stream.liveDot)} />
               Live
             </span>
           )}
         </div>
-        <button className="sidebar-close" onClick={onClose} title="Close">
+        <button {...stylex.props(closeBtn.base)} onClick={onClose} title="Close">
           <svg
             width="14"
             height="14"
@@ -244,53 +262,38 @@ export function ActivitySidebar({steps, isLive, todos, budget, perf, onClose}: P
           </svg>
         </button>
       </div>
-      <div className="steps-panel-body" ref={bodyRef}>
+      <div {...stylex.props(panel.body)} ref={bodyRef}>
         {todos && todos.length > 0 && <TodoList todos={todos} compact />}
         {budget && (
-          <div
-            style={{
-              padding: '8px 12px',
-              margin: '0 0 8px',
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              fontSize: '0.78rem',
-            }}
-          >
-            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 4}}>
+          <div {...stylex.props(budgetStyles.box)}>
+            <div {...stylex.props(budgetStyles.head)}>
               <strong>Budget</strong>
+              {/* The threshold colour is data-driven, so it is chosen here
+                  rather than encoded as three variants. */}
               <span
-                style={{
-                  color:
-                    budget.totalTokens > 400000
-                      ? 'var(--error-text)'
-                      : budget.totalTokens > 300000
-                        ? 'var(--warning-text)'
-                        : 'var(--text-dim)',
-                }}
+                {...stylex.props(
+                  budget.totalTokens > 400_000
+                    ? budgetStyles.over
+                    : budget.totalTokens > 300_000
+                      ? budgetStyles.warn
+                      : budgetStyles.ok,
+                )}
               >
                 {budget.totalTokens.toLocaleString()} tokens
               </span>
             </div>
-            <div
-              style={{
-                height: 4,
-                background: 'var(--surface2)',
-                borderRadius: 4,
-                overflow: 'hidden',
-                marginBottom: 6,
-              }}
-            >
+            <div {...stylex.props(budgetStyles.bar)}>
               <div
+                {...stylex.props(
+                  budgetStyles.fill,
+                  budget.totalTokens > 400_000 && budgetStyles.fillOver,
+                )}
                 style={{
-                  width: `${Math.min(100, Math.round((budget.totalTokens / 500000) * 100))}%`,
-                  height: '100%',
-                  background: budget.totalTokens > 400000 ? 'var(--error-text)' : 'var(--accent)',
-                  transition: 'width 0.3s',
+                  width: `${Math.min(100, Math.round((budget.totalTokens / 500_000) * 100))}%`,
                 }}
               />
             </div>
-            <div style={{display: 'flex', gap: 12, color: 'var(--text-dim)'}}>
+            <div {...stylex.props(budgetStyles.stats)}>
               <span>{budget.inputTokens.toLocaleString()} in</span>
               <span>{budget.outputTokens.toLocaleString()} out</span>
               <span>{budget.llmCalls} llm</span>
@@ -298,15 +301,7 @@ export function ActivitySidebar({steps, isLive, todos, budget, perf, onClose}: P
             </div>
             {perf && (perf.ttftMs != null || perf.prefillTps != null || perf.evalTps != null) && (
               <div
-                style={{
-                  display: 'flex',
-                  gap: 12,
-                  color: 'var(--text-dim)',
-                  marginTop: 4,
-                  paddingTop: 4,
-                  borderTop: '1px solid var(--border)',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
+                {...stylex.props(budgetStyles.stats, budgetStyles.perf)}
                 title={
                   'Throughput across this run.\n' +
                   'TTFT: time to the first token of the first LLM call.\n' +
@@ -325,7 +320,7 @@ export function ActivitySidebar({steps, isLive, todos, budget, perf, onClose}: P
           </div>
         )}
         {items.length === 0 ? (
-          <div className="sidebar-empty">No activity recorded.</div>
+          <div {...stylex.props(empty.block)}>No activity recorded.</div>
         ) : (
           items.map((item, i) =>
             item.kind === 'step' ? (

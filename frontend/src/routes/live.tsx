@@ -1,13 +1,16 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute} from '@tanstack/react-router';
 import {marked} from 'marked';
 import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
+import {chipBtn, errorBubble, prose, stream, ThinkingDots} from '../components/ui';
 import {useAudioTTS} from '../hooks/useAudioTTS';
 import {useLiveSocket, type LiveStatus, type LiveTurn} from '../hooks/useLiveSocket';
 import {useModels} from '../hooks/useModels';
 import {useSpeechRecognition} from '../hooks/useSpeechRecognition';
 import {useWhisperSTT} from '../hooks/useWhisperSTT';
 import {describeStep} from '../lib/steps';
+import {call, live, orbStyle} from './live.styles';
 
 export const Route = createFileRoute('/live')({component: LivePage});
 
@@ -16,14 +19,14 @@ export const Route = createFileRoute('/live')({component: LivePage});
 const TurnItem = memo(function TurnItem({turn}: {turn: LiveTurn}) {
   const html = useMemo(() => marked.parse(turn.text) as string, [turn.text]);
   return (
-    <div className={`live-turn live-turn--${turn.role}`}>
+    <div {...stylex.props(live.turn, turn.role === 'user' ? live.turnUser : live.turnAgent)}>
       {turn.role === 'user' ? (
-        <div className="user-speech-bubble">{turn.text}</div>
+        <div {...stylex.props(live.userBubble)}>{turn.text}</div>
       ) : (
-        <div className="live-agent-bubble agent-bubble" dangerouslySetInnerHTML={{__html: html}} />
+        <div {...stylex.props(prose.base)} data-md dangerouslySetInnerHTML={{__html: html}} />
       )}
       {turn.role === 'agent' && turn.steps > 0 && (
-        <span className="live-steps-badge activity-btn">
+        <span {...stylex.props(chipBtn.base, live.stepsBadge)}>
           <svg
             width="11"
             height="11"
@@ -135,8 +138,8 @@ function LivePage() {
 
   if (sttMode === 'browser' && !supported) {
     return (
-      <div className="live-page">
-        <div className="live-unsupported">
+      <div {...stylex.props(live.page)}>
+        <div {...stylex.props(live.unsupported)}>
           <svg
             width="32"
             height="32"
@@ -152,8 +155,8 @@ function LivePage() {
             <line x1="12" y1="19" x2="12" y2="23" />
             <line x1="8" y1="23" x2="16" y2="23" />
           </svg>
-          <h3>Browser not supported</h3>
-          <p>
+          <h3 {...stylex.props(live.unsupportedTitle)}>Browser not supported</h3>
+          <p {...stylex.props(live.unsupportedBody)}>
             Web Speech API requires Chrome or Edge.
             <br />
             Switch to Whisper STT to use any browser.
@@ -164,19 +167,19 @@ function LivePage() {
   }
 
   return (
-    <div className="live-page">
-      <div className="live-header">
-        <span className="live-title">Live</span>
-        <div className="live-header-controls">
+    <div {...stylex.props(live.page)}>
+      <div {...stylex.props(live.header)}>
+        <span {...stylex.props(live.title)}>Live</span>
+        <div {...stylex.props(live.headerControls)}>
           <button
-            className={`tts-toggle${sttMode === 'whisper' ? ' active' : ''}`}
+            {...stylex.props(live.toggle, sttMode === 'whisper' && live.toggleActive)}
             onClick={() => setSttMode((m) => (m === 'browser' ? 'whisper' : 'browser'))}
             title="Switch STT engine"
           >
             {sttMode === 'whisper' ? 'Whisper' : 'Browser'}
           </button>
           <button
-            className={`tts-toggle${ttsEnabled ? ' active' : ''}`}
+            {...stylex.props(live.toggle, ttsEnabled && live.toggleActive)}
             onClick={() => {
               if (ttsEnabled) cancelTTS();
               setTtsEnabled((v) => !v);
@@ -200,7 +203,7 @@ function LivePage() {
             TTS
           </button>
           <select
-            className="live-model-input"
+            {...stylex.props(live.modelInput)}
             value={model}
             onChange={(e) => setModel(e.target.value)}
             disabled={!catalog}
@@ -214,15 +217,15 @@ function LivePage() {
             ))}
           </select>
           <div
-            className={`live-conn-dot${connected ? ' ok' : ''}`}
+            {...stylex.props(live.connDot, connected && live.connDotOk)}
             title={connected ? 'Connected' : 'Disconnected'}
           />
         </div>
       </div>
 
-      <div className="live-turns">
+      <div {...stylex.props(live.turns)}>
         {turns.length === 0 && !streamText && (
-          <div className="live-empty">
+          <div {...stylex.props(live.empty)}>
             {callActive
               ? 'Speak to start the conversation.'
               : 'Start a call to talk with the agent.'}
@@ -234,13 +237,13 @@ function LivePage() {
 
         {/* Streaming agent response */}
         {streamText && (
-          <div className="live-turn live-turn--agent">
-            <div className="live-agent-bubble agent-bubble streaming">
+          <div {...stylex.props(live.turn, live.turnAgent)}>
+            <div {...stylex.props(prose.base)} data-md>
               <span dangerouslySetInnerHTML={{__html: parsedStreamHtml}} />
-              <span className="cursor" />
+              <span {...stylex.props(stream.cursor)} />
             </div>
             {stepCount > 0 && (
-              <span className="live-steps-badge activity-btn">
+              <span {...stylex.props(chipBtn.base, live.stepsBadge)}>
                 <svg
                   width="11"
                   height="11"
@@ -261,34 +264,30 @@ function LivePage() {
 
         {/* Thinking indicator */}
         {status === 'thinking' && !streamText && (
-          <div className="live-turn live-turn--agent">
-            <div className="thinking">
-              <div className="thinking-dots">
-                <span />
-                <span />
-                <span />
-              </div>
+          <div {...stylex.props(live.turn, live.turnAgent)}>
+            <div {...stylex.props(live.thinking)}>
+              <ThinkingDots />
               {describeStep(currentStep)}
             </div>
           </div>
         )}
 
         {error && (
-          <div className="live-turn">
-            <div className="error-bubble">⚠ {error}</div>
+          <div {...stylex.props(live.turn)}>
+            <div {...stylex.props(errorBubble.base)}>⚠ {error}</div>
           </div>
         )}
 
         <div ref={turnsEndRef} />
       </div>
 
-      {interimText && <div className="live-interim">"{interimText}…"</div>}
+      {interimText && <div {...stylex.props(live.interim)}>"{interimText}…"</div>}
 
-      <div className="live-status-bar">{statusLabel}</div>
+      <div {...stylex.props(live.statusBar)}>{statusLabel}</div>
 
-      <div className="live-controls">
+      <div {...stylex.props(live.controls)}>
         {!callActive ? (
-          <button className="call-start-btn" onClick={handleStartCall} disabled={!connected}>
+          <button {...stylex.props(call.start)} onClick={handleStartCall} disabled={!connected}>
             <svg
               width="18"
               height="18"
@@ -304,10 +303,10 @@ function LivePage() {
             Start call
           </button>
         ) : (
-          <div className="call-active-controls">
-            <div className={`call-status-orb`} data-state={orbState} />
+          <div {...stylex.props(call.active)}>
+            <div {...stylex.props(call.orb, orbStyle(orbState))} data-state={orbState} />
             <button
-              className={`call-btn call-btn--mute${muted ? ' muted' : ''}`}
+              {...stylex.props(call.btn, muted && call.btnMuted)}
               onClick={handleToggleMute}
               title={muted ? 'Unmute' : 'Mute'}
             >
@@ -346,7 +345,11 @@ function LivePage() {
                 </svg>
               )}
             </button>
-            <button className="call-btn call-btn--end" onClick={handleEndCall} title="End call">
+            <button
+              {...stylex.props(call.btn, call.btnEnd)}
+              onClick={handleEndCall}
+              title="End call"
+            >
               <svg
                 width="18"
                 height="18"

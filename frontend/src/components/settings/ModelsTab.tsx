@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -9,8 +10,11 @@ import {modelCatalogQuery, refreshModelCatalog} from '../../relay/ModelCatalogQu
 import {ConfirmDialog} from '../ConfirmDialog';
 import {FormModal} from '../FormModal';
 import {CheckIcon, EditIcon, PlusIcon, SearchIcon, SyncIcon, TrashIcon} from '../icons';
+import {skill} from '../memory.styles';
 import {useQueryRetry} from '../QueryBoundary';
+import {badge, btn, field, iconBtn, page} from '../ui';
 import {ModelSyncModal} from './ModelSyncModal';
+import {models, settings} from './settings.styles';
 
 type ModelEditor = {mode: 'add'} | {mode: 'edit'; model: CatalogModel};
 
@@ -97,28 +101,28 @@ export function ModelsTab() {
   const customCount = (data?.available ?? []).filter((m) => !m.builtin).length;
 
   return (
-    <div className="memory-section">
-      <h2 className="memory-section-title">
-        Model catalog <span className="memory-count">{data?.available?.length ?? 0}</span>
-        <span className="memory-section-hint">
+    <div {...stylex.props(page.section)}>
+      <h2 {...stylex.props(page.sectionTitle)}>
+        Model catalog <span {...stylex.props(page.count)}>{data?.available?.length ?? 0}</span>
+        <span {...stylex.props(page.sectionHint)}>
           {customCount} custom · default: <code>{data?.default ?? '—'}</code>
         </span>
-        <span className="settings-section-actions">
+        <span {...stylex.props(settings.sectionActions)}>
           <button
-            className="artifact-btn"
+            {...stylex.props(btn.base)}
             title="Diff the catalog against what each provider offers"
             onClick={() => setSyncOpen(true)}
           >
             <SyncIcon size={14} /> Sync
           </button>
-          <button className="artifact-btn primary" onClick={() => setEditor({mode: 'add'})}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={() => setEditor({mode: 'add'})}>
             <PlusIcon size={14} /> Add model
           </button>
         </span>
       </h2>
 
-      <div className="settings-filter-row">
-        <div className="settings-search">
+      <div {...stylex.props(settings.filterRow)}>
+        <div {...stylex.props(settings.search)}>
           <SearchIcon size={14} />
           <input
             placeholder="Search models…"
@@ -127,7 +131,7 @@ export function ModelsTab() {
           />
         </div>
         <select
-          className="auto-form-select settings-filter-select"
+          {...stylex.props(field.select, settings.filterSelect)}
           value={providerFilter}
           onChange={(e) => setProviderFilter(e.target.value)}
         >
@@ -141,30 +145,28 @@ export function ModelsTab() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="memory-empty">No models match the filter.</div>
+        <div {...stylex.props(page.empty)}>No models match the filter.</div>
       ) : (
-        <ul className="settings-model-grid">
+        <ul {...stylex.props(models.grid)}>
           {filtered.map((m) => {
             const isDefault = m.id === data?.default;
             return (
-              <li key={m.id} className="skill-card settings-model-card">
-                <div className="skill-card-head">
-                  <span className="settings-badge">{m.provider}</span>
-                  {isDefault && (
-                    <span className="settings-badge settings-badge--live">default</span>
-                  )}
-                  {!m.builtin && <span className="settings-badge">custom</span>}
+              <li key={m.id} {...stylex.props(skill.card, models.card)}>
+                <div {...stylex.props(skill.head)}>
+                  <span {...stylex.props(badge.base)}>{m.provider}</span>
+                  {isDefault && <span {...stylex.props(badge.base, badge.live)}>default</span>}
+                  {!m.builtin && <span {...stylex.props(badge.base)}>custom</span>}
                   {!m.builtin && (
-                    <div className="skill-card-controls">
+                    <div {...stylex.props(skill.controls)}>
                       <button
-                        className="icon-btn"
+                        {...stylex.props(iconBtn.base)}
                         title="Edit model"
                         onClick={() => setEditor({mode: 'edit', model: m})}
                       >
                         <EditIcon size={14} />
                       </button>
                       <button
-                        className="icon-btn icon-btn--danger"
+                        {...stylex.props(iconBtn.base, iconBtn.danger)}
                         title="Remove model"
                         onClick={() => setDeleteTarget(m)}
                       >
@@ -173,24 +175,24 @@ export function ModelsTab() {
                     </div>
                   )}
                 </div>
-                <span className="skill-card-name settings-model-id">{m.id}</span>
-                <p className="skill-card-desc">
+                <span {...stylex.props(skill.name, models.id)}>{m.id}</span>
+                <p {...stylex.props(skill.desc)}>
                   {m.label}
                   {m.contextWindow ? (
-                    <span className="settings-model-window">
+                    <span {...stylex.props(models.window)}>
                       {' · '}
                       {m.contextWindow.toLocaleString()} ctx
                     </span>
                   ) : null}
                 </p>
-                <div className="settings-model-actions">
+                <div {...stylex.props(models.actions)}>
                   {isDefault ? (
-                    <span className="auto-form-hint">
+                    <span {...stylex.props(field.hint)}>
                       <CheckIcon size={12} /> Used when no model is specified
                     </span>
                   ) : (
                     <button
-                      className="artifact-btn small"
+                      {...stylex.props(btn.base, btn.small)}
                       disabled={defaultMut.pending}
                       onClick={() => void defaultMut.run(m.id)}
                     >
@@ -296,10 +298,10 @@ function ModelModal({
       onSubmit={() => canSubmit && onSubmit({id: id.trim(), label: label.trim(), provider})}
       onClose={onClose}
     >
-      <div className="auto-form-group">
-        <span className="auto-form-label">Model ID</span>
+      <div {...stylex.props(field.group)}>
+        <span {...stylex.props(field.label)}>Model ID</span>
         <input
-          className="auto-form-input settings-mono"
+          {...stylex.props(field.input, settings.mono)}
           placeholder="google_genai:gemini-3.5-flash"
           value={id}
           onChange={(e) => setId(e.target.value)}
@@ -307,25 +309,25 @@ function ModelModal({
           spellCheck={false}
           autoFocus={!editing}
         />
-        <span className="auto-form-hint">
+        <span {...stylex.props(field.hint)}>
           <code>provider:model_name</code> — provider must be one of {providers.join(', ')}.
         </span>
       </div>
-      <div className="auto-form-group">
-        <span className="auto-form-label">Label</span>
+      <div {...stylex.props(field.group)}>
+        <span {...stylex.props(field.label)}>Label</span>
         <input
-          className="auto-form-input"
+          {...stylex.props(field.input)}
           placeholder="Gemini 3.5 Flash (Google)"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           autoFocus={editing}
         />
-        <span className="auto-form-hint">Shown in the model dropdowns.</span>
+        <span {...stylex.props(field.hint)}>Shown in the model dropdowns.</span>
       </div>
-      <div className="auto-form-group">
-        <span className="auto-form-label">Provider</span>
+      <div {...stylex.props(field.group)}>
+        <span {...stylex.props(field.label)}>Provider</span>
         <select
-          className="auto-form-select"
+          {...stylex.props(field.select)}
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
         >
@@ -336,7 +338,7 @@ function ModelModal({
             </option>
           ))}
         </select>
-        <span className="auto-form-hint">
+        <span {...stylex.props(field.hint)}>
           Which backend builds the client. Override only when the ID prefix isn't the provider.
         </span>
       </div>

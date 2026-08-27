@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -8,6 +9,8 @@ import {maintenanceQuery} from '../../relay/MaintenanceQuery';
 import {commitPruneCheckpoints} from '../../relay/PruneCheckpointsMutation';
 import {ConfirmDialog} from '../ConfirmDialog';
 import {useQueryRetry} from '../QueryBoundary';
+import {badge, btn, codeField, page} from '../ui';
+import {maint, tools as toolStyles} from './settings.styles';
 
 function bytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -28,7 +31,7 @@ export function MaintenanceTab() {
   );
 
   return (
-    <div className="memory-section">
+    <div {...stylex.props(page.section)}>
       <CheckpointCard stats={data.checkpointStats} onDone={() => setRefetch((n) => n + 1)} />
       <VoiceCard status={data.voiceStatus} onDone={() => setRefetch((n) => n + 1)} />
     </div>
@@ -67,10 +70,10 @@ function CheckpointCard({
   }
 
   return (
-    <section className="tool-kind">
-      <h3 className="tool-kind-title">
+    <section {...stylex.props(toolStyles.kind)}>
+      <h3 {...stylex.props(toolStyles.kindTitle)}>
         Checkpoint retention
-        <span className="tool-kind-blurb">
+        <span {...stylex.props(toolStyles.kindBlurb)}>
           LangGraph re-serializes the whole graph state on every super-step and never reclaims the
           superseded snapshots, so <code>checkpoints.db</code> grows with run length. This is the
           same online sweep the hourly job runs.
@@ -78,12 +81,12 @@ function CheckpointCard({
       </h3>
 
       {!stats.exists ? (
-        <div className="memory-empty">
+        <div {...stylex.props(page.empty)}>
           No checkpoint database at <code>{stats.dbPath}</code> yet.
         </div>
       ) : (
         <>
-          <dl className="maint-stats">
+          <dl {...stylex.props(maint.stats)}>
             <div>
               <dt>Database</dt>
               <dd>{bytes(stats.sizeBytes)}</dd>
@@ -96,37 +99,39 @@ function CheckpointCard({
               <dt>Checkpoints</dt>
               <dd>
                 {stats.checkpoints}
-                <span className="maint-sub">{stats.subgraphCheckpoints} subgraph</span>
+                <span {...stylex.props(maint.sub)}>{stats.subgraphCheckpoints} subgraph</span>
               </dd>
             </div>
             <div>
               <dt>Prunable now</dt>
               <dd>
                 {prunable}
-                <span className="maint-sub">{bytes(stats.reclaimableBytes)} reclaimable</span>
+                <span {...stylex.props(maint.sub)}>
+                  {bytes(stats.reclaimableBytes)} reclaimable
+                </span>
               </dd>
             </div>
           </dl>
-          <p className="tool-row-desc">
+          <p {...stylex.props(toolStyles.rowDesc)}>
             {/* A low prunable count against a large total is the two guards working, not a
                 bug — worth saying, or the number reads as a disappointment. */}
             Checkpoints younger than an hour, and every thread with a run in flight (
-            {stats.activeThreads} right now), are skipped — a row that survives this sweep is
-            picked up by the next one. <code>{stats.dbPath}</code>
+            {stats.activeThreads} right now), are skipped — a row that survives this sweep is picked
+            up by the next one. <code>{stats.dbPath}</code>
           </p>
-          <div className="config-actions">
-            <button className="artifact-btn" disabled={busy} onClick={() => void run(true)}>
+          <div {...stylex.props(codeField.actions)}>
+            <button {...stylex.props(btn.base)} disabled={busy} onClick={() => void run(true)}>
               Dry run
             </button>
             <button
-              className="artifact-btn primary"
+              {...stylex.props(btn.base, btn.primary)}
               disabled={busy || prunable === 0}
               onClick={() => setConfirm(true)}
             >
               Prune {prunable > 0 ? prunable : ''}
             </button>
           </div>
-          {result && <p className="maint-result">{result}</p>}
+          {result && <p {...stylex.props(maint.result)}>{result}</p>}
         </>
       )}
 
@@ -171,20 +176,20 @@ function VoiceCard({
   }
 
   return (
-    <section className="tool-kind">
-      <h3 className="tool-kind-title">
+    <section {...stylex.props(toolStyles.kind)}>
+      <h3 {...stylex.props(toolStyles.kindTitle)}>
         Text-to-speech voice
-        <span className="tool-kind-blurb">
+        <span {...stylex.props(toolStyles.kindBlurb)}>
           The Piper voice model behind <code>POST /tts</code>, which 404s until both files are on
           disk. Roughly 60 MB, fetched from the rhasspy/piper-voices repo.
         </span>
       </h3>
 
       {status.error ? (
-        <div className="memory-error">{status.error}</div>
+        <div {...stylex.props(page.error)}>{status.error}</div>
       ) : (
         <>
-          <dl className="maint-stats">
+          <dl {...stylex.props(maint.stats)}>
             <div>
               <dt>Voice</dt>
               <dd>{status.voice}</dd>
@@ -194,31 +199,31 @@ function VoiceCard({
               <dd>{status.ready ? 'Ready' : 'Not downloaded'}</dd>
             </div>
           </dl>
-          <ul className="tool-list">
+          <ul {...stylex.props(toolStyles.list)}>
             {status.files.map((f) => (
-              <li key={f.name} className={`tool-row${f.exists ? '' : ' tool-row--off'}`}>
-                <div className="tool-row-main">
-                  <div className="tool-row-head">
-                    <span className="tool-row-name">{f.name}</span>
-                    <span className="settings-badge">
+              <li key={f.name} {...stylex.props(toolStyles.row, !f.exists && toolStyles.rowOff)}>
+                <div {...stylex.props(toolStyles.rowMain)}>
+                  <div {...stylex.props(toolStyles.rowHead)}>
+                    <span {...stylex.props(toolStyles.rowName)}>{f.name}</span>
+                    <span {...stylex.props(badge.base)}>
                       {f.exists ? bytes(f.sizeBytes) : 'missing'}
                     </span>
                   </div>
-                  <p className="tool-row-desc">{f.path}</p>
+                  <p {...stylex.props(toolStyles.rowDesc)}>{f.path}</p>
                 </div>
               </li>
             ))}
           </ul>
-          <div className="config-actions">
+          <div {...stylex.props(codeField.actions)}>
             <button
-              className="artifact-btn primary"
+              {...stylex.props(btn.base, btn.primary)}
               disabled={busy || status.ready}
               onClick={() => void download(false)}
             >
               {busy ? 'Downloading…' : 'Download voice'}
             </button>
             <button
-              className="artifact-btn"
+              {...stylex.props(btn.base)}
               disabled={busy}
               title="Re-fetch both files even if they exist — the fix for a truncated download."
               onClick={() => void download(true)}
@@ -226,7 +231,7 @@ function VoiceCard({
               Re-download
             </button>
           </div>
-          <p className="config-meta">
+          <p {...stylex.props(codeField.meta)}>
             Change which voice by setting <code>PIPER_VOICE</code>, then re-download.
           </p>
         </>

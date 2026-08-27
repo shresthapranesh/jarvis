@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -7,10 +8,13 @@ import {useToast} from '../../lib/toast';
 import {mcpServersQuery, refreshMcpServers} from '../../relay/McpServersQuery';
 import {ConfirmDialog} from '../ConfirmDialog';
 import {EditIcon, PlusIcon, TrashIcon} from '../icons';
+import {memory, skill} from '../memory.styles';
 import {useQueryRetry} from '../QueryBoundary';
+import {badge, btn, iconBtn, page} from '../ui';
 import type {McpFormState} from './mcpConfig';
 import {formToConfigJson, prettyJson} from './mcpConfig';
 import {McpServerModal} from './McpServerModal';
+import {settings} from './settings.styles';
 
 export function McpTab() {
   const toast = useToast();
@@ -99,40 +103,40 @@ export function McpTab() {
   );
 
   return (
-    <div className="memory-section">
-      <h2 className="memory-section-title">
-        Servers <span className="memory-count">{servers.length}</span>
-        <span className="memory-section-hint">
+    <div {...stylex.props(page.section)}>
+      <h2 {...stylex.props(page.sectionTitle)}>
+        Servers <span {...stylex.props(page.count)}>{servers.length}</span>
+        <span {...stylex.props(page.sectionHint)}>
           {totalTools} tools loaded · {boundTools} in every prompt
         </span>
-        <span className="settings-section-actions">
+        <span {...stylex.props(settings.sectionActions)}>
           <button
-            className="artifact-btn"
+            {...stylex.props(btn.base)}
             onClick={() => void reloadMut.run()}
             disabled={reloadMut.pending}
             title="Reload MCP connections"
           >
             {reloadMut.pending ? 'Reloading…' : 'Reload'}
           </button>
-          <button className="artifact-btn primary" onClick={() => setShowAdd(true)}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={() => setShowAdd(true)}>
             <PlusIcon size={14} /> Add server
           </button>
         </span>
       </h2>
 
       {servers.length === 0 ? (
-        <div className="memory-empty">
+        <div {...stylex.props(page.empty)}>
           <p>No MCP servers configured.</p>
           <p>
             MCP servers extend the agent with external tools — start from a preset or add your own
             stdio/HTTP server.
           </p>
-          <button className="artifact-btn primary" onClick={() => setShowAdd(true)}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={() => setShowAdd(true)}>
             <PlusIcon size={14} /> Add your first server
           </button>
         </div>
       ) : (
-        <ul className="memory-list">
+        <ul {...stylex.props(page.list)}>
           {servers.map((s: any) => (
             <McpServerCard
               key={s.name}
@@ -207,21 +211,24 @@ function McpServerCard({
   const lazy = s.loadMode === 'lazy';
 
   return (
-    <li className="skill-card">
-      <div className="skill-card-head">
-        <span className="skill-card-name">{s.name}</span>
+    <li {...stylex.props(skill.card)}>
+      <div {...stylex.props(skill.head)}>
+        <span {...stylex.props(skill.name)}>{s.name}</span>
         <span
-          className={`settings-badge settings-badge--${s.transport === 'stdio' ? 'stdio' : s.transport === 'http' ? 'http' : 'sse'}`}
+          {...stylex.props(
+            badge.base,
+            s.transport === 'stdio' ? badge.stdio : s.transport === 'http' ? badge.http : badge.sse,
+          )}
         >
           {s.transport}
         </span>
         {s.toolCount > 0 ? (
-          <span className="settings-badge settings-badge--live">{s.toolCount} tools</span>
+          <span {...stylex.props(badge.base, badge.live)}>{s.toolCount} tools</span>
         ) : (
-          <span className="settings-badge">not loaded</span>
+          <span {...stylex.props(badge.base)}>not loaded</span>
         )}
         <span
-          className="settings-badge"
+          {...stylex.props(badge.base)}
           title={
             lazy
               ? 'Tool schemas stay out of the prompt. The agent discovers and calls them on demand via jarvis.mcp_call.'
@@ -230,9 +237,9 @@ function McpServerCard({
         >
           {lazy ? 'on demand' : 'always loaded'}
         </span>
-        <div className="skill-card-controls">
+        <div {...stylex.props(skill.controls)}>
           <button
-            className="artifact-btn small"
+            {...stylex.props(btn.base, btn.small)}
             disabled={loadModePending}
             title={
               lazy ? 'Bind these tools to the agent' : 'Keep these tool schemas out of the prompt'
@@ -242,14 +249,14 @@ function McpServerCard({
             {lazy ? 'Always load' : 'Load on demand'}
           </button>
           <button
-            className="icon-btn"
+            {...stylex.props(iconBtn.base)}
             title="Edit server"
             onClick={() => onEdit({name: s.name, config: s.config})}
           >
             <EditIcon size={14} />
           </button>
           <button
-            className="icon-btn icon-btn--danger"
+            {...stylex.props(iconBtn.base, iconBtn.danger)}
             title="Remove server"
             onClick={() => onDelete(s.name)}
           >
@@ -257,25 +264,25 @@ function McpServerCard({
           </button>
         </div>
       </div>
-      <p className="skill-card-desc settings-mono">{s.command || s.url || 'custom config'}</p>
-      <details className="skill-card-body">
+      <p {...stylex.props(skill.desc, settings.mono)}>{s.command || s.url || 'custom config'}</p>
+      <details {...stylex.props(skill.body)}>
         <summary>Configuration{serverTools.length > 0 ? ' & tools' : ''}</summary>
         {serverTools.length > 0 && (
-          <div className="settings-tool-chips">
+          <div {...stylex.props(settings.toolChips)}>
             {serverTools.map((t) => (
-              <span key={t} className="settings-badge">
+              <span key={t} {...stylex.props(badge.base)}>
                 {t}
               </span>
             ))}
           </div>
         )}
         {s.toolCount === 0 && (
-          <p className="memory-section-empty">
+          <p {...stylex.props(memory.sectionEmpty)}>
             Server not loaded — tools appear after a successful connection. Try Reload after adding.
           </p>
         )}
         {lazy && s.toolCount > 0 && (
-          <p className="memory-section-empty">
+          <p {...stylex.props(memory.sectionEmpty)}>
             Loaded but not bound: these schemas cost nothing per LLM call. The agent sees the server
             name and tool list, and calls one with{' '}
             <code>
@@ -285,7 +292,7 @@ function McpServerCard({
           </p>
         )}
         <pre>{prettyJson(s.config)}</pre>
-        <button className="artifact-btn small" onClick={() => onCopyConfig(s.config)}>
+        <button {...stylex.props(btn.base, btn.small)} onClick={() => onCopyConfig(s.config)}>
           Copy JSON
         </button>
       </details>

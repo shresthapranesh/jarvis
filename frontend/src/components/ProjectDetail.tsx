@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {Link, useNavigate} from '@tanstack/react-router';
 import {useEffect, useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
@@ -11,16 +12,24 @@ import {uploadStagedAttachment} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {commitDeleteProject} from '../relay/DeleteProjectMutation';
 import {decodeGlobalId} from '../relay/globalId';
-import {mapProjectDetail, projectQuery, projectQueryVars, refreshProject} from '../relay/ProjectQuery';
+import {
+  mapProjectDetail,
+  projectQuery,
+  projectQueryVars,
+  refreshProject,
+} from '../relay/ProjectQuery';
 import {refreshProjects} from '../relay/ProjectsQuery';
 import {commitSetConversationProject} from '../relay/SetConversationProjectMutation';
 import {commitStartTask} from '../relay/StartTaskMutation';
 import {commitUpdateProject} from '../relay/UpdateProjectMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
-import {useQueryRetry} from './QueryBoundary';
 import {FolderIcon, PlusIcon, TrashIcon, XIcon} from './icons';
 import {InputBox} from './InputBox';
+import {item} from './memory.styles';
+import {detail, projects} from './project.styles';
+import {useQueryRetry} from './QueryBoundary';
+import {btn, field, iconBtn, page} from './ui';
 
 interface Props {
   id: string;
@@ -29,11 +38,10 @@ interface Props {
 export function ProjectDetail({id}: Props) {
   const navigate = useNavigate();
 
-  const data = useLazyLoadQuery<TProjectQuery>(
-    projectQuery,
-    projectQueryVars(id),
-    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
-  );
+  const data = useLazyLoadQuery<TProjectQuery>(projectQuery, projectQueryVars(id), {
+    fetchPolicy: 'store-and-network',
+    fetchKey: useQueryRetry(),
+  });
   const project = useMemo(
     () => (data.project ? mapProjectDetail(data.project) : null),
     [data.project],
@@ -120,8 +128,8 @@ export function ProjectDetail({id}: Props) {
 
   if (!project) {
     return (
-      <div className="page memory-page">
-        <div className="memory-empty">
+      <div {...stylex.props(page.scroll)}>
+        <div {...stylex.props(page.empty)}>
           Project not found.
           <p>
             <Link to="/projects">Back to projects</Link>
@@ -135,20 +143,23 @@ export function ProjectDetail({id}: Props) {
   const memoryDirty = memory !== project.memory;
 
   return (
-    <div className="page memory-page project-detail">
-      <header className="memory-header">
-        <div>
-          <nav className="project-breadcrumb">
-            <Link to="/projects">Projects</Link> /
+    <div {...stylex.props(page.scroll, detail.page)}>
+      <header {...stylex.props(page.header)}>
+        <div {...stylex.props(page.headerMain)}>
+          <nav {...stylex.props(detail.breadcrumb)}>
+            <Link to="/projects" {...stylex.props(detail.breadcrumbLink)}>
+              Projects
+            </Link>{' '}
+            /
           </nav>
-          <h1 className="project-detail-title">
-            <FolderIcon size={18} /> {project.name}
+          <h1 {...stylex.props(page.title, detail.title)}>
+            <FolderIcon size={18} style={projects.icon} /> {project.name}
           </h1>
-          {project.description && <p className="memory-subtitle">{project.description}</p>}
+          {project.description && <p {...stylex.props(page.subtitle)}>{project.description}</p>}
         </div>
-        <div className="memory-header-actions">
+        <div {...stylex.props(page.headerActions)}>
           <button
-            className="artifact-btn"
+            {...stylex.props(btn.base)}
             onClick={() => {
               setMetaDraft({name: project.name, description: project.description ?? ''});
               setEditMeta(true);
@@ -157,7 +168,7 @@ export function ProjectDetail({id}: Props) {
             Edit
           </button>
           <button
-            className="artifact-btn"
+            {...stylex.props(btn.base)}
             title="Delete project (conversations are kept)"
             onClick={() => setConfirmDelete(true)}
           >
@@ -166,26 +177,26 @@ export function ProjectDetail({id}: Props) {
         </div>
       </header>
 
-      {actionError && <div className="memory-error">{actionError}</div>}
+      {actionError && <div {...stylex.props(page.error)}>{actionError}</div>}
 
-      <div className="project-detail-grid">
-        <section className="memory-section">
-          <h2 className="memory-section-title">Instructions</h2>
-          <p className="project-section-hint">
+      <div {...stylex.props(detail.grid)}>
+        <section {...stylex.props(page.section)}>
+          <h2 {...stylex.props(page.sectionTitle)}>Instructions</h2>
+          <p {...stylex.props(detail.sectionHint)}>
             Injected into every conversation in this project. Yours to edit — the agent reads but
             never changes them.
           </p>
           <textarea
-            className="auto-form-textarea project-textarea"
+            {...stylex.props(field.textarea, detail.textarea)}
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
             rows={8}
             spellCheck={false}
             placeholder="Guidance the agent should follow in every conversation of this project…"
           />
-          <div className="project-section-actions">
+          <div {...stylex.props(detail.sectionActions)}>
             <button
-              className="artifact-btn primary"
+              {...stylex.props(btn.base, btn.primary)}
               disabled={!instructionsDirty || updateAction.pending}
               onClick={() => void updateAction.run({instructions})}
             >
@@ -194,23 +205,23 @@ export function ProjectDetail({id}: Props) {
           </div>
         </section>
 
-        <section className="memory-section">
-          <h2 className="memory-section-title">Project memory</h2>
-          <p className="project-section-hint">
+        <section {...stylex.props(page.section)}>
+          <h2 {...stylex.props(page.sectionTitle)}>Project memory</h2>
+          <p {...stylex.props(detail.sectionHint)}>
             The agent's shared notepad across this project's conversations — it appends and
             reorganizes this itself via <code>project_memory</code>. You can prune it here.
           </p>
           <textarea
-            className="auto-form-textarea project-textarea"
+            {...stylex.props(field.textarea, detail.textarea)}
             value={memory}
             onChange={(e) => setMemory(e.target.value)}
             rows={8}
             spellCheck={false}
             placeholder="Nothing saved yet — the agent will write here as it learns."
           />
-          <div className="project-section-actions">
+          <div {...stylex.props(detail.sectionActions)}>
             <button
-              className="artifact-btn primary"
+              {...stylex.props(btn.base, btn.primary)}
               disabled={!memoryDirty || updateAction.pending}
               onClick={() => void updateAction.run({memory})}
             >
@@ -220,33 +231,35 @@ export function ProjectDetail({id}: Props) {
         </section>
       </div>
 
-      <section className="memory-section">
-        <h2 className="memory-section-title">
-          Conversations <span className="memory-count">{project.conversations.length}</span>
+      <section {...stylex.props(page.section)}>
+        <h2 {...stylex.props(page.sectionTitle)}>
+          Conversations <span {...stylex.props(page.count)}>{project.conversations.length}</span>
           <button
-            className="artifact-btn project-add-existing-btn"
+            {...stylex.props(btn.base, detail.addExistingBtn)}
             onClick={() => setShowAddExisting(true)}
           >
             <PlusIcon size={13} /> Add existing
           </button>
         </h2>
         {project.conversations.length === 0 ? (
-          <div className="memory-empty">
+          <div {...stylex.props(page.empty)}>
             <p>No conversations yet — start one below, or add an existing one.</p>
           </div>
         ) : (
-          <ul className="project-conv-list">
+          <ul {...stylex.props(detail.convList)}>
             {project.conversations.map((c) => (
-              <li key={c.id} className="project-conv-row">
-                <Link to="/c/$id" params={{id: c.id}} className="project-conv-link">
-                  <span className="project-conv-title">{c.title || 'Untitled conversation'}</span>
-                  <span className="memory-item-meta">
+              <li key={c.id} {...stylex.props(detail.convRow)}>
+                <Link to="/c/$id" params={{id: c.id}} {...stylex.props(detail.convLink)}>
+                  <span {...stylex.props(detail.convTitle)}>
+                    {c.title || 'Untitled conversation'}
+                  </span>
+                  <span {...stylex.props(item.meta)}>
                     {c.message_count} message{c.message_count === 1 ? '' : 's'} ·{' '}
                     {formatRelativeTime(c.created_at)}
                   </span>
                 </Link>
                 <button
-                  className="icon-btn"
+                  {...stylex.props(iconBtn.base)}
                   title="Remove from project (keeps the conversation)"
                   disabled={membershipAction.pending}
                   onClick={() => void membershipAction.run(c.id, false)}
@@ -259,8 +272,8 @@ export function ProjectDetail({id}: Props) {
         )}
       </section>
 
-      <footer className="page-footer project-detail-footer">
-        <p className="project-newchat-hint">Start a new conversation in this project</p>
+      <footer {...stylex.props(detail.footer)}>
+        <p {...stylex.props(detail.newChatHint)}>Start a new conversation in this project</p>
         <InputBox onSubmit={handleNewChat} disabled={chatBusy} />
       </footer>
 
@@ -282,20 +295,20 @@ export function ProjectDetail({id}: Props) {
           setActionError(null);
         }}
       >
-        <div className="auto-form-group">
-          <span className="auto-form-label">Name</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Name</span>
           <input
-            className="auto-form-input"
+            {...stylex.props(field.input)}
             value={metaDraft.name}
             onChange={(e) => setMetaDraft({...metaDraft, name: e.target.value})}
             autoFocus
             spellCheck={false}
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Description</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Description</span>
           <input
-            className="auto-form-input"
+            {...stylex.props(field.input)}
             value={metaDraft.description}
             onChange={(e) => setMetaDraft({...metaDraft, description: e.target.value})}
           />
@@ -360,14 +373,16 @@ function CandidatePicker({busy, onAdd}: {busy: boolean; onAdd: (convId: string) 
   );
 
   if (candidates.length === 0) {
-    return <div className="memory-empty">Every conversation already belongs to a project.</div>;
+    return (
+      <div {...stylex.props(page.empty)}>Every conversation already belongs to a project.</div>
+    );
   }
   return (
-    <ul className="project-candidate-list">
+    <ul {...stylex.props(detail.convList)}>
       {candidates.map((c) => (
-        <li key={c.id} className="project-conv-row">
-          <span className="project-conv-title">{c.title || 'Untitled conversation'}</span>
-          <button className="artifact-btn" disabled={busy} onClick={() => onAdd(c.id)}>
+        <li key={c.id} {...stylex.props(detail.convRow)}>
+          <span {...stylex.props(detail.convTitle)}>{c.title || 'Untitled conversation'}</span>
+          <button {...stylex.props(btn.base)} disabled={busy} onClick={() => onAdd(c.id)}>
             <PlusIcon size={13} /> Add
           </button>
         </li>

@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useEffect, useRef, useState} from 'react';
 
 import {useIsMobile} from '../hooks/useIsMobile';
@@ -6,6 +7,8 @@ import {useWhisperSTT} from '../hooks/useWhisperSTT';
 import type {MediaAttachment, PersistedDocument} from '../lib/types';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
+import {attachment, composer, control} from './InputBox.styles';
+import {stream} from './ui';
 
 interface Props {
   onSubmit: (query: string, model: string, attachments: MediaAttachment[]) => void;
@@ -19,6 +22,12 @@ interface Props {
   // provided, an eye-off button lets the user start the conversation ephemeral.
   incognito?: boolean;
   onToggleIncognito?: () => void;
+  /**
+   * Drop the 760px measure. The dispatch screen already constrains the column
+   * around it, so the composer should fill that column rather than sit narrower
+   * inside it.
+   */
+  fullWidth?: boolean;
 }
 
 function fileTypeCategory(mimeType: string): 'image' | 'audio' | 'video' | 'document' {
@@ -38,6 +47,7 @@ export function InputBox({
   onDeletePersistedDocument,
   incognito = false,
   onToggleIncognito,
+  fullWidth = false,
 }: Props) {
   const {data: catalog} = useModels();
   const isMobile = useIsMobile();
@@ -46,15 +56,13 @@ export function InputBox({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const {listening, interimText, startListening, stopListening} = useWhisperSTT(
-    (text) => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.value = el.value ? el.value + ' ' + text : text;
-      handleInput();
-      el.focus();
-    },
-  );
+  const {listening, interimText, startListening, stopListening} = useWhisperSTT((text) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.value = el.value ? el.value + ' ' + text : text;
+    handleInput();
+    el.focus();
+  });
 
   // Seed the model: prefer the per-conversation `initialModel`, then fall back
   // to the catalog default. Re-runs when the user navigates between
@@ -130,25 +138,44 @@ export function InputBox({
   }
 
   return (
-    <div className="input-wrap">
-      <div className={`input-card${disabled ? ' input-card--disabled' : ''}${incognito ? ' input-card--incognito' : ''}`}>
+    <div {...stylex.props(composer.wrap, fullWidth && composer.wrapFull)}>
+      <div
+        {...stylex.props(
+          composer.card,
+          disabled && composer.cardDisabled,
+          incognito && composer.cardIncognito,
+        )}
+      >
         {(attachments.length > 0 || (persistedDocuments && persistedDocuments.length > 0)) && (
-          <div className="attachment-strip">
+          <div {...stylex.props(attachment.strip)}>
             {persistedDocuments?.map((doc) => (
-              <div key={`saved-${doc.id}`} className="attachment-thumb attachment-thumb--saved" title={`${doc.filename} (saved to conversation)`}>
-                <div className="attachment-thumb-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <div
+                key={`saved-${doc.id}`}
+                {...stylex.props(attachment.thumb)}
+                title={`${doc.filename} (saved to conversation)`}
+              >
+                <div {...stylex.props(attachment.icon, attachment.iconSaved)}>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                     <polyline points="14 2 14 8 20 8" />
                     <line x1="16" y1="13" x2="8" y2="13" />
                     <line x1="16" y1="17" x2="8" y2="17" />
                     <polyline points="10 9 9 9 8 9" />
                   </svg>
-                  <span className="attachment-thumb-name">{doc.filename}</span>
+                  <span {...stylex.props(attachment.name)}>{doc.filename}</span>
                 </div>
                 {onDeletePersistedDocument && (
                   <button
-                    className="attachment-remove"
+                    {...stylex.props(attachment.remove)}
                     onClick={() => onDeletePersistedDocument(doc.id)}
                     title="Remove from conversation"
                     type="button"
@@ -159,11 +186,11 @@ export function InputBox({
               </div>
             ))}
             {attachments.map((att) => (
-              <div key={att.id} className="attachment-thumb">
+              <div key={att.id} {...stylex.props(attachment.thumb)}>
                 {att.type === 'image' ? (
-                  <img src={att.dataUrl} alt={att.name} />
+                  <img src={att.dataUrl} alt={att.name} {...stylex.props(attachment.image)} />
                 ) : (
-                  <div className="attachment-thumb-icon">
+                  <div {...stylex.props(attachment.icon)}>
                     {att.type === 'audio' ? (
                       <svg
                         width="18"
@@ -217,11 +244,11 @@ export function InputBox({
                         <line x1="17" y1="7" x2="22" y2="7" />
                       </svg>
                     )}
-                    <span className="attachment-thumb-name">{att.name}</span>
+                    <span {...stylex.props(attachment.name)}>{att.name}</span>
                   </div>
                 )}
                 <button
-                  className="attachment-remove"
+                  {...stylex.props(attachment.remove)}
                   onClick={() => removeAttachment(att.id)}
                   title="Remove"
                   type="button"
@@ -238,7 +265,8 @@ export function InputBox({
             textareaRef.current = el;
             el?.focus();
           }}
-          className="input-textarea"
+          {...stylex.props(composer.textarea)}
+          data-input-textarea=""
           rows={1}
           placeholder={incognito ? 'Ask anything… (incognito — not saved)' : 'Ask anything…'}
           disabled={disabled}
@@ -246,10 +274,10 @@ export function InputBox({
           onKeyDown={handleKeyDown}
         />
 
-        <div className="input-footer">
+        <div {...stylex.props(composer.footer)}>
           <button
             type="button"
-            className="attach-btn"
+            {...stylex.props(control.icon)}
             title="Attach file"
             disabled={disabled}
             onClick={() => fileInputRef.current?.click()}
@@ -271,13 +299,26 @@ export function InputBox({
           {onToggleIncognito && (
             <button
               type="button"
-              className={`attach-btn${incognito ? ' attach-btn--active' : ''}`}
-              title={incognito ? 'Incognito on — this chat won’t be saved' : 'Start an incognito chat (not saved)'}
+              {...stylex.props(control.icon, incognito && control.iconActive)}
+              title={
+                incognito
+                  ? 'Incognito on — this chat won’t be saved'
+                  : 'Start an incognito chat (not saved)'
+              }
               aria-pressed={incognito}
               disabled={disabled}
               onClick={onToggleIncognito}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
                 <line x1="1" y1="1" x2="23" y2="23" />
               </svg>
@@ -286,14 +327,14 @@ export function InputBox({
 
           <button
             type="button"
-            className={`attach-btn${listening ? ' mic-btn--active' : ''}`}
+            {...stylex.props(control.icon, listening && control.iconActive)}
             title={listening ? 'Stop recording' : 'Voice input'}
             disabled={disabled || interimText === 'Transcribing…'}
             onClick={() => (listening ? stopListening() : void startListening())}
           >
             {interimText === 'Transcribing…' ? (
               <svg
-                className="mic-spinner"
+                {...stylex.props(stream.spinner)}
                 width="13"
                 height="13"
                 viewBox="0 0 24 24"
@@ -334,7 +375,7 @@ export function InputBox({
           />
 
           <select
-            className="model-input"
+            {...stylex.props(control.model)}
             value={model}
             onChange={(e) => void handleModelChange(e.target.value)}
             disabled={!catalog}
@@ -351,12 +392,12 @@ export function InputBox({
           {/* On touch there is no Enter/Shift+Enter to describe, and at the 16px
               control size the hint pushes the send button off screen. Live
               speech interim text still shows — that one is not keyboard advice. */}
-          <span className="input-hint">
+          <span {...stylex.props(composer.hint)}>
             {interimText || (isMobile ? '' : 'Enter · Shift+Enter for newline')}
           </span>
 
           {onStop && disabled ? (
-            <button className="send-btn stop-btn" onClick={onStop} title="Stop">
+            <button {...stylex.props(control.send, control.sendStop)} onClick={onStop} title="Stop">
               <svg
                 width="14"
                 height="14"
@@ -371,7 +412,7 @@ export function InputBox({
               </svg>
             </button>
           ) : (
-            <button className="send-btn" onClick={send} disabled={disabled} title="Send">
+            <button {...stylex.props(control.send)} onClick={send} disabled={disabled} title="Send">
               <svg
                 width="14"
                 height="14"
