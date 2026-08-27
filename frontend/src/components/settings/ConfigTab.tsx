@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -9,6 +10,9 @@ import {settingsQuery} from '../../relay/SettingsQuery';
 import {ConfirmDialog} from '../ConfirmDialog';
 import {SearchIcon} from '../icons';
 import {useQueryRetry} from '../QueryBoundary';
+import {badge, btn, codeField, field, page} from '../ui';
+// `settings` and `tools` are also local variable names in these tabs.
+import {configNew, settings as sx, tools as toolStyles} from './settings.styles';
 
 type Setting = TSettingsQuery['response']['settings'][number];
 
@@ -45,16 +49,16 @@ export function ConfigTab() {
   }, [settings, filter, showManaged]);
 
   return (
-    <div className="memory-section">
-      <h2 className="memory-section-title">
-        Config <span className="memory-count">{settings.length}</span>
-        <span className="memory-section-hint">
+    <div {...stylex.props(page.section)}>
+      <h2 {...stylex.props(page.sectionTitle)}>
+        Config <span {...stylex.props(page.count)}>{settings.length}</span>
+        <span {...stylex.props(page.sectionHint)}>
           {setCount} set · the same rows as <code>main.py config list</code>
         </span>
       </h2>
 
-      <div className="settings-filter-row">
-        <div className="settings-search">
+      <div {...stylex.props(sx.filterRow)}>
+        <div {...stylex.props(sx.search)}>
           <SearchIcon size={14} />
           <input
             placeholder="Search keys…"
@@ -62,7 +66,7 @@ export function ConfigTab() {
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
-        <label className="tool-toggle" title="Show keys owned by another Settings tab">
+        <label {...stylex.props(toolStyles.toggle)} title="Show keys owned by another Settings tab">
           <input
             type="checkbox"
             checked={showManaged}
@@ -70,7 +74,7 @@ export function ConfigTab() {
           />
           <span>Show managed keys</span>
         </label>
-        <button className="artifact-btn" onClick={() => setAdding(true)}>
+        <button {...stylex.props(btn.base)} onClick={() => setAdding(true)}>
           Add key
         </button>
       </div>
@@ -87,9 +91,9 @@ export function ConfigTab() {
       )}
 
       {filtered.length === 0 ? (
-        <div className="memory-empty">No settings match the filter.</div>
+        <div {...stylex.props(page.empty)}>No settings match the filter.</div>
       ) : (
-        <ul className="tool-list">
+        <ul {...stylex.props(toolStyles.list)}>
           {filtered.map((s) => (
             <SettingRow
               key={s.key}
@@ -149,14 +153,16 @@ function SettingRow({
   const multiline = setting.kind === 'json' || setting.value.length > 80;
 
   return (
-    <li className={`tool-row config-row${setting.isSet ? '' : ' tool-row--off'}`}>
-      <div className="tool-row-main">
-        <div className="tool-row-head">
-          <span className="tool-row-name">{setting.label}</span>
-          <code className="config-key">{setting.key}</code>
+    <li
+      {...stylex.props(toolStyles.row, toolStyles.rowStacked, !setting.isSet && toolStyles.rowOff)}
+    >
+      <div {...stylex.props(toolStyles.rowMain)}>
+        <div {...stylex.props(toolStyles.rowHead)}>
+          <span {...stylex.props(toolStyles.rowName)}>{setting.label}</span>
+          <code {...stylex.props(codeField.key)}>{setting.key}</code>
           {managed && (
             <span
-              className="settings-badge"
+              {...stylex.props(badge.base)}
               title={`Edited on the ${setting.managedBy} tab, which rewrites this key wholesale.`}
             >
               managed by {setting.managedBy}
@@ -164,24 +170,24 @@ function SettingRow({
           )}
           {setting.restartRequired && (
             <span
-              className="settings-badge"
+              {...stylex.props(badge.base)}
               title="Read once at startup — a change here is stored but not applied until the server restarts."
             >
               restart required
             </span>
           )}
-          {!setting.known && <span className="settings-badge">custom key</span>}
-          {!setting.isSet && <span className="settings-badge">unset</span>}
+          {!setting.known && <span {...stylex.props(badge.base)}>custom key</span>}
+          {!setting.isSet && <span {...stylex.props(badge.base)}>unset</span>}
         </div>
-        {setting.description && <p className="tool-row-desc">{setting.description}</p>}
+        {setting.description && <p {...stylex.props(toolStyles.rowDesc)}>{setting.description}</p>}
 
         {managed ? (
-          <pre className="config-readonly">{setting.value || '(unset)'}</pre>
+          <pre {...stylex.props(codeField.readonly)}>{setting.value || '(unset)'}</pre>
         ) : (
-          <div className="config-edit">
+          <div {...stylex.props(codeField.edit)}>
             {setting.kind === 'select' ? (
               <select
-                className="auto-form-select"
+                {...stylex.props(field.select)}
                 value={draft}
                 disabled={busy}
                 onChange={(e) => setDraft(e.target.value)}
@@ -195,7 +201,7 @@ function SettingRow({
               </select>
             ) : multiline ? (
               <textarea
-                className="config-input config-input--multiline"
+                {...stylex.props(codeField.input, codeField.multiline)}
                 rows={4}
                 value={draft}
                 disabled={busy}
@@ -204,35 +210,37 @@ function SettingRow({
               />
             ) : (
               <input
-                className="config-input"
+                {...stylex.props(codeField.input)}
                 value={draft}
                 disabled={busy}
                 placeholder={setting.placeholder}
                 onChange={(e) => setDraft(e.target.value)}
               />
             )}
-            <div className="config-actions">
+            <div {...stylex.props(codeField.actions)}>
               <button
-                className="artifact-btn primary"
+                {...stylex.props(btn.base, btn.primary)}
                 disabled={busy || !dirty}
                 onClick={() => void save()}
               >
                 Save
               </button>
               <button
-                className="artifact-btn"
+                {...stylex.props(btn.base)}
                 disabled={busy || !setting.isSet}
                 title="Delete the row — the key reverts to its built-in default."
                 onClick={() => setConfirmClear(true)}
               >
                 Clear
               </button>
-              {dirty && <span className="config-hint">unsaved</span>}
+              {dirty && <span {...stylex.props(codeField.hint)}>unsaved</span>}
             </div>
           </div>
         )}
         {setting.updatedAt && (
-          <p className="config-meta">Updated {new Date(setting.updatedAt).toLocaleString()}</p>
+          <p {...stylex.props(codeField.meta)}>
+            Updated {new Date(setting.updatedAt).toLocaleString()}
+          </p>
         )}
       </div>
 
@@ -278,29 +286,29 @@ function NewKeyRow({
   }
 
   return (
-    <div className="config-new">
+    <div {...stylex.props(configNew.root)}>
       <input
-        className="config-input"
+        {...stylex.props(codeField.input)}
         placeholder="key (e.g. telegram.allowed_users)"
         value={key}
         disabled={busy}
         onChange={(e) => setKey(e.target.value)}
       />
       <input
-        className="config-input"
+        {...stylex.props(codeField.input)}
         placeholder="value"
         value={value}
         disabled={busy}
         onChange={(e) => setValue(e.target.value)}
       />
       <button
-        className="artifact-btn primary"
+        {...stylex.props(btn.base, btn.primary)}
         disabled={busy || !key.trim()}
         onClick={() => void save()}
       >
         Save
       </button>
-      <button className="artifact-btn" disabled={busy} onClick={onCancel}>
+      <button {...stylex.props(btn.base)} disabled={busy} onClick={onCancel}>
         Cancel
       </button>
     </div>

@@ -1,19 +1,15 @@
-import {ReactFlowProvider} from '@xyflow/react';
+import * as stylex from '@stylexjs/stylex';
 import {useNavigate, useParams} from '@tanstack/react-router';
+import {ReactFlowProvider} from '@xyflow/react';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {WorkflowDetailQuery as TWorkflowDetailQuery} from '../__generated__/WorkflowDetailQuery.graphql';
 import type {WorkflowRunsQuery as TWorkflowRunsQuery} from '../__generated__/WorkflowRunsQuery.graphql';
-import {QueryBoundary, useQueryRetry} from './QueryBoundary';
-import {
-  NotificationsEditor,
-  parseNotifications,
-  serializeNotifications,
-} from './NotificationsEditor';
-import {WorkflowEditor} from './WorkflowEditor';
 import {useWorkflowRunEvents} from '../hooks/useWorkflowRunEvents';
 import {formatRelativeTime} from '../lib/api';
+import {parseDefinition, serializeDefinition} from '../lib/types';
+import type {NotificationConfig, Workflow, WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
 import {commitRunWorkflow} from '../relay/RunWorkflowMutation';
 import {commitUpdateWorkflow} from '../relay/UpdateWorkflowMutation';
 import {
@@ -22,13 +18,26 @@ import {
   workflowDetailVars,
 } from '../relay/WorkflowDetailQuery';
 import {mapWorkflow} from '../relay/WorkflowListQuery';
+import {mapWorkflowRun, workflowRunsQuery, workflowRunsVars} from '../relay/WorkflowRunsQuery';
+import {colors} from '../theme/tokens.stylex';
 import {
-  mapWorkflowRun,
-  workflowRunsQuery,
-  workflowRunsVars,
-} from '../relay/WorkflowRunsQuery';
-import {parseDefinition, serializeDefinition} from '../lib/types';
-import type {NotificationConfig, Workflow, WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
+  NotificationsEditor,
+  parseNotifications,
+  serializeNotifications,
+} from './NotificationsEditor';
+import {QueryBoundary, useQueryRetry} from './QueryBoundary';
+import {errorBubble, field} from './ui';
+import {
+  config,
+  editor,
+  history,
+  modal,
+  runPanel,
+  runStatus,
+  statusStyle,
+  wfBtn,
+} from './workflow.styles';
+import {WorkflowEditor} from './WorkflowEditor';
 
 // ── History panel ─────────────────────────────────────────────────────────────
 
@@ -36,7 +45,7 @@ function HistoryPanel(props: {workflowId: string; onClose: () => void}) {
   return (
     <QueryBoundary
       label="Failed to load run history"
-      fallback={<div className="wf-history-sidebar" />}
+      fallback={<div {...stylex.props(history.sidebar)} />}
     >
       <HistoryPanelInner {...props} />
     </QueryBoundary>
@@ -53,33 +62,32 @@ function HistoryPanelInner({workflowId, onClose}: {workflowId: string; onClose: 
   const runs = useMemo(() => data.workflowRuns.map(mapWorkflowRun), [data.workflowRuns]);
 
   return (
-    <div className="wf-history-sidebar">
-      <div className="wf-history-header">
-        <span className="wf-modal-title">Run History</span>
-        <button className="wf-history-close" onClick={onClose}>
+    <div {...stylex.props(history.sidebar)}>
+      <div {...stylex.props(history.header)}>
+        <span {...stylex.props(modal.title)}>Run History</span>
+        <button {...stylex.props(history.close)} onClick={onClose}>
           ✕
         </button>
       </div>
 
-      <div style={{overflowY: 'auto', flex: 1}}>
-        {runs.length === 0 && <div className="wf-history-empty">No runs yet.</div>}
+      <div {...stylex.props(history.scroll)}>
+        {runs.length === 0 && <div {...stylex.props(history.empty)}>No runs yet.</div>}
 
         {runs.map((run) => {
           const duration = run.finished_at
             ? `${((new Date(run.finished_at).getTime() - new Date(run.started_at).getTime()) / 1000).toFixed(1)}s`
             : null;
-          const statusClass = `run-status--${run.status}`;
-
           let nodeCount = 0;
           try {
             if (run.node_results) nodeCount = (JSON.parse(run.node_results) as unknown[]).length;
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
 
           return (
             <div
               key={run.id}
-              className="wf-history-row"
-              style={{cursor: 'pointer'}}
+              {...stylex.props(history.row, styles.clickable)}
               onClick={() =>
                 void navigate({
                   to: '/workflow/$id/runs/$runId',
@@ -87,16 +95,16 @@ function HistoryPanelInner({workflowId, onClose}: {workflowId: string; onClose: 
                 })
               }
             >
-              <div className="wf-history-row-header">
-                <span className={`run-status ${statusClass}`}>{run.status}</span>
-                <span className="wf-history-time">{formatRelativeTime(run.started_at)}</span>
-                {duration && <span className="wf-history-duration">{duration}</span>}
+              <div {...stylex.props(history.rowHeader)}>
+                <span {...stylex.props(runStatus.base, statusStyle(run.status))}>{run.status}</span>
+                <span {...stylex.props(history.time)}>{formatRelativeTime(run.started_at)}</span>
+                {duration && <span {...stylex.props(history.duration)}>{duration}</span>}
                 {nodeCount > 0 && (
-                  <span className="wf-history-node-count">
+                  <span {...stylex.props(history.nodeCount)}>
                     {nodeCount} node{nodeCount !== 1 ? 's' : ''}
                   </span>
                 )}
-                <span className="wf-history-chevron">›</span>
+                <span {...stylex.props(history.chevron)}>›</span>
               </div>
             </div>
           );
@@ -126,26 +134,26 @@ function RunInputModal({requiredKeys, defaultValues, onSubmit, onCancel}: RunInp
   }
 
   return (
-    <div className="wf-modal-backdrop" onClick={onCancel}>
-      <div className="wf-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="wf-modal-title">Run Inputs</div>
-        <form onSubmit={handleSubmit} style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+    <div {...stylex.props(modal.backdrop)} onClick={onCancel}>
+      <div {...stylex.props(modal.root)} onClick={(e) => e.stopPropagation()}>
+        <div {...stylex.props(modal.title)}>Run Inputs</div>
+        <form onSubmit={handleSubmit} {...stylex.props(styles.stack)}>
           {requiredKeys.map((key) => (
-            <div key={key} className="wf-config-field">
-              <label className="wf-config-label">{key}</label>
+            <div key={key} {...stylex.props(config.field)}>
+              <label {...stylex.props(config.label)}>{key}</label>
               <input
-                className="wf-config-input"
+                {...stylex.props(config.input)}
                 value={values[key] ?? ''}
                 onChange={(e) => setValues((v) => ({...v, [key]: e.target.value}))}
                 autoFocus={key === requiredKeys[0]}
               />
             </div>
           ))}
-          <div className="wf-modal-actions">
-            <button type="button" className="wf-save-btn" onClick={onCancel}>
+          <div {...stylex.props(modal.actions)}>
+            <button type="button" {...stylex.props(wfBtn.save)} onClick={onCancel}>
               Cancel
             </button>
-            <button type="submit" className="wf-run-btn">
+            <button type="submit" {...stylex.props(wfBtn.run)}>
               Run
             </button>
           </div>
@@ -170,38 +178,28 @@ interface NodeStatusRowProps {
 }
 
 function NodeStatusRow({nodeId, status}: NodeStatusRowProps) {
-  const statusClass =
-    status.status === 'running'
-      ? 'run-status--running'
-      : status.status === 'done'
-        ? 'run-status--done'
-        : 'run-status--error';
+  // Anything that is not running or done reads as a failure here, which is
+  // what the original three-way ternary did.
+  const pill = status.status === 'running' || status.status === 'done' ? status.status : 'error';
 
   return (
-    <div className="wf-node-status-row">
-      <div className="wf-node-status-row-header">
-        <span className={`run-status ${statusClass}`}>{status.status}</span>
-        <span style={{color: 'var(--text)', fontSize: '0.75rem'}}>{status.label ?? nodeId}</span>
+    <div {...stylex.props(runPanel.statusRow)}>
+      <div {...stylex.props(runPanel.statusHead)}>
+        <span {...stylex.props(runStatus.base, statusStyle(pill))}>{status.status}</span>
+        <span {...stylex.props(styles.nodeLabel)}>{status.label ?? nodeId}</span>
         {status.verdict && (
           <span
-            style={{
-              fontSize: '0.68rem',
-              background: status.verdict === 'true' ? '#1e3a22' : '#3a1e1e',
-              color: status.verdict === 'true' ? '#6bcf7f' : '#cf6b6b',
-              borderRadius: 4,
-              padding: '1px 6px',
-            }}
+            {...stylex.props(
+              styles.verdict,
+              status.verdict === 'true' ? styles.verdictTrue : styles.verdictFalse,
+            )}
           >
             {status.verdict}
           </span>
         )}
       </div>
-      {status.tokens && <div className="wf-node-tokens">{status.tokens}</div>}
-      {status.error && (
-        <div style={{color: 'var(--error-text)', fontSize: '0.72rem', marginTop: 2}}>
-          {status.error}
-        </div>
-      )}
+      {status.tokens && <div {...stylex.props(runPanel.tokens)}>{status.tokens}</div>}
+      {status.error && <div {...stylex.props(styles.nodeError)}>{status.error}</div>}
     </div>
   );
 }
@@ -241,27 +239,23 @@ function SettingsModal({workflow, onClose, onSaved}: SettingsModalProps) {
   }
 
   return (
-    <div className="wf-modal-backdrop" onClick={onClose}>
-      <div
-        className="wf-modal"
-        onClick={(e) => e.stopPropagation()}
-        style={{minWidth: 480, maxWidth: 640}}
-      >
-        <div className="wf-modal-title">Workflow Settings</div>
-        <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
-          <div className="auto-form-group">
-            <label className="auto-form-label">Name</label>
+    <div {...stylex.props(modal.backdrop)} onClick={onClose}>
+      <div {...stylex.props(modal.root, styles.settingsModal)} onClick={(e) => e.stopPropagation()}>
+        <div {...stylex.props(modal.title)}>Workflow Settings</div>
+        <div {...stylex.props(styles.stack)}>
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>Name</label>
             <input
-              className="auto-form-input"
+              {...stylex.props(field.input)}
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={saving}
             />
           </div>
-          <div className="auto-form-group">
-            <label className="auto-form-label">Description</label>
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>Description</label>
             <input
-              className="auto-form-input"
+              {...stylex.props(field.input)}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               disabled={saving}
@@ -272,19 +266,14 @@ function SettingsModal({workflow, onClose, onSaved}: SettingsModalProps) {
             onChange={setNotifications}
             disabled={saving}
           />
-          {error && <div className="error-bubble">{error}</div>}
-          <div className="wf-modal-actions">
-            <button
-              type="button"
-              className="wf-save-btn"
-              onClick={onClose}
-              disabled={saving}
-            >
+          {error && <div {...stylex.props(errorBubble.base)}>{error}</div>}
+          <div {...stylex.props(modal.actions)}>
+            <button type="button" {...stylex.props(wfBtn.save)} onClick={onClose} disabled={saving}>
               Cancel
             </button>
             <button
               type="button"
-              className="wf-run-btn"
+              {...stylex.props(wfBtn.run)}
               onClick={() => void handleSave()}
               disabled={saving || !name.trim()}
             >
@@ -303,11 +292,10 @@ export default function WorkflowEditorPage() {
   const {id} = useParams({from: '/workflow/$id/'});
   const navigate = useNavigate();
 
-  const data = useLazyLoadQuery<TWorkflowDetailQuery>(
-    workflowDetailQuery,
-    workflowDetailVars(id),
-    {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
-  );
+  const data = useLazyLoadQuery<TWorkflowDetailQuery>(workflowDetailQuery, workflowDetailVars(id), {
+    fetchPolicy: 'store-and-network',
+    fetchKey: useQueryRetry(),
+  });
   const workflow = useMemo(
     () => (data.workflow ? mapWorkflow(data.workflow) : null),
     [data.workflow],
@@ -324,10 +312,12 @@ export default function WorkflowEditorPage() {
   const [pendingEdges, setPendingEdges] = useState<WorkflowRFEdge[]>([]);
   const [pendingInputDefs, setPendingInputDefs] = useState<Record<string, string>>({});
 
-  const {streaming, nodeStatuses, outputs, error: streamError} = useWorkflowRunEvents(
-    activeRunId,
-    id,
-  );
+  const {
+    streaming,
+    nodeStatuses,
+    outputs,
+    error: streamError,
+  } = useWorkflowRunEvents(activeRunId, id);
 
   if (!workflow) {
     return <div style={{padding: 24, color: 'var(--text-dim)'}}>Workflow not found.</div>;
@@ -358,8 +348,8 @@ export default function WorkflowEditorPage() {
       if (n.type === 'start' && n.data.initial_inputs) {
         Object.assign(inputDefs, n.data.initial_inputs as Record<string, string>);
       } else if (n.type === 'agent' && n.data.prompt_template) {
-        const vars = [...(n.data.prompt_template as string).matchAll(/\{\{(.+?)\}\}/g)].map(
-          (m) => m[1].trim(),
+        const vars = [...(n.data.prompt_template as string).matchAll(/\{\{(.+?)\}\}/g)].map((m) =>
+          m[1].trim(),
         );
         for (const key of vars) inputDefs[key] = '';
       }
@@ -388,35 +378,26 @@ export default function WorkflowEditorPage() {
   }
 
   const runStatusLabel = streaming ? 'Running…' : streamError ? 'Error' : 'Done';
-  const runStatusClass = streaming
-    ? 'run-status--running'
-    : streamError
-      ? 'run-status--error'
-      : 'run-status--done';
+  const runStatusKind = streaming ? 'running' : streamError ? 'error' : 'done';
 
   // suppress unused variable warning
   void pendingNodes;
   void pendingEdges;
 
   return (
-    <div className="wf-editor-page">
+    <div {...stylex.props(editor.page)}>
       {/* Top bar */}
-      <div className="wf-editor-topbar">
-        <button className="wf-back-btn" onClick={() => void navigate({to: '/workflow'})}>
+      <div {...stylex.props(editor.topbar)}>
+        <button {...stylex.props(wfBtn.back)} onClick={() => void navigate({to: '/workflow'})}>
           ← Workflows
         </button>
-        <span className="wf-workflow-name">{workflow.name}</span>
-        {saveError && (
-          <span style={{fontSize: '0.72rem', color: 'var(--error-text)'}}>{saveError}</span>
-        )}
-        <button
-          className="wf-save-btn"
-          onClick={() => setShowSettings(true)}
-        >
+        <span {...stylex.props(editor.name)}>{workflow.name}</span>
+        {saveError && <span {...stylex.props(styles.saveError)}>{saveError}</span>}
+        <button {...stylex.props(wfBtn.save)} onClick={() => setShowSettings(true)}>
           Settings
         </button>
         <button
-          className={`wf-save-btn${showHistory ? ' wf-save-btn--active' : ''}`}
+          {...stylex.props(wfBtn.save, showHistory && wfBtn.saveActive)}
           onClick={() => setShowHistory((v) => !v)}
         >
           History
@@ -424,7 +405,7 @@ export default function WorkflowEditorPage() {
       </div>
 
       {/* Editor body */}
-      <div className="wf-editor-body">
+      <div {...stylex.props(editor.body)}>
         <ReactFlowProvider>
           <WorkflowEditor
             initialNodes={initNodes}
@@ -441,35 +422,22 @@ export default function WorkflowEditorPage() {
 
       {/* Run panel */}
       {showRunPanel && (
-        <div className="wf-run-panel">
-          <div className="wf-run-panel-header">
-            <span className={`run-status ${runStatusClass}`}>{runStatusLabel}</span>
-            <span style={{fontSize: '0.72rem', color: 'var(--text-dim)', flex: 1, marginLeft: 8}}>
-              {activeRunId}
+        <div {...stylex.props(runPanel.root)}>
+          <div {...stylex.props(runPanel.header)}>
+            <span {...stylex.props(runStatus.base, statusStyle(runStatusKind))}>
+              {runStatusLabel}
             </span>
-            <button
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-dim)',
-                cursor: 'pointer',
-                fontSize: '0.88rem',
-              }}
-              onClick={() => setShowRunPanel(false)}
-            >
+            <span {...stylex.props(styles.runId)}>{activeRunId}</span>
+            <button {...stylex.props(history.close)} onClick={() => setShowRunPanel(false)}>
               ✕
             </button>
           </div>
           {Object.entries(nodeStatuses).map(([nodeId, ns]) => (
             <NodeStatusRow key={nodeId} nodeId={nodeId} status={ns} />
           ))}
-          {streamError && (
-            <div style={{padding: '8px 16px', color: 'var(--error-text)', fontSize: '0.78rem'}}>
-              {streamError}
-            </div>
-          )}
+          {streamError && <div {...stylex.props(styles.runError)}>{streamError}</div>}
           {outputs && !streaming && (
-            <div className="wf-run-outputs">{JSON.stringify(outputs, null, 2)}</div>
+            <div {...stylex.props(runPanel.outputs)}>{JSON.stringify(outputs, null, 2)}</div>
           )}
         </div>
       )}
@@ -495,3 +463,21 @@ export default function WorkflowEditorPage() {
     </div>
   );
 }
+
+const styles = stylex.create({
+  /** The vertical field stack both modals wrap their body in. */
+  stack: {display: 'flex', flexDirection: 'column', gap: 10},
+  /** Settings holds more than a confirmation, so it overrides the modal width. */
+  settingsModal: {minWidth: 480, maxWidth: 640},
+
+  clickable: {cursor: 'pointer'},
+  saveError: {fontSize: '0.72rem', color: colors.errorText},
+  runId: {fontSize: '0.72rem', color: colors.textDim, flex: 1, marginInlineStart: 8},
+  runError: {paddingBlock: 8, paddingInline: 16, color: colors.errorText, fontSize: '0.78rem'},
+
+  nodeLabel: {color: colors.text, fontSize: '0.75rem'},
+  nodeError: {color: colors.errorText, fontSize: '0.72rem', marginBlockStart: 2},
+  verdict: {fontSize: '0.68rem', borderRadius: 4, paddingBlock: 1, paddingInline: 6},
+  verdictTrue: {backgroundColor: '#1e3a22', color: '#6bcf7f'},
+  verdictFalse: {backgroundColor: '#3a1e1e', color: '#cf6b6b'},
+});

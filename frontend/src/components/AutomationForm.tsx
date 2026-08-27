@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useEffect, useState} from 'react';
 
 import {useModels} from '../hooks/useModels';
@@ -7,11 +8,13 @@ import type {
   CreateAutomationPayload,
   NotificationConfig,
 } from '../lib/types';
+import {channels, colors, type} from '../theme/tokens.stylex';
 import {
   NotificationsEditor,
   parseNotifications,
   serializeNotifications,
 } from './NotificationsEditor';
+import {btn, errorBubble, field} from './ui';
 
 interface Props {
   initialValues?: Automation;
@@ -84,8 +87,13 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
       setError('Name is required');
       return;
     }
-    if ((form.input_type === 'prompt' || form.input_type === 'monitor') && !form.prompt_text?.trim()) {
-      setError(form.input_type === 'monitor' ? 'Describe what to monitor' : 'Prompt text is required');
+    if (
+      (form.input_type === 'prompt' || form.input_type === 'monitor') &&
+      !form.prompt_text?.trim()
+    ) {
+      setError(
+        form.input_type === 'monitor' ? 'Describe what to monitor' : 'Prompt text is required',
+      );
       return;
     }
     if (form.input_type === 'code' && !form.code_text?.trim()) {
@@ -121,11 +129,11 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
   }
 
   return (
-    <form className="auto-form" onSubmit={handleSubmit}>
-      <div className="auto-form-group">
-        <label className="auto-form-label">Name</label>
+    <form {...stylex.props(styles.form)} onSubmit={handleSubmit}>
+      <div {...stylex.props(field.group)}>
+        <label {...stylex.props(field.label)}>Name</label>
         <input
-          className="auto-form-input"
+          {...stylex.props(field.input)}
           value={form.name}
           onChange={(e) => set('name', e.target.value)}
           placeholder="My automation"
@@ -133,10 +141,10 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
         />
       </div>
 
-      <div className="auto-form-group">
-        <label className="auto-form-label">Description (optional)</label>
+      <div {...stylex.props(field.group)}>
+        <label {...stylex.props(field.label)}>Description (optional)</label>
         <input
-          className="auto-form-input"
+          {...stylex.props(field.input)}
           value={form.description ?? ''}
           onChange={(e) => set('description', e.target.value)}
           placeholder="What does this do?"
@@ -144,10 +152,10 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
         />
       </div>
 
-      <div className="auto-form-group">
-        <label className="auto-form-label">Input Type</label>
+      <div {...stylex.props(field.group)}>
+        <label {...stylex.props(field.label)}>Input Type</label>
         <select
-          className="auto-form-select"
+          {...stylex.props(field.select)}
           value={form.input_type}
           onChange={(e) => set('input_type', e.target.value as AutomationInputType)}
           disabled={saving}
@@ -161,12 +169,12 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
 
       {(form.input_type === 'prompt' || form.input_type === 'monitor') && (
         <>
-          <div className="auto-form-group">
-            <label className="auto-form-label">
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>
               {form.input_type === 'monitor' ? 'What to monitor' : 'Prompt'}
             </label>
             <textarea
-              className="auto-form-textarea"
+              {...stylex.props(field.textarea)}
               rows={5}
               value={form.prompt_text ?? ''}
               onChange={(e) => set('prompt_text', e.target.value)}
@@ -178,15 +186,15 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
               disabled={saving}
             />
             {form.input_type === 'monitor' && (
-              <div className="auto-form-hint">
+              <div {...stylex.props(field.hint)}>
                 Runs remember previous checks and only notify when something changed.
               </div>
             )}
           </div>
-          <div className="auto-form-group">
-            <label className="auto-form-label">Model</label>
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>Model</label>
             <select
-              className="auto-form-select"
+              {...stylex.props(field.select)}
               value={form.model ?? ''}
               onChange={(e) => set('model', e.target.value)}
               disabled={saving || !catalog}
@@ -201,7 +209,7 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
             </select>
           </div>
           {form.input_type === 'prompt' && (
-            <div className="auto-form-check-row">
+            <div {...stylex.props(styles.checkRow)}>
               <input
                 id="auto-stateful"
                 type="checkbox"
@@ -209,7 +217,7 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
                 onChange={(e) => set('stateful', e.target.checked)}
                 disabled={saving}
               />
-              <label htmlFor="auto-stateful" className="auto-form-check-label">
+              <label htmlFor="auto-stateful" {...stylex.props(styles.checkLabel)}>
                 Stateful — runs share one conversation, so the agent remembers previous runs
               </label>
             </div>
@@ -218,10 +226,10 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
       )}
 
       {form.input_type === 'code' && (
-        <div className="auto-form-group">
-          <label className="auto-form-label">Python Code</label>
+        <div {...stylex.props(field.group)}>
+          <label {...stylex.props(field.label)}>Python Code</label>
           <textarea
-            className="auto-form-textarea auto-form-code"
+            {...stylex.props(field.textarea, styles.code)}
             rows={10}
             value={form.code_text ?? ''}
             onChange={(e) => set('code_text', e.target.value)}
@@ -234,10 +242,10 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
 
       {form.input_type === 'webhook' && (
         <>
-          <div className="auto-form-group">
-            <label className="auto-form-label">URL</label>
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>URL</label>
             <input
-              className="auto-form-input"
+              {...stylex.props(field.input)}
               type="url"
               value={form.webhook_url ?? ''}
               onChange={(e) => set('webhook_url', e.target.value)}
@@ -245,10 +253,10 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
               disabled={saving}
             />
           </div>
-          <div className="auto-form-group">
-            <label className="auto-form-label">Method</label>
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>Method</label>
             <select
-              className="auto-form-select"
+              {...stylex.props(field.select)}
               value={form.webhook_method ?? 'POST'}
               onChange={(e) => set('webhook_method', e.target.value)}
               disabled={saving}
@@ -259,10 +267,10 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
               <option value="DELETE">DELETE</option>
             </select>
           </div>
-          <div className="auto-form-group">
-            <label className="auto-form-label">Headers (JSON)</label>
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>Headers (JSON)</label>
             <textarea
-              className="auto-form-textarea auto-form-code"
+              {...stylex.props(field.textarea, styles.code)}
               rows={3}
               value={form.webhook_headers ?? ''}
               onChange={(e) => set('webhook_headers', e.target.value)}
@@ -271,10 +279,10 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
               spellCheck={false}
             />
           </div>
-          <div className="auto-form-group">
-            <label className="auto-form-label">Body</label>
+          <div {...stylex.props(field.group)}>
+            <label {...stylex.props(field.label)}>Body</label>
             <textarea
-              className="auto-form-textarea auto-form-code"
+              {...stylex.props(field.textarea, styles.code)}
               rows={4}
               value={form.webhook_body ?? ''}
               onChange={(e) => set('webhook_body', e.target.value)}
@@ -286,12 +294,12 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
         </>
       )}
 
-      <div className="auto-form-group">
-        <label className="auto-form-label">
+      <div {...stylex.props(field.group)}>
+        <label {...stylex.props(field.label)}>
           Schedule (cron in server local time, leave blank for ad-hoc)
         </label>
         <input
-          className="auto-form-input"
+          {...stylex.props(field.input)}
           value={form.schedule ?? ''}
           onChange={(e) => set('schedule', e.target.value)}
           placeholder="0 9 * * 1  (Mon 9am)"
@@ -299,13 +307,9 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
         />
       </div>
 
-      <NotificationsEditor
-        value={notifications}
-        onChange={setNotifications}
-        disabled={saving}
-      />
+      <NotificationsEditor value={notifications} onChange={setNotifications} disabled={saving} />
 
-      <div className="auto-form-check-row">
+      <div {...stylex.props(styles.checkRow)}>
         <input
           id="auto-enabled"
           type="checkbox"
@@ -313,26 +317,56 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           onChange={(e) => set('enabled', e.target.checked)}
           disabled={saving}
         />
-        <label htmlFor="auto-enabled" className="auto-form-check-label">
+        <label htmlFor="auto-enabled" {...stylex.props(styles.checkLabel)}>
           Enabled
         </label>
       </div>
 
-      {error && <div className="error-bubble">{error}</div>}
+      {error && <div {...stylex.props(errorBubble.base)}>{error}</div>}
 
-      <div className="auto-form-footer">
-        <button
-          type="button"
-          className="activity-btn auto-form-cancel-btn"
-          onClick={onCancel}
-          disabled={saving}
-        >
+      <div {...stylex.props(styles.footer)}>
+        <button type="button" {...stylex.props(btn.base)} onClick={onCancel} disabled={saving}>
           Cancel
         </button>
-        <button type="submit" className="auto-form-save-btn" disabled={saving}>
+        <button type="submit" {...stylex.props(styles.saveBtn)} disabled={saving}>
           {saving ? 'Saving…' : initialValues ? 'Update' : 'Create'}
         </button>
       </div>
     </form>
   );
 }
+
+const styles = stylex.create({
+  form: {display: 'flex', flexDirection: 'column', gap: 14, padding: 16},
+
+  /** Monospace treatment for the code / JSON textareas. */
+  code: {fontFamily: type.mono, fontSize: '0.78rem'},
+
+  checkRow: {display: 'flex', alignItems: 'center', gap: 8},
+  checkLabel: {
+    fontSize: '0.82rem',
+    color: colors.text,
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+
+  footer: {display: 'flex', justifyContent: 'flex-end', gap: 8, paddingBlockStart: 4},
+  saveBtn: {
+    backgroundImage: `linear-gradient(135deg, ${colors.accentStrong}, ${colors.accent})`,
+    borderStyle: 'none',
+    borderRadius: 8,
+    color: colors.accentContrast,
+    fontSize: '0.82rem',
+    fontFamily: 'inherit',
+    paddingBlock: 6,
+    paddingInline: 18,
+    cursor: {default: 'pointer', ':disabled': 'not-allowed'},
+    opacity: {default: 1, ':disabled': 0.4},
+    boxShadow: {
+      default: `0 2px 10px rgba(${channels.accent}, 0.3)`,
+      ':hover:not(:disabled)': `0 4px 16px rgba(${channels.accent}, 0.45)`,
+    },
+    transform: {default: null, ':hover:not(:disabled)': 'translateY(-1px)'},
+    transition: 'box-shadow 0.2s, transform 0.15s',
+  },
+});

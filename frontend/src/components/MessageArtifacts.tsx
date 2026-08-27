@@ -1,4 +1,7 @@
+import * as stylex from '@stylexjs/stylex';
+
 import type {ArtifactCard} from '../lib/types';
+import {channels, colors} from '../theme/tokens.stylex';
 
 /** Icon per artifact kind — mirrors ArtifactPanel's `renderArtifactBody` switch. */
 function KindIcon({kind}: {kind: string}) {
@@ -73,24 +76,69 @@ interface Props {
 export function MessageArtifacts({artifacts, onOpen, selectedId}: Props) {
   if (artifacts.length === 0) return null;
   return (
-    <div className="message-artifacts">
+    <div {...stylex.props(styles.row)}>
       {artifacts.map((a) => (
         <button
           key={a.id}
           type="button"
-          className={`artifact-card${a.id === selectedId ? ' artifact-card--active' : ''}`}
+          {...stylex.props(styles.card, a.id === selectedId && styles.cardActive)}
           onClick={() => onOpen?.(a.id)}
           title={`Open "${a.title}"`}
         >
-          <span className="artifact-card-icon">
+          <span {...stylex.props(styles.icon)}>
             <KindIcon kind={a.kind} />
           </span>
-          <span className="artifact-card-text">
-            <span className="artifact-card-title">{a.title}</span>
-            <span className="artifact-card-meta">{subtitle(a)}</span>
+          <span {...stylex.props(styles.text)}>
+            <span {...stylex.props(styles.title)}>{a.title}</span>
+            <span {...stylex.props(styles.meta)}>{subtitle(a)}</span>
           </span>
         </button>
       ))}
     </div>
   );
 }
+
+const styles = stylex.create({
+  row: {display: 'flex', flexWrap: 'wrap', gap: 8},
+  card: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+    maxWidth: '100%',
+    paddingBlock: 9,
+    paddingInlineStart: 11,
+    paddingInlineEnd: 13,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {default: colors.border, ':hover': `rgba(${channels.accent}, 0.5)`},
+    borderRadius: 10,
+    backgroundColor: {default: colors.surface, ':hover': colors.accentDim},
+    color: colors.text,
+    cursor: 'pointer',
+    textAlign: 'left',
+    transform: {default: null, ':hover': 'translateY(-1px)'},
+    transition: 'border-color 0.14s, background 0.14s, transform 0.14s',
+  },
+  cardActive: {borderColor: `rgba(${channels.accent}, 0.65)`, backgroundColor: colors.accentDim},
+  icon: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 26,
+    height: 26,
+    flexShrink: 0,
+    borderRadius: 7,
+    backgroundColor: `rgba(${channels.accent}, 0.14)`,
+    color: colors.accent,
+  },
+  text: {display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0},
+  title: {
+    fontSize: '0.83rem',
+    fontWeight: 500,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  meta: {fontSize: '0.68rem', color: colors.textDim, textTransform: 'lowercase'},
+});

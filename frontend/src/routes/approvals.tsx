@@ -1,6 +1,8 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useState} from 'react';
 
+import {kindBadge, kindBadgeStyle, page} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {
   refreshPendingApprovals,
@@ -9,8 +11,10 @@ import {
 } from '../hooks/usePendingApprovals';
 import {formatRelativeTime} from '../lib/api';
 import {useToast} from '../lib/toast';
-import {commitResolveApproval} from '../relay/ResolveApprovalMutation';
 import type {ApprovalSource, PendingApproval} from '../lib/types';
+import {commitResolveApproval} from '../relay/ResolveApprovalMutation';
+// `counts` and `answer` are also local variable names in this file.
+import {answer as answerStyles, card, counts as countStyles} from './approvals.styles';
 
 export const Route = createFileRoute('/approvals')({
   component: ApprovalsPage,
@@ -64,51 +68,51 @@ function ApprovalCard({approval}: {approval: PendingApproval}) {
     approval.source === 'board_task' || approval.source === 'automation' || !!approval.parent_id;
 
   return (
-    <li className="approval-card">
-      <div className="approval-card-head">
-        <span className={`task-kind-badge task-kind-badge--${approval.source}`}>
+    <li {...stylex.props(card.root)}>
+      <div {...stylex.props(card.head)}>
+        <span {...stylex.props(kindBadge.base, kindBadgeStyle(approval.source))}>
           {SOURCE_LABEL[approval.source] ?? approval.source}
         </span>
-        <span className="approval-origin" title={approval.label}>
+        <span {...stylex.props(card.origin)} title={approval.label}>
           {approval.label}
         </span>
-        {approval.tool && <code className="approval-tool">{approval.tool}</code>}
+        {approval.tool && <code {...stylex.props(card.tool)}>{approval.tool}</code>}
         {approval.deferred && (
           <span
-            className="approval-deferred"
+            {...stylex.props(card.deferred)}
             title="Nothing is blocked — approving is what runs it"
           >
             runs on approval
           </span>
         )}
-        <span className="approval-age">{formatRelativeTime(approval.requested_at)}</span>
+        <span {...stylex.props(card.age)}>{formatRelativeTime(approval.requested_at)}</span>
         {canOpen && (
-          <button className="approval-open" type="button" onClick={open}>
+          <button {...stylex.props(card.open)} type="button" onClick={open}>
             Open
           </button>
         )}
       </div>
 
-      <p className="approval-question">{approval.question}</p>
+      <p {...stylex.props(card.question)}>{approval.question}</p>
 
       {approval.args_json && (
-        <div className="approval-args">
+        <div>
           <button
-            className="approval-args-toggle"
+            {...stylex.props(card.argsToggle)}
             type="button"
             onClick={() => setShowArgs((v) => !v)}
           >
             {showArgs ? 'Hide' : 'Show'} arguments
           </button>
-          {showArgs && <pre>{approval.args_json}</pre>}
+          {showArgs && <pre {...stylex.props(card.argsPre)}>{approval.args_json}</pre>}
         </div>
       )}
 
-      <div className="approval-actions">
+      <div {...stylex.props(answerStyles.row)}>
         {isGate ? (
           <>
             <button
-              className="approval-btn approval-btn--approve"
+              {...stylex.props(answerStyles.btn, answerStyles.approve)}
               type="button"
               disabled={action.pending}
               onClick={() => void action.run('approve')}
@@ -116,7 +120,7 @@ function ApprovalCard({approval}: {approval: PendingApproval}) {
               Approve
             </button>
             <button
-              className="approval-btn approval-btn--deny"
+              {...stylex.props(answerStyles.btn, answerStyles.deny)}
               type="button"
               disabled={action.pending}
               onClick={() => void action.run('deny')}
@@ -127,7 +131,7 @@ function ApprovalCard({approval}: {approval: PendingApproval}) {
         ) : (
           <>
             <input
-              className="approval-input"
+              {...stylex.props(answerStyles.input)}
               value={answer}
               placeholder="Your answer…"
               disabled={action.pending}
@@ -137,7 +141,7 @@ function ApprovalCard({approval}: {approval: PendingApproval}) {
               }}
             />
             <button
-              className="approval-btn approval-btn--approve"
+              {...stylex.props(answerStyles.btn, answerStyles.approve)}
               type="button"
               disabled={action.pending || !answer.trim()}
               onClick={() => void action.run(answer.trim())}
@@ -161,19 +165,19 @@ function ApprovalsPage() {
   }, {});
 
   return (
-    <div className="page tasks-page">
-      <header className="tasks-header">
-        <h1>Approvals</h1>
-        <p className="tasks-subtitle">
-          Everything waiting on a human answer. Requests are durable and survive a restart — but
-          a suspended run may not: workflow pauses are marked expired at startup and drop off this
+    <div {...stylex.props(page.scroll, styles.page)}>
+      <header {...stylex.props(styles.header)}>
+        <h1 {...stylex.props(page.title)}>Approvals</h1>
+        <p {...stylex.props(page.subtitle, styles.subtitle)}>
+          Everything waiting on a human answer. Requests are durable and survive a restart — but a
+          suspended run may not: workflow pauses are marked expired at startup and drop off this
           list, while “runs on approval” items block nothing and wait indefinitely.
         </p>
         {approvals.length > 0 && (
-          <div className="approval-counts">
-            <span className="approval-count-total">{approvals.length} pending</span>
+          <div {...stylex.props(countStyles.row)}>
+            <span {...stylex.props(countStyles.total)}>{approvals.length} pending</span>
             {Object.entries(counts).map(([source, n]) => (
-              <span key={source} className="approval-count-chip">
+              <span key={source} {...stylex.props(countStyles.chip)}>
                 {SOURCE_LABEL[source as ApprovalSource] ?? source} · {n}
               </span>
             ))}
@@ -182,11 +186,11 @@ function ApprovalsPage() {
       </header>
 
       {!loaded ? (
-        <div className="tasks-empty">Loading…</div>
+        <div {...stylex.props(page.empty)}>Loading…</div>
       ) : approvals.length === 0 ? (
-        <div className="tasks-empty">Nothing is waiting on you.</div>
+        <div {...stylex.props(page.empty)}>Nothing is waiting on you.</div>
       ) : (
-        <ul className="approval-list">
+        <ul {...stylex.props(card.list)}>
           {approvals.map((a) => (
             <ApprovalCard key={a.id} approval={a} />
           ))}
@@ -195,3 +199,10 @@ function ApprovalsPage() {
     </div>
   );
 }
+
+const styles = stylex.create({
+  /** The header carries its own bottom margin, so the flex gap is off. */
+  page: {gap: 0},
+  header: {marginBlockEnd: 24},
+  subtitle: {maxWidth: 540},
+});

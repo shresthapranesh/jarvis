@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -21,7 +22,10 @@ import {commitUpdateNotificationChannel} from '../../relay/UpdateNotificationCha
 import {ConfirmDialog} from '../ConfirmDialog';
 import {FormModal} from '../FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from '../icons';
+import {item} from '../memory.styles';
 import {useQueryRetry} from '../QueryBoundary';
+import {badge, btn, field, iconBtn, page} from '../ui';
+import {settings} from './settings.styles';
 
 interface ChannelDraft {
   name: string;
@@ -118,21 +122,21 @@ export function NotificationsTab() {
   const draftValid = Boolean(draft.name.trim() && draft.target.trim());
 
   return (
-    <div className="memory-section">
-      <h2 className="memory-section-title">
-        Channels <span className="memory-count">{channels.length}</span>
-        <span className="memory-section-hint">
+    <div {...stylex.props(page.section)}>
+      <h2 {...stylex.props(page.sectionTitle)}>
+        Channels <span {...stylex.props(page.count)}>{channels.length}</span>
+        <span {...stylex.props(page.sectionHint)}>
           chat IDs from @userinfobot (Telegram) or Developer Mode → Copy ID (Discord)
         </span>
-        <span className="settings-section-actions">
-          <button className="artifact-btn primary" onClick={openAdd}>
+        <span {...stylex.props(settings.sectionActions)}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> New channel
           </button>
         </span>
       </h2>
 
       {refsInUse.length > 0 && (
-        <div className="memory-error">
+        <div {...stylex.props(page.error)}>
           Cannot delete — still used by:{' '}
           {refsInUse.map((r, i) => (
             <span key={`${r.kind}:${r.id}`}>
@@ -144,34 +148,38 @@ export function NotificationsTab() {
       )}
 
       {channels.length === 0 ? (
-        <div className="memory-empty">
+        <div {...stylex.props(page.empty)}>
           <p>No channels yet.</p>
           <p>Create one to get notified when automations finish, fail, or detect changes.</p>
-          <button className="artifact-btn primary" onClick={openAdd}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> New channel
           </button>
         </div>
       ) : (
-        <ul className="memory-list">
+        <ul {...stylex.props(page.list)}>
           {channels.map((ch) => (
-            <li key={ch.id} className="memory-item">
-              <div className="memory-item-main">
-                <span className="memory-item-text settings-channel-name">
+            <li key={ch.id} {...stylex.props(item.root)}>
+              <div {...stylex.props(item.main)}>
+                <span {...stylex.props(item.text, settings.channelName)}>
                   <span
-                    className={`settings-badge settings-badge--${ch.type === 'telegram' ? 'http' : 'sse'}`}
+                    {...stylex.props(badge.base, ch.type === 'telegram' ? badge.http : badge.sse)}
                   >
                     {ch.type}
                   </span>
                   {ch.name}
                 </span>
-                <span className="memory-item-meta">target: {ch.target}</span>
+                <span {...stylex.props(item.meta)}>target: {ch.target}</span>
               </div>
-              <div className="memory-item-actions">
-                <button className="icon-btn" title="Edit channel" onClick={() => openEdit(ch)}>
+              <div {...stylex.props(item.actions)}>
+                <button
+                  {...stylex.props(iconBtn.base)}
+                  title="Edit channel"
+                  onClick={() => openEdit(ch)}
+                >
                   <EditIcon size={14} />
                 </button>
                 <button
-                  className="icon-btn icon-btn--danger"
+                  {...stylex.props(iconBtn.base, iconBtn.danger)}
                   title="Delete channel"
                   onClick={() => setDeleteTarget(ch)}
                 >
@@ -198,10 +206,10 @@ export function NotificationsTab() {
         }}
         onClose={closeEditor}
       >
-        <div className="auto-form-group">
-          <span className="auto-form-label">Name</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Name</span>
           <input
-            className="auto-form-input"
+            {...stylex.props(field.input)}
             value={draft.name}
             onChange={(e) => setDraft({...draft, name: e.target.value})}
             autoFocus={editor?.mode === 'add'}
@@ -209,10 +217,10 @@ export function NotificationsTab() {
             placeholder="team-discord"
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Type</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Type</span>
           <select
-            className="auto-form-select"
+            {...stylex.props(field.select)}
             value={draft.type}
             onChange={(e) => setDraft({...draft, type: e.target.value as NotificationChannelType})}
           >
@@ -220,12 +228,12 @@ export function NotificationsTab() {
             <option value="discord">Discord</option>
           </select>
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>
             Target — {draft.type === 'telegram' ? 'chat ID' : 'channel ID'}
           </span>
           <input
-            className="auto-form-input"
+            {...stylex.props(field.input)}
             value={draft.target}
             onChange={(e) => setDraft({...draft, target: e.target.value})}
             spellCheck={false}

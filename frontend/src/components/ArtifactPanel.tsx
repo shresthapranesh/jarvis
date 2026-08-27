@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {marked} from 'marked';
 import {Suspense, useEffect, useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
@@ -9,8 +10,10 @@ import {artifactDetailQuery, refreshArtifactDetail} from '../relay/ArtifactDetai
 import {artifactListQuery, refreshArtifactList} from '../relay/ArtifactListQuery';
 import {commitDeleteArtifact} from '../relay/DeleteArtifactMutation';
 import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
-import {commitUpdateArtifact} from '../relay/UpdateArtifactMutation';
 import {commitRestoreArtifactVersion} from '../relay/RestoreArtifactVersionMutation';
+import {commitUpdateArtifact} from '../relay/UpdateArtifactMutation';
+import {detail as detailStyles, diff, editor, panel, version} from './ArtifactPanel.styles';
+import {btn, closeBtn, prose} from './ui';
 
 const svg = (path: React.ReactNode, w = 2) => (
   <svg
@@ -96,36 +99,54 @@ export function ArtifactPanel({conversationId, selectedId, onSelect, onClose}: P
   }, [selectedId, artifacts, onSelect]);
 
   return (
-    <div className="artifact-panel">
-      <div className="artifact-panel-header">
-        <div className="artifact-panel-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <div {...stylex.props(panel.root)}>
+      <div {...stylex.props(panel.header)}>
+        <div {...stylex.props(panel.title)}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
           </svg>
           Artifacts
         </div>
-        <button className="sidebar-close" onClick={onClose} title="Close">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <button {...stylex.props(closeBtn.base)} onClick={onClose} title="Close">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
       </div>
 
-      <div className="artifact-list">
+      <div {...stylex.props(panel.list)}>
         {artifacts.length === 0 ? (
-          <div className="sidebar-empty">No artifacts yet.</div>
+          <div {...stylex.props(panel.empty)}>No artifacts yet.</div>
         ) : (
           artifacts.map((a) => (
             <button
               key={a.id}
-              className={`artifact-list-item${a.id === selectedId ? ' active' : ''}`}
+              {...stylex.props(panel.item, a.id === selectedId && panel.itemActive)}
               onClick={() => onSelect(a.id)}
               type="button"
             >
-              <span className="artifact-list-title">{a.title}</span>
-              <span className="artifact-list-meta">
+              <span {...stylex.props(panel.itemTitle)}>{a.title}</span>
+              <span {...stylex.props(panel.itemMeta)}>
                 {new Date(a.updatedAt).toLocaleString()}
               </span>
             </button>
@@ -134,7 +155,7 @@ export function ArtifactPanel({conversationId, selectedId, onSelect, onClose}: P
       </div>
 
       {selectedId && (
-        <Suspense fallback={<div className="artifact-detail" />}>
+        <Suspense fallback={<div {...stylex.props(detailStyles.root)} />}>
           <ArtifactDetail
             key={selectedId}
             rawId={selectedId}
@@ -178,7 +199,13 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
 
   if (!detail) return null;
 
-  const versions = (detail as any).versions as Array<{id: string; version: number; title: string; createdAt: string; content: string}>;
+  const versions = (detail as any).versions as Array<{
+    id: string;
+    version: number;
+    title: string;
+    createdAt: string;
+    content: string;
+  }>;
   const versionCount = (detail as any).versionCount ?? versions?.length ?? 0;
 
   async function save() {
@@ -233,20 +260,29 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
     const m = bLines.length;
     // Clamp to avoid O(n*m) blow up on huge artifacts
     if (n > 2000 || m > 2000) {
-      return [{type: 'same', text: `Diff too large to display (${n} vs ${m} lines). Showing full new content.`}, ...bLines.map(l => ({type: 'same' as const, text: l}))];
+      return [
+        {
+          type: 'same',
+          text: `Diff too large to display (${n} vs ${m} lines). Showing full new content.`,
+        },
+        ...bLines.map((l) => ({type: 'same' as const, text: l})),
+      ];
     }
     const dp: number[][] = Array.from({length: n + 1}, () => Array(m + 1).fill(0));
     for (let i = n - 1; i >= 0; i--) {
       for (let j = m - 1; j >= 0; j--) {
-        dp[i][j] = aLines[i] === bLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        dp[i][j] =
+          aLines[i] === bLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
       }
     }
     const out: Array<{type: 'same' | 'add' | 'del'; text: string}> = [];
-    let i = 0, j = 0;
+    let i = 0,
+      j = 0;
     while (i < n || j < m) {
       if (i < n && j < m && aLines[i] === bLines[j]) {
         out.push({type: 'same', text: aLines[i]});
-        i++; j++;
+        i++;
+        j++;
       } else if (j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j])) {
         out.push({type: 'add', text: bLines[j]});
         j++;
@@ -260,7 +296,7 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
 
   function getVersionContent(vNum: number | null): string {
     if (vNum === null) return (detail as any).content as string;
-    const found = versions?.find(v => v.version === vNum);
+    const found = versions?.find((v) => v.version === vNum);
     return found?.content ?? '';
   }
 
@@ -272,15 +308,15 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
   })();
 
   return (
-    <div className="artifact-detail">
-      <div className="artifact-detail-toolbar">
+    <div {...stylex.props(detailStyles.root)}>
+      <div {...stylex.props(detailStyles.toolbar)}>
         {editing ? (
           <>
-            <button className="artifact-btn primary" onClick={save} disabled={saving}>
+            <button {...stylex.props(btn.base, btn.primary)} onClick={save} disabled={saving}>
               {ICON.check}
               <span>{saving ? 'Saving…' : 'Save'}</span>
             </button>
-            <button className="artifact-btn" onClick={() => setEditing(false)}>
+            <button {...stylex.props(btn.base)} onClick={() => setEditing(false)}>
               {ICON.close}
               <span>Cancel</span>
             </button>
@@ -289,24 +325,30 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
           <>
             {detail.kind === 'markdown' && (
               <>
-                <button className="artifact-btn" onClick={() => setEditing(true)}>
+                <button {...stylex.props(btn.base)} onClick={() => setEditing(true)}>
                   {ICON.edit}
                   <span>Edit</span>
                 </button>
-                <button className={`artifact-btn${copied ? ' success' : ''}`} onClick={copy}>
+                <button {...stylex.props(btn.base, copied && btn.success)} onClick={copy}>
                   {copied ? ICON.check : ICON.copy}
                   <span>{copied ? 'Copied' : 'Copy'}</span>
                 </button>
               </>
             )}
-            <a className="artifact-btn" href={artifactDownloadUrl(rawId)} download={`${detail.title || rawId}.md`}>
+            <a
+              {...stylex.props(btn.base)}
+              href={artifactDownloadUrl(rawId)}
+              download={`${detail.title || rawId}.md`}
+            >
               {ICON.download}
               <span>Download</span>
             </a>
-            <button className="artifact-btn" onClick={() => setShowVersions(!showVersions)}>
-              <span>🕑 {versionCount}v{showVersions ? ' ▲' : ' ▼'}</span>
+            <button {...stylex.props(btn.base)} onClick={() => setShowVersions(!showVersions)}>
+              <span>
+                🕑 {versionCount}v{showVersions ? ' ▲' : ' ▼'}
+              </span>
             </button>
-            <button className="artifact-btn danger" onClick={remove}>
+            <button {...stylex.props(btn.base, btn.danger)} onClick={remove}>
               {ICON.trash}
               <span>Delete</span>
             </button>
@@ -315,45 +357,109 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
       </div>
 
       {showVersions && (
-        <div className="artifact-versions-panel">
-          <div className="artifact-versions-header">
+        <div {...stylex.props(version.panel)}>
+          <div {...stylex.props(version.header)}>
             <strong>Version history</strong>
-            <span style={{fontSize: '0.75rem', opacity: 0.7}}>Compare any two versions, restore old as new</span>
+            <span {...stylex.props(version.hint)}>
+              Compare any two versions, restore old as new
+            </span>
           </div>
-          <div className="artifact-versions-list">
+          <div {...stylex.props(version.list)}>
             {/* Current */}
-            <div className={`artifact-version-row ${compareTo === -1 ? 'active' : ''}`}>
-              <span className="artifact-version-badge">current</span>
-              <span className="artifact-version-title">{detail.title}</span>
-              <span className="artifact-version-meta">{new Date((detail as any).updatedAt).toLocaleString()}</span>
-              <div className="artifact-version-actions">
-                <button className="artifact-btn small" onClick={() => setCompareFrom(compareFrom === null ? versions?.[versions.length-1]?.version ?? null : null)}>from</button>
-                <button className="artifact-btn small primary" onClick={() => setCompareTo(-1)}>to</button>
+            <div {...stylex.props(version.row, compareTo === -1 && version.rowActive)}>
+              <span {...stylex.props(version.badge)}>current</span>
+              <span {...stylex.props(version.title)}>{detail.title}</span>
+              <span {...stylex.props(version.meta)}>
+                {new Date((detail as any).updatedAt).toLocaleString()}
+              </span>
+              <div {...stylex.props(version.actions)}>
+                <button
+                  {...stylex.props(btn.base, btn.small)}
+                  onClick={() =>
+                    setCompareFrom(
+                      compareFrom === null
+                        ? (versions?.[versions.length - 1]?.version ?? null)
+                        : null,
+                    )
+                  }
+                >
+                  from
+                </button>
+                <button
+                  {...stylex.props(btn.base, btn.small, btn.primary)}
+                  onClick={() => setCompareTo(-1)}
+                >
+                  to
+                </button>
               </div>
             </div>
-            {(versions || []).slice().reverse().map((v) => (
-              <div key={v.version} className={`artifact-version-row ${compareFrom === v.version || compareTo === v.version ? 'active' : ''}`}>
-                <span className="artifact-version-badge">v{v.version}</span>
-                <span className="artifact-version-title">{v.title}</span>
-                <span className="artifact-version-meta">{new Date(v.createdAt).toLocaleString()}</span>
-                <div className="artifact-version-actions">
-                  <button className="artifact-btn small" onClick={() => setCompareFrom(v.version)} title="Set as diff source">from</button>
-                  <button className="artifact-btn small primary" onClick={() => setCompareTo(v.version)} title="Set as diff target">to</button>
-                  <button className="artifact-btn small" disabled={restoring === v.version} onClick={() => restoreVersion(v.version)}>{restoring === v.version ? '…' : 'restore'}</button>
+            {(versions || [])
+              .slice()
+              .reverse()
+              .map((v) => (
+                <div
+                  key={v.version}
+                  {...stylex.props(
+                    version.row,
+                    (compareFrom === v.version || compareTo === v.version) && version.rowActive,
+                  )}
+                >
+                  <span {...stylex.props(version.badge)}>v{v.version}</span>
+                  <span {...stylex.props(version.title)}>{v.title}</span>
+                  <span {...stylex.props(version.meta)}>
+                    {new Date(v.createdAt).toLocaleString()}
+                  </span>
+                  <div {...stylex.props(version.actions)}>
+                    <button
+                      {...stylex.props(btn.base, btn.small)}
+                      onClick={() => setCompareFrom(v.version)}
+                      title="Set as diff source"
+                    >
+                      from
+                    </button>
+                    <button
+                      {...stylex.props(btn.base, btn.small, btn.primary)}
+                      onClick={() => setCompareTo(v.version)}
+                      title="Set as diff target"
+                    >
+                      to
+                    </button>
+                    <button
+                      {...stylex.props(btn.base, btn.small)}
+                      disabled={restoring === v.version}
+                      onClick={() => restoreVersion(v.version)}
+                    >
+                      {restoring === v.version ? '…' : 'restore'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
           </div>
 
           {compareFrom !== null && compareTo !== null && diffRows && (
-            <div className="artifact-diff">
-              <div className="artifact-diff-header">
+            <div {...stylex.props(diff.root)}>
+              <div {...stylex.props(diff.header)}>
                 Diff: v{compareFrom} → {compareTo === -1 ? 'current' : `v${compareTo}`}
-                <button className="artifact-btn small" onClick={() => {setCompareFrom(null); setCompareTo(null);}}>clear</button>
+                <button
+                  {...stylex.props(btn.base, btn.small)}
+                  onClick={() => {
+                    setCompareFrom(null);
+                    setCompareTo(null);
+                  }}
+                >
+                  clear
+                </button>
               </div>
-              <pre className="artifact-diff-content">
+              <pre {...stylex.props(diff.content)}>
                 {diffRows.map((row, idx) => (
-                  <div key={idx} className={`diff-line diff-${row.type}`}>{row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '} {row.text}</div>
+                  <div
+                    key={idx}
+                    {...stylex.props(
+                      row.type === 'add' ? diff.add : row.type === 'del' ? diff.del : null,
+                    )}
+                  >
+                    {row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '} {row.text}
+                  </div>
                 ))}
               </pre>
             </div>
@@ -362,13 +468,23 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
       )}
 
       {editing ? (
-        <div className="artifact-editor">
-          <input className="artifact-title-input" value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="Title" />
-          <textarea className="artifact-content-textarea" value={draftContent} onChange={(e) => setDraftContent(e.target.value)} spellCheck={false} />
+        <div {...stylex.props(editor.root)}>
+          <input
+            {...stylex.props(editor.title)}
+            value={draftTitle}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            placeholder="Title"
+          />
+          <textarea
+            {...stylex.props(editor.content)}
+            value={draftContent}
+            onChange={(e) => setDraftContent(e.target.value)}
+            spellCheck={false}
+          />
         </div>
       ) : (
         <>
-          <h2 className="artifact-detail-title">{detail.title}</h2>
+          <h2 {...stylex.props(detailStyles.title)}>{detail.title}</h2>
           {renderArtifactBody(detail, rawId)}
         </>
       )}
@@ -383,18 +499,22 @@ function renderArtifactBody(
   const src = artifactDownloadUrl(rawId);
   switch (detail.kind) {
     case 'audio':
-      return <audio className="artifact-media" controls src={src} />;
+      return <audio {...stylex.props(detailStyles.media)} controls src={src} />;
     case 'video':
-      return <video className="artifact-media" controls src={src} />;
+      return <video {...stylex.props(detailStyles.media)} controls src={src} />;
     case 'image':
-      return <img className="artifact-media" src={src} alt={detail.title} />;
+      return <img {...stylex.props(detailStyles.media)} src={src} alt={detail.title} />;
     case 'markdown':
       return (
-        <div className="artifact-detail-content agent-bubble" dangerouslySetInnerHTML={{__html: marked.parse(detail.content) as string}} />
+        <div
+          {...stylex.props(prose.base, detailStyles.content)}
+          data-md
+          dangerouslySetInnerHTML={{__html: marked.parse(detail.content) as string}}
+        />
       );
     default:
       return (
-        <div className="artifact-detail-content agent-bubble">
+        <div {...stylex.props(prose.base, detailStyles.content)} data-md>
           Binary artifact ({detail.mimeType || 'unknown type'}) — use Download to view it.
         </div>
       );

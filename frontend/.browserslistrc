@@ -1,0 +1,9 @@
+# Pinned to browsers with native light-dark() support (Chrome 123+, Firefox 120+,
+# Safari 17.5+). Not cosmetic: @stylexjs/unplugin runs lightningcss over the
+# collected CSS, and older targets lower light-dark() to a polyfill that needs
+# `color-scheme` present in the same transform() call. StyleX extracts CSS per
+# module, so it never is — the polyfill's variables stay undefined and dark mode
+# silently breaks.
+last 2 Chrome versions
+last 2 Firefox versions
+last 2 Safari versions

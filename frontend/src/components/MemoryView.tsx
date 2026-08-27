@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {marked} from 'marked';
 import {useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
@@ -12,12 +13,14 @@ import {commitConsolidateMemory} from '../relay/ConsolidateMemoryMutation';
 import {commitDeleteAgentMemory} from '../relay/DeleteAgentMemoryMutation';
 import {commitDeleteMemory} from '../relay/DeleteMemoryMutation';
 import {memoriesQuery, refreshMemories} from '../relay/MemoriesQuery';
-import {commitUpdateMemory} from '../relay/UpdateMemoryMutation';
 import {commitUpdateMemoryItem} from '../relay/UpdateMemoryItemMutation';
+import {commitUpdateMemory} from '../relay/UpdateMemoryMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
+import {item, kindDotStyle, kindDot, memory, seg} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
+import {btn, codeField, field, iconBtn, page, prose} from './ui';
 
 const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
   fact: {label: 'Fact', hint: 'surfaced by relevance each turn'},
@@ -120,19 +123,19 @@ export function MemoryView() {
 
   function renderItem(m: MemoryItem) {
     return (
-      <li key={m.id} className={`memory-item memory-item--${m.kind}`}>
-        <div className="memory-item-main">
-          <span className="memory-item-text">{m.text}</span>
-          <span className="memory-item-meta">
+      <li key={m.id} {...stylex.props(item.root)}>
+        <div {...stylex.props(item.main)}>
+          <span {...stylex.props(item.text)}>{m.text}</span>
+          <span {...stylex.props(item.meta)}>
             Updated {new Date(m.updated_at).toLocaleDateString()}
           </span>
         </div>
-        <div className="memory-item-actions">
-          <button className="icon-btn" title="Edit memory" onClick={() => openEdit(m)}>
+        <div {...stylex.props(item.actions)}>
+          <button {...stylex.props(iconBtn.base)} title="Edit memory" onClick={() => openEdit(m)}>
             <EditIcon size={14} />
           </button>
           <button
-            className="icon-btn icon-btn--danger"
+            {...stylex.props(iconBtn.base, iconBtn.danger)}
             title="Delete memory"
             onClick={() => setDeleteTarget(m)}
           >
@@ -145,16 +148,16 @@ export function MemoryView() {
 
   function renderSection(title: string, kindKey: MemoryKind, list: MemoryItem[]) {
     return (
-      <section className="memory-section">
-        <h2 className="memory-section-title">
-          <span className={`memory-kind-dot memory-kind-dot--${kindKey}`} />
-          {title} <span className="memory-count">{list.length}</span>
-          <span className="memory-section-hint">{KIND_INFO[kindKey].hint}</span>
+      <section {...stylex.props(page.section)}>
+        <h2 {...stylex.props(page.sectionTitle)}>
+          <span {...stylex.props(kindDot.base, kindDotStyle(kindKey))} />
+          {title} <span {...stylex.props(page.count)}>{list.length}</span>
+          <span {...stylex.props(page.sectionHint)}>{KIND_INFO[kindKey].hint}</span>
         </h2>
         {list.length === 0 ? (
-          <p className="memory-section-empty">Nothing here yet.</p>
+          <p {...stylex.props(memory.sectionEmpty)}>Nothing here yet.</p>
         ) : (
-          <ul className="memory-list">{list.map(renderItem)}</ul>
+          <ul {...stylex.props(page.list)}>{list.map(renderItem)}</ul>
         )}
       </section>
     );
@@ -164,45 +167,45 @@ export function MemoryView() {
   const editKind = editor?.mode === 'edit' ? editor.item.kind : kind;
 
   return (
-    <div className="page memory-page">
-      <header className="memory-header">
-        <div>
-          <h1>Memory</h1>
-          <p className="memory-subtitle">
+    <div {...stylex.props(page.scroll)}>
+      <header {...stylex.props(page.header)}>
+        <div {...stylex.props(page.headerMain)}>
+          <h1 {...stylex.props(page.title)}>Memory</h1>
+          <p {...stylex.props(page.subtitle)}>
             The agent's long-term memory — discrete items embedded for retrieval.{' '}
-            <strong>Core</strong> items are injected into every system prompt;{' '}
-            <strong>fact</strong> items are surfaced by relevance each turn. The agent can
-            also write them via <code>remember(…)</code>, or the scheduled consolidation
-            job extracts them from recent conversations.
+            <strong>Core</strong> items are injected into every system prompt; <strong>fact</strong>{' '}
+            items are surfaced by relevance each turn. The agent can also write them via{' '}
+            <code>remember(…)</code>, or the scheduled consolidation job extracts them from recent
+            conversations.
           </p>
         </div>
-        <div className="memory-header-actions">
+        <div {...stylex.props(page.headerActions)}>
           <button
-            className="artifact-btn"
+            {...stylex.props(btn.base)}
             onClick={() => void consolidateAction.run()}
             disabled={consolidateAction.pending}
             title="Run the LLM that extracts new memory items from recent conversations"
           >
             {consolidateAction.pending ? 'Consolidating…' : 'Consolidate'}
           </button>
-          <button className="artifact-btn primary" onClick={openAdd}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> Add memory
           </button>
         </div>
       </header>
 
-      {actionError && !editorOpen && <div className="memory-error">{actionError}</div>}
+      {actionError && !editorOpen && <div {...stylex.props(page.error)}>{actionError}</div>}
 
       {showBlobFallback ? (
         <LegacyBlob blob={blob} primary />
       ) : all.length === 0 ? (
-        <div className="memory-empty">
+        <div {...stylex.props(page.empty)}>
           <p>No memories yet.</p>
           <p>
-            Add one, ask the agent to <code>remember</code> something, or run
-            consolidation after some conversation history accumulates.
+            Add one, ask the agent to <code>remember</code> something, or run consolidation after
+            some conversation history accumulates.
           </p>
-          <button className="artifact-btn primary" onClick={openAdd}>
+          <button {...stylex.props(btn.base, btn.primary, styles.emptyBtn)} onClick={openAdd}>
             <PlusIcon size={14} /> Add memory
           </button>
         </div>
@@ -230,10 +233,10 @@ export function MemoryView() {
         onSubmit={submitEditor}
         onClose={closeEditor}
       >
-        <div className="auto-form-group">
-          <span className="auto-form-label">Memory</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Memory</span>
           <textarea
-            className="auto-form-textarea"
+            {...stylex.props(field.textarea)}
             value={text}
             onChange={(e) => setText(e.target.value)}
             spellCheck={false}
@@ -242,29 +245,29 @@ export function MemoryView() {
             placeholder="e.g. Prefers responses in Spanish when discussing travel."
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Kind</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Kind</span>
           {editor?.mode === 'edit' ? (
-            <span className="memory-kind-static">
-              <span className={`memory-kind-dot memory-kind-dot--${editKind}`} />
+            <span {...stylex.props(memory.kindStatic)}>
+              <span {...stylex.props(kindDot.base, kindDotStyle(editKind))} />
               {KIND_INFO[editKind].label} — {KIND_INFO[editKind].hint}
             </span>
           ) : (
-            <div className="seg" role="radiogroup" aria-label="Memory kind">
+            <div {...stylex.props(seg.root)} role="radiogroup" aria-label="Memory kind">
               {(Object.keys(KIND_INFO) as MemoryKind[]).map((k) => (
                 <button
                   key={k}
                   type="button"
                   role="radio"
                   aria-checked={kind === k}
-                  className={`seg-opt${kind === k ? ' seg-opt--active' : ''}`}
+                  {...stylex.props(seg.opt, kind === k && seg.optActive)}
                   onClick={() => setKind(k)}
                 >
-                  <span className="seg-opt-label">
-                    <span className={`memory-kind-dot memory-kind-dot--${k}`} />
+                  <span {...stylex.props(seg.label)}>
+                    <span {...stylex.props(kindDot.base, kindDotStyle(k))} />
                     {KIND_INFO[k].label}
                   </span>
-                  <span className="seg-opt-hint">{KIND_INFO[k].hint}</span>
+                  <span {...stylex.props(seg.hint)}>{KIND_INFO[k].hint}</span>
                 </button>
               ))}
             </div>
@@ -338,12 +341,12 @@ function LegacyBlob({
   }
 
   return (
-    <div className="memory-section">
-      <h2 className="memory-section-title">
+    <div {...stylex.props(page.section)}>
+      <h2 {...stylex.props(page.sectionTitle)}>
         Legacy AGENTS.md
-        <span className="memory-section-hint">{blob.content.length} chars</span>
+        <span {...stylex.props(page.sectionHint)}>{blob.content.length} chars</span>
       </h2>
-      <p className="memory-subtitle">
+      <p {...stylex.props(page.subtitle)}>
         {primary ? (
           <>
             No discrete items yet (no embedding model configured), so this blob <em>is</em> the
@@ -359,29 +362,33 @@ function LegacyBlob({
         )}
       </p>
 
-      {error && <div className="memory-error">{error}</div>}
+      {error && <div {...stylex.props(page.error)}>{error}</div>}
 
       {editing ? (
         <>
           <textarea
-            className="config-input config-input--multiline"
+            {...stylex.props(codeField.input, codeField.multiline)}
             rows={16}
             value={draft}
             disabled={busy}
             spellCheck={false}
             onChange={(e) => setDraft(e.target.value)}
           />
-          <div className="config-actions">
+          <div {...stylex.props(codeField.actions)}>
             <button
-              className="artifact-btn primary"
+              {...stylex.props(btn.base, btn.primary)}
               disabled={busy || !draft.trim()}
-              title={draft.trim() ? '' : 'Use Clear to remove the entry — an empty blob is not the same as no blob.'}
+              title={
+                draft.trim()
+                  ? ''
+                  : 'Use Clear to remove the entry — an empty blob is not the same as no blob.'
+              }
               onClick={() => void save()}
             >
               Save
             </button>
             <button
-              className="artifact-btn"
+              {...stylex.props(btn.base)}
               disabled={busy}
               onClick={() => {
                 setDraft(blob.content);
@@ -396,12 +403,13 @@ function LegacyBlob({
       ) : (
         <>
           <div
-            className="artifact-detail-content agent-bubble"
+            {...stylex.props(prose.vars, styles.blobBody)}
+            data-md
             dangerouslySetInnerHTML={{__html: marked.parse(blob.content) as string}}
           />
-          <div className="config-actions">
+          <div {...stylex.props(codeField.actions)}>
             <button
-              className="artifact-btn"
+              {...stylex.props(btn.base)}
               onClick={() => {
                 setDraft(blob.content);
                 setEditing(true);
@@ -410,7 +418,7 @@ function LegacyBlob({
               <EditIcon size={14} /> Edit
             </button>
             <button
-              className="artifact-btn"
+              {...stylex.props(btn.base)}
               disabled={!blob.exists}
               onClick={() => setConfirmClear(true)}
             >
@@ -432,3 +440,9 @@ function LegacyBlob({
     </div>
   );
 }
+
+const styles = stylex.create({
+  /** The empty state's call to action sits a little clear of the prose. */
+  emptyBtn: {marginBlockStart: 8},
+  blobBody: {fontSize: '0.9rem', lineHeight: 1.55},
+});

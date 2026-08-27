@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, Link, useNavigate} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {useLazyLoadQuery, usePaginationFragment} from 'react-relay';
@@ -15,6 +16,7 @@ import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {RunSpine} from '../components/RunSpine';
+import {page} from '../components/ui';
 import {refreshRunningTasks} from '../hooks/useRunningTasks';
 import {useTaskEvents} from '../hooks/useTaskEvents';
 import type {
@@ -42,6 +44,7 @@ import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
 import {commitStopTask} from '../relay/StopTaskMutation';
 import {todoListQuery} from '../relay/TodoListQuery';
+import {conv} from './c.$id.styles';
 
 export const Route = createFileRoute('/c/$id')({
   validateSearch: (search: Record<string, unknown>): {task?: string} =>
@@ -139,9 +142,7 @@ function ConversationPage() {
   // they fall back to the newest assistant message rather than becoming
   // unreachable: the card is the only way into the side panel.
   const artifactsByMessage = useMemo(() => {
-    const lastAssistantId = [...allMessages]
-      .reverse()
-      .find((m) => m.role === 'assistant')?.id;
+    const lastAssistantId = [...allMessages].reverse().find((m) => m.role === 'assistant')?.id;
     const byMessage = new Map<string, ArtifactCard[]>();
     for (const a of artifactListData.artifacts) {
       const owner = a.messageId ?? lastAssistantId;
@@ -439,10 +440,10 @@ function ConversationPage() {
   }, [id, isEphemeral]);
 
   return (
-    <div className={`page${showSpine ? ' has-spine' : ''}`}>
+    <div {...stylex.props(page.root)}>
       {isEphemeral && (
         <div
-          className="incognito-bar"
+          {...stylex.props(conv.incognitoBar)}
           title="This conversation is not saved and will be deleted when you leave."
         >
           <svg
@@ -463,11 +464,11 @@ function ConversationPage() {
         </div>
       )}
       {data.project && (
-        <div className="project-badge-bar">
+        <div {...stylex.props(conv.projectBar)}>
           <Link
             to="/projects/$id"
             params={{id: decodeGlobalId(data.project.id)}}
-            className="project-badge"
+            {...stylex.props(conv.projectBadge)}
             title="Open project"
           >
             <FolderIcon size={12} /> {data.project.name}
@@ -492,6 +493,7 @@ function ConversationPage() {
         streamingArtifacts={isActive ? streamingArtifacts : undefined}
         onOpenArtifact={handleOpenArtifact}
         openArtifactId={artifactPanelOpen ? selectedArtifactId : null}
+        hasSpine={showSpine}
       />
       {showSpine && (
         <RunSpine
@@ -521,7 +523,7 @@ function ConversationPage() {
           onClose={() => setArtifactPanelOpen(false)}
         />
       )}
-      <footer className="page-footer">
+      <footer {...stylex.props(conv.footer, showSpine && conv.footerWithSpine)}>
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt
             taskId={runningMsg.id}

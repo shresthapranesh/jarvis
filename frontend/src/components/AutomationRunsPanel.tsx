@@ -1,14 +1,15 @@
+import * as stylex from '@stylexjs/stylex';
 import {marked} from 'marked';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {AutomationRunsQuery as TAutomationRunsQuery} from '../__generated__/AutomationRunsQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
-import {QueryBoundary, useQueryRetry} from './QueryBoundary';
-import {refreshAutomationList} from '../relay/AutomationListQuery';
-
 import {useAutomationRunEvents} from '../hooks/useAutomationRunEvents';
 import {formatDuration, formatRelativeTime} from '../lib/api';
+import {useToast} from '../lib/toast';
+import type {Automation, AutomationRun} from '../lib/types';
+import {refreshAutomationList} from '../relay/AutomationListQuery';
 import {
   automationRunsQuery,
   automationRunsVars,
@@ -16,8 +17,8 @@ import {
   refreshAutomationRuns,
 } from '../relay/AutomationRunsQuery';
 import {commitTriggerAutomation} from '../relay/TriggerAutomationMutation';
-import {useToast} from '../lib/toast';
-import type {Automation, AutomationRun} from '../lib/types';
+import {panel, statusDot, typeIcon} from '../routes/automation.styles';
+import {headBtn, live, sheet, timeline} from './AutomationRunsPanel.styles';
 import {
   BoltIcon,
   CalendarIcon,
@@ -30,6 +31,8 @@ import {
   WebhookIcon,
   XIcon,
 } from './icons';
+import {QueryBoundary, useQueryRetry} from './QueryBoundary';
+import {errorBubble, prose, stream, ThinkingDots} from './ui';
 
 function TypeIcon({type, size = 16}: {type: Automation['input_type']; size?: number}) {
   if (type === 'prompt') return <BoltIcon size={size} />;
@@ -61,6 +64,12 @@ function useElapsedSeconds(active: boolean): number {
 
   return secs;
 }
+
+const PILL = {
+  running: live.pillRunning,
+  done: live.pillDone,
+  error: live.pillError,
+} as const;
 
 function LiveRunCard({
   runId,
@@ -95,48 +104,43 @@ function LiveRunCard({
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
-    stickToBottomRef.current =
-      el.scrollHeight - el.clientHeight - el.scrollTop < 40;
+    stickToBottomRef.current = el.scrollHeight - el.clientHeight - el.scrollTop < 40;
   }
 
-  const status: 'running' | 'done' | 'error' = error
-    ? 'error'
-    : streaming
-    ? 'running'
-    : 'done';
+  const status: 'running' | 'done' | 'error' = error ? 'error' : streaming ? 'running' : 'done';
 
-  const fmtElapsed =
-    elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+  const fmtElapsed = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
 
   return (
     <div
-      className={`live-run-card live-run-card--${status}${completed ? ' live-run-card--fading' : ''}`}
+      {...stylex.props(
+        live.card,
+        status === 'running' && live.cardRunning,
+        completed && live.cardFading,
+      )}
     >
-      <div className="live-run-header">
-        <span className={`live-run-pill live-run-pill--${status}`}>
-          {status === 'running' && <span className="live-run-dot" />}
+      <div {...stylex.props(live.header)}>
+        <span {...stylex.props(live.pill, PILL[status])}>
+          {status === 'running' && <span {...stylex.props(live.dot)} />}
           {status === 'running' ? 'Running' : status === 'done' ? 'Done' : 'Error'}
         </span>
-        <span className="live-run-timer">{fmtElapsed}</span>
+        <span {...stylex.props(live.timer)}>{fmtElapsed}</span>
       </div>
-      <div className="live-run-body" ref={scrollRef} onScroll={onScroll}>
+      <div {...stylex.props(live.body)} ref={scrollRef} onScroll={onScroll}>
         {error ? (
-          <div className="error-bubble">{error}</div>
+          <div {...stylex.props(errorBubble.base)}>{error}</div>
         ) : text ? (
           <div
-            className="live-run-output"
+            {...stylex.props(prose.vars)}
+            data-md
             dangerouslySetInnerHTML={{__html: marked.parse(text) as string}}
           />
         ) : (
-          <div className="live-run-thinking">
-            <div className="thinking-dots">
-              <span />
-              <span />
-              <span />
-            </div>
+          <div {...stylex.props(live.thinking)}>
+            <ThinkingDots />
           </div>
         )}
-        {streaming && text && <span className="cursor" />}
+        {streaming && text && <span {...stylex.props(stream.cursor)} />}
       </div>
     </div>
   );
@@ -156,6 +160,33 @@ function snippetFromText(text: string, maxChars = 240): string {
   return stripped.slice(0, maxChars).trimEnd() + '…';
 }
 
+// Run status is server data, so the variant is looked up rather than encoded
+// as a fixed set of props — an unknown status falls back to the base style.
+function statusVariant(status: string) {
+  if (status === 'done') return timeline.statusDone;
+  if (status === 'error') return timeline.statusError;
+  if (status === 'running') return timeline.statusRunning;
+  return null;
+}
+
+function barVariant(status: string) {
+  if (status === 'done') return timeline.barDone;
+  if (status === 'error') return timeline.barError;
+  if (status === 'running') return timeline.barRunning;
+  return null;
+}
+
+function dotVariant(status: string) {
+  if (status === 'done') return statusDot.done;
+  if (status === 'error') return statusDot.error;
+  if (status === 'running') return statusDot.running;
+  if (status === 'no_change') return statusDot.no_change;
+  if (status === 'skipped') return statusDot.skipped;
+  if (status === 'stopped') return statusDot.stopped;
+  if (status === 'blocked') return statusDot.blocked;
+  return null;
+}
+
 function RunTimelineRow({run, maxDurationMs}: {run: AutomationRun; maxDurationMs: number}) {
   const [open, setOpen] = useState(false);
   const text = run.output ?? run.error ?? '';
@@ -167,52 +198,53 @@ function RunTimelineRow({run, maxDurationMs}: {run: AutomationRun; maxDurationMs
   const barPct = maxDurationMs > 0 ? Math.max(8, (durationMs / maxDurationMs) * 100) : 8;
 
   return (
-    <div className={`run-row-v2 run-row-v2--${run.status}${open ? ' run-row-v2--open' : ''}`}>
+    <div {...stylex.props(timeline.row, open && timeline.rowOpen)}>
       <div
-        className="run-row-v2-header"
+        {...stylex.props(timeline.head)}
         onClick={() => text && setOpen((o) => !o)}
         role="button"
         tabIndex={0}
       >
-        <div className="run-row-v2-meta">
-          <span className={`run-status-dot run-status-dot--${run.status}`} />
-          <span className={`run-row-v2-status run-row-v2-status--${run.status}`}>
-            {run.status}
-          </span>
-          <span className="run-trigger-icon" title={run.triggered_by}>
+        <div {...stylex.props(timeline.meta)}>
+          <span {...stylex.props(statusDot.base, dotVariant(run.status))} />
+          <span {...stylex.props(timeline.status, statusVariant(run.status))}>{run.status}</span>
+          <span {...stylex.props(timeline.trigger)} title={run.triggered_by}>
             {run.triggered_by === 'schedule' ? (
               <CalendarIcon size={11} />
             ) : (
               <CursorClickIcon size={11} />
             )}
           </span>
-          <span className="run-row-v2-time">{formatRelativeTime(run.started_at)}</span>
+          <span {...stylex.props(timeline.time)}>{formatRelativeTime(run.started_at)}</span>
           {duration && (
-            <span className="run-row-v2-duration">
+            <span {...stylex.props(timeline.duration)}>
               <span
-                className={`run-duration-bar run-duration-bar--${run.status}`}
+                {...stylex.props(timeline.bar, barVariant(run.status))}
                 style={{width: `${barPct}%`}}
               />
-              <span className="run-duration-label">{duration}</span>
+              <span {...stylex.props(timeline.barLabel)}>{duration}</span>
             </span>
           )}
           {text && (
-            <span className={`run-row-v2-chevron${open ? ' run-row-v2-chevron--open' : ''}`}>
+            <span {...stylex.props(timeline.chevron, open && timeline.chevronOpen)}>
               <ChevronDownIcon size={12} />
             </span>
           )}
         </div>
         {snippet && !open && (
-          <div
-            className={`run-row-v2-snippet${run.status === 'error' ? ' run-row-v2-snippet--error' : ''}`}
-          >
+          <div {...stylex.props(timeline.snippet, run.status === 'error' && timeline.snippetError)}>
             {snippet}
           </div>
         )}
       </div>
       {open && text && (
         <div
-          className={`run-row-v2-output${run.status === 'error' ? ' run-row-v2-output--error' : ''}`}
+          {...stylex.props(
+            timeline.output,
+            prose.vars,
+            run.status === 'error' && timeline.outputError,
+          )}
+          data-md
           dangerouslySetInnerHTML={{__html: marked.parse(text) as string}}
         />
       )}
@@ -232,7 +264,7 @@ export function AutomationRunsPanel(props: PanelProps) {
   return (
     <QueryBoundary
       label="Failed to load runs"
-      fallback={<div className="runs-empty">Loading runs…</div>}
+      fallback={<div {...stylex.props(sheet.empty)}>Loading runs…</div>}
     >
       <AutomationRunsPanelInner {...props} />
     </QueryBoundary>
@@ -275,20 +307,22 @@ function AutomationRunsPanelInner({automation, onClose, onEdit}: PanelProps) {
 
   return (
     <>
-      <div className="auto-panel-backdrop" onClick={onClose} />
-      <aside className="runs-panel" role="dialog" aria-label={`Runs for ${automation.name}`}>
-        <header className="runs-panel-header">
-          <div className="runs-panel-title">
-            <span className={`runs-panel-type runs-panel-type--${automation.input_type}`}>
+      <div {...stylex.props(panel.backdrop)} onClick={onClose} />
+      <aside {...stylex.props(sheet.root)} role="dialog" aria-label={`Runs for ${automation.name}`}>
+        <header {...stylex.props(sheet.header)}>
+          <div {...stylex.props(sheet.title)}>
+            <span
+              {...stylex.props(typeIcon.base, sheet.typeIconSm, typeIcon[automation.input_type])}
+            >
               <TypeIcon type={automation.input_type} size={14} />
             </span>
-            <span className="runs-panel-name" title={automation.name}>
+            <span {...stylex.props(sheet.name)} title={automation.name}>
               {automation.name}
             </span>
           </div>
-          <div className="runs-panel-actions">
+          <div {...stylex.props(sheet.actions)}>
             <button
-              className="runs-panel-btn runs-panel-btn--primary"
+              {...stylex.props(headBtn.base, headBtn.primary)}
               onClick={() => void triggerAction.run()}
               disabled={triggerAction.pending || !!activeRunId}
               title="Run now"
@@ -296,15 +330,11 @@ function AutomationRunsPanelInner({automation, onClose, onEdit}: PanelProps) {
               <PlayIcon size={12} />
               <span>Run</span>
             </button>
-            <button
-              className="runs-panel-btn"
-              onClick={() => onEdit(automation)}
-              title="Edit"
-            >
+            <button {...stylex.props(headBtn.base)} onClick={() => onEdit(automation)} title="Edit">
               <EditIcon size={13} />
             </button>
             <button
-              className="runs-panel-btn runs-panel-btn--close"
+              {...stylex.props(headBtn.base, headBtn.close)}
               onClick={onClose}
               aria-label="Close"
             >
@@ -313,7 +343,7 @@ function AutomationRunsPanelInner({automation, onClose, onEdit}: PanelProps) {
           </div>
         </header>
 
-        <div className="runs-panel-body">
+        <div {...stylex.props(sheet.body)}>
           {activeRunId && (
             <LiveRunCard
               runId={activeRunId}
@@ -328,19 +358,19 @@ function AutomationRunsPanelInner({automation, onClose, onEdit}: PanelProps) {
             />
           )}
 
-          <div className="runs-panel-section-label">
-            History {runs.length > 0 && <span className="runs-count">({runs.length})</span>}
+          <div {...stylex.props(sheet.sectionLabel)}>
+            History {runs.length > 0 && <span {...stylex.props(sheet.count)}>({runs.length})</span>}
           </div>
 
           {runs.length === 0 && !activeRunId && (
-            <div className="runs-empty">
+            <div {...stylex.props(sheet.empty)}>
               <BoltIcon size={20} />
-              <p>No runs yet. Hit Run to fire one.</p>
+              <p {...stylex.props(sheet.emptyP)}>No runs yet. Hit Run to fire one.</p>
             </div>
           )}
 
           {runs.length > 0 && (
-            <div className="run-timeline">
+            <div {...stylex.props(timeline.list)}>
               {runs.map((r) => (
                 <RunTimelineRow key={r.id} run={r} maxDurationMs={maxDurationMs} />
               ))}

@@ -1,0 +1,283 @@
+/* ════════════════════════════════════════════════════════════════════
+   base.css — the only global stylesheet.
+
+   Everything here is something StyleX structurally cannot express: it
+   styles an element React does not render (html/body), a document-level
+   pseudo-element, a universal selector, or DOM that arrives as an HTML
+   string. Component styling lives in `stylex.create` beside its
+   component; design tokens live in `src/theme/tokens.stylex.ts`.
+   ════════════════════════════════════════════════════════════════════ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Pre-paint theme ──────────────────────────────────────────────────
+   The theme is resolved before first paint by the inline script in
+   index.html, which stamps `data-theme` on <html>. The real palette is a
+   StyleX theme whose class name is hashed at build time, so that script
+   cannot apply it — `theme/applyTheme.ts` does, once the bundle runs.
+
+   These four literals cover the only surface visible in between (the root
+   div is empty until React mounts) and MUST track `colors.bg` / `colors.text`
+   in theme/tokens.stylex.ts and theme/themes.stylex.ts. `--pp-bg` is also
+   what __root.tsx reads to keep <meta name="theme-color"> in step. */
+:root {
+  color-scheme: dark;
+  --pp-bg: #141110;
+  --pp-text: #ece6df;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --pp-bg: #f6f3ee;
+  --pp-text: #1a1512;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  background-color: var(--pp-bg);
+  color: var(--pp-text);
+  transition:
+    color 0.25s ease,
+    background-color 0.25s ease;
+}
+
+/* ── View transitions ──
+   Document-level pseudo-elements: they have no element to hang a class on.
+   The `view-transition-name`s they target are set from StyleX, on .app-shell
+   (root), the left panel (nav) and the main panel (main). */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.22s;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  ::view-transition-old(main),
+  ::view-transition-new(main) {
+    animation-duration: 0.22s;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  ::view-transition-old(nav),
+  ::view-transition-new(nav) {
+    animation-duration: 0.2s;
+    animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Caller-authored content ──────────────────────────────────────────
+   Two places take markup this app does not render itself and so cannot
+   attach a compiled style to: HTML strings from `marked`, and JSX passed
+   as a prop (a dialog's `message`). Both are keyed off a data attribute
+   rather than a class, so the element still gets all its own styling
+   from StyleX with no className to collide with. */
+[data-dialog-prose] p {
+  margin: 0 0 8px;
+}
+[data-dialog-prose] p:last-child {
+  margin-bottom: 0;
+}
+[data-dialog-prose] strong {
+  color: var(--pp-text);
+  font-weight: 600;
+}
+
+/* ── iOS zoom guard ──────────────────────────────────────────────────
+   iOS zooms the page when focusing any control under 16px, and never
+   zooms back out. This targets bare elements across the whole app, which
+   no compiled per-element style can do; the `:not()` chain is only there
+   to out-specify the component rules. No design intent survives an
+   unrecoverable zoom. */
+@media (max-width: 860px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* ── Rendered markdown ───────────────────────────────────────────────
+   `marked` output reaches the DOM as an HTML string, so these descendants
+   exist only at runtime and no compiled style can reach them. The host
+   element carries `data-md` (never a class) so it still takes all of its
+   own styling from StyleX, and forwards the handful of tokens these rules
+   need as plain custom properties — StyleX's variable names are hashed and
+   unknowable from a stylesheet. See `prose` in components/ui/run.tsx: its
+   `base` publishes them along with the type scale, and `vars` publishes only
+   the tokens, for a container that sets its own. */
+[data-md] h1,
+[data-md] h2,
+[data-md] h3,
+[data-md] h4 {
+  margin: 0.75em 0 0.35em;
+}
+[data-md] h1 {
+  font-size: 1.15em;
+}
+[data-md] h2 {
+  font-size: 1.05em;
+}
+[data-md] h3 {
+  font-size: 0.97em;
+}
+[data-md] p {
+  margin: 0.45em 0;
+}
+[data-md] ul,
+[data-md] ol {
+  padding-left: 1.4em;
+  margin: 0.45em 0;
+}
+[data-md] li {
+  margin: 0.2em 0;
+}
+[data-md] code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.85em;
+  background: var(--md-surface2);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+[data-md] pre {
+  background: var(--md-surface);
+  border: 1px solid var(--md-border);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 var(--md-inset);
+  padding: 13px 15px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+[data-md] pre code {
+  background: none;
+  padding: 0;
+}
+[data-md] blockquote {
+  border-left: 3px solid var(--md-border);
+  padding-left: 12px;
+  color: var(--md-text-dim);
+  margin: 0.5em 0;
+}
+[data-md] a {
+  color: var(--md-accent);
+  text-decoration: none;
+}
+[data-md] a:hover {
+  text-decoration: underline;
+}
+[data-md] table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+  font-size: 0.85em;
+}
+[data-md] th,
+[data-md] td {
+  border: 1px solid var(--md-border);
+  padding: 5px 10px;
+  text-align: left;
+}
+[data-md] th {
+  background: var(--md-surface2);
+  font-weight: 600;
+}
+[data-md] hr {
+  border: none;
+  border-top: 1px solid var(--md-border);
+  margin: 0.7em 0;
+}
+[data-md] > *:first-child {
+  margin-top: 0;
+}
+[data-md] > *:last-child {
+  margin-bottom: 0;
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   @xyflow/react overrides
+
+   The workflow canvas is third-party DOM: React Flow renders its own
+   controls, minimap, edges and handle elements, so there is no element
+   here for `stylex.props()` to reach. These stay global selectors.
+
+   Their colours are not hardcoded, though — `editor.canvas` in
+   components/workflow.styles.ts publishes the `--rf-*` palette on the
+   canvas wrapper, and every value below reads it.
+
+   Every selector is prefixed `:root` for specificity, which is not
+   cosmetic: @xyflow/react's own stylesheet is imported by the lazily
+   loaded WorkflowEditor module, so it lands *after* this file in both dev
+   and the build. At equal single-class specificity it would win, and its
+   `.react-flow__minimap { background: #fff }` did — the minimap rendered
+   white against the dark canvas. `:root` breaks the tie for good.
+   ══════════════════════════════════════════════════════════════════════ */
+:root .react-flow {
+  background: var(--rf-bg);
+}
+:root .react-flow__background pattern circle {
+  fill: var(--rf-border) !important;
+}
+:root .react-flow__controls {
+  background: var(--rf-surface);
+  border: 1px solid var(--rf-border);
+  box-shadow: none;
+  border-radius: 6px;
+  overflow: hidden;
+}
+:root .react-flow__controls-button {
+  background: var(--rf-surface);
+  border-bottom: 1px solid var(--rf-border);
+  color: var(--rf-text-dim);
+  fill: var(--rf-text-dim);
+}
+:root .react-flow__controls-button:hover {
+  background: var(--rf-surface2);
+}
+:root .react-flow__minimap {
+  background: var(--rf-surface);
+  border: 1px solid var(--rf-border);
+  border-radius: 6px;
+}
+:root .react-flow__edge-path {
+  stroke: var(--rf-border);
+  stroke-width: 2;
+}
+:root .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--rf-accent);
+}
+:root .react-flow__connection-path {
+  stroke: var(--rf-accent);
+}
+
+/* The connection dots — the same `:root` + `!important` reason as above. */
+:root .wf-handle {
+  background: var(--rf-accent) !important;
+  border: 2px solid var(--rf-bg) !important;
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 50% !important;
+}
+:root .wf-handle--true {
+  background: #3a7d44 !important;
+}
+:root .wf-handle--false {
+  background: var(--rf-error-border) !important;
+}

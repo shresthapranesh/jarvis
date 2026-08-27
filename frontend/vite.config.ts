@@ -1,4 +1,5 @@
 import {transformSync} from '@babel/core';
+import stylex from '@stylexjs/unplugin';
 // @ts-expect-error — babel-plugin-relay has no bundled type defs
 import relayPlugin from 'babel-plugin-relay';
 import {tanstackRouter} from '@tanstack/router-plugin/vite';
@@ -37,6 +38,18 @@ export default defineConfig({
   plugins: [
     tanstackRouter({routesDirectory: './src/routes'}),
     relayTransform(),
+    // StyleX compiles `stylex.create`/`defineVars` away at build time and
+    // appends the collected CSS to Vite's own stylesheet asset. It runs after
+    // relayTransform() only because that one must see the original `graphql`
+    // tagged templates; the two passes are otherwise independent.
+    // `cssInjectionTarget` is not optional here. The plugin appends its CSS to
+    // one existing asset, and its default picks a file literally named
+    // index.css/style.css or else the *first* .css asset — which in this build
+    // is the lazily-loaded WorkflowEditor chunk (it imports @xyflow's
+    // stylesheet). The design tokens would then only arrive on /workflow.
+    stylex.vite({
+      cssInjectionTarget: (fileName) => /(^|\/)index-[^/]*\.css$/.test(fileName),
+    }),
     react(),
   ],
   server: {

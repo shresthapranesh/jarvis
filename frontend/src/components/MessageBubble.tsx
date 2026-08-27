@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {marked} from 'marked';
 import {useEffect, useMemo, useRef, useState} from 'react';
 
@@ -39,7 +40,7 @@ function StopIcon() {
 function SpinnerIcon() {
   return (
     <svg
-      className="mic-spinner"
+      {...stylex.props(stream.spinner)}
       width="12"
       height="12"
       viewBox="0 0 24 24"
@@ -58,6 +59,8 @@ import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep, getStepPreview} from '../lib/steps';
 import type {ArtifactCard, Message, Step} from '../lib/types';
 import {MessageArtifacts} from './MessageArtifacts';
+import {actions, badge, bubble, media, safety, working} from './MessageBubble.styles';
+import {chipBtn, prose, stream, ThinkingDots, turn} from './ui';
 import {WorkerPanel} from './WorkerPanel';
 
 // Rendering for historical messages persisted with status "blocked" by the
@@ -65,8 +68,8 @@ import {WorkerPanel} from './WorkerPanel';
 function SafetyBanner({layer}: {layer: 'input' | 'output'}) {
   const layerLabel = layer === 'input' ? 'Input blocked' : 'Output redacted';
   return (
-    <div className={`safety-banner safety-banner--${layer}`}>
-      <span className="safety-banner__label">⚠ {layerLabel}</span>
+    <div {...stylex.props(safety.banner)}>
+      <span {...stylex.props(safety.label)}>⚠ {layerLabel}</span>
     </div>
   );
 }
@@ -104,7 +107,7 @@ function TokenBadge({input, output}: {input: number | null; output: number | nul
   if (input == null && output == null) return null;
   return (
     <span
-      className="token-badge"
+      {...stylex.props(badge.base)}
       title={`Tokens for this turn — input: ${(input ?? 0).toLocaleString()} (full context sent), output: ${(output ?? 0).toLocaleString()}`}
     >
       ↑ {formatTokens(input ?? 0)} ↓ {formatTokens(output ?? 0)}
@@ -136,7 +139,7 @@ function PerfBadge({
     .filter(Boolean)
     .join('\n');
   return (
-    <span className="token-badge perf-badge" title={title}>
+    <span {...stylex.props(badge.base, badge.perf)} title={title}>
       {ttftMs != null && <span>{formatMs(ttftMs)} TTFT</span>}
       {prefillTps != null && <span>{formatRate(prefillTps)} pp</span>}
       {evalTps != null && <span>{formatRate(evalTps)} tg</span>}
@@ -152,18 +155,18 @@ function formatBytes(bytes: number) {
 
 function MultimodalUserContent({parts}: {parts: ContentPart[]}) {
   return (
-    <div className="multimodal-user">
+    <div {...stylex.props(media.stack)}>
       {parts.map((part, i) => {
         if (part.type === 'text') {
           return part.text ? (
-            <p key={i} className="multimodal-text">
+            <p key={i} {...stylex.props(media.text)}>
               {part.text}
             </p>
           ) : null;
         }
         if (part.type === 'image') {
           return (
-            <div key={i} className="multimodal-file-badge">
+            <div key={i} {...stylex.props(media.chip)}>
               <svg
                 width="13"
                 height="13"
@@ -179,13 +182,13 @@ function MultimodalUserContent({parts}: {parts: ContentPart[]}) {
                 <polyline points="21 15 16 10 5 21" />
               </svg>
               <span>{part.name}</span>
-              <span className="multimodal-size">{formatBytes(part.size)}</span>
+              <span {...stylex.props(media.size)}>{formatBytes(part.size)}</span>
             </div>
           );
         }
         if (part.type === 'audio') {
           return (
-            <div key={i} className="multimodal-file-badge">
+            <div key={i} {...stylex.props(media.chip)}>
               <svg
                 width="13"
                 height="13"
@@ -201,13 +204,13 @@ function MultimodalUserContent({parts}: {parts: ContentPart[]}) {
                 <circle cx="18" cy="16" r="3" />
               </svg>
               <span>{part.name}</span>
-              <span className="multimodal-size">{formatBytes(part.size)}</span>
+              <span {...stylex.props(media.size)}>{formatBytes(part.size)}</span>
             </div>
           );
         }
         if (part.type === 'video') {
           return (
-            <div key={i} className="multimodal-file-badge">
+            <div key={i} {...stylex.props(media.chip)}>
               <svg
                 width="13"
                 height="13"
@@ -222,13 +225,13 @@ function MultimodalUserContent({parts}: {parts: ContentPart[]}) {
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
               </svg>
               <span>{part.name}</span>
-              <span className="multimodal-size">{formatBytes(part.size)}</span>
+              <span {...stylex.props(media.size)}>{formatBytes(part.size)}</span>
             </div>
           );
         }
         if (part.type === 'document') {
           return (
-            <div key={i} className="multimodal-file-badge">
+            <div key={i} {...stylex.props(media.chip)}>
               <svg
                 width="13"
                 height="13"
@@ -245,7 +248,7 @@ function MultimodalUserContent({parts}: {parts: ContentPart[]}) {
                 <line x1="16" y1="17" x2="8" y2="17" />
               </svg>
               <span>{part.name}</span>
-              <span className="multimodal-size">{formatBytes(part.size)}</span>
+              <span {...stylex.props(media.size)}>{formatBytes(part.size)}</span>
             </div>
           );
         }
@@ -291,7 +294,7 @@ export function StreamingBubble({
   }, [thinkingText]);
 
   const stepsButton = steps.length > 0 && (
-    <button className="activity-btn" onClick={() => onShowSteps?.(steps)}>
+    <button {...stylex.props(chipBtn.base)} onClick={() => onShowSteps?.(steps)}>
       <svg
         width="11"
         height="11"
@@ -309,35 +312,31 @@ export function StreamingBubble({
   );
 
   return (
-    <div className="turn">
+    <div {...stylex.props(turn.base)}>
       {workers && workers.length > 0 && <WorkerPanel workers={workers} />}
       {text ? (
-        <div className="agent-bubble streaming">
+        <div {...stylex.props(prose.base)} data-md>
           {/* No `key` here: keying on text.length remounts this node on every
               token, which restarts the fade-in over the whole accumulated
               message and reads as flicker. The fade belongs to the bubble
               mounting once, not to each token. */}
           <span dangerouslySetInnerHTML={{__html: html}} />
-          <span className="cursor" />
+          <span {...stylex.props(stream.cursor)} />
         </div>
       ) : (
-        <div className="working-widget">
+        <div {...stylex.props(working.root)}>
           {/* Section 1: animated dots + action label */}
-          <div className="working-action">
-            <div className="thinking-dots">
-              <span />
-              <span />
-              <span />
-            </div>
-            <span className="working-label">{describeStep(latestStep)}</span>
+          <div {...stylex.props(working.action)}>
+            <ThinkingDots />
+            <span {...stylex.props(working.label)}>{describeStep(latestStep)}</span>
           </div>
           {/* Section 2: live reasoning text (if available), else step preview */}
           {thinkingText ? (
-            <div className="thinking-stream" ref={thinkingRef}>
+            <div {...stylex.props(working.thinking)} ref={thinkingRef}>
               {thinkingText}
             </div>
           ) : (
-            preview && <div className="working-preview">{preview}</div>
+            preview && <div {...stylex.props(working.preview)}>{preview}</div>
           )}
           {/* Section 3: step count */}
           {stepsButton}
@@ -481,13 +480,13 @@ export function MessageBubble({
           .join('\n')
       : message.content;
     return (
-      <div className="turn">
-        <div className="user-bubble">
+      <div {...stylex.props(turn.base)}>
+        <div {...stylex.props(bubble.user)}>
           {parts ? <MultimodalUserContent parts={parts} /> : message.content}
         </div>
-        <div className="turn-actions turn-actions--user">
+        <div {...stylex.props(actions.row, actions.rowUser)}>
           <button
-            className={`copy-btn${copied ? ' copy-btn--copied' : ''}`}
+            {...stylex.props(actions.copy, copied && actions.copyDone)}
             onClick={() => copyText(plainText)}
             title={copied ? 'Copied!' : 'Copy'}
             type="button"
@@ -503,12 +502,13 @@ export function MessageBubble({
   const blocked = message.status === 'blocked';
 
   return (
-    <div className="turn">
+    <div {...stylex.props(turn.base)}>
       {blocked && (
         <SafetyBanner layer={message.content.startsWith('[OUTPUT REDACTED') ? 'output' : 'input'} />
       )}
       <div
-        className={`agent-bubble${blocked ? ' agent-bubble--blocked' : ''}`}
+        {...stylex.props(prose.base, blocked && prose.blocked)}
+        data-md
         dangerouslySetInnerHTML={{__html: html}}
       />
       {artifacts && artifacts.length > 0 && (
@@ -518,9 +518,9 @@ export function MessageBubble({
           selectedId={openArtifactId}
         />
       )}
-      <div className={`turn-actions${ttsState !== 'idle' ? ' turn-actions--tts-active' : ''}`}>
+      <div {...stylex.props(actions.row, ttsState !== 'idle' && actions.rowPinned)}>
         <button
-          className={`copy-btn${copied ? ' copy-btn--copied' : ''}`}
+          {...stylex.props(actions.copy, copied && actions.copyDone)}
           onClick={() => copyText(message.content)}
           title={copied ? 'Copied!' : 'Copy'}
           type="button"
@@ -528,7 +528,7 @@ export function MessageBubble({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </button>
         <button
-          className={`copy-btn${ttsState === 'playing' ? ' copy-btn--copied' : ''}`}
+          {...stylex.props(actions.copy, ttsState === 'playing' && actions.copyDone)}
           onClick={readAloud}
           title={
             ttsState === 'loading' ? 'Loading…' : ttsState === 'playing' ? 'Stop' : 'Read aloud'
@@ -544,7 +544,7 @@ export function MessageBubble({
           )}
         </button>
         {message.steps.length > 0 && (
-          <button className="activity-btn" onClick={() => onShowSteps?.(message.steps)}>
+          <button {...stylex.props(chipBtn.base)} onClick={() => onShowSteps?.(message.steps)}>
             <svg
               width="11"
               height="11"

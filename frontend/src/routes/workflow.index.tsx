@@ -1,9 +1,11 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {WorkflowListQuery as TWorkflowListQuery} from '../__generated__/WorkflowListQuery.graphql';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
+import {config, list, modal, newBtn, wfBtn} from '../components/workflow.styles';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {formatRelativeTime} from '../lib/api';
 import {commitCreateWorkflow} from '../relay/CreateWorkflowMutation';
@@ -16,7 +18,7 @@ function WorkflowListRoute() {
   return (
     <QueryBoundary
       label="Failed to load workflows"
-      fallback={<div className="wf-list-empty">Loading…</div>}
+      fallback={<div {...stylex.props(list.empty)}>Loading…</div>}
     >
       <WorkflowListPage />
     </QueryBoundary>
@@ -66,32 +68,32 @@ function WorkflowListPage() {
   const confirmDeleteWorkflow = workflows.find((wf) => wf.id === confirmDeleteId);
 
   return (
-    <div className="wf-list-page">
-      <div className="wf-list-header">
-        <h2 className="wf-list-title">Workflows</h2>
-        <button className="auto-new-btn" onClick={() => setShowCreate((v) => !v)}>
+    <div {...stylex.props(list.page)}>
+      <div {...stylex.props(list.header)}>
+        <h2 {...stylex.props(list.title)}>Workflows</h2>
+        <button {...stylex.props(newBtn.base)} onClick={() => setShowCreate((v) => !v)}>
           {showCreate ? 'Cancel' : '+ New'}
         </button>
       </div>
 
       {showCreate && (
-        <form className="wf-create-form" onSubmit={handleCreate}>
+        <form {...stylex.props(list.createForm)} onSubmit={handleCreate}>
           <input
-            className="wf-config-input"
+            {...stylex.props(config.input, list.createInput)}
             placeholder="Workflow name"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             autoFocus
           />
           <input
-            className="wf-config-input"
+            {...stylex.props(config.input, list.createInput)}
             placeholder="Description (optional)"
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
           />
           <button
             type="submit"
-            className="auto-new-btn"
+            {...stylex.props(newBtn.base)}
             disabled={createAction.pending || !newName.trim()}
           >
             {createAction.pending ? 'Creating…' : 'Create'}
@@ -99,25 +101,24 @@ function WorkflowListPage() {
         </form>
       )}
 
-
       {workflows.length === 0 && (
-        <div className="wf-list-empty">No workflows yet. Create one above.</div>
+        <div {...stylex.props(list.empty)}>No workflows yet. Create one above.</div>
       )}
 
       {workflows.map((wf) => (
         <div
           key={wf.id}
-          className="wf-row"
+          {...stylex.props(list.row)}
           onClick={() => void navigate({to: '/workflow/$id', params: {id: wf.id}})}
         >
-          <div className="wf-row-info">
-            <div className="wf-row-name">{wf.name}</div>
-            {wf.description && <div className="wf-row-desc">{wf.description}</div>}
-            <div className="wf-row-meta">{formatRelativeTime(wf.updated_at)}</div>
+          <div {...stylex.props(list.rowInfo)}>
+            <div {...stylex.props(list.rowName)}>{wf.name}</div>
+            {wf.description && <div {...stylex.props(list.rowDesc)}>{wf.description}</div>}
+            <div {...stylex.props(list.rowMeta)}>{formatRelativeTime(wf.updated_at)}</div>
           </div>
-          <div className="wf-row-actions">
+          <div {...stylex.props(list.rowActions)}>
             <button
-              className="wf-delete-node-btn wf-delete-node-btn--inline"
+              {...stylex.props(wfBtn.del, wfBtn.delInline)}
               onClick={(e) => {
                 e.stopPropagation();
                 setConfirmDeleteId(wf.id);
@@ -131,20 +132,19 @@ function WorkflowListPage() {
 
       {/* Delete confirmation modal */}
       {confirmDeleteId && confirmDeleteWorkflow && (
-        <div className="wf-modal-backdrop" onClick={() => setConfirmDeleteId(null)}>
-          <div className="wf-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="wf-modal-title">Delete workflow?</div>
-            <p style={{fontSize: '0.83rem', color: 'var(--text-dim)', margin: 0}}>
-              <strong style={{color: 'var(--text)'}}>{confirmDeleteWorkflow.name}</strong> and all
+        <div {...stylex.props(modal.backdrop)} onClick={() => setConfirmDeleteId(null)}>
+          <div {...stylex.props(modal.root)} onClick={(e) => e.stopPropagation()}>
+            <div {...stylex.props(modal.title)}>Delete workflow?</div>
+            <p {...stylex.props(modal.body)}>
+              <strong {...stylex.props(modal.strong)}>{confirmDeleteWorkflow.name}</strong> and all
               its run history will be permanently deleted.
             </p>
-            <div className="wf-modal-actions">
-              <button className="wf-save-btn" onClick={() => setConfirmDeleteId(null)}>
+            <div {...stylex.props(modal.actions)}>
+              <button {...stylex.props(wfBtn.save)} onClick={() => setConfirmDeleteId(null)}>
                 Cancel
               </button>
               <button
-                className="wf-delete-node-btn"
-                style={{marginTop: 0}}
+                {...stylex.props(wfBtn.del, wfBtn.delInline)}
                 disabled={deleteAction.pending}
                 onClick={() => void deleteAction.run(confirmDeleteId)}
               >

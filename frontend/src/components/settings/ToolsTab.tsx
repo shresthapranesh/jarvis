@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -7,6 +8,9 @@ import {commitSetToolPolicy} from '../../relay/SetToolPolicyMutation';
 import {toolsQuery} from '../../relay/ToolsQuery';
 import {SearchIcon} from '../icons';
 import {useQueryRetry} from '../QueryBoundary';
+import {badge, field, page} from '../ui';
+// `tools` is also a local variable name in this tab.
+import {settings as sx, tools as toolStyles} from './settings.styles';
 
 type Tool = TToolsQuery['response']['tools'][number];
 
@@ -82,16 +86,16 @@ export function ToolsTab() {
   }
 
   return (
-    <div className="memory-section">
-      <h2 className="memory-section-title">
-        Tools <span className="memory-count">{tools.length}</span>
-        <span className="memory-section-hint">
+    <div {...stylex.props(page.section)}>
+      <h2 {...stylex.props(page.sectionTitle)}>
+        Tools <span {...stylex.props(page.count)}>{tools.length}</span>
+        <span {...stylex.props(page.sectionHint)}>
           {off} off · {gated} need approval
         </span>
       </h2>
 
-      <div className="settings-filter-row">
-        <div className="settings-search">
+      <div {...stylex.props(sx.filterRow)}>
+        <div {...stylex.props(sx.search)}>
           <SearchIcon size={14} />
           <input
             placeholder="Search tools…"
@@ -100,7 +104,7 @@ export function ToolsTab() {
           />
         </div>
         <select
-          className="auto-form-select settings-filter-select"
+          {...stylex.props(field.select, sx.filterSelect)}
           value={kindFilter}
           onChange={(e) => setKindFilter(e.target.value)}
         >
@@ -112,18 +116,18 @@ export function ToolsTab() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="memory-empty">No tools match the filter.</div>
+        <div {...stylex.props(page.empty)}>No tools match the filter.</div>
       ) : (
         [...groups.entries()].map(([kind, byGroup]) => (
-          <section key={kind} className="tool-kind">
-            <h3 className="tool-kind-title">
+          <section key={kind} {...stylex.props(toolStyles.kind)}>
+            <h3 {...stylex.props(toolStyles.kindTitle)}>
               {KIND_LABEL[kind] ?? kind}
-              <span className="tool-kind-blurb">{KIND_BLURB[kind]}</span>
+              <span {...stylex.props(toolStyles.kindBlurb)}>{KIND_BLURB[kind]}</span>
             </h3>
             {[...byGroup.entries()].map(([group, rows]) => (
-              <div key={group} className="tool-group">
-                {kind !== 'bound' && <div className="tool-group-name">{group}</div>}
-                <ul className="tool-list">
+              <div key={group} {...stylex.props(toolStyles.group)}>
+                {kind !== 'bound' && <div {...stylex.props(toolStyles.groupName)}>{group}</div>}
+                <ul {...stylex.props(toolStyles.list)}>
                   {rows.map((tool) => (
                     <ToolRow
                       key={tool.key}
@@ -152,32 +156,32 @@ function ToolRow({
   onChange: (change: {enabled?: boolean; requiresApproval?: boolean}) => void;
 }) {
   return (
-    <li className={`tool-row${tool.enabled ? '' : ' tool-row--off'}`}>
-      <div className="tool-row-main">
-        <div className="tool-row-head">
-          <span className="tool-row-name">{tool.name}</span>
+    <li {...stylex.props(toolStyles.row, !tool.enabled && toolStyles.rowOff)}>
+      <div {...stylex.props(toolStyles.rowMain)}>
+        <div {...stylex.props(toolStyles.rowHead)}>
+          <span {...stylex.props(toolStyles.rowName)}>{tool.name}</span>
           {tool.inPrompt && (
             <span
-              className="settings-badge"
+              {...stylex.props(badge.base)}
               title="This tool's schema is sent to the model on every LLM call, used or not."
             >
               in prompt
             </span>
           )}
           {!tool.available && (
-            <span className="settings-badge" title={tool.detail || 'Not currently reachable'}>
+            <span {...stylex.props(badge.base)} title={tool.detail || 'Not currently reachable'}>
               {tool.detail || 'unavailable'}
             </span>
           )}
-          {tool.available && tool.detail && <span className="settings-badge">{tool.detail}</span>}
-          {tool.requiresApproval && (
-            <span className="settings-badge settings-badge--live">approval</span>
+          {tool.available && tool.detail && (
+            <span {...stylex.props(badge.base)}>{tool.detail}</span>
           )}
+          {tool.requiresApproval && <span {...stylex.props(badge.base, badge.live)}>approval</span>}
         </div>
-        {tool.description && <p className="tool-row-desc">{tool.description}</p>}
+        {tool.description && <p {...stylex.props(toolStyles.rowDesc)}>{tool.description}</p>}
       </div>
-      <div className="tool-row-controls">
-        <label className="tool-toggle" title="Let the agent use this tool at all">
+      <div {...stylex.props(toolStyles.rowControls)}>
+        <label {...stylex.props(toolStyles.toggle)} title="Let the agent use this tool at all">
           <input
             type="checkbox"
             checked={tool.enabled}
@@ -187,7 +191,7 @@ function ToolRow({
           <span>Enabled</span>
         </label>
         <label
-          className="tool-toggle"
+          {...stylex.props(toolStyles.toggle)}
           title="Every call blocks until a human approves it, wherever it runs — chat, board task, automation or the SDK."
         >
           <input

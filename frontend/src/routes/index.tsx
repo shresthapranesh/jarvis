@@ -1,9 +1,11 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, Link, useNavigate} from '@tanstack/react-router';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
 import {InputBox} from '../components/InputBox';
+import {errorBubble, page} from '../components/ui';
 import {useRunningTasks} from '../hooks/useRunningTasks';
 import {greeting, relativeTime} from '../lib/format';
 import type {MediaAttachment} from '../lib/types';
@@ -11,6 +13,7 @@ import {uploadStagedAttachment} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {decodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
+import {dispatch, recent as recentStyles, run} from './index.styles';
 
 export const Route = createFileRoute('/')({component: IndexPage});
 
@@ -70,15 +73,15 @@ function IndexPage() {
   }
 
   return (
-    <div className="page dispatch">
-      <div className="dispatch-scroll">
-        <div className="dispatch-inner">
-          <header className="dispatch-head">
-            <h1 className="dispatch-greeting">{greeting()}</h1>
-            <p className="dispatch-sub">
+    <div {...stylex.props(page.root)}>
+      <div {...stylex.props(dispatch.scroll)}>
+        <div {...stylex.props(dispatch.inner)}>
+          <header {...stylex.props(dispatch.head)}>
+            <h1 {...stylex.props(dispatch.greeting)}>{greeting()}</h1>
+            <p {...stylex.props(dispatch.sub)}>
               {running.length > 0 ? (
                 <>
-                  <span className="dispatch-pulse" aria-hidden="true" />
+                  <span {...stylex.props(dispatch.pulse)} aria-hidden="true" />
                   {running.length} {running.length === 1 ? 'run' : 'runs'} in flight
                 </>
               ) : (
@@ -87,47 +90,48 @@ function IndexPage() {
             </p>
           </header>
 
-          {error && <div className="error-bubble dispatch-error">{error}</div>}
+          {error && <div {...stylex.props(errorBubble.base, dispatch.error)}>{error}</div>}
 
-          <div className="dispatch-composer">
+          <div>
             <InputBox
               onSubmit={handleSubmit}
               disabled={loading}
+              fullWidth
               incognito={incognito}
               onToggleIncognito={() => setIncognito((v) => !v)}
             />
           </div>
 
           {running.length > 0 && (
-            <section className="dispatch-section">
-              <h2 className="dispatch-section-heading">In flight</h2>
-              <ul className="dispatch-runs">
+            <section {...stylex.props(dispatch.section)}>
+              <h2 {...stylex.props(dispatch.heading)}>In flight</h2>
+              <ul {...stylex.props(recentStyles.list)}>
                 {running.map((task) => (
-                  <li className="dispatch-run" key={task.id}>
-                    <span className="dispatch-run-mark" aria-hidden="true" />
-                    <span className="dispatch-run-label">{task.label}</span>
-                    <span className="dispatch-run-kind">{task.kind}</span>
-                    <span className="dispatch-run-time">{relativeTime(task.started_at)}</span>
+                  <li {...stylex.props(run.row)} key={task.id}>
+                    <span {...stylex.props(run.mark)} aria-hidden="true" />
+                    <span {...stylex.props(run.label)}>{task.label}</span>
+                    <span {...stylex.props(run.time)}>{task.kind}</span>
+                    <span {...stylex.props(run.time)}>{relativeTime(task.started_at)}</span>
                   </li>
                 ))}
               </ul>
-              <Link to="/tasks" className="dispatch-more">
+              <Link to="/tasks" {...stylex.props(dispatch.more)}>
                 All tasks →
               </Link>
             </section>
           )}
 
           {recent.length > 0 && (
-            <section className="dispatch-section">
-              <h2 className="dispatch-section-heading">Recent</h2>
-              <ul className="dispatch-recent">
+            <section {...stylex.props(dispatch.section)}>
+              <h2 {...stylex.props(dispatch.heading)}>Recent</h2>
+              <ul {...stylex.props(recentStyles.list)}>
                 {recent.map((conv) => (
                   <li key={conv.id}>
-                    <Link to="/c/$id" params={{id: conv.id}} className="dispatch-recent-row">
-                      <span className="dispatch-recent-title">{conv.title}</span>
-                      <span className="dispatch-recent-meta">
+                    <Link to="/c/$id" params={{id: conv.id}} {...stylex.props(recentStyles.row)}>
+                      <span {...stylex.props(recentStyles.title)}>{conv.title}</span>
+                      <span {...stylex.props(recentStyles.meta)}>
                         {conv.messageCount} {conv.messageCount === 1 ? 'message' : 'messages'}
-                        <span className="dispatch-dot" aria-hidden="true">
+                        <span {...stylex.props(recentStyles.dot)} aria-hidden="true">
                           ·
                         </span>
                         {relativeTime(conv.createdAt)}

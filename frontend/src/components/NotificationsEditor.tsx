@@ -1,11 +1,13 @@
+import * as stylex from '@stylexjs/stylex';
 import {Link} from '@tanstack/react-router';
 import {useMemo} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {NotificationChannelsQuery as TNotificationChannelsQuery} from '../__generated__/NotificationChannelsQuery.graphql';
+import type {NotificationConfig, NotificationOn} from '../lib/types';
 import {mapChannel, notificationChannelsQuery} from '../relay/NotificationChannelsQuery';
 import {QueryBoundary} from './QueryBoundary';
-import type {NotificationConfig, NotificationOn} from '../lib/types';
+import {chipBtn, field} from './ui';
 
 interface Props {
   value: NotificationConfig[];
@@ -19,8 +21,7 @@ export function parseNotifications(raw: string | null | undefined): Notification
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
-      (c): c is NotificationConfig =>
-        c && typeof c === 'object' && typeof c.id === 'string',
+      (c): c is NotificationConfig => c && typeof c === 'object' && typeof c.id === 'string',
     );
   } catch {
     return [];
@@ -40,7 +41,7 @@ export function NotificationsEditor(props: Props) {
   return (
     <QueryBoundary
       label="Failed to load channels"
-      fallback={<div className="auto-form-group">Loading channels…</div>}
+      fallback={<div {...stylex.props(field.group)}>Loading channels…</div>}
     >
       <NotificationsEditorInner {...props} />
     </QueryBoundary>
@@ -72,8 +73,8 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
   const noChannels = channels.length === 0;
 
   return (
-    <div className="auto-form-group">
-      <label className="auto-form-label">Notifications</label>
+    <div {...stylex.props(field.group)}>
+      <label {...stylex.props(field.label)}>Notifications</label>
       {value.length === 0 && (
         <div style={{fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: 6}}>
           {noChannels ? (
@@ -103,17 +104,13 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
             }}
           >
             <select
-              className="auto-form-select"
+              {...stylex.props(field.select)}
               value={row.id}
               onChange={(e) => update(idx, {id: e.target.value})}
               disabled={disabled}
               style={{flex: 1}}
             >
-              {orphan && (
-                <option value={row.id}>
-                  (missing channel {row.id.slice(0, 8)}…)
-                </option>
-              )}
+              {orphan && <option value={row.id}>(missing channel {row.id.slice(0, 8)}…)</option>}
               {channels.length === 0 && !orphan && (
                 <option value="" disabled>
                   No channels — add in Settings
@@ -126,7 +123,7 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
               ))}
             </select>
             <select
-              className="auto-form-select"
+              {...stylex.props(field.select)}
               value={row.on}
               onChange={(e) => update(idx, {on: e.target.value as NotificationOn})}
               disabled={disabled}
@@ -138,7 +135,7 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
             </select>
             <button
               type="button"
-              className="activity-btn"
+              {...stylex.props(chipBtn.base)}
               onClick={() => remove(idx)}
               disabled={disabled}
               style={{flex: '0 0 auto'}}
@@ -150,7 +147,7 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
       })}
       <button
         type="button"
-        className="activity-btn"
+        {...stylex.props(chipBtn.base)}
         onClick={add}
         disabled={disabled || channels.length === 0}
         style={{marginTop: 4}}

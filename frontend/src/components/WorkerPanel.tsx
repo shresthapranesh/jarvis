@@ -1,7 +1,10 @@
+import * as stylex from '@stylexjs/stylex';
 import {useState} from 'react';
 
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep} from '../lib/steps';
+import {colors, type} from '../theme/tokens.stylex';
+import {worker} from './ui';
 
 const RESULT_PREVIEW = 280;
 
@@ -24,28 +27,40 @@ function workerActivity(w: WorkerInfo): string {
   });
 }
 
-function WorkerCard({worker}: {worker: WorkerInfo}) {
+const DOT_STYLE: Record<string, keyof typeof worker> = {
+  running: 'dotRunning',
+  done: 'dotDone',
+  error: 'dotError',
+};
+
+// The prop is `w`, not `worker`: the shared worker styles are imported under
+// that name.
+function WorkerCard({w}: {w: WorkerInfo}) {
   const [expanded, setExpanded] = useState(false);
-  const running = worker.status === 'running';
-  const result = worker.result ?? '';
+  const running = w.status === 'running';
+  const result = w.result ?? '';
   const clipped = !expanded && result.length > RESULT_PREVIEW;
+  const expandable = result.length > RESULT_PREVIEW;
 
   return (
-    <div className={`worker-card worker-card--${worker.status}`}>
-      <div className="worker-card-head">
-        <span className={`worker-status-dot worker-status-dot--${worker.status}`} />
-        <span className="worker-role">{worker.role}</span>
-        <span className="worker-task" title={worker.task}>
-          {worker.task}
+    <div {...stylex.props(styles.card, running && styles.cardRunning)}>
+      <div {...stylex.props(styles.head)}>
+        <span {...stylex.props(worker.dot, worker[DOT_STYLE[w.status] ?? 'dotUnknown'])} />
+        <span {...stylex.props(worker.role)}>{w.role}</span>
+        <span {...stylex.props(worker.task)} title={w.task}>
+          {w.task}
         </span>
       </div>
-      <div className="worker-activity">{workerActivity(worker)}</div>
-      {running && worker.tail && <div className="worker-tail">{worker.tail}</div>}
+      <div {...stylex.props(styles.activity)}>{workerActivity(w)}</div>
+      {running && w.tail && <div {...stylex.props(styles.tail)}>{w.tail}</div>}
       {!running && result && (
         <div
-          className={`worker-result${clipped ? ' worker-result--clipped' : ''}`}
-          onClick={() => result.length > RESULT_PREVIEW && setExpanded((v) => !v)}
-          style={{cursor: result.length > RESULT_PREVIEW ? 'pointer' : 'default'}}
+          {...stylex.props(
+            styles.result,
+            clipped && styles.resultClipped,
+            expandable && styles.resultExpandable,
+          )}
+          onClick={() => expandable && setExpanded((v) => !v)}
           title={clipped ? 'Click to expand' : undefined}
         >
           {clipped ? result.slice(0, RESULT_PREVIEW) + '…' : result}
@@ -64,11 +79,63 @@ export function WorkerPanel({workers}: {workers: WorkerInfo[]}) {
       : `${workers.length} worker${workers.length !== 1 ? 's' : ''} finished`;
 
   return (
-    <div className="worker-panel">
-      <div className="worker-panel-header">{label}</div>
+    <div {...stylex.props(styles.panel)}>
+      <div {...stylex.props(styles.panelHeader)}>{label}</div>
       {workers.map((w) => (
-        <WorkerCard key={w.idx} worker={w} />
+        <WorkerCard key={w.idx} w={w} />
       ))}
     </div>
   );
 }
+
+const styles = stylex.create({
+  panel: {display: 'flex', flexDirection: 'column', gap: 6, marginBlock: '4px 8px'},
+  panelHeader: {
+    fontSize: '0.75rem',
+    color: colors.textDim,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+  },
+
+  card: {
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    paddingBlock: 8,
+    paddingInline: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  cardRunning: {borderColor: colors.borderStrong},
+
+  head: {display: 'flex', alignItems: 'center', gap: 7, minWidth: 0},
+
+  activity: {fontSize: '0.75rem', color: colors.textDim, paddingInlineStart: 14},
+  tail: {
+    fontSize: '0.72rem',
+    color: colors.textDim,
+    fontFamily: type.mono,
+    lineHeight: 1.45,
+    maxHeight: 60,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column-reverse', // keep the newest text visible
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    paddingInlineStart: 14,
+    opacity: 0.85,
+  },
+  result: {
+    fontSize: '0.76rem',
+    lineHeight: 1.5,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    paddingInlineStart: 14,
+    cursor: 'default',
+  },
+  resultClipped: {opacity: 0.9},
+  resultExpandable: {cursor: 'pointer'},
+});

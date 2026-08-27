@@ -1,7 +1,9 @@
+import * as stylex from '@stylexjs/stylex';
 import {createFileRoute} from '@tanstack/react-router';
 import {Suspense} from 'react';
 
 import {ArtifactsBrowser} from '../components/ArtifactsBrowser';
+import {browser} from '../components/ArtifactsBrowser.styles';
 
 export const Route = createFileRoute('/artifacts')({
   component: ArtifactsPage,
@@ -9,7 +11,7 @@ export const Route = createFileRoute('/artifacts')({
 
 function ArtifactsPage() {
   return (
-    <Suspense fallback={<div className="artifacts-loading">Loading artifacts…</div>}>
+    <Suspense fallback={<div {...stylex.props(browser.loading)}>Loading artifacts…</div>}>
       <ArtifactsBrowser />
     </Suspense>
   );

@@ -1,8 +1,19 @@
+import * as stylex from '@stylexjs/stylex';
 import type {SVGProps} from 'react';
 
-type IconProps = Omit<SVGProps<SVGSVGElement>, 'children'> & {size?: number};
+/**
+ * `style` is deliberately re-typed as a StyleX style rather than
+ * `CSSProperties`: an icon is almost always styled by the control it sits in,
+ * and that control needs to hand it a compiled style (opacity, rotation) it
+ * cannot reach with a selector. `stylex.props` still emits a real `style`
+ * attribute underneath when the style carries CSS variables.
+ */
+export type IconProps = Omit<SVGProps<SVGSVGElement>, 'children' | 'style' | 'className'> & {
+  size?: number;
+  style?: stylex.StyleXStyles;
+};
 
-function Icon({size = 16, children, ...rest}: IconProps & {children: React.ReactNode}) {
+function Icon({size = 16, style, children, ...rest}: IconProps & {children: React.ReactNode}) {
   return (
     <svg
       width={size}
@@ -15,6 +26,7 @@ function Icon({size = 16, children, ...rest}: IconProps & {children: React.React
       strokeLinejoin="round"
       aria-hidden="true"
       {...rest}
+      {...stylex.props(style)}
     >
       {children}
     </svg>
@@ -292,8 +304,15 @@ export const ChevronLeftIcon = (p: IconProps) => (
  * The product mark — a dispatch node fanning out to concurrent workers.
  * Drawn rather than imported so it inherits the petrol/signal tokens.
  */
-export const BrandMark = ({size = 20}: {size?: number}) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+export const BrandMark = ({size = 20, style}: {size?: number; style?: stylex.StyleXStyles}) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 32 32"
+    fill="none"
+    aria-hidden="true"
+    {...stylex.props(style)}
+  >
     <path
       d="M9 16 L16 9 M9 16 L16 23 M16 9 L23 12.5 M16 23 L23 19.5"
       stroke="currentColor"

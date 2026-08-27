@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {Link} from '@tanstack/react-router';
 import {useCallback, useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
@@ -6,6 +7,7 @@ import type {BoardTasksQuery as TBoardTasksQuery} from '../__generated__/BoardTa
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {useBoardTaskEvents} from '../hooks/useBoardTaskEvents';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
+import type {BoardTask, BoardTaskStatus} from '../lib/types';
 import {commitAnswerBoardTask} from '../relay/AnswerBoardTaskMutation';
 import {boardTasksQuery, mapBoardTask, refreshBoardTasks} from '../relay/BoardTasksQuery';
 import {commitCreateBoardTask} from '../relay/CreateBoardTaskMutation';
@@ -14,11 +16,29 @@ import {commitDeleteBoardTask} from '../relay/DeleteBoardTaskMutation';
 import {commitSetBoardTaskStatus} from '../relay/SetBoardTaskStatusMutation';
 import {commitStopBoardTask} from '../relay/StopBoardTaskMutation';
 import {commitUpdateBoardTask} from '../relay/UpdateBoardTaskMutation';
+import {kf} from '../theme/keyframes.stylex';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
+import {
+  ArchiveIcon,
+  EditIcon,
+  PauseIcon,
+  PlayIcon,
+  PlusIcon,
+  SplitIcon,
+  StopIcon,
+  TrashIcon,
+} from './icons';
 import {useQueryRetry} from './QueryBoundary';
-import {ArchiveIcon, EditIcon, PauseIcon, PlayIcon, PlusIcon, SplitIcon, StopIcon, TrashIcon} from './icons';
-import type {BoardTask, BoardTaskStatus} from '../lib/types';
+import {
+  answer as answerStyles,
+  board,
+  card,
+  chip,
+  parentDotStyle,
+  parents,
+} from './TaskBoard.styles';
+import {btn, field, iconBtn, page, Switch} from './ui';
 
 const COLUMNS: Array<{key: BoardTaskStatus; label: string}> = [
   {key: 'todo', label: 'Todo'},
@@ -37,22 +57,39 @@ interface Draft {
   parentIds: string[];
 }
 
-const EMPTY_DRAFT: Draft = {title: '', body: '', priority: 0, start: true, decompose: false, parentIds: []};
+const EMPTY_DRAFT: Draft = {
+  title: '',
+  body: '',
+  priority: 0,
+  start: true,
+  decompose: false,
+  parentIds: [],
+};
 
 type Editor = {mode: 'add'} | {mode: 'edit'; task: BoardTask};
 
 const TAIL_CHARS = 280;
 
+// The old rules reached this through `.board-col--running .board-col-head
+// span:first-child`. The column already knows its key, so the tint is applied
+// directly to the title.
+function colTitleStyle(key: BoardTaskStatus) {
+  if (key === 'running') return board.colTitleRunning;
+  if (key === 'blocked') return board.colTitleBlocked;
+  if (key === 'done') return board.colTitleDone;
+  return null;
+}
+
 /** Live token tail for a running card — one subscription per running task. */
 function RunTail({runId, onFinished}: {runId: string | null; onFinished: () => void}) {
   const {text, streaming, error} = useBoardTaskEvents(runId, onFinished);
-  if (error) return <p className="board-card-reason">{error}</p>;
+  if (error) return <p {...stylex.props(card.reason)}>{error}</p>;
   if (!streaming && !text) return null;
   const tail = text.length > TAIL_CHARS ? `…${text.slice(-TAIL_CHARS)}` : text;
   return (
-    <p className="board-card-tail">
+    <p {...stylex.props(card.tail)}>
       {tail || 'working…'}
-      {streaming && <span className="board-tail-cursor" aria-hidden="true" />}
+      {streaming && <span {...stylex.props(card.tailCursor)} aria-hidden="true" />}
     </p>
   );
 }
@@ -67,23 +104,23 @@ function AnswerBox({taskId, onAnswered}: {taskId: string; onAnswered: () => void
     },
   });
   return (
-    <div className="board-answer">
+    <div {...stylex.props(answerStyles.root)}>
       <textarea
-        className="board-answer-input"
+        {...stylex.props(answerStyles.input)}
         value={answer}
         onChange={(e) => setAnswer(e.target.value)}
         rows={2}
         placeholder="Answer the question to resume…"
       />
       <button
-        className="artifact-btn primary board-answer-btn"
+        {...stylex.props(btn.base, btn.primary, answerStyles.btn)}
         disabled={!answer.trim() || answerAction.pending}
         onClick={() => void answerAction.run()}
       >
         {answerAction.pending ? 'Resuming…' : 'Answer & resume'}
       </button>
       {answerAction.error && (
-        <span className="board-card-reason">{answerAction.error.message}</span>
+        <span {...stylex.props(card.reason)}>{answerAction.error.message}</span>
       )}
     </div>
   );
@@ -107,7 +144,6 @@ export function TaskBoard() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<BoardTask | null>(null);
-
 
   function closeEditor() {
     setEditor(null);
@@ -236,41 +272,52 @@ export function TaskBoard() {
   function renderCard(t: BoardTask) {
     const pendingParents = t.status === 'todo' ? waitingOn(t) : [];
     return (
-      <li key={t.id} className={`board-card board-card--${t.status}`}>
-        <div className="board-card-title">{t.title}</div>
-        <div className="board-card-meta">
-          {t.priority !== 0 && <span className="board-chip board-chip--priority">P{t.priority}</span>}
-          {t.created_by === 'agent' && <span className="board-chip">agent</span>}
-          {t.skill && <span className="board-chip">skill: {t.skill}</span>}
+      <li
+        key={t.id}
+        {...stylex.props(
+          card.root,
+          t.status === 'running' && card.running,
+          t.status === 'blocked' && card.blocked,
+        )}
+      >
+        <div {...stylex.props(card.title)}>{t.title}</div>
+        <div {...stylex.props(card.meta)}>
+          {t.priority !== 0 && (
+            <span {...stylex.props(chip.base, chip.priority)}>P{t.priority}</span>
+          )}
+          {t.created_by === 'agent' && <span {...stylex.props(chip.base)}>agent</span>}
+          {t.skill && <span {...stylex.props(chip.base)}>skill: {t.skill}</span>}
           {t.failure_count > 0 && (
-            <span className="board-chip board-chip--danger">{t.failure_count} failure{t.failure_count > 1 ? 's' : ''}</span>
+            <span {...stylex.props(chip.base, chip.danger)}>
+              {t.failure_count} failure{t.failure_count > 1 ? 's' : ''}
+            </span>
           )}
           {t.status === 'blocked' && t.blocked_kind === 'needs_input' && (
-            <span className="board-chip board-chip--question">needs input</span>
+            <span {...stylex.props(chip.base, chip.question)}>needs input</span>
           )}
           {pendingParents.length > 0 && (
-            <span className="board-chip" title={pendingParents.join(', ')}>
+            <span {...stylex.props(chip.base)} title={pendingParents.join(', ')}>
               waits on {pendingParents.length}
             </span>
           )}
         </div>
-        {t.body && <p className="board-card-body">{t.body}</p>}
+        {t.body && <p {...stylex.props(card.body)}>{t.body}</p>}
         {t.status === 'running' && <RunTail runId={t.run_id} onFinished={refresh} />}
         {t.status === 'blocked' && t.blocked_reason && (
-          <p className={`board-card-reason${t.blocked_kind === 'needs_input' ? ' board-card-reason--question' : ''}`}>
+          <p
+            {...stylex.props(card.reason, t.blocked_kind === 'needs_input' && card.reasonQuestion)}
+          >
             {t.blocked_reason}
           </p>
         )}
         {t.status === 'blocked' && t.blocked_kind === 'needs_input' && (
           <AnswerBox taskId={t.id} onAnswered={refresh} />
         )}
-        {t.status === 'done' && t.summary && (
-          <p className="board-card-summary">{t.summary}</p>
-        )}
-        <div className="board-card-actions">
+        {t.status === 'done' && t.summary && <p {...stylex.props(card.summary)}>{t.summary}</p>}
+        <div {...stylex.props(card.actions)}>
           {(t.status === 'todo' || t.status === 'blocked') && (
             <button
-              className="icon-btn"
+              {...stylex.props(iconBtn.base)}
               title={t.status === 'blocked' ? 'Unblock and queue' : 'Queue for dispatch'}
               onClick={() => void moveAction.run(t.id, 'ready')}
             >
@@ -279,17 +326,17 @@ export function TaskBoard() {
           )}
           {(t.status === 'todo' || t.status === 'ready') && t.parent_ids.length === 0 && (
             <button
-              className="icon-btn"
+              {...stylex.props(iconBtn.base)}
               title="Split into subtasks with a planner LLM"
               disabled={decomposingId === t.id}
               onClick={() => void decomposeAction.run(t.id)}
             >
-              <SplitIcon size={13} className={decomposingId === t.id ? 'board-split-busy' : undefined} />
+              <SplitIcon size={13} style={decomposingId === t.id ? spinner.busy : null} />
             </button>
           )}
           {t.status === 'done' && (
             <button
-              className="icon-btn"
+              {...stylex.props(iconBtn.base)}
               title="Re-run"
               onClick={() => void moveAction.run(t.id, 'ready')}
             >
@@ -298,7 +345,7 @@ export function TaskBoard() {
           )}
           {t.status === 'ready' && (
             <button
-              className="icon-btn"
+              {...stylex.props(iconBtn.base)}
               title="Park in todo"
               onClick={() => void moveAction.run(t.id, 'todo')}
             >
@@ -307,7 +354,7 @@ export function TaskBoard() {
           )}
           {t.status === 'running' && (
             <button
-              className="icon-btn icon-btn--danger"
+              {...stylex.props(iconBtn.base, iconBtn.danger)}
               title="Stop run"
               onClick={() => void stopAction.run(t.id)}
             >
@@ -315,13 +362,13 @@ export function TaskBoard() {
             </button>
           )}
           {t.status !== 'running' && (
-            <button className="icon-btn" title="Edit task" onClick={() => openEdit(t)}>
+            <button {...stylex.props(iconBtn.base)} title="Edit task" onClick={() => openEdit(t)}>
               <EditIcon size={13} />
             </button>
           )}
           {(t.status === 'done' || t.status === 'blocked') && (
             <button
-              className="icon-btn"
+              {...stylex.props(iconBtn.base)}
               title="Archive"
               onClick={() => void moveAction.run(t.id, 'archived')}
             >
@@ -330,7 +377,7 @@ export function TaskBoard() {
           )}
           {t.status !== 'running' && (
             <button
-              className="icon-btn icon-btn--danger"
+              {...stylex.props(iconBtn.base, iconBtn.danger)}
               title="Delete task"
               onClick={() => setDeleteTarget(t)}
             >
@@ -341,7 +388,7 @@ export function TaskBoard() {
             <Link
               to="/c/$id"
               params={{id: t.conversation_id}}
-              className="board-card-transcript"
+              {...stylex.props(card.transcript)}
               title="Open run transcript"
             >
               transcript
@@ -353,42 +400,42 @@ export function TaskBoard() {
   }
 
   return (
-    <div className="page board-page">
-      <header className="memory-header">
-        <div>
-          <h1>Board</h1>
-          <p className="memory-subtitle">
+    <div {...stylex.props(board.page)}>
+      <header {...stylex.props(page.header)}>
+        <div {...stylex.props(page.headerMain)}>
+          <h1 {...stylex.props(page.title)}>Board</h1>
+          <p {...stylex.props(page.subtitle)}>
             Durable background tasks the agent works through on its own. Cards in{' '}
-            <strong>ready</strong> are picked up automatically; dependent tasks wait until
-            their parents finish and receive their summaries as context. The agent can queue
-            work here too via <code>create_task(…)</code>.
+            <strong>ready</strong> are picked up automatically; dependent tasks wait until their
+            parents finish and receive their summaries as context. The agent can queue work here too
+            via <code>create_task(…)</code>.
           </p>
         </div>
-        <div className="memory-header-actions">
-          <button className="artifact-btn primary" onClick={openAdd}>
+        <div {...stylex.props(page.headerActions)}>
+          <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> New task
           </button>
         </div>
       </header>
 
-      {actionError && !editor && <div className="memory-error">{actionError}</div>}
+      {actionError && !editor && <div {...stylex.props(page.error)}>{actionError}</div>}
 
-      {(
-        <div className="board-columns">
+      {
+        <div {...stylex.props(board.columns)}>
           {COLUMNS.map((col) => {
             const cards = all.filter((t) => t.status === col.key);
             return (
-              <section key={col.key} className={`board-col board-col--${col.key}`}>
-                <header className="board-col-head">
-                  <span>{col.label}</span>
-                  <span className="board-col-count">{cards.length}</span>
+              <section key={col.key} {...stylex.props(board.col)}>
+                <header {...stylex.props(board.colHead)}>
+                  <span {...stylex.props(colTitleStyle(col.key))}>{col.label}</span>
+                  <span {...stylex.props(board.colCount)}>{cards.length}</span>
                 </header>
-                <ul className="board-cards">{cards.map(renderCard)}</ul>
+                <ul {...stylex.props(board.cards)}>{cards.map(renderCard)}</ul>
               </section>
             );
           })}
         </div>
-      )}
+      }
 
       <FormModal
         open={editor !== null}
@@ -401,29 +448,19 @@ export function TaskBoard() {
         footerExtra={
           editor?.mode === 'add' ? (
             <>
-              <label className="switch switch--labeled">
-                <input
-                  type="checkbox"
-                  checked={draft.start}
-                  disabled={draft.decompose}
-                  onChange={(e) => setDraft({...draft, start: e.target.checked})}
-                />
-                <span className="switch-track" aria-hidden="true" />
-                Start immediately
-              </label>
+              <Switch
+                checked={draft.start}
+                disabled={draft.decompose}
+                onChange={(next) => setDraft({...draft, start: next})}
+                label="Start immediately"
+              />
               {draft.parentIds.length === 0 && (
-                <label
-                  className="switch switch--labeled"
+                <Switch
+                  checked={draft.decompose}
+                  onChange={(next) => setDraft({...draft, decompose: next})}
                   title="A planner LLM splits this into parallel subtasks; the task itself runs last with their results"
-                >
-                  <input
-                    type="checkbox"
-                    checked={draft.decompose}
-                    onChange={(e) => setDraft({...draft, decompose: e.target.checked})}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                  Auto-split into subtasks
-                </label>
+                  label="Auto-split into subtasks"
+                />
               )}
             </>
           ) : undefined
@@ -431,30 +468,30 @@ export function TaskBoard() {
         onSubmit={submitEditor}
         onClose={closeEditor}
       >
-        <div className="auto-form-group">
-          <span className="auto-form-label">Title</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Title</span>
           <input
-            className="auto-form-input"
+            {...stylex.props(field.input)}
             value={draft.title}
             onChange={(e) => setDraft({...draft, title: e.target.value})}
             autoFocus={editor?.mode === 'add'}
             placeholder="Summarize this week's AI research papers"
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Instructions</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Instructions</span>
           <textarea
-            className="auto-form-textarea"
+            {...stylex.props(field.textarea)}
             value={draft.body}
             onChange={(e) => setDraft({...draft, body: e.target.value})}
             rows={6}
             placeholder="What should the agent do, and what does 'done' look like?"
           />
         </div>
-        <div className="auto-form-group">
-          <span className="auto-form-label">Priority (higher runs first)</span>
+        <div {...stylex.props(field.group)}>
+          <span {...stylex.props(field.label)}>Priority (higher runs first)</span>
           <input
-            className="auto-form-input board-priority-input"
+            {...stylex.props(field.input, parents.priorityInput)}
             type="number"
             value={draft.priority}
             onChange={(e) => setDraft({...draft, priority: Number(e.target.value) || 0})}
@@ -462,19 +499,17 @@ export function TaskBoard() {
         </div>
         {(() => {
           const editingId = editor?.mode === 'edit' ? editor.task.id : null;
-          const candidates = all.filter(
-            (t) => t.id !== editingId && t.status !== 'archived',
-          );
+          const candidates = all.filter((t) => t.id !== editingId && t.status !== 'archived');
           if (candidates.length === 0) return null;
           return (
-            <div className="auto-form-group">
-              <span className="auto-form-label">
+            <div {...stylex.props(field.group)}>
+              <span {...stylex.props(field.label)}>
                 Depends on — runs after these finish, receiving their summaries
               </span>
-              <ul className="board-parent-picker">
+              <ul {...stylex.props(parents.list)}>
                 {candidates.map((t) => (
                   <li key={t.id}>
-                    <label className="board-parent-option">
+                    <label {...stylex.props(parents.option)}>
                       <input
                         type="checkbox"
                         checked={draft.parentIds.includes(t.id)}
@@ -487,14 +522,14 @@ export function TaskBoard() {
                           })
                         }
                       />
-                      <span className={`board-parent-status board-parent-status--${t.status}`} />
+                      <span {...stylex.props(parents.dot, parentDotStyle(t.status))} />
                       {t.title}
                     </label>
                   </li>
                 ))}
               </ul>
               {draft.parentIds.length > 0 && editor?.mode === 'add' && (
-                <span className="auto-form-hint">
+                <span {...stylex.props(field.hint)}>
                   Dependent tasks wait in todo until every parent is done.
                 </span>
               )}
@@ -508,8 +543,7 @@ export function TaskBoard() {
         title="Delete task"
         message={
           <p>
-            Delete <strong>{deleteTarget?.title}</strong>? Its run transcript is deleted
-            with it.
+            Delete <strong>{deleteTarget?.title}</strong>? Its run transcript is deleted with it.
           </p>
         }
         confirmLabel="Delete"
@@ -520,3 +554,13 @@ export function TaskBoard() {
     </div>
   );
 }
+
+// The one icon on this page that animates — everything else here is static.
+const spinner = stylex.create({
+  busy: {
+    animationName: kf.spin,
+    animationDuration: '1s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+  },
+});

@@ -1,7 +1,11 @@
+import * as stylex from '@stylexjs/stylex';
+
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import type {ArtifactCard, Message, Step, TodoItem} from '../lib/types';
+import {channels, layout, space} from '../theme/tokens.stylex';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
 import {TodoList} from './TodoList';
+import {errorBubble, turn} from './ui';
 
 interface Props {
   messages: Message[];
@@ -17,6 +21,12 @@ interface Props {
   containerRef?: React.RefObject<HTMLDivElement | null>;
   isLoadingOlder?: boolean;
   onShowSteps?: (steps: Step[]) => void;
+  /**
+   * Whether the run spine is showing beside the thread. The spine is absolutely
+   * positioned, so the thread reserves its width as padding — the old rule was
+   * `.page.has-spine #messages`, which no compiled style can express.
+   */
+  hasSpine?: boolean;
   /** Artifacts keyed by the assistant message that produced them. */
   artifactsByMessage?: Map<string, ArtifactCard[]>;
   /** Artifacts the in-flight run has produced so far. */
@@ -39,17 +49,20 @@ export function MessageThread({
   containerRef,
   isLoadingOlder,
   onShowSteps,
+  hasSpine,
   artifactsByMessage,
   streamingArtifacts,
   onOpenArtifact,
   openArtifactId,
 }: Props) {
   return (
-    <div id="messages" ref={containerRef}>
-      {topRef && <div ref={topRef} className="messages-top-sentinel" />}
-      {isLoadingOlder && (
-        <div className="messages-loading-older">Loading older messages…</div>
-      )}
+    <div
+      id="messages"
+      ref={containerRef}
+      {...stylex.props(styles.scroller, hasSpine && styles.scrollerWithSpine)}
+    >
+      {topRef && <div ref={topRef} {...stylex.props(styles.topSentinel)} />}
+      {isLoadingOlder && <div {...stylex.props(styles.loadingOlder)}>Loading older messages…</div>}
       {messages.map((msg) => (
         <MessageBubble
           key={msg.id}
@@ -61,7 +74,7 @@ export function MessageThread({
         />
       ))}
       {todos && todos.length > 0 && (
-        <div className="turn">
+        <div {...stylex.props(turn.base)}>
           <TodoList todos={todos} />
         </div>
       )}
@@ -78,11 +91,48 @@ export function MessageThread({
         />
       )}
       {streamError && !isStreaming && (
-        <div className="turn">
-          <div className="error-bubble">⚠ {streamError}</div>
+        <div {...stylex.props(turn.base)}>
+          <div {...stylex.props(errorBubble.base)}>⚠ {streamError}</div>
         </div>
       )}
       <div ref={bottomRef} />
     </div>
   );
 }
+
+const styles = stylex.create({
+  scroller: {
+    flex: 1,
+    overflowY: 'auto',
+    paddingBlock: {default: 28, '@media (max-width: 768px)': 20},
+    paddingInline: {default: 20, '@media (max-width: 768px)': 14},
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 24,
+    /* No `scroll-behavior: smooth` here on purpose. It applies to every
+       programmatic scroll that doesn't name a behavior — including the
+       restore-to-bottom on open and the scrollTop fixup after prepending older
+       messages, both of which must be instant. Callers that want the animation
+       pass `behavior: 'smooth'` explicitly (see routes/c.$id.tsx). */
+    '::-webkit-scrollbar': {width: 6},
+    '::-webkit-scrollbar-track': {backgroundColor: 'transparent'},
+    '::-webkit-scrollbar-thumb': {
+      backgroundColor: `rgba(${channels.tint}, 0.12)`,
+      borderRadius: 3,
+    },
+  },
+  scrollerWithSpine: {
+    paddingInlineEnd: {
+      default: `calc(${layout.spineW} + ${space.s5})`,
+      // Below this the rail is hidden entirely, so the reservation goes too.
+      '@media (max-width: 1100px)': space.s5,
+    },
+  },
+  topSentinel: {height: 1, flexShrink: 0},
+  loadingOlder: {
+    alignSelf: 'center',
+    fontSize: 12,
+    color: `rgba(${channels.tint}, 0.45)`,
+    paddingBlock: 4,
+  },
+});
