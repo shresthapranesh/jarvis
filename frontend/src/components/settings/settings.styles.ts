@@ -16,13 +16,36 @@ export const settings = stylex.create({
     borderBlockEndStyle: 'solid',
     borderBlockEndColor: colors.border,
     marginBlockEnd: 4,
-    // Seven tabs do not fit a phone; the strip scrolls rather than wraps,
+    // Six tabs do not fit a phone; the strip scrolls rather than wraps,
     // which would push the content down a row. The bar itself is hidden —
     // the tabs run to the edge, which is the affordance.
     overflowX: 'auto',
     scrollbarWidth: 'none',
     '::-webkit-scrollbar': {display: 'none'},
+    // `overflow-x: auto` above makes this a scroll container, which resolves
+    // its `min-height: auto` to 0 — and as a flex item in the page scroller it
+    // then shrinks to nothing the moment a tab's content overflows. That is
+    // why Tools and Config rendered with *no tab strip at all* while the short
+    // tabs looked fine. Never let it shrink.
+    flexShrink: 0,
+    // Those two long lists are also what you need the strip to leave, so it
+    // pins to the top of the page scroller instead of scrolling away. It can
+    // sit flush at 0 because `root` below moves the scroller's top padding
+    // onto the header — otherwise the strip would pin *below* that padding and
+    // rows would scroll through the transparent band above it. The negative
+    // inline margin (cancelled by matching padding) stretches its opaque
+    // background across the page gutters for the same reason.
+    position: 'sticky',
+    insetBlockStart: 0,
+    zIndex: 3,
+    backgroundColor: colors.bg,
+    marginInline: {default: -40, '@media (max-width: 768px)': -16},
+    paddingInline: {default: 40, '@media (max-width: 768px)': 16},
   },
+
+  /** On `page.scroll`: hand the top padding to `chromeTop` — see `tabs`. */
+  root: {paddingBlockStart: 0},
+  chromeTop: {paddingBlockStart: {default: 32, '@media (max-width: 768px)': 20}},
   tab: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -41,12 +64,16 @@ export const settings = stylex.create({
     marginBlockEnd: -1,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
+    textDecoration: 'none',
     transition: 'color 0.14s ease, border-color 0.14s ease',
   },
   tabActive: {color: colors.text, fontWeight: 500, borderBlockEndColor: colors.accent},
 
   /** Buttons that ride along a section heading, pushed to its right edge. */
   sectionActions: {marginInlineStart: 'auto', display: 'flex', gap: 8, fontWeight: 400},
+
+  /** An icon action that rides along a row's badge line, pushed to the right. */
+  rowHeadAction: {marginInlineStart: 'auto'},
 
   mono: {fontFamily: type.mono, fontSize: type.tUi},
   channelName: {display: 'inline-flex', alignItems: 'center', gap: 8},
@@ -156,10 +183,9 @@ export const models = stylex.create({
   },
   card: {gap: 6},
   id: {fontFamily: type.mono, fontSize: type.tUi, overflowWrap: 'anywhere'},
-  // Pinned to the bottom of the card so the row of "Set as default" buttons
-  // lines up across the grid regardless of label length.
-  actions: {marginBlockStart: 'auto', paddingBlockStart: 4},
-  actionsHint: {display: 'inline-flex', alignItems: 'center', gap: 5, marginBlockStart: 0},
+  /** The single "which model is the default" control, in the filter row. */
+  defaultPicker: {display: 'flex', alignItems: 'center', gap: 6, minWidth: 0},
+  defaultSelect: {flexGrow: 0, flexShrink: 1, flexBasis: 260, fontFamily: type.mono},
   window: {color: colors.textDim, fontSize: type.tSmall, whiteSpace: 'nowrap'},
 });
 
