@@ -8,6 +8,7 @@ import type {NotificationConfig, NotificationOn} from '../lib/types';
 import {mapChannel, notificationChannelsQuery} from '../relay/NotificationChannelsQuery';
 import {QueryBoundary} from './QueryBoundary';
 import {chipBtn, field} from './ui';
+import {type} from '../theme/tokens.stylex';
 
 interface Props {
   value: NotificationConfig[];
@@ -76,7 +77,7 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
     <div {...stylex.props(field.group)}>
       <label {...stylex.props(field.label)}>Notifications</label>
       {value.length === 0 && (
-        <div style={{fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: 6}}>
+        <div style={{fontSize: type.tUi, color: 'var(--text-dim)', marginBottom: 6}}>
           {noChannels ? (
             <>
               No channels configured.{' '}
@@ -104,7 +105,7 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
             }}
           >
             <select
-              {...stylex.props(field.select)}
+              {...stylex.props(field.select, field.selectChrome)}
               value={row.id}
               onChange={(e) => update(idx, {id: e.target.value})}
               disabled={disabled}
@@ -123,7 +124,7 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
               ))}
             </select>
             <select
-              {...stylex.props(field.select)}
+              {...stylex.props(field.select, field.selectChrome)}
               value={row.on}
               onChange={(e) => update(idx, {on: e.target.value as NotificationOn})}
               disabled={disabled}

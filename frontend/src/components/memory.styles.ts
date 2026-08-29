@@ -18,7 +18,7 @@ export const item = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': colors.borderStrong},
-    borderRadius: 10,
+    borderRadius: 3,
     paddingBlock: 10,
     paddingInline: 14,
     backgroundColor: {default: colors.surface, ':hover': colors.surface2},
@@ -36,13 +36,13 @@ export const item = stylex.create({
   },
   main: {flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4},
   text: {
-    fontSize: '0.88rem',
+    fontSize: type.tBody,
     lineHeight: 1.5,
     color: colors.text,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
-  meta: {fontSize: '0.7rem', color: colors.textFaint},
+  meta: {fontSize: type.tMicro, color: colors.textFaint},
   actions: {
     display: 'flex',
     gap: 4,
@@ -71,7 +71,7 @@ export function kindDotStyle(kind: string) {
 
 export const memory = stylex.create({
   sectionEmpty: {
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     color: colors.textFaint,
     margin: 0,
     paddingBlock: 6,
@@ -82,20 +82,20 @@ export const memory = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: 7,
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     color: colors.textDim,
     paddingBlock: 6,
     paddingInline: 2,
   },
   subtitleCode: {
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
     backgroundColor: colors.surface2,
     paddingBlock: 1,
     paddingInline: 5,
-    borderRadius: 3,
+    borderRadius: 2,
   },
   metaLine: {
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
     color: colors.textDim,
     whiteSpace: 'nowrap',
     flexShrink: 0,
@@ -117,7 +117,7 @@ export const seg = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': colors.borderStrong},
-    borderRadius: 9,
+    borderRadius: 3,
     color: colors.textDim,
     fontFamily: 'inherit',
     cursor: 'pointer',
@@ -136,10 +136,10 @@ export const seg = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: 7,
-    fontSize: '0.84rem',
+    fontSize: type.tUi,
     fontWeight: 600,
   },
-  hint: {fontSize: '0.72rem', color: 'var(--seg-hint-color)'},
+  hint: {fontSize: type.tSmall, color: 'var(--seg-hint-color)'},
 });
 
 /** A skill card — the same shell as `item`, laid out as a column. */
@@ -151,7 +151,7 @@ export const skill = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': colors.borderStrong},
-    borderRadius: 10,
+    borderRadius: 3,
     paddingBlock: 12,
     paddingInline: 14,
     backgroundColor: {default: colors.surface, ':hover': colors.surface2},
@@ -169,7 +169,7 @@ export const skill = stylex.create({
   headStart: {justifyContent: 'flex-start', gap: 6},
   name: {
     fontFamily: type.mono,
-    fontSize: '0.86rem',
+    fontSize: type.tBody,
     fontWeight: 600,
     color: colors.text,
     overflowWrap: 'anywhere',
@@ -181,9 +181,9 @@ export const skill = stylex.create({
     marginInlineStart: 'auto',
     flexShrink: 0,
   },
-  desc: {fontSize: '0.82rem', lineHeight: 1.5, color: colors.textDim, margin: 0},
+  desc: {fontSize: type.tUi, lineHeight: 1.5, color: colors.textDim, margin: 0},
 
-  body: {fontSize: '0.78rem'},
+  body: {fontSize: type.tUi},
   summary: {
     cursor: 'pointer',
     color: {default: colors.textFaint, ':hover': colors.accent},
@@ -199,9 +199,9 @@ export const skill = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
     fontFamily: type.mono,
-    fontSize: '0.75rem',
+    fontSize: type.tSmall,
     lineHeight: 1.55,
     color: colors.textDim,
     whiteSpace: 'pre-wrap',
@@ -210,5 +210,5 @@ export const skill = stylex.create({
     overflowY: 'auto',
   },
   /** Name and body are code, so the editor fields go mono. */
-  monoField: {fontFamily: type.mono, fontSize: '0.8rem'},
+  monoField: {fontFamily: type.mono, fontSize: type.tUi},
 });

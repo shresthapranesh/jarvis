@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import type {ArtifactCard, Message, Step, TodoItem} from '../lib/types';
-import {channels, layout, space} from '../theme/tokens.stylex';
+import {channels, layout, space, type} from '../theme/tokens.stylex';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
 import {TodoList} from './TodoList';
 import {errorBubble, turn} from './ui';
@@ -27,6 +27,7 @@ interface Props {
    * `.page.has-spine #messages`, which no compiled style can express.
    */
   hasSpine?: boolean;
+  spineCollapsed?: boolean;
   /** Artifacts keyed by the assistant message that produced them. */
   artifactsByMessage?: Map<string, ArtifactCard[]>;
   /** Artifacts the in-flight run has produced so far. */
@@ -50,6 +51,7 @@ export function MessageThread({
   isLoadingOlder,
   onShowSteps,
   hasSpine,
+  spineCollapsed,
   artifactsByMessage,
   streamingArtifacts,
   onOpenArtifact,
@@ -59,7 +61,11 @@ export function MessageThread({
     <div
       id="messages"
       ref={containerRef}
-      {...stylex.props(styles.scroller, hasSpine && styles.scrollerWithSpine)}
+      {...stylex.props(
+        styles.scroller,
+        hasSpine && styles.scrollerWithSpine,
+        hasSpine && spineCollapsed && styles.scrollerWithSpineCollapsed,
+      )}
     >
       {topRef && <div ref={topRef} {...stylex.props(styles.topSentinel)} />}
       {isLoadingOlder && <div {...stylex.props(styles.loadingOlder)}>Loading older messages…</div>}
@@ -118,7 +124,7 @@ const styles = stylex.create({
     '::-webkit-scrollbar-track': {backgroundColor: 'transparent'},
     '::-webkit-scrollbar-thumb': {
       backgroundColor: `rgba(${channels.tint}, 0.12)`,
-      borderRadius: 3,
+      borderRadius: 2,
     },
   },
   scrollerWithSpine: {
@@ -128,10 +134,22 @@ const styles = stylex.create({
       '@media (max-width: 1100px)': space.s5,
     },
   },
+  /**
+   * A settled rail is 30px, so reserving 208 for it would give away the width
+   * collapsing it was meant to reclaim. Applied after `scrollerWithSpine` so
+   * it wins. Hovering the rail expands it *over* this padding rather than
+   * pushing it — the rail is `position: fixed`, so nothing reflows.
+   */
+  scrollerWithSpineCollapsed: {
+    paddingInlineEnd: {
+      default: `calc(${layout.spineCollapsedW} + ${space.s5})`,
+      '@media (max-width: 1100px)': space.s5,
+    },
+  },
   topSentinel: {height: 1, flexShrink: 0},
   loadingOlder: {
     alignSelf: 'center',
-    fontSize: 12,
+    fontSize: type.tSmall,
     color: `rgba(${channels.tint}, 0.45)`,
     paddingBlock: 4,
   },

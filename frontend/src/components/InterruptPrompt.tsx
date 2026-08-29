@@ -3,7 +3,7 @@ import {useRef, useState} from 'react';
 
 import {commitResolveApproval} from '../relay/ResolveApprovalMutation';
 import {commitResumeTask} from '../relay/ResumeTaskMutation';
-import {channels, colors} from '../theme/tokens.stylex';
+import {channels, colors, type} from '../theme/tokens.stylex';
 
 interface Props {
   taskId: string;
@@ -106,7 +106,7 @@ const styles = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: `rgba(${channels.accent}, 0.35)`,
-    borderRadius: 14,
+    borderRadius: 3,
     display: 'flex',
     flexDirection: 'column',
     paddingBlock: 12,
@@ -118,23 +118,23 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: 6,
-    fontSize: '0.75rem',
+    fontSize: type.tSmall,
     color: colors.accent,
     fontWeight: 600,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',
   },
-  question: {color: colors.text, fontSize: '0.92rem', lineHeight: 1.45, whiteSpace: 'pre-wrap'},
+  question: {color: colors.text, fontSize: type.tBody, lineHeight: 1.45, whiteSpace: 'pre-wrap'},
   textarea: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':focus': colors.accent},
-    borderRadius: 8,
+    borderRadius: 3,
     outline: 'none',
     resize: 'none',
     color: colors.text,
-    fontSize: '0.9rem',
+    fontSize: type.tBody,
     fontFamily: 'inherit',
     lineHeight: 1.5,
     paddingBlock: 8,
@@ -143,17 +143,17 @@ const styles = stylex.create({
     maxHeight: 120,
     '::placeholder': {color: colors.textDim},
   },
-  error: {color: colors.errorText, fontSize: '0.78rem'},
+  error: {color: colors.errorText, fontSize: type.tUi},
   footer: {display: 'flex', alignItems: 'center', gap: 8},
-  hint: {flex: 1, fontSize: '0.68rem', color: colors.textDim},
+  hint: {flex: 1, fontSize: type.tMicro, color: colors.textDim},
   submit: {
     backgroundImage: `linear-gradient(135deg, ${colors.accentStrong}, ${colors.accent})`,
     color: colors.accentContrast,
     borderStyle: 'none',
-    borderRadius: 8,
+    borderRadius: 3,
     paddingBlock: 6,
     paddingInline: 14,
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
     fontWeight: 600,
     cursor: {default: 'pointer', ':disabled': 'not-allowed'},
     opacity: {default: 1, ':disabled': 0.45},

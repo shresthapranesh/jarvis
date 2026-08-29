@@ -13,7 +13,7 @@ import {workflowDetailQuery, workflowDetailVars} from '../relay/WorkflowDetailQu
 import {mapWorkflow} from '../relay/WorkflowListQuery';
 import {workflowRunDetailQuery, workflowRunDetailVars} from '../relay/WorkflowRunDetailQuery';
 import {mapWorkflowRun} from '../relay/WorkflowRunsQuery';
-import {colors} from '../theme/tokens.stylex';
+import {colors, type} from '../theme/tokens.stylex';
 import {useQueryRetry} from './QueryBoundary';
 import {
   editor,
@@ -262,14 +262,14 @@ export default function WorkflowRunPage() {
 }
 
 const styles = stylex.create({
-  recordLabel: {flex: 1, fontSize: '0.88rem', fontWeight: 600},
-  duration: {fontSize: '0.72rem', color: colors.textDim},
+  recordLabel: {flex: 1, fontSize: type.tBody, fontWeight: 600},
+  duration: {fontSize: type.tSmall, color: colors.textDim},
   verdictRow: {paddingBlock: 8, paddingInline: 16},
 
-  planList: {margin: 0, paddingInlineStart: 20, fontSize: '0.86rem', lineHeight: 1.6},
+  planList: {margin: 0, paddingInlineStart: 20, fontSize: type.tBody, lineHeight: 1.6},
   planItem: {marginBlockEnd: 2},
 
-  summaryTitle: {fontSize: '0.75rem', fontWeight: 600, color: colors.text, flex: 1},
-  summaryCount: {fontSize: '0.68rem', color: colors.textDim},
-  summaryDuration: {fontSize: '0.68rem', color: colors.textDim, marginInlineStart: 'auto'},
+  summaryTitle: {fontSize: type.tSmall, fontWeight: 600, color: colors.text, flex: 1},
+  summaryCount: {fontSize: type.tMicro, color: colors.textDim},
+  summaryDuration: {fontSize: type.tMicro, color: colors.textDim, marginInlineStart: 'auto'},
 });

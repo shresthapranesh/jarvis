@@ -91,7 +91,7 @@ export function WorkerPanel({workers}: {workers: WorkerInfo[]}) {
 const styles = stylex.create({
   panel: {display: 'flex', flexDirection: 'column', gap: 6, marginBlock: '4px 8px'},
   panelHeader: {
-    fontSize: '0.75rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',
@@ -101,7 +101,7 @@ const styles = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: 3,
     backgroundColor: colors.surface,
     paddingBlock: 8,
     paddingInline: 10,
@@ -113,9 +113,9 @@ const styles = stylex.create({
 
   head: {display: 'flex', alignItems: 'center', gap: 7, minWidth: 0},
 
-  activity: {fontSize: '0.75rem', color: colors.textDim, paddingInlineStart: 14},
+  activity: {fontSize: type.tSmall, color: colors.textDim, paddingInlineStart: 14},
   tail: {
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
     fontFamily: type.mono,
     lineHeight: 1.45,
@@ -129,7 +129,7 @@ const styles = stylex.create({
     opacity: 0.85,
   },
   result: {
-    fontSize: '0.76rem',
+    fontSize: type.tSmall,
     lineHeight: 1.5,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',

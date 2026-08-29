@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import {Component, createContext, useContext, useState, type ReactNode} from 'react';
 import {Suspense} from 'react';
 
-import {colors} from '../theme/tokens.stylex';
+import {colors, type} from '../theme/tokens.stylex';
 import {btn} from './ui';
 
 /**
@@ -90,7 +90,7 @@ const styles = stylex.create({
     paddingBlock: 40,
     paddingInline: 24,
     color: colors.textDim,
-    fontSize: '0.9rem',
+    fontSize: type.tBody,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',

@@ -23,7 +23,7 @@ import {
   XIcon,
 } from '../components/icons';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
-import {closeBtn, page} from '../components/ui';
+import {closeBtn, field, page} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
 import {formatNextRun, formatRelativeTime} from '../lib/api';
@@ -467,7 +467,7 @@ function AutomationPage() {
                 Group
               </label>
               <select
-                {...stylex.props(filters.groupBySelect)}
+                {...stylex.props(filters.groupBySelect, field.selectChrome)}
                 id="group-by"
                 value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value as GroupBy)}

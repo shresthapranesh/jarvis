@@ -2,11 +2,16 @@ import * as stylex from '@stylexjs/stylex';
 
 import {channels, colors} from './tokens.stylex';
 
-/* ── Light mode — graphite ink overlays on a warm paper field ──────────
+/* ── Light mode — ink on bone stock ────────────────────────────────────
    Dark is the default (it lives in `defineVars`), so light is the only theme
    here. It comes in two halves because `createTheme` overrides one var group
    at a time, and `colors` derives from `channels`; `applyTheme.ts` puts both
    classes on <html> together.
+
+   The two modes are the *same* design, not two designs: flat opaque stock,
+   hairline rules, monochrome chrome, colour only on machine state. What flips
+   is which of ink/stock is the ground — so `tint` and `accent` swap roles and
+   almost everything derived from them follows without restating.
 
    The four literals in base.css's pre-paint block mirror `bg`/`text` from
    here and from tokens.stylex.ts — changing either colour means changing both.
@@ -15,58 +20,57 @@ import {channels, colors} from './tokens.stylex';
 /**
  * Swapping these re-tints every overlay derived from them in `lightColors`
  * below, which is why most of the dark palette's `rgba(...)` tokens need no
- * restating at all.
+ * restating at all. `tint` and `accent` are both ink here and both bone in
+ * dark: the overlay hue and the accent are the same substance in this theme.
  */
 export const lightChannels = stylex.createTheme(channels, {
-  tint: '32, 22, 16',
-  shadow: '28, 18, 10',
-  // Copper darkens on paper — the dark-mode value fails contrast on #f6f3ee.
-  accent: '180, 98, 42',
-  signalLive: '13, 132, 84',
-  signalTool: '17, 122, 140',
-  signalInsight: '109, 68, 216',
-  ok: '13, 132, 84',
-  danger: '202, 42, 42',
-  warn: '158, 104, 22',
+  tint: '22, 22, 26',
+  shadow: '22, 22, 26',
+  accent: '26, 27, 33',
+  // The signal inks darken on stock — the dark-mode values fail contrast on
+  // #f4f2ed, and a printed second colour is darker than its screen twin anyway.
+  signalLive: '30, 116, 71',
+  signalTool: '42, 91, 158',
+  signalInsight: '95, 66, 175',
+  ok: '30, 116, 71',
+  danger: '186, 46, 40',
+  warn: '146, 98, 20',
 });
 
 /**
  * Only two kinds of token appear here: literal colours, and derived overlays
  * whose *alpha* differs from dark. The derived tokens whose formula is
- * unchanged (`border`, `accent`, `signal*`, `ok`, `danger`, `warn`) follow the
- * channel swap above on their own, and are absent on purpose.
+ * unchanged (`surface*`, `accent`, `signal*Dim`, `ok`, `danger`, `warn`,
+ * `userBg`) follow the channel swap above on their own, and are absent on
+ * purpose.
  */
 export const lightColors = stylex.createTheme(colors, {
-  bg: '#f6f3ee',
-  surface: `rgba(${channels.tint}, 0.035)`,
-  surface2: `rgba(${channels.tint}, 0.06)`,
-  surface3: `rgba(${channels.tint}, 0.1)`,
-  borderStrong: `rgba(${channels.tint}, 0.18)`,
-  text: '#1a1512',
-  textDim: '#66594f',
-  textFaint: '#948779',
+  bg: '#f4f2ed',
+  // Ink rules on stock read heavier than bone rules on ink at equal alpha, so
+  // both steps come down rather than being inherited.
+  border: `rgba(${channels.tint}, 0.13)`,
+  borderStrong: `rgba(${channels.tint}, 0.24)`,
+  text: '#16161a',
+  textDim: '#5e5c57',
+  textFaint: '#8d8a83',
 
-  accentStrong: '#944d1f',
-  accentDim: `rgba(${channels.accent}, 0.12)`,
-  accentContrast: '#fdf7f1',
+  accentStrong: '#000000',
+  accentDim: `rgba(${channels.accent}, 0.09)`,
+  accentContrast: '#f7f6f2',
+  dangerContrast: '#f7f6f2', // light-mode `danger` is a deep red: paper on it, 5.5:1
 
-  signalLiveDim: `rgba(${channels.signalLive}, 0.12)`,
-  signalToolDim: `rgba(${channels.signalTool}, 0.12)`,
-  signalInsightDim: `rgba(${channels.signalInsight}, 0.12)`,
+  errorText: '#a11f1a',
+  errorBg: 'rgba(186, 46, 40, 0.07)',
+  errorBorder: 'rgba(186, 46, 40, 0.26)',
+  warningText: '#7c5310',
+  warningBg: 'rgba(146, 98, 20, 0.08)',
+  warningBorder: 'rgba(146, 98, 20, 0.28)',
+  webhookText: '#553da0',
+  webhookBg: 'rgba(95, 66, 175, 0.07)',
 
-  userBg: `rgba(${channels.accent}, 0.12)`,
-  errorBg: 'rgba(202, 42, 42, 0.08)',
-  errorBorder: 'rgba(202, 42, 42, 0.28)',
-  errorText: '#a81f1f',
-  warningBg: 'rgba(158, 104, 22, 0.1)',
-  warningBorder: 'rgba(158, 104, 22, 0.3)',
-  warningText: '#855312',
-  webhookBg: 'rgba(109, 68, 216, 0.08)',
-  webhookText: '#5b33c0',
-
-  // near-white glass (not pure #fff, so the channel swap can't touch it)
-  glassBg: 'rgba(253, 251, 248, 0.78)',
-  glassBorder: `rgba(${channels.tint}, 0.08)`,
-  appBg:
-    'radial-gradient(ellipse 120% 85% at 50% -18%, #fdfbf7 0%, rgba(253, 251, 247, 0) 62%), linear-gradient(180deg, #faf7f2 0%, #f6f3ee 52%, #f0ece5 100%)',
+  // A second sheet of stock, one step brighter than the page — opaque, so it
+  // cannot pick up the tint swap the way a translucent panel would.
+  glassBg: '#fbfaf7',
+  glassBorder: `rgba(${channels.tint}, 0.11)`,
+  appBg: 'linear-gradient(#f4f2ed, #f4f2ed)',
 });

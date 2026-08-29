@@ -16,7 +16,7 @@
          standalone splash does not flash. The pre-paint script below corrects it
          when the resolved theme is light; __root.tsx keeps it in sync after that,
          sourcing the value from --pp-bg so the colour is defined only in CSS. -->
-    <meta name="theme-color" content="#141110" />
+    <meta name="theme-color" content="#111113" />
     <script>
       // Resolve theme before first paint to avoid a flash of the wrong mode.
       (function () {
@@ -30,7 +30,7 @@
           // this one literal must track :root[data-theme='light'] --pp-bg in
           // src/base.css, which in turn tracks `colors.bg` in the light theme.
           if (t === 'light') {
-            document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f6f3ee');
+            document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f4f2ed');
           }
         } catch (e) {
           document.documentElement.setAttribute('data-theme', 'dark');
@@ -40,7 +40,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap"
       rel="stylesheet"
     />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d0d0d'/%3E%3Cline x1='10' y1='16' x2='16' y2='9' stroke='%234f9cf9' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='10' y1='16' x2='16' y2='23' stroke='%234f9cf9' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='16' y1='9' x2='22' y2='13' stroke='%234f9cf9' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='16' y1='23' x2='22' y2='19' stroke='%234f9cf9' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='10' cy='16' r='3' fill='%234f9cf9'/%3E%3Ccircle cx='16' cy='9' r='2.5' fill='%2322c55e'/%3E%3Ccircle cx='16' cy='23' r='2.5' fill='%2322c55e'/%3E%3Ccircle cx='22' cy='13' r='2' fill='%23a78bfa'/%3E%3Ccircle cx='22' cy='19' r='2' fill='%23a78bfa'/%3E%3C/svg%3E" />
@@ -60,7 +60,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Jarvis" />
     <!-- Deliberately NOT black-translucent: that pins the status-bar text to
-         white, which disappears against this app's light theme (#f6f3ee). With
+         white, which disappears against this app's light theme (#f4f2ed). With
          `default`, iOS tints the bar from theme-color instead — which __root.tsx
          keeps synced to --bg, so the bar tracks whichever theme is active. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />

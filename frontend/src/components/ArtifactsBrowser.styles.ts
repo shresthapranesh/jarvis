@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {colors} from '../theme/tokens.stylex';
+import {colors, type} from '../theme/tokens.stylex';
 
 /* ── Styles for ArtifactsBrowser.tsx ───────────────────────────────────
    A sortable table of every artifact, with a resizable detail pane that
@@ -22,9 +22,9 @@ export const browser = stylex.create({
     borderBlockEndColor: colors.border,
     flexShrink: 0,
   },
-  title: {fontSize: '1.3rem', fontWeight: 600, margin: 0, color: colors.text},
-  count: {fontSize: '0.8rem', color: colors.textDim},
-  empty: {paddingBlock: 40, paddingInline: 32, color: colors.textDim, fontSize: '0.9rem'},
+  title: {fontSize: type.tPage, fontWeight: 600, margin: 0, color: colors.text},
+  count: {fontSize: type.tUi, color: colors.textDim},
+  empty: {paddingBlock: 40, paddingInline: 32, color: colors.textDim, fontSize: type.tBody},
   loading: {
     paddingBlockStart: {default: 32, '@media (max-width: 768px)': 24},
     paddingBlockEnd: 32,
@@ -33,7 +33,7 @@ export const browser = stylex.create({
   },
 
   scroll: {flex: 1, overflowY: 'auto'},
-  table: {width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem'},
+  table: {width: '100%', borderCollapse: 'collapse', fontSize: type.tBody},
   // Below 768px the columns stop being columns: the row becomes a card with
   // the title on its own line and the rest wrapping beneath as meta. The
   // header row carries no content once that happens, so it goes.
@@ -44,7 +44,7 @@ export const browser = stylex.create({
     zIndex: 1,
     textAlign: 'left',
     fontWeight: 600,
-    fontSize: '0.66rem',
+    fontSize: type.tMicro,
     textTransform: 'uppercase',
     letterSpacing: '0.07em',
     color: colors.textDim,
@@ -96,12 +96,12 @@ export const browser = stylex.create({
     display: 'inline-block',
     paddingBlock: 2,
     paddingInline: 8,
-    borderRadius: 4,
+    borderRadius: 2,
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    fontSize: '0.7rem',
+    fontSize: type.tMicro,
     color: colors.textDim,
   },
   muted: {color: colors.textDim},
@@ -156,7 +156,7 @@ export const browser = stylex.create({
     flexShrink: 0,
   },
   detailName: {
-    fontSize: '0.9rem',
+    fontSize: type.tBody,
     fontWeight: 600,
     color: colors.text,
     overflow: 'hidden',

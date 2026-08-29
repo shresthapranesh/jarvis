@@ -132,7 +132,7 @@ export function McpServerModal({
         <div {...stylex.props(field.group)}>
           <span {...stylex.props(field.label)}>Transport</span>
           <select
-            {...stylex.props(field.select)}
+            {...stylex.props(field.select, field.selectChrome)}
             value={form.transport}
             onChange={(e) => update('transport', e.target.value as McpTransport)}
             disabled={form.useAdvanced}

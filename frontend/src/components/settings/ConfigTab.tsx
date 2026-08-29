@@ -61,6 +61,7 @@ export function ConfigTab() {
         <div {...stylex.props(sx.search)}>
           <SearchIcon size={14} />
           <input
+            {...stylex.props(sx.searchInput)}
             placeholder="Search keys…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -187,7 +188,7 @@ function SettingRow({
           <div {...stylex.props(codeField.edit)}>
             {setting.kind === 'select' ? (
               <select
-                {...stylex.props(field.select)}
+                {...stylex.props(field.select, field.selectChrome)}
                 value={draft}
                 disabled={busy}
                 onChange={(e) => setDraft(e.target.value)}

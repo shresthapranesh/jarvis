@@ -1,10 +1,10 @@
 import * as stylex from '@stylexjs/stylex';
-import {useEffect, useRef} from 'react';
+import {useEffect, useRef, useState} from 'react';
 
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {compactNumber} from '../lib/format';
 import type {Step} from '../lib/types';
-import {foot, node as nodeStyles, rail, track} from './RunSpine.styles';
+import {foot, mini, node as nodeStyles, rail, track} from './RunSpine.styles';
 
 interface Budget {
   inputTokens: number;
@@ -83,6 +83,15 @@ export function RunSpine({
 }: Props) {
   const trackRef = useRef<HTMLDivElement | null>(null);
 
+  // A live run always shows the full column; a settled one is a 30px trace
+  // until you point at it. Hover is state rather than a `:hover` rule because
+  // the two are separate renders — see the note in RunSpine.styles.ts. The
+  // rail is `display: none` below `bp.wide`, so there is no pointerless
+  // viewport to strand here; a click still opens the full sidebar, which is
+  // the better answer on a touchscreen anyway.
+  const [hovered, setHovered] = useState(false);
+  const expanded = isLive || hovered;
+
   // Newest node is at the bottom; follow it while the run is live.
   useEffect(() => {
     if (!isLive) return;
@@ -94,8 +103,34 @@ export function RunSpine({
   const visible = steps.slice(-MAX_NODES);
   const runningWorkers = workers.filter((w) => w.status === 'running').length;
 
+  if (!expanded) {
+    return (
+      <aside
+        {...stylex.props(rail.root, rail.rootCollapsed)}
+        aria-label={`Run activity — ${steps.length} step${steps.length === 1 ? '' : 's'}`}
+        onMouseEnter={() => setHovered(true)}
+        onClick={onExpand}
+      >
+        <div {...stylex.props(mini.track)}>
+          {visible.map((step) => (
+            <span
+              key={step.id}
+              {...stylex.props(nodeStyles.mark, markForKind(stepKind(step)))}
+              aria-hidden="true"
+            />
+          ))}
+        </div>
+        <span {...stylex.props(mini.count)}>{steps.length}</span>
+      </aside>
+    );
+  }
+
   return (
-    <aside {...stylex.props(rail.root)} aria-label="Run activity">
+    <aside
+      {...stylex.props(rail.root)}
+      aria-label="Run activity"
+      onMouseLeave={() => setHovered(false)}
+    >
       <header {...stylex.props(rail.head)}>
         <span {...stylex.props(rail.eyebrow)}>Run</span>
         <span {...stylex.props(rail.state, isLive && rail.stateLive)}>

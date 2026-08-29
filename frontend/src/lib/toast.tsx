@@ -4,7 +4,7 @@ import {createPortal} from 'react-dom';
 
 import {AlertIcon, CheckIcon, InfoIcon, XIcon} from '../components/icons';
 import {kf} from '../theme/keyframes.stylex';
-import {channels, colors, layout} from '../theme/tokens.stylex';
+import {channels, colors, layout, type} from '../theme/tokens.stylex';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -97,13 +97,13 @@ const styles = stylex.create({
     borderStyle: 'solid',
     borderColor: colors.glassBorder,
     borderInlineStartWidth: 3,
-    borderRadius: 10,
+    borderRadius: 3,
     paddingBlock: 9,
     paddingInlineStart: 11,
     paddingInlineEnd: 12,
     minWidth: 240,
     maxWidth: 380,
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     color: colors.text,
     boxShadow: `0 6px 22px rgba(${channels.shadow}, 0.4)`,
     pointerEvents: 'auto',
@@ -126,7 +126,7 @@ const styles = stylex.create({
     color: {default: colors.textDim, ':hover': colors.text},
     cursor: 'pointer',
     padding: 3,
-    borderRadius: 4,
+    borderRadius: 2,
     display: 'inline-flex',
     flexShrink: 0,
     transition: 'background 0.1s, color 0.1s',

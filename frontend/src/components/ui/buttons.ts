@@ -3,7 +3,7 @@
    ════════════════════════════════════════════════════════════════════ */
 import * as stylex from '@stylexjs/stylex';
 
-import {channels, colors} from '../../theme/tokens.stylex';
+import {channels, colors, type} from '../../theme/tokens.stylex';
 
 /**
  * The workhorse button. Icons inside it dim to 0.65 and come up on hover,
@@ -12,7 +12,7 @@ import {channels, colors} from '../../theme/tokens.stylex';
  */
 export const btn = stylex.create({
   base: {
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
     fontWeight: 500,
     lineHeight: 1,
     paddingBlock: 7,
@@ -21,7 +21,7 @@ export const btn = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': `rgba(${channels.tint}, 0.2)`},
-    borderRadius: 8,
+    borderRadius: 3,
     color: colors.text,
     cursor: {default: 'pointer', ':disabled': 'not-allowed'},
     textDecoration: 'none',
@@ -53,7 +53,7 @@ export const btn = stylex.create({
     backgroundColor: {default: colors.surface, ':hover': colors.errorBg},
     borderColor: {default: colors.border, ':hover': colors.errorBorder},
   },
-  small: {fontSize: '0.7rem', paddingBlock: 3, paddingInline: 8, borderRadius: 4},
+  small: {fontSize: type.tMicro, paddingBlock: 3, paddingInline: 8, borderRadius: 2},
   /** For an svg inside `btn.base`. */
   icon: {opacity: 'var(--btn-icon-opacity)', flexShrink: 0, transition: 'opacity 0.14s ease'},
 });
@@ -66,7 +66,7 @@ export const iconBtn = stylex.create({
     justifyContent: 'center',
     width: 26,
     height: 26,
-    borderRadius: 7,
+    borderRadius: 2,
     backgroundColor: {default: 'transparent', ':hover': colors.surface3},
     borderWidth: 1,
     borderStyle: 'solid',
@@ -95,9 +95,9 @@ export const chipBtn = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': colors.accentDim},
-    borderRadius: 6,
+    borderRadius: 2,
     color: {default: colors.textDim, ':hover': colors.accent},
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     paddingBlock: 3,
     paddingInline: 9,
     cursor: 'pointer',
@@ -124,7 +124,7 @@ export const closeBtn = stylex.create({
       default: `rgba(${channels.tint}, 0.09)`,
       ':hover': `rgba(${channels.tint}, 0.15)`,
     },
-    borderRadius: 7,
+    borderRadius: 2,
     color: {default: colors.textDim, ':hover': colors.text},
     cursor: 'pointer',
     padding: 0,

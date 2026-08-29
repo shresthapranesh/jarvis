@@ -34,8 +34,10 @@ export const dispatch = stylex.create({
   greeting: {
     fontFamily: type.display,
     fontSize: type.tDisplay,
-    fontWeight: 600,
-    letterSpacing: '-0.035em',
+    // A serif at 500 with near-normal tracking. The -0.035em the grotesk
+    // wanted closes a serif's counters and turns it into a smear.
+    fontWeight: 500,
+    letterSpacing: '-0.005em',
     lineHeight: 1.05,
     color: colors.text,
   },

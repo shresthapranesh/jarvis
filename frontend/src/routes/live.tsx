@@ -3,7 +3,7 @@ import {createFileRoute} from '@tanstack/react-router';
 import {marked} from 'marked';
 import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
-import {chipBtn, errorBubble, prose, stream, ThinkingDots} from '../components/ui';
+import {ThinkingDots, chipBtn, errorBubble, field, prose, stream} from '../components/ui';
 import {useAudioTTS} from '../hooks/useAudioTTS';
 import {useLiveSocket, type LiveStatus, type LiveTurn} from '../hooks/useLiveSocket';
 import {useModels} from '../hooks/useModels';
@@ -203,7 +203,7 @@ function LivePage() {
             TTS
           </button>
           <select
-            {...stylex.props(live.modelInput)}
+            {...stylex.props(live.modelInput, field.selectChrome)}
             value={model}
             onChange={(e) => setModel(e.target.value)}
             disabled={!catalog}

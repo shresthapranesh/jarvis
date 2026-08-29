@@ -155,7 +155,7 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
       <div {...stylex.props(field.group)}>
         <label {...stylex.props(field.label)}>Input Type</label>
         <select
-          {...stylex.props(field.select)}
+          {...stylex.props(field.select, field.selectChrome)}
           value={form.input_type}
           onChange={(e) => set('input_type', e.target.value as AutomationInputType)}
           disabled={saving}
@@ -194,7 +194,7 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           <div {...stylex.props(field.group)}>
             <label {...stylex.props(field.label)}>Model</label>
             <select
-              {...stylex.props(field.select)}
+              {...stylex.props(field.select, field.selectChrome)}
               value={form.model ?? ''}
               onChange={(e) => set('model', e.target.value)}
               disabled={saving || !catalog}
@@ -256,7 +256,7 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           <div {...stylex.props(field.group)}>
             <label {...stylex.props(field.label)}>Method</label>
             <select
-              {...stylex.props(field.select)}
+              {...stylex.props(field.select, field.selectChrome)}
               value={form.webhook_method ?? 'POST'}
               onChange={(e) => set('webhook_method', e.target.value)}
               disabled={saving}
@@ -340,11 +340,11 @@ const styles = stylex.create({
   form: {display: 'flex', flexDirection: 'column', gap: 14, padding: 16},
 
   /** Monospace treatment for the code / JSON textareas. */
-  code: {fontFamily: type.mono, fontSize: '0.78rem'},
+  code: {fontFamily: type.mono, fontSize: type.tUi},
 
   checkRow: {display: 'flex', alignItems: 'center', gap: 8},
   checkLabel: {
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     color: colors.text,
     cursor: 'pointer',
     userSelect: 'none',
@@ -354,9 +354,9 @@ const styles = stylex.create({
   saveBtn: {
     backgroundImage: `linear-gradient(135deg, ${colors.accentStrong}, ${colors.accent})`,
     borderStyle: 'none',
-    borderRadius: 8,
+    borderRadius: 3,
     color: colors.accentContrast,
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     fontFamily: 'inherit',
     paddingBlock: 6,
     paddingInline: 18,

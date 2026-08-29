@@ -3,7 +3,7 @@
    ════════════════════════════════════════════════════════════════════ */
 import * as stylex from '@stylexjs/stylex';
 
-import {channels, colors} from '../../theme/tokens.stylex';
+import {channels, colors, type} from '../../theme/tokens.stylex';
 
 /**
  * Page scaffolding. `page.root` is the flex column every route mounts as;
@@ -43,9 +43,9 @@ export const page = stylex.create({
     flexShrink: 0,
     paddingBlockStart: 4,
   },
-  title: {fontSize: '1.4rem', fontWeight: 600, marginBlock: '0 4px', color: colors.text},
+  title: {fontSize: type.tPage, fontWeight: 600, marginBlock: '0 4px', color: colors.text},
   subtitle: {
-    fontSize: '0.85rem',
+    fontSize: type.tBody,
     color: colors.textDim,
     maxWidth: 640,
     lineHeight: 1.5,
@@ -56,13 +56,13 @@ export const page = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    fontSize: '0.95rem',
+    fontSize: type.tBody,
     fontWeight: 600,
     color: colors.text,
     marginBlock: '8px 0',
   },
   sectionHint: {
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     fontWeight: 400,
     color: colors.textFaint,
     marginInlineStart: 2,
@@ -76,25 +76,25 @@ export const page = stylex.create({
     gap: 6,
   },
   count: {
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     fontWeight: 500,
     color: colors.textDim,
     backgroundColor: colors.surface2,
-    borderRadius: 10,
+    borderRadius: 3,
     paddingBlock: 1,
     paddingInline: 8,
   },
-  itemMeta: {fontSize: '0.7rem', color: colors.textFaint},
+  itemMeta: {fontSize: type.tMicro, color: colors.textFaint},
   empty: {
     paddingBlock: 40,
     paddingInline: 16,
     textAlign: 'center',
     color: colors.textDim,
-    fontSize: '0.9rem',
+    fontSize: type.tBody,
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
@@ -106,9 +106,9 @@ export const page = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.errorText,
-    borderRadius: 6,
+    borderRadius: 2,
     color: colors.errorText,
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     backgroundColor: `rgba(${channels.danger}, 0.08)`,
   },
 });
@@ -117,11 +117,11 @@ export const badge = stylex.create({
   base: {
     display: 'inline-flex',
     alignItems: 'center',
-    fontSize: '0.68rem',
+    fontSize: type.tMicro,
     fontWeight: 500,
     paddingBlock: 1,
     paddingInline: 8,
-    borderRadius: 999,
+    borderRadius: 2,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
@@ -172,13 +172,13 @@ export const kindBadge = stylex.create({
   base: {
     display: 'inline-flex',
     alignItems: 'center',
-    fontSize: '0.68rem',
+    fontSize: type.tMicro,
     fontWeight: 600,
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
     paddingBlock: 3,
     paddingInline: 8,
-    borderRadius: 999,
+    borderRadius: 2,
     flexShrink: 0,
   },
   chat: {backgroundColor: colors.accentDim, color: colors.accent},

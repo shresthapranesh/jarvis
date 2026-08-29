@@ -28,14 +28,14 @@
    what __root.tsx reads to keep <meta name="theme-color"> in step. */
 :root {
   color-scheme: dark;
-  --pp-bg: #141110;
-  --pp-text: #ece6df;
+  --pp-bg: #111113;
+  --pp-text: #e9e7e2;
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --pp-bg: #f6f3ee;
-  --pp-text: #1a1512;
+  --pp-bg: #f4f2ed;
+  --pp-text: #16161a;
 }
 
 html,
@@ -54,8 +54,12 @@ html {
 
 /* ── View transitions ──
    Document-level pseudo-elements: they have no element to hang a class on.
-   The `view-transition-name`s they target are set from StyleX, on .app-shell
-   (root), the left panel (nav) and the main panel (main). */
+   `nav` and `main` are set from StyleX, on the left panel and the main panel.
+   `root` is NOT — the UA stylesheet puts it on the document element, and
+   naming it a second time on .app-shell aborted every transition with
+   "Unexpected duplicate view-transition-name". Elements carrying their own
+   name are lifted out of the root snapshot, so the three still compose the
+   way this file assumes. */
 @media (prefers-reduced-motion: no-preference) {
   ::view-transition-old(root),
   ::view-transition-new(root) {
@@ -154,12 +158,12 @@ html {
   font-size: 0.85em;
   background: var(--md-surface2);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 2px;
 }
 [data-md] pre {
   background: var(--md-surface);
   border: 1px solid var(--md-border);
-  border-radius: 10px;
+  border-radius: 3px;
   box-shadow: inset 0 1px 0 var(--md-inset);
   padding: 13px 15px;
   overflow-x: auto;
@@ -175,12 +179,16 @@ html {
   color: var(--md-text-dim);
   margin: 0.5em 0;
 }
+/* The accent is the ink itself in this theme, so colour cannot mark a link —
+   the underline is the affordance and is always on, not a hover reveal. */
 [data-md] a {
   color: var(--md-accent);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 [data-md] a:hover {
-  text-decoration: underline;
+  text-decoration-thickness: 2px;
 }
 [data-md] table {
   border-collapse: collapse;
@@ -239,7 +247,7 @@ html {
   background: var(--rf-surface);
   border: 1px solid var(--rf-border);
   box-shadow: none;
-  border-radius: 6px;
+  border-radius: 2px;
   overflow: hidden;
 }
 :root .react-flow__controls-button {
@@ -254,7 +262,7 @@ html {
 :root .react-flow__minimap {
   background: var(--rf-surface);
   border: 1px solid var(--rf-border);
-  border-radius: 6px;
+  border-radius: 2px;
 }
 :root .react-flow__edge-path {
   stroke: var(--rf-border);
@@ -273,10 +281,10 @@ html {
   border: 2px solid var(--rf-bg) !important;
   width: 10px !important;
   height: 10px !important;
-  border-radius: 50% !important;
+  border-radius: 2px !important;
 }
 :root .wf-handle--true {
-  background: #3a7d44 !important;
+  background: var(--rf-ok) !important;
 }
 :root .wf-handle--false {
   background: var(--rf-error-border) !important;

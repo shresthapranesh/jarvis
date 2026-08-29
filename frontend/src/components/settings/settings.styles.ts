@@ -30,7 +30,7 @@ export const settings = stylex.create({
     paddingBlockStart: 8,
     paddingBlockEnd: 10,
     paddingInline: 12,
-    fontSize: '0.85rem',
+    fontSize: type.tBody,
     fontFamily: 'inherit',
     color: {default: colors.textDim, ':hover': colors.text},
     backgroundColor: 'transparent',
@@ -48,7 +48,7 @@ export const settings = stylex.create({
   /** Buttons that ride along a section heading, pushed to its right edge. */
   sectionActions: {marginInlineStart: 'auto', display: 'flex', gap: 8, fontWeight: 400},
 
-  mono: {fontFamily: type.mono, fontSize: '0.78rem'},
+  mono: {fontFamily: type.mono, fontSize: type.tUi},
   channelName: {display: 'inline-flex', alignItems: 'center', gap: 8},
   toolChips: {
     display: 'flex',
@@ -71,7 +71,7 @@ export const settings = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':focus-within': colors.accent},
-    borderRadius: 8,
+    borderRadius: 3,
     backgroundColor: colors.surface,
     color: colors.textDim,
   },
@@ -82,7 +82,7 @@ export const settings = stylex.create({
     outline: 'none',
     backgroundColor: 'transparent',
     color: colors.text,
-    fontSize: '0.84rem',
+    fontSize: type.tUi,
     fontFamily: 'inherit',
     paddingBlock: 8,
     paddingInline: 0,
@@ -106,10 +106,10 @@ export const settings = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
     backgroundColor: colors.surface,
     fontFamily: type.mono,
-    fontSize: '0.74rem',
+    fontSize: type.tSmall,
     lineHeight: 1.5,
     color: colors.textDim,
     overflow: 'auto',
@@ -133,15 +133,15 @@ export const settings = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': colors.accent},
-    borderRadius: 8,
+    borderRadius: 3,
     backgroundColor: {default: colors.surface, ':hover': colors.surface2},
     cursor: 'pointer',
     textAlign: 'left',
     fontFamily: 'inherit',
     transition: 'border-color 0.14s ease, background 0.14s ease',
   },
-  presetName: {fontSize: '0.8rem', fontWeight: 600, color: colors.text},
-  presetDesc: {fontSize: '0.68rem', color: colors.textDim, lineHeight: 1.3},
+  presetName: {fontSize: type.tUi, fontWeight: 600, color: colors.text},
+  presetDesc: {fontSize: type.tMicro, color: colors.textDim, lineHeight: 1.3},
 });
 
 /** The models grid on Settings → Models. */
@@ -155,12 +155,12 @@ export const models = stylex.create({
     gap: 8,
   },
   card: {gap: 6},
-  id: {fontFamily: type.mono, fontSize: '0.78rem', overflowWrap: 'anywhere'},
+  id: {fontFamily: type.mono, fontSize: type.tUi, overflowWrap: 'anywhere'},
   // Pinned to the bottom of the card so the row of "Set as default" buttons
   // lines up across the grid regardless of label length.
   actions: {marginBlockStart: 'auto', paddingBlockStart: 4},
   actionsHint: {display: 'inline-flex', alignItems: 'center', gap: 5, marginBlockStart: 0},
-  window: {color: colors.textDim, fontSize: '0.74rem', whiteSpace: 'nowrap'},
+  window: {color: colors.textDim, fontSize: type.tSmall, whiteSpace: 'nowrap'},
 });
 
 /** Settings → Models → Sync: the drift report. */
@@ -178,13 +178,13 @@ export const sync = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
-    fontSize: '0.8rem',
+    fontSize: type.tUi,
     color: colors.textDim,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
   },
   note: {display: 'flex', alignItems: 'center', gap: 6, margin: 0},
-  noteWarn: {color: colors.warn, fontSize: '0.8rem'},
+  noteWarn: {color: colors.warn, fontSize: type.tUi},
 
   // The report is the scrolling region — the controls above and the add
   // button below stay reachable no matter how much drift a provider reports.
@@ -203,12 +203,12 @@ export const sync = stylex.create({
     alignItems: 'center',
     gap: 8,
     margin: 0,
-    fontSize: '0.86rem',
+    fontSize: type.tBody,
     fontWeight: 600,
     color: colors.text,
   },
   finding: {display: 'flex', flexDirection: 'column', gap: 4},
-  findingTitle: {fontSize: '0.78rem', color: colors.textDim},
+  findingTitle: {fontSize: type.tUi, color: colors.textDim},
   plain: {
     listStyle: 'none',
     margin: 0,
@@ -217,8 +217,8 @@ export const sync = stylex.create({
     flexDirection: 'column',
     gap: 4,
   },
-  plainItem: {display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: '0.8rem'},
-  reason: {color: colors.textDim, fontSize: '0.76rem', overflowWrap: 'anywhere'},
+  plainItem: {display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: type.tUi},
+  reason: {color: colors.textDim, fontSize: type.tSmall, overflowWrap: 'anywhere'},
   /** The apply button on a context-window finding, pushed to the row's end. */
   rowEndBtn: {marginInlineStart: 'auto'},
 
@@ -232,7 +232,7 @@ export const sync = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
     overflow: 'hidden',
   },
   row: {
@@ -249,7 +249,7 @@ export const sync = stylex.create({
   rowMain: {display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, cursor: 'pointer'},
   rowLabel: {
     color: colors.textDim,
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
@@ -266,17 +266,17 @@ export const tools = stylex.create({
     gap: 10,
     flexWrap: 'wrap',
     marginBlock: '0 8px',
-    fontSize: '0.86rem',
+    fontSize: type.tBody,
     fontWeight: 600,
     color: colors.text,
   },
-  kindBlurb: {fontSize: '0.74rem', fontWeight: 400, color: colors.textDim},
+  kindBlurb: {fontSize: type.tSmall, fontWeight: 400, color: colors.textDim},
   // Was `.tool-group + .tool-group` — a sibling combinator, so the gap moves
   // onto the group itself and the first one is exempted.
   group: {marginBlockStart: {default: 10, ':first-child': 0}},
   groupName: {
     fontFamily: type.mono,
-    fontSize: '0.74rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
     paddingBlock: 4,
   },
@@ -299,7 +299,7 @@ export const tools = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
     backgroundColor: colors.surface,
   },
   rowOff: {opacity: 0.55},
@@ -312,18 +312,18 @@ export const tools = stylex.create({
   rowHead: {display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap'},
   rowName: {
     fontFamily: type.mono,
-    fontSize: '0.8rem',
+    fontSize: type.tUi,
     color: colors.text,
     overflowWrap: 'anywhere',
   },
-  rowDesc: {marginBlock: '3px 0', fontSize: '0.76rem', lineHeight: 1.45, color: colors.textDim},
+  rowDesc: {marginBlock: '3px 0', fontSize: type.tSmall, lineHeight: 1.45, color: colors.textDim},
   rowControls: {display: 'flex', gap: 12, flexGrow: 0, flexShrink: 0, paddingBlockStart: 2},
 
   toggle: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 5,
-    fontSize: '0.74rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
     cursor: 'pointer',
     userSelect: 'none',
@@ -337,20 +337,20 @@ export const maint = stylex.create({
   stats: {display: 'flex', flexWrap: 'wrap', gap: 22, marginBlock: '10px 4px'},
   stat: {display: 'flex', flexDirection: 'column', gap: 2},
   dt: {
-    fontSize: '0.7rem',
+    fontSize: type.tMicro,
     textTransform: 'uppercase',
     letterSpacing: '0.04em',
     color: colors.textDim,
   },
-  dd: {margin: 0, fontSize: '0.95rem', fontWeight: 600, color: colors.text},
-  sub: {display: 'block', fontSize: '0.7rem', fontWeight: 400, color: colors.textDim},
+  dd: {margin: 0, fontSize: type.tBody, fontWeight: 600, color: colors.text},
+  sub: {display: 'block', fontSize: type.tMicro, fontWeight: 400, color: colors.textDim},
   result: {
     marginBlock: '10px 0',
     paddingBlock: 8,
     paddingInline: 10,
-    borderRadius: 6,
+    borderRadius: 2,
     backgroundColor: colors.surface,
-    fontSize: '0.76rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
   },
 });
@@ -368,7 +368,7 @@ export const configNew = stylex.create({
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
   },
   input: {flexGrow: 1, flexShrink: 1, flexBasis: 200, width: 'auto'},
 });

@@ -15,11 +15,17 @@ import {bp, channels, colors, css, layout, radii, space, type} from '../theme/to
 
 /** The three-column frame: rail, main column, and the host the route mounts into. */
 export const shell = stylex.create({
+  // No `viewTransitionName: 'root'` here. The UA stylesheet already gives the
+  // document element that name, so declaring it again on a descendant is a
+  // duplicate — and a duplicate name does not degrade, it makes the browser
+  // abort the whole transition ("Unexpected duplicate view-transition-name").
+  // Every transition in the app was being skipped. The `::view-transition-*`
+  // rules in base.css still target `root`; it is now supplied by the document
+  // element, which is what they always meant.
   appShell: {
     display: 'flex',
     height: `calc(100dvh - ${css.kbInset})`,
     overflow: 'hidden',
-    viewTransitionName: 'root',
   },
   mainPanel: {
     flex: 1,
@@ -124,9 +130,9 @@ export const brand = stylex.create({
   block: {display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0},
   name: {
     fontFamily: type.display,
-    fontSize: '0.9375rem',
-    fontWeight: 650,
-    letterSpacing: '-0.025em',
+    fontSize: type.tTitle,
+    fontWeight: 500,
+    letterSpacing: '0',
     color: colors.text,
     lineHeight: 1.1,
   },
@@ -173,7 +179,7 @@ export const control = stylex.create({
     justifyContent: 'center',
     width: {default: 24, [bp.compact]: 40},
     height: {default: 24, [bp.compact]: 40},
-    borderRadius: 7,
+    borderRadius: 2,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: 'transparent', ':hover': colors.accentDim},
@@ -280,11 +286,11 @@ export const nav = stylex.create({
     height: 18,
     paddingBlock: 0,
     paddingInline: 6,
-    fontSize: '0.7rem',
+    fontSize: type.tMicro,
     fontWeight: 600,
     backgroundColor: colors.accent,
     color: colors.accentContrast,
-    borderRadius: 999,
+    borderRadius: 2,
     flexShrink: 0,
   },
   badgeCompact: {
@@ -294,7 +300,7 @@ export const nav = stylex.create({
     marginInlineStart: 0,
     minWidth: 14,
     height: 14,
-    fontSize: '0.6rem',
+    fontSize: type.tNano,
     paddingInline: 3,
   },
 });
@@ -338,5 +344,5 @@ export const mobile = stylex.create({
   /* The mobile chrome is always in the DOM; on desktop it is inert. */
   // In normal flow, so nothing ever scrolls under it — a backdrop-filter here
   // would cost a frame's work to blur the flat page background.
-  topbarName: {fontSize: '0.9rem', fontWeight: 600, letterSpacing: '-0.01em'},
+  topbarName: {fontSize: type.tBody, fontWeight: 600, letterSpacing: '-0.01em'},
 });
