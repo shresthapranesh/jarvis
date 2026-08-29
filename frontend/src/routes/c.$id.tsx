@@ -15,10 +15,11 @@ import {FolderIcon} from '../components/icons';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
-import {RunSpine} from '../components/RunSpine';
+import {ThreadSpine} from '../components/ThreadSpine';
 import {page} from '../components/ui';
 import {refreshRunningTasks} from '../hooks/useRunningTasks';
 import {useTaskEvents} from '../hooks/useTaskEvents';
+import {messageAnchorId} from '../lib/thread';
 import type {
   ArtifactCard,
   MediaAttachment,
@@ -417,7 +418,18 @@ function ConversationPage() {
     return [];
   }, [isActive, steps, allMessages]);
 
-  const showSpine = !panelOpen && !artifactPanelOpen && (isActive || spineSteps.length > 0);
+  const showSpine = !panelOpen && !artifactPanelOpen && (isActive || messages.length > 0);
+
+  // Jumping from the spine is the reader taking over the scroll position, so
+  // it must release the pin first — otherwise the settle-window re-pin above
+  // (or a ResizeObserver firing as late markdown lays out) yanks the thread
+  // straight back to the bottom and the jump silently does nothing.
+  function jumpToMessage(messageId: string) {
+    pinBottomRef.current = false;
+    document
+      .getElementById(messageAnchorId(messageId))
+      ?.scrollIntoView({block: 'center', behavior: 'smooth'});
+  }
 
   // Incognito teardown. Discard when the user closes the tab (best-effort) and
   // when they navigate away from a settled ephemeral chat. `activeRef` keeps the
@@ -497,13 +509,15 @@ function ConversationPage() {
         spineCollapsed={!isActive}
       />
       {showSpine && (
-        <RunSpine
+        <ThreadSpine
+          messages={messages}
           steps={spineSteps}
           workers={isActive ? workers : []}
           artifactCount={totalArtifactCount}
           isLive={isActive}
           budget={liveBudget}
           onExpand={() => handleShowSteps(spineSteps)}
+          onJump={jumpToMessage}
         />
       )}
       {panelOpen && (

@@ -3,12 +3,12 @@ import * as stylex from '@stylexjs/stylex';
 import {kf} from '../theme/keyframes.stylex';
 import {bp, channels, colors, layout, radii, space, type} from '../theme/tokens.stylex';
 
-/* ── Styles for RunSpine.tsx ───────────────────────────────────────────
-   The fixed rail, the hairline track of nodes hung off it, and the stats
-   footer. The rail is a trace, not a log — everything here is sized for
-   a 208px column.
+/* ── Styles for ThreadSpine.tsx ────────────────────────────────────────
+   The fixed rail, the hairline track of turns hung off it, the hover card,
+   and the stats footer. The rail is a map of the conversation, not a log —
+   everything here is sized for a 208px column.
 
-   At rest it is not that column. A settled run's trace is worth a glance and
+   At rest it is not that column. A settled thread's map is worth a glance and
    not 208px of reading width, so once the run finishes the rail drops to
    `spineCollapsedW` and shows marks only; hover or click brings the full
    column back. Collapsed and expanded are separate renders rather than one
@@ -65,7 +65,7 @@ export const rail = stylex.create({
   state: {fontFamily: type.mono, fontSize: type.tMicro, color: colors.textFaint},
   stateLive: {color: colors.signalLive},
 
-  /* The rail itself: one hairline, nodes hung off it. */
+  /* The rail itself: one hairline, turns hung off it. */
 });
 
 /** The scrolling list of nodes and the hairline connecting them. */
@@ -148,7 +148,7 @@ export const mini = stylex.create({
   },
 });
 
-/** One step on the rail. Kind is carried by the reserved signal hues. */
+/** One turn on the rail. Role is carried by the reserved signal hues. */
 export const node = stylex.create({
   root: {
     position: 'relative',
@@ -165,6 +165,8 @@ export const node = stylex.create({
     color: {default: colors.textDim, ':hover': colors.text},
     transition: 'color 0.15s',
   },
+  /** The turn currently filling the reader's viewport. */
+  current: {color: colors.text},
   pending: {cursor: 'default', color: colors.signalLive},
   mark: {
     position: 'relative',
@@ -179,11 +181,15 @@ export const node = stylex.create({
     borderColor: 'currentColor',
     boxShadow: `0 0 0 3px ${colors.bg}`,
   },
-  /* Kind is carried by the reserved signal hues — the whole reason they exist. */
-  markTool: {color: colors.signalTool},
-  markWorker: {color: colors.signalInsight},
-  markArtifact: {color: colors.accent},
-  markThink: {color: colors.textFaint},
+  /* Role is carried by the reserved signal hues — the whole reason they exist.
+     Two roles alternate down the rail, so they must stay tellable apart at
+     9px: the user's turn is the accent, the assistant's the tool blue. */
+  markUser: {color: colors.accent},
+  markAssistant: {color: colors.signalTool},
+  markBlocked: {color: colors.warn},
+  markError: {color: colors.errorText},
+  /** Filled rather than hollow — the one dot you can find without reading. */
+  markCurrent: {backgroundColor: 'currentColor', transform: 'scale(1.15)'},
   markActive: {
     color: colors.signalLive,
     backgroundColor: colors.signalLive,
@@ -199,6 +205,54 @@ export const node = stylex.create({
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+  },
+});
+
+/**
+ * The hover card. Fixed rather than nested in the track, which scrolls and
+ * would clip it; the component supplies `top` from the dot's own rect.
+ */
+export const peek = stylex.create({
+  card: {
+    position: 'fixed',
+    insetInlineEnd: `calc(${layout.spineW} + ${space.s2})`,
+    transform: 'translateY(-50%)',
+    width: 300,
+    maxHeight: 120,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 5,
+    paddingBlock: space.s2,
+    paddingInline: space.s3,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.glassBorder,
+    borderRadius: radii.sm,
+    backgroundColor: colors.glassBg,
+    boxShadow: `0 6px 24px rgba(${channels.shadow}, 0.28)`,
+    zIndex: 30,
+    pointerEvents: 'none',
+    animationName: kf.panelEnter,
+    animationDuration: '0.12s',
+    animationFillMode: 'both',
+  },
+  role: {
+    fontSize: type.tMicro,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: type.trackMicro,
+  },
+  roleUser: {color: colors.accent},
+  roleAssistant: {color: colors.signalTool},
+  roleBlocked: {color: colors.warn},
+  roleError: {color: colors.errorText},
+  text: {
+    margin: 0,
+    fontSize: type.tSmall,
+    lineHeight: 1.45,
+    color: colors.textDim,
+    overflow: 'hidden',
   },
 });
 
