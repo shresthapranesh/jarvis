@@ -57,6 +57,7 @@ function SpinnerIcon() {
 
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep, getStepPreview} from '../lib/steps';
+import {messageAnchorId} from '../lib/thread';
 import type {ArtifactCard, Message, Step} from '../lib/types';
 import {MessageArtifacts} from './MessageArtifacts';
 import {actions, badge, bubble, media, safety, working} from './MessageBubble.styles';
@@ -480,7 +481,7 @@ export function MessageBubble({
           .join('\n')
       : message.content;
     return (
-      <div {...stylex.props(turn.base)}>
+      <div id={messageAnchorId(message.id)} {...stylex.props(turn.base)}>
         <div {...stylex.props(bubble.user)}>
           {parts ? <MultimodalUserContent parts={parts} /> : message.content}
         </div>
@@ -502,7 +503,7 @@ export function MessageBubble({
   const blocked = message.status === 'blocked';
 
   return (
-    <div {...stylex.props(turn.base)}>
+    <div id={messageAnchorId(message.id)} {...stylex.props(turn.base)}>
       {blocked && (
         <SafetyBanner layer={message.content.startsWith('[OUTPUT REDACTED') ? 'output' : 'input'} />
       )}
