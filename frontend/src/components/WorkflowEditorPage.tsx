@@ -19,7 +19,7 @@ import {
 } from '../relay/WorkflowDetailQuery';
 import {mapWorkflow} from '../relay/WorkflowListQuery';
 import {mapWorkflowRun, workflowRunsQuery, workflowRunsVars} from '../relay/WorkflowRunsQuery';
-import {colors} from '../theme/tokens.stylex';
+import {colors, type} from '../theme/tokens.stylex';
 import {
   NotificationsEditor,
   parseNotifications,
@@ -471,13 +471,13 @@ const styles = stylex.create({
   settingsModal: {minWidth: 480, maxWidth: 640},
 
   clickable: {cursor: 'pointer'},
-  saveError: {fontSize: '0.72rem', color: colors.errorText},
-  runId: {fontSize: '0.72rem', color: colors.textDim, flex: 1, marginInlineStart: 8},
-  runError: {paddingBlock: 8, paddingInline: 16, color: colors.errorText, fontSize: '0.78rem'},
+  saveError: {fontSize: type.tSmall, color: colors.errorText},
+  runId: {fontSize: type.tSmall, color: colors.textDim, flex: 1, marginInlineStart: 8},
+  runError: {paddingBlock: 8, paddingInline: 16, color: colors.errorText, fontSize: type.tUi},
 
-  nodeLabel: {color: colors.text, fontSize: '0.75rem'},
-  nodeError: {color: colors.errorText, fontSize: '0.72rem', marginBlockStart: 2},
-  verdict: {fontSize: '0.68rem', borderRadius: 4, paddingBlock: 1, paddingInline: 6},
+  nodeLabel: {color: colors.text, fontSize: type.tSmall},
+  nodeError: {color: colors.errorText, fontSize: type.tSmall, marginBlockStart: 2},
+  verdict: {fontSize: type.tMicro, borderRadius: 2, paddingBlock: 1, paddingInline: 6},
   verdictTrue: {backgroundColor: '#1e3a22', color: '#6bcf7f'},
   verdictFalse: {backgroundColor: '#3a1e1e', color: '#cf6b6b'},
 });

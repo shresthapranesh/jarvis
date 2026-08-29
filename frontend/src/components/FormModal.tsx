@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import {useEffect} from 'react';
 import {createPortal} from 'react-dom';
 
-import {colors} from '../theme/tokens.stylex';
+import {colors, type} from '../theme/tokens.stylex';
 import {btn, modal, page} from './ui';
 
 interface Props {
@@ -113,5 +113,5 @@ export const formModal = stylex.create({
   fields: {display: 'flex', flexDirection: 'column', gap: 14},
   footer: {display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12},
   footerActions: {display: 'flex', alignItems: 'center', gap: 8, marginInlineStart: 'auto'},
-  kbdHint: {fontSize: '0.7rem', color: colors.textFaint, marginInlineEnd: 4},
+  kbdHint: {fontSize: type.tMicro, color: colors.textFaint, marginInlineEnd: 4},
 });

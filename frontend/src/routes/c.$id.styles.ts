@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {colors, css, layout, space} from '../theme/tokens.stylex';
+import {colors, css, layout, space, type} from '../theme/tokens.stylex';
 
 /* ── Styles for routes/c.$id.tsx ───────────────────────────────────────
    The page chrome around the thread: the incognito notice, the project
@@ -16,7 +16,7 @@ export const conv = stylex.create({
     flexShrink: 0,
     paddingBlock: 7,
     paddingInline: 16,
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
     backgroundColor: `color-mix(in srgb, ${colors.accent} 8%, transparent)`,
     borderBlockEndWidth: 1,
@@ -29,13 +29,13 @@ export const conv = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     color: {default: colors.textDim, ':hover': colors.text},
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': colors.borderStrong},
-    borderRadius: 999,
+    borderRadius: 2,
     paddingBlock: 3,
     paddingInline: 10,
     textDecoration: 'none',
@@ -57,6 +57,18 @@ export const conv = stylex.create({
   footerWithSpine: {
     paddingInlineEnd: {
       default: `calc(${layout.spineW} + ${space.s5})`,
+      '@media (max-width: 1100px)': space.s5,
+      '@media (max-width: 860px)': 12,
+    },
+  },
+  /**
+   * A settled rail is 30px wide, so the footer reserves that instead — the
+   * mirror of `scrollerWithSpineCollapsed` in MessageThread, breakpoints
+   * included. Applied after `footerWithSpine` so it wins.
+   */
+  footerWithSpineCollapsed: {
+    paddingInlineEnd: {
+      default: `calc(${layout.spineCollapsedW} + ${space.s5})`,
       '@media (max-width: 1100px)': space.s5,
       '@media (max-width: 860px)': 12,
     },

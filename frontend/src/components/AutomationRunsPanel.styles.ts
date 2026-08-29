@@ -55,9 +55,9 @@ export const sheet = stylex.create({
   },
   title: {display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1},
   /** The list's type icon, one size down to fit the header row. */
-  typeIconSm: {width: 28, height: 28, borderRadius: 7},
+  typeIconSm: {width: 28, height: 28, borderRadius: 2},
   name: {
-    fontSize: '0.92rem',
+    fontSize: type.tBody,
     fontWeight: 600,
     color: colors.text,
     overflow: 'hidden',
@@ -77,7 +77,7 @@ export const sheet = stylex.create({
     gap: 14,
   },
   sectionLabel: {
-    fontSize: '0.66rem',
+    fontSize: type.tMicro,
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
     color: colors.textDim,
@@ -91,7 +91,7 @@ export const sheet = stylex.create({
 
   empty: {
     color: colors.textDim,
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     paddingBlock: 30,
     paddingInline: 10,
     textAlign: 'center',
@@ -116,9 +116,9 @@ export const headBtn = stylex.create({
     color: {default: colors.textDim, ':hover:not(:disabled)': colors.text},
     paddingBlock: 6,
     paddingInline: 8,
-    borderRadius: 6,
+    borderRadius: 2,
     fontFamily: 'inherit',
-    fontSize: '0.74rem',
+    fontSize: type.tSmall,
     cursor: {default: 'pointer', ':disabled': 'not-allowed'},
     opacity: {default: 1, ':disabled': 0.5},
     transition: 'background 0.12s, color 0.12s, border-color 0.12s',
@@ -141,7 +141,7 @@ export const headBtn = stylex.create({
 export const live = stylex.create({
   card: {
     position: 'relative',
-    borderRadius: 10,
+    borderRadius: 3,
     backgroundColor: `rgba(${channels.tint}, 0.03)`,
     borderWidth: 1,
     borderStyle: 'solid',
@@ -158,7 +158,7 @@ export const live = stylex.create({
       content: '',
       position: 'absolute',
       inset: -1,
-      borderRadius: 10,
+      borderRadius: 3,
       backgroundImage: `linear-gradient(120deg, rgba(${channels.accent}, 0), rgba(${channels.accent}, 0.7), rgba(127, 220, 201, 0.7), rgba(${channels.accent}, 0))`,
       backgroundSize: '200% 100%',
       animationName: kf.glowSweep,
@@ -186,13 +186,13 @@ export const live = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
-    fontSize: '0.7rem',
+    fontSize: type.tMicro,
     fontWeight: 500,
     textTransform: 'uppercase',
     letterSpacing: '0.06em',
     paddingBlock: 3,
     paddingInline: 9,
-    borderRadius: 999,
+    borderRadius: 2,
   },
   pillRunning: {backgroundColor: colors.accentDim, color: colors.accent},
   pillDone: {backgroundColor: `rgba(${channels.ok}, 0.15)`, color: colors.ok},
@@ -208,7 +208,7 @@ export const live = stylex.create({
     animationIterationCount: 'infinite',
   },
   timer: {
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     fontFamily: type.mono,
     color: colors.textDim,
     letterSpacing: '0.04em',
@@ -220,7 +220,7 @@ export const live = stylex.create({
     overflowY: 'auto',
     paddingBlock: 14,
     paddingInline: 16,
-    fontSize: '0.86rem',
+    fontSize: type.tBody,
     lineHeight: 1.6,
     color: colors.text,
   },
@@ -236,7 +236,7 @@ export const timeline = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': `rgba(${channels.tint}, 0.16)`},
-    borderRadius: 8,
+    borderRadius: 3,
     overflow: 'hidden',
     transition: 'border-color 0.12s',
   },
@@ -254,13 +254,13 @@ export const timeline = stylex.create({
   meta: {display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap'},
 
   status: {
-    fontSize: '0.66rem',
+    fontSize: type.tMicro,
     textTransform: 'uppercase',
     letterSpacing: '0.07em',
     fontWeight: 600,
     paddingBlock: 2,
     paddingInline: 7,
-    borderRadius: 999,
+    borderRadius: 2,
     backgroundColor: colors.surface2,
     color: colors.textDim,
   },
@@ -269,7 +269,7 @@ export const timeline = stylex.create({
   statusRunning: {backgroundColor: colors.accentDim, color: colors.accent},
 
   trigger: {color: colors.textDim, display: 'inline-flex'},
-  time: {fontSize: '0.76rem', color: colors.textDim, whiteSpace: 'nowrap'},
+  time: {fontSize: type.tSmall, color: colors.textDim, whiteSpace: 'nowrap'},
 
   duration: {
     display: 'flex',
@@ -296,7 +296,7 @@ export const timeline = stylex.create({
   barRunning: {
     backgroundImage: `linear-gradient(90deg, rgba(${channels.accent}, 0.3), ${colors.accent})`,
   },
-  barLabel: {fontSize: '0.7rem', color: colors.textDim, fontFamily: type.mono},
+  barLabel: {fontSize: type.tMicro, color: colors.textDim, fontFamily: type.mono},
 
   chevron: {
     color: colors.textDim,
@@ -315,7 +315,7 @@ export const timeline = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     fontFamily: type.mono,
-    fontSize: '0.74rem',
+    fontSize: type.tSmall,
     paddingInlineStart: 1,
   },
   snippetError: {color: colors.errorText, opacity: 0.85},
@@ -327,7 +327,7 @@ export const timeline = stylex.create({
     paddingBlock: 14,
     paddingInline: 16,
     backgroundColor: `rgba(${channels.shadow}, 0.18)`,
-    fontSize: '0.85rem',
+    fontSize: type.tBody,
     lineHeight: 1.6,
     color: colors.text,
     maxHeight: 'min(560px, 55vh)',

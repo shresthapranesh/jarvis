@@ -494,6 +494,7 @@ function ConversationPage() {
         onOpenArtifact={handleOpenArtifact}
         openArtifactId={artifactPanelOpen ? selectedArtifactId : null}
         hasSpine={showSpine}
+        spineCollapsed={!isActive}
       />
       {showSpine && (
         <RunSpine
@@ -523,7 +524,13 @@ function ConversationPage() {
           onClose={() => setArtifactPanelOpen(false)}
         />
       )}
-      <footer {...stylex.props(conv.footer, showSpine && conv.footerWithSpine)}>
+      <footer
+        {...stylex.props(
+          conv.footer,
+          showSpine && conv.footerWithSpine,
+          showSpine && !isActive && conv.footerWithSpineCollapsed,
+        )}
+      >
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt
             taskId={runningMsg.id}

@@ -125,13 +125,14 @@ export function ModelsTab() {
         <div {...stylex.props(settings.search)}>
           <SearchIcon size={14} />
           <input
+            {...stylex.props(settings.searchInput)}
             placeholder="Search models…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
         <select
-          {...stylex.props(field.select, settings.filterSelect)}
+          {...stylex.props(field.select, settings.filterSelect, field.selectChrome)}
           value={providerFilter}
           onChange={(e) => setProviderFilter(e.target.value)}
         >
@@ -327,7 +328,7 @@ function ModelModal({
       <div {...stylex.props(field.group)}>
         <span {...stylex.props(field.label)}>Provider</span>
         <select
-          {...stylex.props(field.select)}
+          {...stylex.props(field.select, field.selectChrome)}
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
         >

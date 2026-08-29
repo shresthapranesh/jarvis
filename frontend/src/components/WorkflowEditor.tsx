@@ -27,6 +27,7 @@ import type {
 } from '../lib/types';
 import {fetchWorkflowList} from '../relay/WorkflowListQuery';
 import {config, editor, node as nodeStyles, palette, wfBtn} from './workflow.styles';
+import {field} from './ui';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -521,7 +522,7 @@ function ConfigPanel({node, models, onUpdate, onDelete}: ConfigPanelProps) {
         <div {...stylex.props(config.field)}>
           <label {...stylex.props(config.label)}>Model</label>
           <select
-            {...stylex.props(config.input)}
+            {...stylex.props(config.input, field.selectChrome)}
             value={(d.model as string) || ''}
             onChange={(e) => onUpdate({model: e.target.value})}
           >
@@ -597,7 +598,7 @@ function ConfigPanel({node, models, onUpdate, onDelete}: ConfigPanelProps) {
                   placeholder='{"type":"object","properties":{"title":{"type":"string"}}}'
                 />
                 <select
-                  {...stylex.props(config.input)}
+                  {...stylex.props(config.input, field.selectChrome)}
                   value={(d.output_schema_mode as string) || 'auto'}
                   onChange={(e) => onUpdate({output_schema_mode: e.target.value as any})}
                 >
@@ -830,7 +831,7 @@ function ConfigPanel({node, models, onUpdate, onDelete}: ConfigPanelProps) {
           <div {...stylex.props(config.field)}>
             <label {...stylex.props(config.label)}>On deny</label>
             <select
-              {...stylex.props(config.input)}
+              {...stylex.props(config.input, field.selectChrome)}
               value={(d.on_deny as string) || 'error'}
               onChange={(e) => onUpdate({on_deny: e.target.value as any})}
             >
@@ -982,7 +983,7 @@ function ConfigPanel({node, models, onUpdate, onDelete}: ConfigPanelProps) {
             <div {...stylex.props(config.field)}>
               <div {...stylex.props(config.hint)}>Select a saved workflow to run for each item</div>
               <select
-                {...stylex.props(config.input)}
+                {...stylex.props(config.input, field.selectChrome)}
                 value={(d.workflow_id as string) || ''}
                 onChange={(e) => onUpdate({workflow_id: e.target.value || undefined})}
               >
@@ -1069,7 +1070,7 @@ function ConfigPanel({node, models, onUpdate, onDelete}: ConfigPanelProps) {
               <div {...stylex.props(config.field)}>
                 <label {...stylex.props(config.label)}>On error</label>
                 <select
-                  {...stylex.props(config.input)}
+                  {...stylex.props(config.input, field.selectChrome)}
                   value={(d.on_error as string) || 'error'}
                   onChange={(e) => onUpdate({on_error: e.target.value as any})}
                 >

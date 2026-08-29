@@ -21,6 +21,7 @@ import {EditIcon, PlusIcon, TrashIcon} from './icons';
 import {item, kindDotStyle, kindDot, memory, seg} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
 import {btn, codeField, field, iconBtn, page, prose} from './ui';
+import {type} from '../theme/tokens.stylex';
 
 const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
   fact: {label: 'Fact', hint: 'surfaced by relevance each turn'},
@@ -444,5 +445,5 @@ function LegacyBlob({
 const styles = stylex.create({
   /** The empty state's call to action sits a little clear of the prose. */
   emptyBtn: {marginBlockStart: 8},
-  blobBody: {fontSize: '0.9rem', lineHeight: 1.55},
+  blobBody: {fontSize: type.tBody, lineHeight: 1.55},
 });

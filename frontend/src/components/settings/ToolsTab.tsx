@@ -98,13 +98,14 @@ export function ToolsTab() {
         <div {...stylex.props(sx.search)}>
           <SearchIcon size={14} />
           <input
+            {...stylex.props(sx.searchInput)}
             placeholder="Search tools…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
         <select
-          {...stylex.props(field.select, sx.filterSelect)}
+          {...stylex.props(field.select, sx.filterSelect, field.selectChrome)}
           value={kindFilter}
           onChange={(e) => setKindFilter(e.target.value)}
         >

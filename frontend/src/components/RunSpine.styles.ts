@@ -6,7 +6,14 @@ import {bp, channels, colors, layout, radii, space, type} from '../theme/tokens.
 /* ── Styles for RunSpine.tsx ───────────────────────────────────────────
    The fixed rail, the hairline track of nodes hung off it, and the stats
    footer. The rail is a trace, not a log — everything here is sized for
-   a 208px column. */
+   a 208px column.
+
+   At rest it is not that column. A settled run's trace is worth a glance and
+   not 208px of reading width, so once the run finishes the rail drops to
+   `spineCollapsedW` and shows marks only; hover or click brings the full
+   column back. Collapsed and expanded are separate renders rather than one
+   clipped by `overflow`, because a 208px layout squeezed into 30px rewraps
+   into something that looks broken for the length of the transition. */
 
 /** The fixed column and its header. */
 export const rail = stylex.create({
@@ -15,6 +22,7 @@ export const rail = stylex.create({
     insetBlock: 0,
     insetInlineEnd: 0,
     width: layout.spineW,
+    transition: 'width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)',
     display: {default: 'flex', [bp.wide]: 'none'},
     flexDirection: 'column',
     borderInlineStartWidth: 1,
@@ -28,6 +36,16 @@ export const rail = stylex.create({
     animationDuration: '0.24s',
     animationTimingFunction: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
     animationFillMode: 'both',
+  },
+  /** At rest: marks only. Expands on hover, or on click for touch. */
+  rootCollapsed: {
+    width: layout.spineCollapsedW,
+    cursor: 'pointer',
+    alignItems: 'center',
+    // The rail is a peripheral thing when there is nothing running; it should
+    // not compete with the thread for attention until asked.
+    opacity: {default: 0.65, ':hover': 1},
+    transition: 'width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease',
   },
   head: {
     display: 'flex',
@@ -95,6 +113,38 @@ export const track = stylex.create({
     paddingBlock: `${space.s1} ${space.s2}`,
     paddingInlineStart: space.s4,
     transition: 'color 0.15s',
+  },
+});
+
+/** The at-rest rail: the same marks, the same hairline, no labels. */
+export const mini = stylex.create({
+  track: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    paddingBlock: space.s4,
+    position: 'relative',
+    overflow: 'hidden',
+    // The same hairline the expanded track draws, minus the node offsets.
+    '::before': {
+      content: '',
+      position: 'absolute',
+      insetBlockStart: 20,
+      insetBlockEnd: 20,
+      width: 1,
+      backgroundColor: `rgba(${channels.tint}, 0.14)`,
+    },
+  },
+  count: {
+    flexShrink: 0,
+    fontFamily: type.mono,
+    fontSize: type.tNano,
+    color: colors.textFaint,
+    paddingBlock: space.s3,
+    textAlign: 'center',
   },
 });
 

@@ -131,7 +131,7 @@ export function ModelSyncModal({
 
         <div {...stylex.props(sync.controls)}>
           <select
-            {...stylex.props(field.select, sync.providerSelect)}
+            {...stylex.props(field.select, sync.providerSelect, field.selectChrome)}
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
             disabled={busy}
@@ -205,6 +205,7 @@ export function ModelSyncModal({
                     <div {...stylex.props(settings.search)}>
                       <SearchIcon size={14} />
                       <input
+                        {...stylex.props(settings.searchInput)}
                         placeholder="Filter new models…"
                         value={filter}
                         onChange={(e) => setFilter(e.target.value)}

@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {colors} from '../theme/tokens.stylex';
+import {colors, type} from '../theme/tokens.stylex';
 
 /* ── Styles for ProjectsView.tsx and ProjectDetail.tsx ─────────────────
    The index is a grid of cards; the detail is a two-column page whose
@@ -25,7 +25,7 @@ export const projects = stylex.create({
 
 export const detail = stylex.create({
   page: {gap: 18},
-  breadcrumb: {fontSize: '0.75rem', color: colors.textFaint, marginBlockEnd: 2},
+  breadcrumb: {fontSize: type.tSmall, color: colors.textFaint, marginBlockEnd: 2},
   breadcrumbLink: {
     color: {default: colors.textDim, ':hover': colors.text},
     textDecorationLine: 'none',
@@ -39,10 +39,10 @@ export const detail = stylex.create({
     gridTemplateColumns: {default: '1fr 1fr', '@media (max-width: 900px)': '1fr'},
     gap: 18,
   },
-  sectionHint: {fontSize: '0.75rem', color: colors.textFaint, margin: 0},
-  textarea: {fontSize: '0.82rem', lineHeight: 1.5, resize: 'vertical', minHeight: 120},
+  sectionHint: {fontSize: type.tSmall, color: colors.textFaint, margin: 0},
+  textarea: {fontSize: type.tUi, lineHeight: 1.5, resize: 'vertical', minHeight: 120},
   sectionActions: {display: 'flex', justifyContent: 'flex-end'},
-  addExistingBtn: {marginInlineStart: 'auto', fontSize: '0.72rem'},
+  addExistingBtn: {marginInlineStart: 'auto', fontSize: type.tSmall},
 
   convList: {
     listStyle: 'none',
@@ -61,7 +61,7 @@ export const detail = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': colors.borderStrong},
-    borderRadius: 10,
+    borderRadius: 3,
     backgroundColor: {default: colors.surface, ':hover': colors.surface2},
   },
   convLink: {
@@ -74,7 +74,7 @@ export const detail = stylex.create({
     color: 'inherit',
   },
   convTitle: {
-    fontSize: '0.85rem',
+    fontSize: type.tBody,
     color: colors.text,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -83,7 +83,7 @@ export const detail = stylex.create({
 
   footer: {marginBlockStart: 'auto'},
   newChatHint: {
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     color: colors.textFaint,
     marginBlock: '0 6px',
     marginInlineStart: 2,

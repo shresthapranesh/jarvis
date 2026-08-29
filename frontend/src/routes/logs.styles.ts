@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {channels, colors, space} from '../theme/tokens.stylex';
+import {channels, colors, space, type} from '../theme/tokens.stylex';
 
 /* ── Styles for routes/logs.tsx ────────────────────────────────────────
    A live tail of the server log: a filter toolbar, then a monospace grid
@@ -17,8 +17,8 @@ export const logs = stylex.create({
   },
   header: {display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0},
   titleRow: {display: 'flex', alignItems: 'baseline', gap: 14},
-  title: {margin: 0, fontSize: '1.1rem', fontWeight: 600},
-  status: {fontSize: '0.75rem', color: colors.textDim},
+  title: {margin: 0, fontSize: type.tTitle, fontWeight: 600},
+  status: {fontSize: type.tSmall, color: colors.textDim},
   statusOk: {color: colors.ok},
   statusErr: {color: colors.errorText},
 
@@ -27,7 +27,7 @@ export const logs = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
   },
   fieldGrow: {flex: 1, minWidth: 220},
@@ -39,10 +39,10 @@ export const logs = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 6,
+    borderRadius: 2,
     paddingBlock: 6,
     paddingInline: 8,
-    fontSize: '0.85rem',
+    fontSize: type.tBody,
     fontFamily: 'inherit',
     minWidth: 110,
   },
@@ -53,10 +53,10 @@ export const logs = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 6,
+    borderRadius: 2,
     paddingBlock: 6,
     paddingInline: 12,
-    fontSize: '0.82rem',
+    fontSize: type.tUi,
     fontFamily: 'inherit',
     cursor: 'pointer',
   },
@@ -73,17 +73,17 @@ export const logs = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
     backgroundColor: `rgba(${channels.shadow}, 0.25)`,
   },
-  empty: {padding: 32, textAlign: 'center', color: colors.textDim, fontSize: '0.85rem'},
+  empty: {padding: 32, textAlign: 'center', color: colors.textDim, fontSize: type.tBody},
   list: {
     margin: 0,
     paddingBlock: 4,
     paddingInline: 0,
     listStyle: 'none',
     fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
   },
 
   row: {

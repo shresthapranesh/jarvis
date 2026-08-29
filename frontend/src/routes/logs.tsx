@@ -6,6 +6,7 @@ import {useLogStream} from '../hooks/useLogStream';
 import type {LogLevel, LogRecord} from '../lib/types';
 // `logs` is the log-record array in this file.
 import {levelStyle, logs as sx, rowStyle} from './logs.styles';
+import {field} from '../components/ui';
 
 export const Route = createFileRoute('/logs')({
   component: LogsPage,
@@ -77,7 +78,7 @@ function LogsPage() {
           <label {...stylex.props(sx.field)}>
             <span>Level</span>
             <select
-              {...stylex.props(sx.control)}
+              {...stylex.props(sx.control, field.selectChrome)}
               value={levelFilter}
               onChange={(e) => setLevelFilter(e.target.value as LevelFilter)}
             >
@@ -91,7 +92,7 @@ function LogsPage() {
           <label {...stylex.props(sx.field)}>
             <span>Logger</span>
             <select
-              {...stylex.props(sx.control)}
+              {...stylex.props(sx.control, field.selectChrome)}
               value={loggerFilter}
               onChange={(e) => setLoggerFilter(e.target.value)}
             >

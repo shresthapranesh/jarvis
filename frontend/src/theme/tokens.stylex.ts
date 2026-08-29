@@ -1,17 +1,24 @@
 /* ════════════════════════════════════════════════════════════════════
-   Abyssal — a deep-sea, instrument-grade theme for a multi-agent console.
-   One petrol hue carries the whole field; depth comes from luminance, not
-   from mixing hues. Panels are frosted petrol glass. Two modes share one
-   identity: neutrals + interactive accent flip per theme; the semantic
-   *signal* hues (one per agent role / event kind) stay constant, retuned
-   only for contrast. Every light/dark overlay in this file is driven off
-   `channels` so a single channel swap re-tints the UI.
+   Paper Terminal — ink on stock, for a console that is mostly reading.
+
+   The previous theme ("Abyssal") built depth out of luminance: frosted
+   panels, an ambient radial field, warm copper chrome. This one throws
+   that model out. There is no glass, no gradient, no ambient wash and no
+   brand hue — structure comes from hairline rules and whitespace, exactly
+   the way a printed page gets it, and every surface is opaque.
+
+   The one rule that governs the palette: **chrome is monochrome; colour
+   is reserved for machine state.** The accent is ink (bone, inverted), so
+   a filled button is a letterpress block and a link is underlined rather
+   than tinted. The only hues on screen are the three agent signals and
+   ok/danger/warn — which means a green dot is never competing with a
+   copper button for the same glance.
 
    `channels` and `colors` are the two theme-varying groups, and the only
    ones `themes.stylex.ts` overrides — so every token that flips with the
-   theme has to live in one of them, including the glass and the ambient
-   field. The split is not cosmetic: `colors` derives from `channels`, and
-   a single group deriving from itself is a TS circularity error.
+   theme has to live in one of them. The split is not cosmetic: `colors`
+   derives from `channels`, and a single group deriving from itself is a
+   TS circularity error.
 
    Everything below them (type, space, layout, radii) is theme-invariant
    and gets its own group so it never has to be restated in a theme.
@@ -24,84 +31,116 @@ import * as stylex from '@stylexjs/stylex';
  * derived token in `colors` below without the theme restating any of them.
  */
 export const channels = stylex.defineVars({
-  tint: '247, 235, 222', // warm bone — every overlay carries the ember cast
-  shadow: '12, 7, 4',
-  accent: '224, 138, 69', // copper — chrome, links, focus
+  tint: '234, 233, 228', // bone — every overlay is this ink/stock at some alpha
+  shadow: '10, 10, 12',
+  // The accent is the ink itself, faintly cooled. Chrome carries no hue, so a
+  // filled control reads as a printed block and colour never competes with the
+  // signal hues below for attention.
+  accent: '232, 234, 240',
 
-  // Semantic signal, reserved for live agent activity. `tool` is cyan, not the
-  // usual amber: the accent is copper here, and two warm hues a step apart stop
-  // reading as different signals on a 9px mark.
-  signalLive: '110, 222, 143',
-  signalTool: '92, 200, 216',
-  signalInsight: '180, 148, 248',
+  // Semantic signal, reserved for live agent activity — muted to a printed
+  // second-colour rather than a screen hue, so they sit on the stock instead
+  // of glowing off it.
+  signalLive: '95, 168, 118',
+  signalTool: '108, 146, 200',
+  signalInsight: '160, 137, 210',
 
-  ok: '110, 222, 143',
-  danger: '248, 113, 113',
-  warn: '240, 180, 94',
+  ok: '95, 168, 118',
+  danger: '224, 106, 100',
+  warn: '212, 164, 88',
 });
 
 export const colors = stylex.defineVars({
-  // ── Neutrals (warm graphite) ──
-  bg: '#141110',
-  surface: `rgba(${channels.tint}, 0.045)`,
-  surface2: `rgba(${channels.tint}, 0.075)`,
-  surface3: `rgba(${channels.tint}, 0.11)`,
-  border: `rgba(${channels.tint}, 0.1)`,
-  borderStrong: `rgba(${channels.tint}, 0.17)`,
-  text: '#ece6df',
-  textDim: '#9a8e84',
-  textFaint: '#6b6058',
+  // ── Neutrals (cold ink stock) ──
+  bg: '#111113',
+  surface: `rgba(${channels.tint}, 0.035)`,
+  surface2: `rgba(${channels.tint}, 0.065)`,
+  surface3: `rgba(${channels.tint}, 0.1)`,
+  // Rules are the whole structural system now, so they carry roughly twice the
+  // contrast the glass build needed — a 0.1 hairline disappears once there is
+  // no luminance step behind it to imply the edge.
+  border: `rgba(${channels.tint}, 0.15)`,
+  borderStrong: `rgba(${channels.tint}, 0.28)`,
+  text: '#e9e7e2',
+  textDim: '#9b988f',
+  textFaint: '#6a6862',
 
-  // ── Interactive accent ──
+  // ── Interactive accent (ink, inverted) ──
   accent: `rgb(${channels.accent})`,
-  accentStrong: '#f0a668',
-  accentDim: `rgba(${channels.accent}, 0.14)`,
-  accentContrast: '#1e1006', // text set on accent-filled controls
+  accentStrong: '#ffffff',
+  accentDim: `rgba(${channels.accent}, 0.12)`,
+  accentContrast: '#111113', // text set on accent-filled controls
 
   // ── Semantic signal ──
   signalLive: `rgb(${channels.signalLive})`,
   signalTool: `rgb(${channels.signalTool})`,
   signalInsight: `rgb(${channels.signalInsight})`,
-  signalLiveDim: `rgba(${channels.signalLive}, 0.13)`,
-  signalToolDim: `rgba(${channels.signalTool}, 0.13)`,
-  signalInsightDim: `rgba(${channels.signalInsight}, 0.13)`,
+  signalLiveDim: `rgba(${channels.signalLive}, 0.15)`,
+  signalToolDim: `rgba(${channels.signalTool}, 0.15)`,
+  signalInsightDim: `rgba(${channels.signalInsight}, 0.15)`,
 
   // ── Status ──
   ok: `rgb(${channels.ok})`,
   danger: `rgb(${channels.danger})`,
   warn: `rgb(${channels.warn})`,
-  userBg: `rgba(${channels.accent}, 0.15)`,
-  errorBg: 'rgba(58, 20, 16, 0.55)',
-  errorBorder: 'rgba(150, 55, 45, 0.5)',
-  errorText: '#fca5a5',
-  warningBg: 'rgba(56, 36, 12, 0.5)',
-  warningBorder: 'rgba(180, 120, 40, 0.45)',
-  warningText: '#f3c07a',
-  webhookBg: 'rgba(46, 30, 62, 0.5)',
-  webhookText: '#cbb6fd',
+  // Text on a danger-filled control. In dark mode `danger` is a light salmon,
+  // so white on it lands at 3.3:1 — under AA. Ink on it is 5.7:1, and it also
+  // makes every filled button in dark mode dark-on-light, which is the rule
+  // `accentContrast` already sets.
+  dangerContrast: '#111113',
+  userBg: `rgba(${channels.tint}, 0.06)`,
+  errorBg: 'rgba(224, 106, 100, 0.1)',
+  errorBorder: 'rgba(224, 106, 100, 0.34)',
+  errorText: '#f0a5a0',
+  warningBg: 'rgba(212, 164, 88, 0.1)',
+  warningBorder: 'rgba(212, 164, 88, 0.32)',
+  warningText: '#e3bd7f',
+  webhookBg: 'rgba(160, 137, 210, 0.1)',
+  webhookText: '#c3b0e8',
 
-  // ── Glass + ambient field (one hue, depth by luminance) ──
-  glassBg: 'rgba(26, 21, 18, 0.58)',
-  glassBorder: `rgba(${channels.tint}, 0.09)`,
-  appBg:
-    'radial-gradient(ellipse 120% 85% at 50% -18%, #2a1d14 0%, rgba(42, 29, 20, 0) 62%), linear-gradient(180deg, #1a1512 0%, #141110 52%, #0f0c0a 100%)',
+  // ── Panel stock ──
+  // Opaque, not translucent: `glassBg` keeps its name because ~20 call sites
+  // use it for "the panel over the page", but it is now a second sheet of
+  // stock laid on the first. `layout.blur` is `none`, so the backdrop-filter
+  // those sites still declare compiles to a no-op rather than needing a sweep.
+  glassBg: '#17171a',
+  glassBorder: `rgba(${channels.tint}, 0.13)`,
+  // Flat. The ambient radial field was the single loudest thing in the old
+  // theme; paper has no light source.
+  appBg: 'linear-gradient(#111113, #111113)',
 });
 
 /**
- * Six steps, each with an intended job; nothing outside this set. The shell
- * used to render almost everything at ~13px, which is why it read as flat.
+ * The type scale. Eight steps, each with a job named below and nothing outside
+ * the set — every `fontSize` in the app resolves to one of these.
+ *
+ * The steps are not arbitrary: they were derived by clustering the ~340
+ * hand-written sizes this replaced, which had drifted to 42 distinct values
+ * between 0.55rem and 1.4rem. Each cluster was a real intent stated in four
+ * slightly different numbers; each step below is that intent, stated once.
+ *
+ * Two of them are worth explaining. `tPage` exists because every page title in
+ * the app was written at 1.3–1.4rem while `tTitle` at 17px went unused — the
+ * scale was missing a step, not the call sites. `tNano` exists for the workflow
+ * canvas, where node badges and branch labels genuinely need to go below the
+ * 11px eyebrow and were doing it at five different sizes.
  */
 export const type = stylex.defineVars({
-  display: "'Space Grotesk', system-ui, sans-serif",
+  // A text serif, not a grotesk: it is the one place the page admits it is a
+  // document. Newsreader ships real weights — a display face faked to 600 by
+  // the browser is exactly the tell this theme cannot afford.
+  display: "'Newsreader', 'Iowan Old Style', Georgia, serif",
   body: "'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   mono: "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
 
-  tDisplay: '1.75rem', // dispatch greeting — the only truly large type
-  tTitle: '1.0625rem', // page titles
-  tBody: '0.9375rem', // prose, messages
-  tUi: '0.8125rem', // controls, nav, list rows
-  tSmall: '0.75rem', // secondary meta
-  tMicro: '0.6875rem', // eyebrows — always uppercase + tracked
+  tDisplay: '2.125rem', // 34px — dispatch greeting; the only truly large type
+  tPage: '1.3125rem', // 21px — page titles, stat values
+  tTitle: '1.0625rem', // 17px — section + modal headings
+  tBody: '0.9375rem', // 15px — prose, messages, dialog and panel copy
+  tUi: '0.8125rem', // 13px — controls, nav, list rows
+  tSmall: '0.75rem', // 12px — secondary meta
+  tMicro: '0.6875rem', // 11px — eyebrows; always uppercase + tracked
+  tNano: '0.625rem', // 10px — canvas badges and branch labels only
   trackMicro: '0.13em',
 });
 
@@ -115,11 +154,23 @@ export const space = stylex.defineVars({
   s7: '56px',
 });
 
+/**
+ * Corners are a printing artefact in this theme, not a design element, so the
+ * default is as close to none as makes no difference — `sm` is every chip,
+ * control, list row and panel in the app.
+ *
+ * `md` and `lg` are the deliberate exception: the composer. It is the one
+ * element you put your hands on rather than read, and it is allowed to be
+ * soft. The pair is a nesting relationship, not two independent choices —
+ * `lg` is the field, `md` is what sits inside it, and inner ≈ outer minus the
+ * padding is what stops a rounded control inside a rounded field from looking
+ * like a mistake.
+ */
 export const radii = stylex.defineVars({
-  sm: '6px',
-  md: '10px',
-  lg: '14px',
-  xl: '18px',
+  sm: '2px', // everything else
+  md: '6px', // controls nested inside the composer
+  lg: '12px', // the composer field
+  xl: '16px', // unused; kept so the scale has headroom
 });
 
 export const layout = stylex.defineVars({
@@ -127,7 +178,13 @@ export const layout = stylex.defineVars({
   leftCollapsedW: '52px',
   rightW: '312px',
   spineW: '208px',
-  blur: 'blur(14px)',
+  // The rail at rest: wide enough for the hairline and its 9px marks and
+  // nothing else. Read by the rail itself *and* by the padding the thread and
+  // composer reserve for it, which is the only reason it is a token.
+  spineCollapsedW: '30px',
+  // Kept as a token so the ~20 sites that still declare `backdropFilter` need
+  // no edit: they now compile to a no-op. Panels are opaque stock instead.
+  blur: 'none',
 });
 
 /**

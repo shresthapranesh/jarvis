@@ -220,7 +220,7 @@ export function NotificationsTab() {
         <div {...stylex.props(field.group)}>
           <span {...stylex.props(field.label)}>Type</span>
           <select
-            {...stylex.props(field.select)}
+            {...stylex.props(field.select, field.selectChrome)}
             value={draft.type}
             onChange={(e) => setDraft({...draft, type: e.target.value as NotificationChannelType})}
           >

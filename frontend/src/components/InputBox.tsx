@@ -8,7 +8,7 @@ import type {MediaAttachment, PersistedDocument} from '../lib/types';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {attachment, composer, control} from './InputBox.styles';
-import {stream} from './ui';
+import {field, iconBtn, stream} from './ui';
 
 interface Props {
   onSubmit: (query: string, model: string, attachments: MediaAttachment[]) => void;
@@ -277,7 +277,7 @@ export function InputBox({
         <div {...stylex.props(composer.footer)}>
           <button
             type="button"
-            {...stylex.props(control.icon)}
+            {...stylex.props(iconBtn.base, control.glyph)}
             title="Attach file"
             disabled={disabled}
             onClick={() => fileInputRef.current?.click()}
@@ -299,7 +299,7 @@ export function InputBox({
           {onToggleIncognito && (
             <button
               type="button"
-              {...stylex.props(control.icon, incognito && control.iconActive)}
+              {...stylex.props(iconBtn.base, control.glyph, incognito && control.iconActive)}
               title={
                 incognito
                   ? 'Incognito on — this chat won’t be saved'
@@ -327,7 +327,7 @@ export function InputBox({
 
           <button
             type="button"
-            {...stylex.props(control.icon, listening && control.iconActive)}
+            {...stylex.props(iconBtn.base, control.glyph, listening && control.iconActive)}
             title={listening ? 'Stop recording' : 'Voice input'}
             disabled={disabled || interimText === 'Transcribing…'}
             onClick={() => (listening ? stopListening() : void startListening())}
@@ -375,7 +375,7 @@ export function InputBox({
           />
 
           <select
-            {...stylex.props(control.model)}
+            {...stylex.props(control.model, field.selectChrome)}
             value={model}
             onChange={(e) => void handleModelChange(e.target.value)}
             disabled={!catalog}
@@ -392,7 +392,7 @@ export function InputBox({
           {/* On touch there is no Enter/Shift+Enter to describe, and at the 16px
               control size the hint pushes the send button off screen. Live
               speech interim text still shows — that one is not keyboard advice. */}
-          <span {...stylex.props(composer.hint)}>
+          <span {...stylex.props(composer.hint, !interimText && composer.hintIdle)}>
             {interimText || (isMobile ? '' : 'Enter · Shift+Enter for newline')}
           </span>
 

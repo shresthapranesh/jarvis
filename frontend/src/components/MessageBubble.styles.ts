@@ -7,29 +7,29 @@ import {channels, colors, type} from '../theme/tokens.stylex';
    working" placeholder, the action row under a finished turn, its
    badges, and the attachment chips a multimodal message carries. */
 
-/** The user's own message — the only side of the exchange that gets a bubble. */
+/**
+ * The user's own message — the only side of the exchange that gets a bubble.
+ * Its position is what attributes it, so it needs no label.
+ *
+ * A block of stock with a rule down its leading edge, not a floating bubble:
+ * nothing in this theme casts a shadow or lifts on hover, because nothing in
+ * it sits above the page.
+ */
 export const bubble = stylex.create({
   user: {
     alignSelf: 'flex-end',
     backgroundColor: colors.userBg,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: `rgba(${channels.accent}, 0.18)`,
-    borderRadius: '18px 18px 5px 18px',
+    borderInlineStartWidth: 2,
+    borderInlineStartStyle: 'solid',
+    borderInlineStartColor: colors.borderStrong,
     paddingBlock: 10,
     paddingInline: 14,
     maxWidth: '71%',
     lineHeight: 1.6,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
-    fontSize: '0.9375rem',
-    boxShadow: {
-      default: `0 1px 6px rgba(${channels.shadow}, 0.18)`,
-      ':hover': `0 4px 14px rgba(${channels.shadow}, 0.28)`,
-    },
-    transform: {default: null, ':hover': 'translateY(-1px)'},
-    transition:
-      'box-shadow 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)',
+    fontSize: type.tBody,
+    transition: 'border-color 0.15s',
   },
 });
 
@@ -37,7 +37,7 @@ export const bubble = stylex.create({
 export const working = stylex.create({
   root: {display: 'flex', flexDirection: 'column', gap: 5, paddingBlock: 10, paddingInline: 2},
   action: {display: 'flex', alignItems: 'center', gap: 8},
-  label: {fontSize: '0.82rem', color: colors.textDim},
+  label: {fontSize: type.tUi, color: colors.textDim},
   preview: {
     fontSize: type.tSmall,
     color: colors.textFaint,
@@ -78,9 +78,6 @@ export const actions = stylex.create({
     opacity: {default: 'var(--turn-actions-opacity)', ':focus-within': 1},
     transition: 'opacity 0.15s',
   },
-  // Resting turns used to show nothing at all until hovered, which made settled
-  // conversations look inert. Keep the row present but recessive; `turn.base`
-  // publishes the hover value.
   rowUser: {justifyContent: 'flex-end'},
   // Resting turns used to show nothing at all until hovered, which made settled
   // conversations look inert. Keep the row present but recessive; `turn.base`
@@ -103,7 +100,7 @@ export const actions = stylex.create({
       default: `rgba(${channels.tint}, 0.09)`,
       ':hover': `rgba(${channels.accent}, 0.3)`,
     },
-    borderRadius: 6,
+    borderRadius: 2,
     color: {default: colors.textDim, ':hover': colors.accent},
     cursor: 'pointer',
     padding: 0,
@@ -116,7 +113,7 @@ export const actions = stylex.create({
 export const badge = stylex.create({
   base: {
     color: colors.textDim,
-    fontSize: '0.68rem',
+    fontSize: type.tMicro,
     whiteSpace: 'nowrap',
     paddingBlock: 3,
     paddingInline: 4,
@@ -138,12 +135,12 @@ export const safety = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.warningBorder,
-    borderRadius: 8,
+    borderRadius: 3,
     paddingBlock: 8,
     paddingInline: 12,
     marginBlockEnd: 6,
     color: colors.warningText,
-    fontSize: '0.8rem',
+    fontSize: type.tUi,
     lineHeight: 1.35,
   },
   label: {fontWeight: 600, whiteSpace: 'nowrap'},
@@ -161,12 +158,12 @@ export const media = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: `rgba(${channels.tint}, 0.12)`,
-    borderRadius: 6,
+    borderRadius: 2,
     paddingBlock: 4,
     paddingInline: 9,
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
     color: colors.text,
     maxWidth: '100%',
   },
-  size: {color: `rgba(${channels.tint}, 0.45)`, fontSize: '0.68rem', marginInlineStart: 2},
+  size: {color: `rgba(${channels.tint}, 0.45)`, fontSize: type.tMicro, marginInlineStart: 2},
 });

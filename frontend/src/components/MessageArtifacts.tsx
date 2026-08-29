@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 
 import type {ArtifactCard} from '../lib/types';
-import {channels, colors} from '../theme/tokens.stylex';
+import {channels, colors, type} from '../theme/tokens.stylex';
 
 /** Icon per artifact kind — mirrors ArtifactPanel's `renderArtifactBody` switch. */
 function KindIcon({kind}: {kind: string}) {
@@ -112,7 +112,7 @@ const styles = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: {default: colors.border, ':hover': `rgba(${channels.accent}, 0.5)`},
-    borderRadius: 10,
+    borderRadius: 3,
     backgroundColor: {default: colors.surface, ':hover': colors.accentDim},
     color: colors.text,
     cursor: 'pointer',
@@ -128,17 +128,17 @@ const styles = stylex.create({
     width: 26,
     height: 26,
     flexShrink: 0,
-    borderRadius: 7,
+    borderRadius: 2,
     backgroundColor: `rgba(${channels.accent}, 0.14)`,
     color: colors.accent,
   },
   text: {display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0},
   title: {
-    fontSize: '0.83rem',
+    fontSize: type.tUi,
     fontWeight: 500,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
-  meta: {fontSize: '0.68rem', color: colors.textDim, textTransform: 'lowercase'},
+  meta: {fontSize: type.tMicro, color: colors.textDim, textTransform: 'lowercase'},
 });

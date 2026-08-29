@@ -4,7 +4,7 @@
 import * as stylex from '@stylexjs/stylex';
 
 import {kf} from '../../theme/keyframes.stylex';
-import {channels, colors} from '../../theme/tokens.stylex';
+import {channels, colors, type} from '../../theme/tokens.stylex';
 
 /**
  * Live-run ornaments: the blinking caret on a streaming reply, the bouncing
@@ -76,18 +76,18 @@ export const worker = stylex.create({
   dotUnknown: {backgroundColor: colors.textDim, opacity: 0.5},
   role: {
     flex: 'none',
-    fontSize: '0.68rem',
+    fontSize: type.tMicro,
     fontWeight: 600,
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
     color: colors.accent,
     backgroundColor: colors.accentDim,
-    borderRadius: 5,
+    borderRadius: 2,
     paddingBlock: 1,
     paddingInline: 6,
   },
   task: {
-    fontSize: '0.8rem',
+    fontSize: type.tUi,
     color: colors.textDim,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -122,7 +122,7 @@ export const prose = stylex.create({
     paddingBlock: 3,
     paddingInline: 2,
     lineHeight: 1.68,
-    fontSize: '0.9375rem',
+    fontSize: type.tBody,
     letterSpacing: '-0.01em',
     wordBreak: 'break-word',
     '--md-surface': colors.surface,
@@ -138,7 +138,7 @@ export const prose = stylex.create({
     borderStyle: 'dashed',
     borderColor: colors.warningBorder,
     backgroundColor: colors.warningBg,
-    borderRadius: 12,
+    borderRadius: 3,
     paddingBlock: 12,
     paddingInline: 14,
     opacity: 0.85,
@@ -176,11 +176,11 @@ export const errorBubble = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.errorBorder,
-    borderRadius: 8,
+    borderRadius: 3,
     paddingBlock: 10,
     paddingInline: 14,
     color: colors.errorText,
-    fontSize: '0.85rem',
+    fontSize: type.tBody,
   },
 });
 

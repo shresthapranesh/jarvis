@@ -11,7 +11,7 @@ import {
 import {formatRelativeTime} from '../lib/api';
 import type {RunningTask, TaskKind} from '../lib/types';
 import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
-import {channels, colors} from '../theme/tokens.stylex';
+import {channels, colors, type} from '../theme/tokens.stylex';
 
 export const Route = createFileRoute('/tasks')({
   component: TasksPage,
@@ -152,7 +152,7 @@ const styles = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 3,
     paddingBlock: 4,
     paddingInlineStart: 12,
     paddingInlineEnd: 6,
@@ -168,7 +168,7 @@ const styles = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     color: colors.text,
-    fontSize: '0.88rem',
+    fontSize: type.tBody,
     fontFamily: 'inherit',
     textAlign: 'left',
     paddingBlock: 8,
@@ -182,9 +182,9 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     flex: 1,
   },
-  elapsed: {fontSize: '0.78rem', color: colors.textDim, flexShrink: 0},
+  elapsed: {fontSize: type.tUi, color: colors.textDim, flexShrink: 0},
 
-  flag: {fontSize: '0.7rem', paddingBlock: 2, paddingInline: 6, borderRadius: 4, flexShrink: 0},
+  flag: {fontSize: type.tMicro, paddingBlock: 2, paddingInline: 6, borderRadius: 2, flexShrink: 0},
   flagInterrupt: {backgroundColor: `rgba(${channels.accent}, 0.18)`, color: colors.accent},
   flagCancelling: {backgroundColor: colors.errorBg, color: colors.errorText},
 
@@ -195,7 +195,7 @@ const styles = stylex.create({
     paddingBlockEnd: 4,
     paddingInlineStart: 12,
     paddingInlineEnd: 4,
-    fontSize: '0.72rem',
+    fontSize: type.tSmall,
     color: colors.textDim,
   },
   bar: {
@@ -203,7 +203,7 @@ const styles = stylex.create({
     maxWidth: 160,
     height: 4,
     backgroundColor: colors.surface2,
-    borderRadius: 4,
+    borderRadius: 2,
     overflow: 'hidden',
   },
   barFill: {height: '100%', transition: 'width 0.3s'},
@@ -219,7 +219,7 @@ const styles = stylex.create({
   },
 
   stopBtn: {
-    fontSize: '0.78rem',
+    fontSize: type.tUi,
     fontFamily: 'inherit',
     paddingBlock: 6,
     paddingInline: 14,
@@ -227,7 +227,7 @@ const styles = stylex.create({
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: colors.errorBorder,
-    borderRadius: 6,
+    borderRadius: 2,
     color: colors.errorText,
     cursor: {default: 'pointer', ':disabled': 'not-allowed'},
     opacity: {default: 1, ':disabled': 0.5},
