@@ -8,9 +8,9 @@ import {commitDeleteSetting} from '../../relay/DeleteSettingMutation';
 import {commitSetSetting} from '../../relay/SetSettingMutation';
 import {settingsQuery} from '../../relay/SettingsQuery';
 import {ConfirmDialog} from '../ConfirmDialog';
-import {SearchIcon} from '../icons';
+import {SearchIcon, TrashIcon} from '../icons';
 import {useQueryRetry} from '../QueryBoundary';
-import {badge, btn, codeField, field, page} from '../ui';
+import {badge, btn, codeField, field, iconBtn, page} from '../ui';
 // `settings` and `tools` are also local variable names in these tabs.
 import {configNew, settings as sx, tools as toolStyles} from './settings.styles';
 
@@ -124,16 +124,28 @@ function SettingRow({
   const managed = Boolean(setting.managedBy);
   const dirty = draft !== setting.value;
 
-  async function save() {
+  async function save(value: string = draft) {
     setBusy(true);
     try {
-      const res = await commitSetSetting({key: setting.key, value: draft, allowManaged: false});
+      const res = await commitSetSetting({key: setting.key, value, allowManaged: false});
       onSaved(`${setting.key}: ${res.note}`);
     } catch (e) {
       onError((e as Error).message || String(e));
       setDraft(setting.value);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Enter commits, Escape abandons — the two keys a single-line field already
+  // implies, so the common edit needs no button at all.
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && dirty) {
+      e.preventDefault();
+      void save();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setDraft(setting.value);
     }
   }
 
@@ -179,6 +191,17 @@ function SettingRow({
           )}
           {!setting.known && <span {...stylex.props(badge.base)}>custom key</span>}
           {!setting.isSet && <span {...stylex.props(badge.base)}>unset</span>}
+          {setting.isSet && !managed && (
+            <button
+              {...stylex.props(iconBtn.base, iconBtn.danger, sx.rowHeadAction)}
+              disabled={busy}
+              title="Clear — delete the row so the key reverts to its built-in default"
+              aria-label={`Clear ${setting.key}`}
+              onClick={() => setConfirmClear(true)}
+            >
+              <TrashIcon size={13} />
+            </button>
+          )}
         </div>
         {setting.description && <p {...stylex.props(toolStyles.rowDesc)}>{setting.description}</p>}
 
@@ -191,7 +214,10 @@ function SettingRow({
                 {...stylex.props(field.select, field.selectChrome)}
                 value={draft}
                 disabled={busy}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  void save(e.target.value);
+                }}
               >
                 <option value="">(unset)</option>
                 {setting.choices.map((c) => (
@@ -208,6 +234,7 @@ function SettingRow({
                 disabled={busy}
                 placeholder={setting.placeholder}
                 onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
               />
             ) : (
               <input
@@ -216,26 +243,32 @@ function SettingRow({
                 disabled={busy}
                 placeholder={setting.placeholder}
                 onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={onKey}
               />
             )}
-            <div {...stylex.props(codeField.actions)}>
-              <button
-                {...stylex.props(btn.base, btn.primary)}
-                disabled={busy || !dirty}
-                onClick={() => void save()}
-              >
-                Save
-              </button>
-              <button
-                {...stylex.props(btn.base)}
-                disabled={busy || !setting.isSet}
-                title="Delete the row — the key reverts to its built-in default."
-                onClick={() => setConfirmClear(true)}
-              >
-                Clear
-              </button>
-              {dirty && <span {...stylex.props(codeField.hint)}>unsaved</span>}
-            </div>
+            {dirty && (
+              <div {...stylex.props(codeField.actions)}>
+                <button
+                  {...stylex.props(btn.base, btn.primary)}
+                  disabled={busy}
+                  onClick={() => void save()}
+                >
+                  Save
+                </button>
+                <button
+                  {...stylex.props(btn.base)}
+                  disabled={busy}
+                  onClick={() => setDraft(setting.value)}
+                >
+                  Revert
+                </button>
+                <span {...stylex.props(codeField.hint)}>
+                  {setting.kind === 'json' || setting.value.length > 80
+                    ? 'unsaved'
+                    : 'unsaved · Enter to save, Esc to revert'}
+                </span>
+              </div>
+            )}
           </div>
         )}
         {setting.updatedAt && (

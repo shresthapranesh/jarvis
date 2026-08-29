@@ -23,8 +23,15 @@ import { Route as ArtifactsRouteImport } from './routes/artifacts'
 import { Route as ApprovalsRouteImport } from './routes/approvals'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkflowIndexRouteImport } from './routes/workflow.index'
+import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as WorkflowIdRouteImport } from './routes/workflow.$id'
+import { Route as SettingsToolsRouteImport } from './routes/settings.tools'
+import { Route as SettingsNotificationsRouteImport } from './routes/settings.notifications'
+import { Route as SettingsModelsRouteImport } from './routes/settings.models'
+import { Route as SettingsMcpRouteImport } from './routes/settings.mcp'
+import { Route as SettingsMaintenanceRouteImport } from './routes/settings.maintenance'
+import { Route as SettingsConfigRouteImport } from './routes/settings.config'
 import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
 import { Route as CIdRouteImport } from './routes/c.$id'
 import { Route as WorkflowIdIndexRouteImport } from './routes/workflow.$id.index'
@@ -100,6 +107,11 @@ const WorkflowIndexRoute = WorkflowIndexRouteImport.update({
   path: '/',
   getParentRoute: () => WorkflowRoute,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -109,6 +121,36 @@ const WorkflowIdRoute = WorkflowIdRouteImport.update({
   id: '/$id',
   path: '/$id',
   getParentRoute: () => WorkflowRoute,
+} as any)
+const SettingsToolsRoute = SettingsToolsRouteImport.update({
+  id: '/tools',
+  path: '/tools',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsNotificationsRoute = SettingsNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsModelsRoute = SettingsModelsRouteImport.update({
+  id: '/models',
+  path: '/models',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsMcpRoute = SettingsMcpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsMaintenanceRoute = SettingsMaintenanceRouteImport.update({
+  id: '/maintenance',
+  path: '/maintenance',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsConfigRoute = SettingsConfigRouteImport.update({
+  id: '/config',
+  path: '/config',
+  getParentRoute: () => SettingsRoute,
 } as any)
 const ProjectsIdRoute = ProjectsIdRouteImport.update({
   id: '/$id',
@@ -141,14 +183,21 @@ export interface FileRoutesByFullPath {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/projects': typeof ProjectsRouteWithChildren
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
+  '/settings/config': typeof SettingsConfigRoute
+  '/settings/maintenance': typeof SettingsMaintenanceRoute
+  '/settings/mcp': typeof SettingsMcpRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/tools': typeof SettingsToolsRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
   '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/workflow/': typeof WorkflowIndexRoute
   '/workflow/$id/': typeof WorkflowIdIndexRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
@@ -162,12 +211,18 @@ export interface FileRoutesByTo {
   '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
-  '/settings': typeof SettingsRoute
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
+  '/settings/config': typeof SettingsConfigRoute
+  '/settings/maintenance': typeof SettingsMaintenanceRoute
+  '/settings/mcp': typeof SettingsMcpRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/tools': typeof SettingsToolsRoute
   '/projects': typeof ProjectsIndexRoute
+  '/settings': typeof SettingsIndexRoute
   '/workflow': typeof WorkflowIndexRoute
   '/workflow/$id': typeof WorkflowIdIndexRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
@@ -183,14 +238,21 @@ export interface FileRoutesById {
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/projects': typeof ProjectsRouteWithChildren
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
+  '/settings/config': typeof SettingsConfigRoute
+  '/settings/maintenance': typeof SettingsMaintenanceRoute
+  '/settings/mcp': typeof SettingsMcpRoute
+  '/settings/models': typeof SettingsModelsRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/tools': typeof SettingsToolsRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
   '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
   '/workflow/': typeof WorkflowIndexRoute
   '/workflow/$id/': typeof WorkflowIdIndexRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
@@ -213,8 +275,15 @@ export interface FileRouteTypes {
     | '/workflow'
     | '/c/$id'
     | '/projects/$id'
+    | '/settings/config'
+    | '/settings/maintenance'
+    | '/settings/mcp'
+    | '/settings/models'
+    | '/settings/notifications'
+    | '/settings/tools'
     | '/workflow/$id'
     | '/projects/'
+    | '/settings/'
     | '/workflow/'
     | '/workflow/$id/'
     | '/workflow/$id/runs/$runId'
@@ -228,12 +297,18 @@ export interface FileRouteTypes {
     | '/live'
     | '/logs'
     | '/memory'
-    | '/settings'
     | '/skills'
     | '/tasks'
     | '/c/$id'
     | '/projects/$id'
+    | '/settings/config'
+    | '/settings/maintenance'
+    | '/settings/mcp'
+    | '/settings/models'
+    | '/settings/notifications'
+    | '/settings/tools'
     | '/projects'
+    | '/settings'
     | '/workflow'
     | '/workflow/$id'
     | '/workflow/$id/runs/$runId'
@@ -254,8 +329,15 @@ export interface FileRouteTypes {
     | '/workflow'
     | '/c/$id'
     | '/projects/$id'
+    | '/settings/config'
+    | '/settings/maintenance'
+    | '/settings/mcp'
+    | '/settings/models'
+    | '/settings/notifications'
+    | '/settings/tools'
     | '/workflow/$id'
     | '/projects/'
+    | '/settings/'
     | '/workflow/'
     | '/workflow/$id/'
     | '/workflow/$id/runs/$runId'
@@ -271,7 +353,7 @@ export interface RootRouteChildren {
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
   ProjectsRoute: typeof ProjectsRouteWithChildren
-  SettingsRoute: typeof SettingsRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   SkillsRoute: typeof SkillsRoute
   TasksRoute: typeof TasksRoute
   WorkflowRoute: typeof WorkflowRouteWithChildren
@@ -378,6 +460,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowIndexRouteImport
       parentRoute: typeof WorkflowRoute
     }
+    '/settings/': {
+      id: '/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/projects/': {
       id: '/projects/'
       path: '/'
@@ -391,6 +480,48 @@ declare module '@tanstack/react-router' {
       fullPath: '/workflow/$id'
       preLoaderRoute: typeof WorkflowIdRouteImport
       parentRoute: typeof WorkflowRoute
+    }
+    '/settings/tools': {
+      id: '/settings/tools'
+      path: '/tools'
+      fullPath: '/settings/tools'
+      preLoaderRoute: typeof SettingsToolsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/notifications': {
+      id: '/settings/notifications'
+      path: '/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof SettingsNotificationsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/models': {
+      id: '/settings/models'
+      path: '/models'
+      fullPath: '/settings/models'
+      preLoaderRoute: typeof SettingsModelsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/mcp': {
+      id: '/settings/mcp'
+      path: '/mcp'
+      fullPath: '/settings/mcp'
+      preLoaderRoute: typeof SettingsMcpRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/maintenance': {
+      id: '/settings/maintenance'
+      path: '/maintenance'
+      fullPath: '/settings/maintenance'
+      preLoaderRoute: typeof SettingsMaintenanceRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/config': {
+      id: '/settings/config'
+      path: '/config'
+      fullPath: '/settings/config'
+      preLoaderRoute: typeof SettingsConfigRouteImport
+      parentRoute: typeof SettingsRoute
     }
     '/projects/$id': {
       id: '/projects/$id'
@@ -437,6 +568,30 @@ const ProjectsRouteWithChildren = ProjectsRoute._addFileChildren(
   ProjectsRouteChildren,
 )
 
+interface SettingsRouteChildren {
+  SettingsConfigRoute: typeof SettingsConfigRoute
+  SettingsMaintenanceRoute: typeof SettingsMaintenanceRoute
+  SettingsMcpRoute: typeof SettingsMcpRoute
+  SettingsModelsRoute: typeof SettingsModelsRoute
+  SettingsNotificationsRoute: typeof SettingsNotificationsRoute
+  SettingsToolsRoute: typeof SettingsToolsRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsConfigRoute: SettingsConfigRoute,
+  SettingsMaintenanceRoute: SettingsMaintenanceRoute,
+  SettingsMcpRoute: SettingsMcpRoute,
+  SettingsModelsRoute: SettingsModelsRoute,
+  SettingsNotificationsRoute: SettingsNotificationsRoute,
+  SettingsToolsRoute: SettingsToolsRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 interface WorkflowIdRouteChildren {
   WorkflowIdIndexRoute: typeof WorkflowIdIndexRoute
   WorkflowIdRunsRunIdRoute: typeof WorkflowIdRunsRunIdRoute
@@ -475,7 +630,7 @@ const rootRouteChildren: RootRouteChildren = {
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
   ProjectsRoute: ProjectsRouteWithChildren,
-  SettingsRoute: SettingsRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   SkillsRoute: SkillsRoute,
   TasksRoute: TasksRoute,
   WorkflowRoute: WorkflowRouteWithChildren,

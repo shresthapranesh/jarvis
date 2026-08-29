@@ -9,7 +9,7 @@ import type {CatalogModel, ModelCatalogData} from '../../relay/ModelCatalogQuery
 import {modelCatalogQuery, refreshModelCatalog} from '../../relay/ModelCatalogQuery';
 import {ConfirmDialog} from '../ConfirmDialog';
 import {FormModal} from '../FormModal';
-import {CheckIcon, EditIcon, PlusIcon, SearchIcon, SyncIcon, TrashIcon} from '../icons';
+import {EditIcon, PlusIcon, SearchIcon, SyncIcon, TrashIcon} from '../icons';
 import {skill} from '../memory.styles';
 import {useQueryRetry} from '../QueryBoundary';
 import {badge, btn, field, iconBtn, page} from '../ui';
@@ -104,9 +104,7 @@ export function ModelsTab() {
     <div {...stylex.props(page.section)}>
       <h2 {...stylex.props(page.sectionTitle)}>
         Model catalog <span {...stylex.props(page.count)}>{data?.available?.length ?? 0}</span>
-        <span {...stylex.props(page.sectionHint)}>
-          {customCount} custom · default: <code>{data?.default ?? '—'}</code>
-        </span>
+        <span {...stylex.props(page.sectionHint)}>{customCount} custom</span>
         <span {...stylex.props(settings.sectionActions)}>
           <button
             {...stylex.props(btn.base)}
@@ -143,6 +141,27 @@ export function ModelsTab() {
             </option>
           ))}
         </select>
+        {/* Exactly one model can be the default, so this is one control — not
+            a "Set as default" button repeated on every card in the grid. It
+            lists the whole catalog, not just the current filter, so narrowing
+            the grid can never hide the model you are trying to select. */}
+        <label {...stylex.props(models.defaultPicker)}>
+          <span {...stylex.props(page.sectionHint)}>Default</span>
+          <select
+            {...stylex.props(field.select, models.defaultSelect, field.selectChrome)}
+            value={data?.default ?? ''}
+            disabled={defaultMut.pending}
+            onChange={(e) => void defaultMut.run(e.target.value)}
+            title="The model used when a run does not name one"
+          >
+            {!data?.default && <option value="">—</option>}
+            {(data?.available ?? []).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.id}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {filtered.length === 0 ? (
@@ -186,21 +205,6 @@ export function ModelsTab() {
                     </span>
                   ) : null}
                 </p>
-                <div {...stylex.props(models.actions)}>
-                  {isDefault ? (
-                    <span {...stylex.props(field.hint)}>
-                      <CheckIcon size={12} /> Used when no model is specified
-                    </span>
-                  ) : (
-                    <button
-                      {...stylex.props(btn.base, btn.small)}
-                      disabled={defaultMut.pending}
-                      onClick={() => void defaultMut.run(m.id)}
-                    >
-                      Set as default
-                    </button>
-                  )}
-                </div>
               </li>
             );
           })}
