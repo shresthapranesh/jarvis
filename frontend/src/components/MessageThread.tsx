@@ -4,6 +4,7 @@ import type {WorkerInfo} from '../hooks/useTaskEvents';
 import type {ArtifactCard, Message, Step, TodoItem} from '../lib/types';
 import {channels, layout, space, type} from '../theme/tokens.stylex';
 import {MessageBubble, StreamingBubble} from './MessageBubble';
+import {QueuedMessages} from './QueuedMessages';
 import {TodoList} from './TodoList';
 import {errorBubble, turn} from './ui';
 
@@ -34,6 +35,9 @@ interface Props {
   streamingArtifacts?: ArtifactCard[];
   onOpenArtifact?: (id: string) => void;
   openArtifactId?: string | null;
+  /** Messages typed during the run and not yet delivered to it. */
+  queuedMessages?: Message[];
+  onUnqueue?: (messageId: string) => void;
 }
 
 export function MessageThread({
@@ -56,6 +60,8 @@ export function MessageThread({
   streamingArtifacts,
   onOpenArtifact,
   openArtifactId,
+  queuedMessages,
+  onUnqueue,
 }: Props) {
   return (
     <div
@@ -95,6 +101,9 @@ export function MessageThread({
           onOpenArtifact={onOpenArtifact}
           openArtifactId={openArtifactId}
         />
+      )}
+      {queuedMessages && queuedMessages.length > 0 && (
+        <QueuedMessages messages={queuedMessages} onUnqueue={onUnqueue} />
       )}
       {streamError && !isStreaming && (
         <div {...stylex.props(turn.base)}>

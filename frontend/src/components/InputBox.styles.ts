@@ -39,6 +39,15 @@ export const composer = stylex.create({
     transition: 'border-color 0.15s ease',
   },
   cardDisabled: {opacity: 0.6},
+  /**
+   * Queueing: the field is live but what it does has changed, so it says so
+   * with a rule rather than by dimming — dimming is what `cardDisabled` means
+   * here, and this is the opposite state.
+   */
+  cardQueueing: {
+    borderStyle: 'dashed',
+    borderColor: `color-mix(in srgb, ${colors.accent} 35%, ${colors.border})`,
+  },
   cardIncognito: {borderColor: `color-mix(in srgb, ${colors.accent} 45%, ${colors.border})`},
   textarea: {
     backgroundColor: 'transparent',

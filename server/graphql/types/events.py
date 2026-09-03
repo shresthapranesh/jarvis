@@ -83,6 +83,27 @@ class TodosUpdatedEvent:
 
 
 @strawberry.type
+class QueuedMessageEvent:
+    """A message was queued against this run while it was in flight."""
+
+    message_id: str
+    text: str
+    position: int
+
+
+@strawberry.type
+class QueuedWithdrawnEvent:
+    message_id: str
+
+
+@strawberry.type
+class QueuedConsumedEvent:
+    """Queued messages were handed to the model before its next call."""
+
+    message_ids: list[str]
+
+
+@strawberry.type
 class InterruptEvent:
     interrupt_id: str
     question: str
@@ -182,6 +203,9 @@ ChatEvent = Annotated[
         WorkerDoneEvent,
         ArtifactEvent,
         TodosUpdatedEvent,
+        QueuedMessageEvent,
+        QueuedWithdrawnEvent,
+        QueuedConsumedEvent,
         InterruptEvent,
         InterruptResolvedEvent,
         ApprovalRequestEvent,
@@ -293,6 +317,17 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
             kind=data.get("kind") or "markdown",
             preview=data.get("preview"),
         )
+    if event_name == "queued_message":
+        return QueuedMessageEvent(
+            message_id=data.get("message_id", ""),
+            text=data.get("text", ""),
+            position=_safe_int(data.get("position", 0)),
+        )
+    if event_name == "queued_withdrawn":
+        return QueuedWithdrawnEvent(message_id=data.get("message_id", ""))
+    if event_name == "queued_consumed":
+        ids = data.get("message_ids") or []
+        return QueuedConsumedEvent(message_ids=[str(i) for i in ids])
     if event_name == "todos_updated":
         todos_raw = data.get("todos") or []
         todos: list[TodoItem] = []

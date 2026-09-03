@@ -539,6 +539,53 @@ async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[C
     return list(await _get_retrieval_task(store, query, key))
 
 
+# ── Mid-run message queue ────────────────────────────────────────────────────
+
+async def _drain_queued_input(config: RunnableConfig) -> list[HumanMessage]:
+    """Messages the user queued while this run was in flight, taken now.
+
+    This node is the only chokepoint every main-graph LLM call passes, which
+    makes it the one safe injection point. The tools node sits *between* an
+    AIMessage's tool_calls and their results, and a HumanMessage spliced in
+    there is the orphan pairing Anthropic/Bedrock reject outright; arriving
+    here instead, the queued text lands after the current tool batch's results
+    and before the next model call.
+
+    The delivered HumanMessage keeps the durable row's id, so it is both the
+    retrieval-cache key the queueMessage resolver already warmed and idempotent
+    under `add_messages` if the node is ever replayed.
+    """
+    task_id = (config.get("configurable") or {}).get("message_id")
+    if not task_id:
+        return []
+    from core.state import _tasks, emit_event
+
+    task_state = _tasks.get(task_id)
+    if task_state is None or not task_state.pending_input:
+        return []
+    drained = task_state.drain_input()
+
+    # Best-effort: the message is already being delivered to the model, so a
+    # failed status flip must not take the turn down with it. The row is left
+    # `queued` and the next run adopts it — a duplicate is recoverable, a lost
+    # user message is not.
+    try:
+        from db.engine import async_session
+        from db.ops import mark_messages_delivered
+
+        async with async_session() as session:
+            await mark_messages_delivered(session, [m.id for m in drained])
+    except Exception as exc:
+        logger.warning("queued message status flip failed: %s", exc)
+
+    emit_event(
+        task_state, "queued_consumed",
+        message_ids=[m.id for m in drained],
+    )
+    logger.info("delivered %d queued message(s) to run %s", len(drained), task_id)
+    return [HumanMessage(content=m.text, id=m.id) for m in drained]
+
+
 # ── Checkpointer ─────────────────────────────────────────────────────────────
 
 _sync_checkpointer: SqliteSaver | None = None
@@ -748,6 +795,12 @@ def _build_agent(
         """
         _phase = _PhaseTimer()
         raw_messages = list(state.get("messages", []))
+        # Mid-run queue: delivered before retrieval runs, so the queued text is
+        # what the memory/skill lookup keys off — the user's newest intent, not
+        # the one the turn started with.
+        queued = await _drain_queued_input(config)
+        if queued:
+            raw_messages.extend(queued)
         # Independent of each other, so they overlap rather than stack: the
         # retrieval is a cached per-turn task (usually already resolved), while
         # the project read is a fresh DB round-trip on EVERY model iteration by
@@ -864,7 +917,7 @@ def _build_agent(
                 len(messages_for_llm),
                 compaction.compacted,
             )
-        return {"messages": state_update_msgs + [response]}
+        return {"messages": state_update_msgs + queued + [response]}
 
     # ── Build graph ───────────────────────────────────────────────────────────
 

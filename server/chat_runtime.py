@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -32,6 +33,7 @@ from core.run_scaffold import (
 from core.schemas import AttachmentIn
 from core.state import (
     InterruptRequest,
+    QueuedMessage,
     TaskState,
     _tasks,
     emit_event,
@@ -47,8 +49,11 @@ from db.models import Conversation
 from db.ops import (
     add_message,
     create_document,
+    delete_message,
     get_or_create_conversation,
     get_project,
+    get_queued_messages,
+    mark_messages_delivered,
 )
 
 
@@ -241,6 +246,7 @@ async def _run_agent_task(
             status = "done"
             await finalize(final_message, status)
             emit_event(state, "done", message=final_message, conversation_id=conv_id)
+            await _redispatch_queued(state, conv_id, model)
 
             # No project-memory work here. This used to fire a consolidation
             # attempt after every completed chat, which is once per *turn* —
@@ -292,6 +298,162 @@ async def _run_agent_task(
             except Exception:
                 pass
         finish_task_state(task_id, state, status)
+
+
+# ── Mid-run message queue ────────────────────────────────────────────────────
+#
+# A message typed while a run is in flight is not a second run: two runs on one
+# `thread_id` race the checkpointer. It is queued instead, and the agent's
+# model_request node drains it just before its next LLM call
+# (core/agents.py:_drain_queued_input).
+#
+# Two carriers, on purpose. `TaskState.pending_input` is the fast path the
+# drain reads with no IO; the `messages` row (status `queued`) is what renders
+# in the transcript and what survives a restart, since TaskState does not.
+
+
+async def queue_chat_message(session: AsyncSession, task_id: str, text: str) -> tuple[str, int]:
+    """Queue `text` for the in-flight run `task_id`. Returns (message_id, position)."""
+    text = text.strip()
+    if not text:
+        raise ValueError("empty message")
+    state = _tasks.get(task_id)
+    if state is None or state.done:
+        raise ValueError("task not found or already finished")
+    # A paused run is not waiting for the next turn, it is waiting for *this*
+    # answer — and it will not reach the drain until it gets one. resumeTask is
+    # the path for that, so refuse rather than park the text behind the pause.
+    if state.pending_interrupt_id:
+        raise ValueError("this run is waiting on an answer — use resumeTask")
+    conv_id = state.parent_id
+    if not conv_id:
+        raise ValueError("task is not attached to a conversation")
+
+    msg = await add_message(session, conv_id, "user", text, status="queued")
+    position = state.queue_input(QueuedMessage(id=msg.id, text=text))
+    # The drain makes this the newest user turn, and _retrieved_volatile_parts
+    # keys its memory+skill lookup off the last HumanMessage's id. Warming it
+    # here — with the id the drain will deliver — keeps that work off the
+    # critical path of the iteration that consumes it.
+    try:
+        prefetch_retrieval(get_store(), text, msg.id)
+    except Exception as exc:
+        logger.debug("queued-message retrieval prefetch skipped: %s", exc)
+    emit_event(state, "queued_message", message_id=msg.id, text=text, position=position)
+    logger.info("queued message for run %s (position %d)", task_id, position)
+    return msg.id, position
+
+
+async def unqueue_chat_message(session: AsyncSession, task_id: str, message_id: str) -> bool:
+    """Withdraw a queued message. False if it was already delivered."""
+    state = _tasks.get(task_id)
+    if state is None:
+        raise ValueError("task not found")
+    if not state.unqueue_input(message_id):
+        return False
+    await delete_message(session, message_id)
+    emit_event(state, "queued_withdrawn", message_id=message_id)
+    return True
+
+
+def in_flight_chat_task(conv_id: str) -> str | None:
+    """The chat run currently up on `conv_id`, or None if it is idle.
+
+    `_tasks` covers both pending and running work — `enqueue_chat_task`
+    registers the state before it commits the job — so this sees a turn that
+    has been accepted but not yet claimed. The one gap is a job that outlived a
+    restart: nothing re-registers it until the worker claims it, so a message
+    sent inside that window starts its own turn. `_adopt_queued_messages` is
+    what keeps that from losing anything.
+    """
+    for task_id, state in _tasks.items():
+        if state.kind == "chat" and state.parent_id == conv_id and not state.done:
+            return task_id
+    return None
+
+
+async def route_to_live_run(
+    session: AsyncSession,
+    conv_id: str,
+    query: str,
+    attachments: list | None = None,
+) -> tuple[str, str] | None:
+    """Hand `query` to the run already up on this conversation, if there is one.
+
+    Returns ``(task_id, message_id)`` when the text was queued, or None when
+    the conversation is idle and the caller should start a turn as usual. This
+    is the single rule every surface goes through, because starting a second
+    turn here is not a heavier version of the same thing — both runs share the
+    conversation's LangGraph `thread_id` and race the checkpointer.
+
+    Raises when a run is up but this message cannot join it: attachments (a
+    queued row has to be replayable from the DB alone, and it stores attachment
+    metadata, not bytes) or a run paused on an interrupt, which is waiting for
+    that answer rather than for the next turn.
+    """
+    task_id = in_flight_chat_task(conv_id)
+    if task_id is None:
+        return None
+    if attachments:
+        raise ValueError(
+            "a run is already in flight on this conversation and attachments cannot be "
+            "queued onto it — wait for it to finish, or stop it first"
+        )
+    message_id, _ = await queue_chat_message(session, task_id, query)
+    return task_id, message_id
+
+
+async def _adopt_queued_messages(conv_id: str, state: TaskState) -> None:
+    """Pick up messages queued against a run that is no longer around.
+
+    A restart loses TaskState but not the rows, and a stopped or errored run
+    deliberately leaves its queue behind (see `_redispatch_queued`). Either
+    way the next run on the conversation is the one that should deliver them,
+    so adoption happens per job rather than per restart.
+    """
+    try:
+        async with async_session() as session:
+            rows = await get_queued_messages(session, conv_id)
+    except Exception as exc:
+        logger.warning("could not load queued messages for %s: %s", conv_id, exc)
+        return
+    known = {m.id for m in state.pending_input}
+    adopted = 0
+    for row in rows:
+        if row.id in known:
+            continue
+        state.queue_input(QueuedMessage(id=row.id, text=row.content))
+        adopted += 1
+    if adopted:
+        logger.info("adopted %d queued message(s) into run on %s", adopted, conv_id)
+
+
+async def _redispatch_queued(state: TaskState, conv_id: str, model: str) -> None:
+    """A message queued after the last drain has no run left to join — start one.
+
+    Only on a clean finish. A stopped or errored run leaves its queue as
+    `queued` rows instead, so the next run adopts them (or the user withdraws
+    them) rather than firing a fresh turn at a conversation they just
+    interrupted.
+
+    Only the first leftover becomes the new turn's prompt; the rest stay
+    `queued` and `_adopt_queued_messages` hands them to that run, which is the
+    same path a restart takes.
+    """
+    leftovers = state.drain_input()
+    if not leftovers:
+        return
+    first = leftovers[0]
+    try:
+        async with async_session() as session:
+            await mark_messages_delivered(session, [first.id], status="done")
+            await enqueue_chat_task(
+                session, first.text, model, conv_id, source="queue",
+            )
+    except Exception as exc:
+        # The rows are still `queued`, so nothing is lost — the next run on
+        # this conversation adopts all of them, including `first`.
+        logger.warning("re-dispatch of queued messages failed: %s", exc)
 
 
 async def _resolve_conv_scope(conv_id: str) -> tuple[str | None, bool]:
@@ -350,6 +512,8 @@ async def chat_job_handler(job: Job) -> None:
     state = get_or_create_task_state(
         task_id, kind="chat", label=label, parent_id=conv_id, model=model,
     )
+
+    await _adopt_queued_messages(conv_id, state)
 
     async with queue_cancel_watch(task_id, state):
         await _run_agent_task(
@@ -422,6 +586,20 @@ def _assistant_placeholder(task_id: str, conv_id: str, model: str):
     )
 
 
+@dataclass
+class ChatDispatch:
+    """What a chat request turned into: a new turn, or a message queued onto
+    the run already going. `task_id` is the run to subscribe to either way."""
+
+    task_id: str
+    conversation_id: str
+    queued_message_id: str | None = None
+
+    @property
+    def queued(self) -> bool:
+        return self.queued_message_id is not None
+
+
 async def register_chat_task(
     session: AsyncSession,
     query: str,
@@ -430,7 +608,7 @@ async def register_chat_task(
     attachments: list | None = None,
     project_id: str | None = None,
     ephemeral: bool = False,
-) -> tuple[str, str]:
+) -> ChatDispatch:
     """GraphQL-side wrapper: create conversation if missing, write the user
     Message + any document attachments, then enqueue the chat job.
 
@@ -438,8 +616,12 @@ async def register_chat_task(
     created here; joining an existing conversation goes through
     ``setConversationProject`` (project) and inherits the stored incognito flag.
     Incognito and project membership are mutually exclusive — an ephemeral chat
-    ignores ``project_id``. Returns ``(task_id, conversation_id)``. Caller
-    validates ``model``.
+    ignores ``project_id``. Caller validates ``model``.
+
+    A request arriving while this conversation is already running is queued
+    onto that run rather than started beside it (see `route_to_live_run`); the
+    returned `ChatDispatch` says which happened, and carries the running task's
+    id either way so the caller subscribes to the right stream.
     """
     if ephemeral:
         project_id = None
@@ -449,6 +631,13 @@ async def register_chat_task(
     conv = await get_or_create_conversation(
         session, conversation_id, model, title, project_id=project_id, ephemeral=ephemeral
     )
+
+    routed = await route_to_live_run(session, conv.id, query, attachments)
+    if routed is not None:
+        task_id, message_id = routed
+        return ChatDispatch(
+            task_id=task_id, conversation_id=conv.id, queued_message_id=message_id,
+        )
 
     if attachments:
         display_parts: list[dict] = [{"type": "text", "text": query}]
@@ -490,4 +679,4 @@ async def register_chat_task(
     task_id = await enqueue_chat_task(
         session, query, model, conv.id, attachments=attachments, source="http",
     )
-    return (task_id, conv.id)
+    return ChatDispatch(task_id=task_id, conversation_id=conv.id)

@@ -42,9 +42,11 @@ import {commitDeleteDocument} from '../relay/DeleteDocumentMutation';
 import {commitDiscardConversation} from '../relay/DiscardConversationMutation';
 import {documentListQuery, refreshDocumentList} from '../relay/DocumentListQuery';
 import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
+import {commitQueueMessage} from '../relay/QueueMessageMutation';
 import {commitStartTask} from '../relay/StartTaskMutation';
 import {commitStopTask} from '../relay/StopTaskMutation';
 import {todoListQuery} from '../relay/TodoListQuery';
+import {commitUnqueueMessage} from '../relay/UnqueueMessageMutation';
 import {conv} from './c.$id.styles';
 
 export const Route = createFileRoute('/c/$id')({
@@ -396,14 +398,48 @@ function ConversationPage() {
     }
   }
 
-  // Build displayed messages: replace running assistant message with streaming state
-  const messages: Message[] = [
-    ...allMessages
+  // Build displayed messages: replace running assistant message with streaming
+  // state, and hold back messages queued against the run — those render under
+  // the streaming turn (see MessageThread), because the answer above is still
+  // being written for the prompt that came before them.
+  const messages: Message[] = orderDeliveredAboveReply(
+    allMessages
       .filter((m) => !(m.role === 'assistant' && m.status === 'running'))
-      .concat(pendingUser ? [pendingUser] : []),
-  ];
+      .filter((m) => m.status !== 'queued'),
+  ).concat(pendingUser ? [pendingUser] : []);
+  const queuedMessages = useMemo<Message[]>(
+    () => allMessages.filter((m) => m.status === 'queued'),
+    [allMessages],
+  );
 
   const isActive = streaming || !!runningMsg;
+  // Sending queues instead of starting a turn while a run is up. Not while it
+  // is paused: the run is waiting on that answer and will not reach a delivery
+  // point until it gets one, so the InterruptPrompt is the input then.
+  const canQueue = isActive && !!streamTaskId && !pendingInterrupt;
+
+  async function handleQueue(query: string) {
+    if (!streamTaskId) return;
+    try {
+      await commitQueueMessage(streamTaskId, query);
+      await loadConversationPage(id);
+    } catch (err) {
+      console.error('Failed to queue message:', err);
+    }
+  }
+
+  async function handleUnqueue(messageId: string) {
+    if (!streamTaskId) return;
+    try {
+      await commitUnqueueMessage(streamTaskId, messageId);
+    } catch (err) {
+      console.error('Failed to withdraw queued message:', err);
+    }
+    // Refetch either way: a false result means the run delivered it first, and
+    // the store is then the thing that is out of date.
+    await loadConversationPage(id);
+  }
+
   const isEphemeral = data.ephemeral;
 
   // The spine is the always-on, collapsed form of the activity sidebar: live
@@ -507,6 +543,8 @@ function ConversationPage() {
         openArtifactId={artifactPanelOpen ? selectedArtifactId : null}
         hasSpine={showSpine}
         spineCollapsed={!isActive}
+        queuedMessages={queuedMessages}
+        onUnqueue={canQueue ? handleUnqueue : undefined}
       />
       {showSpine && (
         <ThreadSpine
@@ -554,7 +592,9 @@ function ConversationPage() {
         )}
         <InputBox
           onSubmit={handleSubmit}
-          disabled={isActive}
+          disabled={isActive && !canQueue}
+          queueing={canQueue}
+          onQueue={handleQueue}
           onStop={handleStop}
           conversationId={id}
           initialModel={conversationModel}
@@ -564,4 +604,35 @@ function ConversationPage() {
       </footer>
     </div>
   );
+}
+
+/**
+ * Put mid-run messages above the reply that answered them.
+ *
+ * The assistant row is stamped when its run *starts*, so a message delivered
+ * into that run is created after it and sorts underneath — reading as if the
+ * user spoke after an answer that had in fact already read them. Nothing in
+ * creation order can tell that case from an ordinary next-turn prompt, which
+ * is why delivery records `status: 'delivered'` rather than plain `done`.
+ *
+ * The run that delivered a message is always the nearest assistant row before
+ * it, so the move is exact rather than a heuristic.
+ */
+function orderDeliveredAboveReply(list: Message[]): Message[] {
+  if (!list.some((m) => m.status === 'delivered')) return list;
+  const ordered: Message[] = [];
+  for (const msg of list) {
+    if (msg.role === 'user' && msg.status === 'delivered') {
+      let at = ordered.length;
+      // Step over siblings already lifted, so a batch keeps its own order.
+      while (at > 0 && ordered[at - 1].role === 'user' && ordered[at - 1].status === 'delivered') {
+        at--;
+      }
+      if (at > 0 && ordered[at - 1].role === 'assistant') at--;
+      ordered.splice(at, 0, msg);
+    } else {
+      ordered.push(msg);
+    }
+  }
+  return ordered;
 }

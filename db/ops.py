@@ -85,6 +85,57 @@ async def update_message_status(session: AsyncSession, message_id: str, status: 
         await session.commit()
 
 
+async def get_queued_messages(session: AsyncSession, conv_id: str) -> list[Message]:
+    """User messages queued against this conversation and not yet delivered.
+
+    Oldest-first: the queue is a FIFO, and a restart has to rebuild it in the
+    order the user typed. Status `queued` is only ever set by the message
+    queue, so this cannot pick up an ordinary turn.
+    """
+    q = (
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .where(Message.role == "user")
+        .where(Message.status == "queued")
+        .order_by(Message.created_at.asc())
+    )
+    return list((await session.execute(q)).scalars().all())
+
+
+async def mark_messages_delivered(
+    session: AsyncSession, message_ids: list[str], status: str = "delivered",
+) -> None:
+    """Close out queued rows — they are part of the conversation now.
+
+    `delivered` (the default) means the message was handed to a run already in
+    flight. That is not cosmetic: the assistant row is stamped at run *start*,
+    so a mid-run delivery is created after the reply it ends up in, and
+    creation order alone would file it under an answer it actually preceded.
+    The status is what lets the thread put it back (routes/c.$id.tsx).
+
+    A leftover promoted to its own new turn is an ordinary opening message —
+    `_redispatch_queued` passes `done` for that.
+    """
+    if not message_ids:
+        return
+    rows = (
+        await session.execute(select(Message).where(Message.id.in_(message_ids)))
+    ).scalars().all()
+    for msg in rows:
+        msg.status = status
+    await session.commit()
+
+
+async def delete_message(session: AsyncSession, message_id: str) -> bool:
+    """Delete one message row. Used to un-queue a message before delivery."""
+    msg = await session.get(Message, message_id)
+    if msg is None:
+        return False
+    await session.delete(msg)
+    await session.commit()
+    return True
+
+
 async def update_message_usage(
     session: AsyncSession,
     message_id: str,
