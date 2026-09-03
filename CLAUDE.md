@@ -290,13 +290,37 @@ Conventions:
 - `running_tasks` query (`queries/task_run.py`) lists everything currently in `_tasks` for the Tasks page; finished tasks linger ~5s before being popped so the UI can show their terminal state.
 
 ### Chat events
-`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `budget_exceeded`, `budget_update`, `perf_update`, `done`, `stopped`, `error`
+`token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `queued_message`, `queued_withdrawn`, `queued_consumed`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `budget_exceeded`, `budget_update`, `perf_update`, `done`, `stopped`, `error`
 
 > `browser_step` currently has **no producer** — its only emitter was `tools/browser_agent.py`, which was deleted along with the `browser-use` dependency. The consumer plumbing (`core/streaming.py`, `BrowserStepEvent` in the `ChatEvent` union, the frontend hook) is left in place because removing a union member is a GraphQL schema change requiring a Relay regeneration. Wire a new emitter to it, or remove the plumbing as its own change.
 
 Worker lifecycle events (`worker_*`) stream live from `tools/workers.py` and — except `worker_token` — are also persisted as `Step` rows (`source="subagent"`, `subagent="<role>:<idx>"`, result capped at `WORKER_RESULT_PERSIST_CAP`), so the activity sidebar can rebuild per-worker groups after a reload.
 
 Custom events (anything except `token`/`thinking_token`/`step`) are dispatched from tools via `adispatch_custom_event(name, {"type": name, ...})` (the `"type"` key is required — `core/streaming.py:_process_chunk` switches on it). Token/thinking/step events flow naturally from LangGraph stream modes (`STREAM_MODES`).
+
+### Mid-run message queue
+A message typed while a run is in flight is **queued, not started** — two runs on one conversation share a LangGraph `thread_id` and would race the checkpointer (nothing but the web UI's disabled composer prevented that before; bots could always trigger it). `queueMessage(taskId, query)` / `unqueueMessage(taskId, messageId)` (`mutations/conversation.py` → `server/chat_runtime.py`).
+
+**Every surface goes through one rule**, `route_to_live_run` — it is not the web UI's policy, because the surface that could always trigger the race is the bots. `in_flight_chat_task(conv_id)` scans `_tasks`, which covers pending *and* running work (`enqueue_chat_task` registers the state before it commits the job), so an accepted-but-unclaimed turn counts. `startTask` returns the **running** task's id with `queued: true` + `queuedMessageId` — subscribe to it either way, since that run is what will answer. Telegram/Discord send a short "added to what I'm working on" note instead of opening a second stream on the same `TaskState`. The rule **raises** rather than falling back to a concurrent run when the message can't join: attachments (text-only, above) or a run paused on an interrupt.
+
+The one gap is a job that outlived a restart — nothing re-registers its `TaskState` until a worker claims it, so a message sent inside that window starts its own turn. `_adopt_queued_messages` is why that loses nothing.
+
+**Delivery point: `core/agents.py:_drain_queued_input`, called at the top of `model_request_node`.** That node is the only chokepoint every main-graph LLM call passes, which makes it the one safe injection point — the `tools` node sits *between* an AIMessage's `tool_calls` and their results, and a HumanMessage spliced in there is exactly the orphan pairing Anthropic/Bedrock reject. Arriving here, the queued text lands after the current tool batch's results and before the next model call. Drained messages are appended to `raw_messages` *before* compaction and returned in the node's state update, so the same list feeds the LLM call and the checkpointer.
+
+**Two carriers, and both are needed.** `TaskState.pending_input` is the fast path the node reads with no IO; a `messages` row with status `queued` is what renders in the transcript and what survives a restart. Delivery flips the row to `done` and reuses the row id as the `HumanMessage` id — which is also the retrieval-cache key (`_retrieved_volatile_parts` keys off the last HumanMessage's id), warmed by `prefetch_retrieval` at queue time so the drain doesn't put a memory lookup on the critical path of the iteration that consumes it.
+
+`TaskState.drain_input()` is **sync on purpose**: no await between reading the list and clearing it, and every producer is on the same loop, so two writers need no lock.
+
+Text only. A queued row has to be replayable from the DB alone after a restart, and the display row carries attachment *metadata*, not bytes.
+
+**Delivery records `status: "delivered"`, not `done`** — and that is load-bearing, not bookkeeping. The assistant row is stamped at run *start*, so a mid-run message is created **after** the reply it lands in and sorts underneath it; nothing in creation order distinguishes that from an ordinary next-turn prompt. `orderDeliveredAboveReply` (`routes/c.$id.tsx`) lifts each delivered message above the nearest preceding assistant row — always the run that delivered it, so the move is exact. `_redispatch_queued` passes `done` instead, since a promoted leftover opens its own turn.
+
+Lifecycle at the edges:
+- **Clean finish with leftovers** → `_redispatch_queued` marks the first as delivered and `enqueue_chat_task`s it as a new turn; the rest stay `queued`.
+- **Stopped / errored / restarted** → the queue is left as `queued` rows on purpose (don't fire a turn at a conversation the user just interrupted). `_adopt_queued_messages` runs at the top of every `chat_job_handler`, so the next run on that conversation picks them up — one path for restart, stop, and re-dispatch alike.
+- **Paused on an interrupt** → `queueMessage` is refused. The run is waiting for *that* answer and will not reach a drain until it gets one; `resumeTask` is the path.
+
+**UI** (`routes/c.$id.tsx`): while a run is up the composer stays live and switches to queueing (`InputBox`'s `queueing` + `onQueue`) — dashed rule, "Queue a message for this run…", and both Stop and Send. Queued rows are held out of the thread and rendered by `QueuedMessages` **below** the streaming turn, each with a withdraw button; putting them above would read as messages the agent had already been given. `useTaskEvents` treats `queued_message`/`queued_withdrawn`/`queued_consumed` as "the queue moved" and refetches the page rather than keeping a parallel list — the rows are the source of truth, which is what makes a reload and a second tab agree.
 
 ### Automation events
 `token`, `thinking_token`, `step`, `done`, `error`

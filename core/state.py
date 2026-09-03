@@ -117,6 +117,22 @@ class InterruptRequest:
 
 
 @dataclass
+class QueuedMessage:
+    """A user message typed while the run it belongs to was already in flight.
+
+    Lives here for the drain — the agent's model_request node takes these
+    just before its LLM call — and is mirrored to a `messages` row with
+    status ``queued``, which is what renders in the transcript and what
+    survives a restart. TaskState does not: this list is the fast path, the
+    row is the durable one.
+    """
+
+    id: str  # the durable Message row id; also the HumanMessage id on delivery
+    text: str
+    queued_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
 class TaskState:
     events: list[dict] = field(default_factory=list)
     done: bool = False
@@ -124,6 +140,10 @@ class TaskState:
     pending_interrupt_id: str | None = None
     pending_interrupt: InterruptRequest | None = None
     resume_future: asyncio.Future | None = None
+    # Messages the user sent while this run was still going. Drained by the
+    # agent's model_request node, so they land after the current tool batch's
+    # results and before the next LLM call.
+    pending_input: list[QueuedMessage] = field(default_factory=list)
     # Self-describing fields surfaced by the global /tasks endpoint.
     # Default-initialized for backwards compat; each subsystem sets them
     # at registration time.
@@ -153,6 +173,32 @@ class TaskState:
         """Mark the run as no longer paused. Clears id and payload together."""
         self.pending_interrupt = None
         self.pending_interrupt_id = None
+
+    def queue_input(self, msg: QueuedMessage) -> int:
+        """Append `msg` to this run's queue. Returns its 1-based position."""
+        self.pending_input.append(msg)
+        return len(self.pending_input)
+
+    def unqueue_input(self, message_id: str) -> bool:
+        """Drop a still-undelivered queued message. False if already drained."""
+        for i, queued in enumerate(self.pending_input):
+            if queued.id == message_id:
+                del self.pending_input[i]
+                return True
+        return False
+
+    def drain_input(self) -> list[QueuedMessage]:
+        """Take everything queued, atomically.
+
+        Sync on purpose. The swap has no await between reading the list and
+        clearing it, and every producer runs on the same loop, so nothing can
+        be queued into a list that is about to be discarded — which is why
+        this needs no lock despite having two writers.
+        """
+        if not self.pending_input:
+            return []
+        drained, self.pending_input = self.pending_input, []
+        return drained
 
 
 _tasks: dict[str, TaskState] = {}

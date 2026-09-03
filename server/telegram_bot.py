@@ -21,7 +21,7 @@ from core.state import (
 )
 from db import async_session
 from db.ops import add_message, get_default_model, get_or_create_conversation, get_setting
-from server.chat_runtime import enqueue_chat_task
+from server.chat_runtime import enqueue_chat_task, route_to_live_run
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,21 @@ async def _check_and_get_model(user_id: int | None, chat_id: int) -> str | None:
         return await get_default_model(session)
 
 
+# Sent instead of a second stream when a message lands mid-run. A bot chat is
+# one conversation, so the alternative is two runs racing the same LangGraph
+# thread — and the reply already in flight will answer this too.
+_QUEUED_NOTE = "📥 Added to what I'm working on — it'll be picked up in a moment."
+
+
+async def _route_or_none(session, conv_id: str, text: str, attachments) -> str | None:
+    """Queue onto a live run. Returns a note to send, or None to start a turn."""
+    try:
+        routed = await route_to_live_run(session, conv_id, text, attachments)
+    except ValueError as exc:
+        return str(exc)
+    return None if routed is None else _QUEUED_NOTE
+
+
 async def _dispatch(
     bot: Bot,
     chat_id: int,
@@ -52,6 +67,11 @@ async def _dispatch(
     conv_id = f"telegram_{chat_id}"
     async with async_session() as session:
         await get_or_create_conversation(session, conv_id, model, db_user_content[:60], surface="telegram")
+        note = await _route_or_none(session, conv_id, user_content, attachments)
+        if note is not None:
+            loading_task.cancel()
+            await bot.send_message(chat_id=chat_id, text=note)
+            return
         await add_message(session, conv_id, "user", db_user_content)
         task_id = await enqueue_chat_task(
             session, user_content, model, conv_id,
@@ -108,6 +128,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     conv_id = f"telegram_{chat_id}"
     async with async_session() as session:
         await get_or_create_conversation(session, conv_id, model, text[:60], surface="telegram")
+        note = await _route_or_none(session, conv_id, text, None)
+        if note is not None:
+            loading_task.cancel()
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=placeholder_id, text=note,
+            )
+            return
         await add_message(session, conv_id, "user", f"[Voice] {text}")
         task_id = await enqueue_chat_task(
             session, text, model, conv_id, source="telegram",

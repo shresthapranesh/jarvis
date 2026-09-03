@@ -13,6 +13,14 @@ import {field, iconBtn, stream} from './ui';
 interface Props {
   onSubmit: (query: string, model: string, attachments: MediaAttachment[]) => void;
   disabled?: boolean;
+  /**
+   * A run is in flight and sending queues instead of starting a second turn.
+   * The composer stays live — this is the whole point of the mode — so
+   * `disabled` is false here and every rule that keys off it stays off.
+   */
+  queueing?: boolean;
+  /** Called instead of `onSubmit` while `queueing`. Text only. */
+  onQueue?: (query: string) => void;
   onStop?: () => void;
   conversationId?: string;
   initialModel?: string;
@@ -40,6 +48,8 @@ function fileTypeCategory(mimeType: string): 'image' | 'audio' | 'video' | 'docu
 export function InputBox({
   onSubmit,
   disabled = false,
+  queueing = false,
+  onQueue,
   onStop,
   conversationId,
   initialModel,
@@ -101,13 +111,25 @@ export function InputBox({
     }
   }
 
-  function send() {
-    const query = textareaRef.current?.value.trim();
-    if ((!query && attachments.length === 0) || disabled || !model) return;
-    onSubmit(query ?? '', model, attachments);
+  function clearInput() {
     const el = textareaRef.current!;
     el.value = '';
     el.style.height = 'auto';
+  }
+
+  function send() {
+    const query = textareaRef.current?.value.trim();
+    if (queueing) {
+      // Text only: a queued message has to be replayable from its stored row
+      // after a restart, and the row carries attachment metadata, not bytes.
+      if (!query || !onQueue) return;
+      onQueue(query);
+      clearInput();
+      return;
+    }
+    if ((!query && attachments.length === 0) || disabled || !model) return;
+    onSubmit(query ?? '', model, attachments);
+    clearInput();
     setAttachments([]);
   }
 
@@ -143,6 +165,7 @@ export function InputBox({
         {...stylex.props(
           composer.card,
           disabled && composer.cardDisabled,
+          queueing && composer.cardQueueing,
           incognito && composer.cardIncognito,
         )}
       >
@@ -268,7 +291,13 @@ export function InputBox({
           {...stylex.props(composer.textarea)}
           data-input-textarea=""
           rows={1}
-          placeholder={incognito ? 'Ask anything… (incognito — not saved)' : 'Ask anything…'}
+          placeholder={
+            queueing
+              ? 'Queue a message for this run…'
+              : incognito
+                ? 'Ask anything… (incognito — not saved)'
+                : 'Ask anything…'
+          }
           disabled={disabled}
           onInput={handleInput}
           onKeyDown={handleKeyDown}
@@ -278,8 +307,8 @@ export function InputBox({
           <button
             type="button"
             {...stylex.props(iconBtn.base, control.glyph)}
-            title="Attach file"
-            disabled={disabled}
+            title={queueing ? 'Queued messages are text only' : 'Attach file'}
+            disabled={disabled || queueing}
             onClick={() => fileInputRef.current?.click()}
           >
             <svg
@@ -306,7 +335,7 @@ export function InputBox({
                   : 'Start an incognito chat (not saved)'
               }
               aria-pressed={incognito}
-              disabled={disabled}
+              disabled={disabled || queueing}
               onClick={onToggleIncognito}
             >
               <svg
@@ -393,24 +422,52 @@ export function InputBox({
               control size the hint pushes the send button off screen. Live
               speech interim text still shows — that one is not keyboard advice. */}
           <span {...stylex.props(composer.hint, !interimText && composer.hintIdle)}>
-            {interimText || (isMobile ? '' : 'Enter · Shift+Enter for newline')}
+            {interimText ||
+              (queueing
+                ? 'Enter · delivered at the run’s next step'
+                : isMobile
+                  ? ''
+                  : 'Enter · Shift+Enter for newline')}
           </span>
 
-          {onStop && disabled ? (
-            <button {...stylex.props(control.send, control.sendStop)} onClick={onStop} title="Stop">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+          {onStop && (disabled || queueing) ? (
+            <>
+              <button
+                {...stylex.props(control.send, control.sendStop)}
+                onClick={onStop}
+                title="Stop"
               >
-                <rect x="6" y="6" width="12" height="12" rx="2" ry="2" />
-              </svg>
-            </button>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="6" y="6" width="12" height="12" rx="2" ry="2" />
+                </svg>
+              </button>
+              {queueing && (
+                <button {...stylex.props(control.send)} onClick={send} title="Queue message">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              )}
+            </>
           ) : (
             <button {...stylex.props(control.send)} onClick={send} disabled={disabled} title="Send">
               <svg

@@ -191,7 +191,7 @@ type BudgetUpdateEvent {
   snapshot: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | InterruptEvent | InterruptResolvedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type CheckpointPruneResult {
   rootPruned: Int!
@@ -398,6 +398,8 @@ type Mutation {
   deleteMemory(id: String!): Boolean!
   startTask(input: StartTaskInput!): StartTaskPayload!
   stopTask(taskId: String!): Boolean!
+  queueMessage(taskId: String!, query: String!): QueueMessagePayload!
+  unqueueMessage(taskId: String!, messageId: String!): Boolean!
   resumeTask(taskId: String!, answer: String!): Boolean!
   updateConversation(id: ID!, title: String = null, model: String = null, pinned: Boolean = null): Conversation!
   deleteConversation(id: ID!): Boolean!
@@ -592,6 +594,25 @@ type Query {
   voiceStatus: VoiceStatus!
 }
 
+type QueueMessagePayload {
+  messageId: String!
+  position: Int!
+}
+
+type QueuedConsumedEvent {
+  messageIds: [String!]!
+}
+
+type QueuedMessageEvent {
+  messageId: String!
+  text: String!
+  position: Int!
+}
+
+type QueuedWithdrawnEvent {
+  messageId: String!
+}
+
 type ResolveApprovalPayload {
   id: String!
   status: String!
@@ -675,6 +696,8 @@ input StartTaskInput {
 type StartTaskPayload {
   taskId: String!
   conversationId: String!
+  queued: Boolean!
+  queuedMessageId: String
 }
 
 type Step {

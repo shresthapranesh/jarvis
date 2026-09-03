@@ -17,7 +17,7 @@ from db.ops import close_open_approvals, delete_conversation, resolve_model, upd
 
 from ..types.conversation import Conversation
 from ..types.upload import UploadReferenceInput
-from server.chat_runtime import register_chat_task
+from server.chat_runtime import queue_chat_message, register_chat_task, unqueue_chat_message
 
 
 @strawberry.input
@@ -39,6 +39,17 @@ class StartTaskInput:
 class StartTaskPayload:
     task_id: str
     conversation_id: str
+    # True when the conversation was already running and this message was
+    # queued onto that run instead of starting a second one. `task_id` is then
+    # the running task — subscribe to it either way.
+    queued: bool = False
+    queued_message_id: str | None = None
+
+
+@strawberry.type
+class QueueMessagePayload:
+    message_id: str
+    position: int
 
 
 def _infer_attachment_type(mime: str) -> str:
@@ -95,7 +106,7 @@ class ConversationMutation:
         if input.attachment_uploads:
             attachments, staging_paths = _resolve_staged_uploads(input.attachment_uploads)
 
-        task_id, conv_id = await register_chat_task(
+        dispatch = await register_chat_task(
             session, input.query, model, input.conversation_id, attachments,
             project_id=input.project_id, ephemeral=input.ephemeral,
         )
@@ -106,7 +117,12 @@ class ConversationMutation:
         for bytes_path, meta_path in staging_paths:
             bytes_path.unlink(missing_ok=True)
             meta_path.unlink(missing_ok=True)
-        return StartTaskPayload(task_id=task_id, conversation_id=conv_id)
+        return StartTaskPayload(
+            task_id=dispatch.task_id,
+            conversation_id=dispatch.conversation_id,
+            queued=dispatch.queued,
+            queued_message_id=dispatch.queued_message_id,
+        )
 
     @strawberry.mutation
     async def stop_task(self, task_id: str) -> bool:
@@ -122,6 +138,32 @@ class ConversationMutation:
         if state.resume_future and not state.resume_future.done():
             state.resume_future.cancel()
         return True
+
+    @strawberry.mutation
+    async def queue_message(
+        self, info: strawberry.Info, task_id: str, query: str,
+    ) -> QueueMessagePayload:
+        """Queue a message for a run that is already in flight.
+
+        Not a second `startTask`: two runs on one conversation share a
+        LangGraph `thread_id` and would race the checkpointer. The queued text
+        is delivered by the agent's model_request node just before its next LLM
+        call — i.e. after the tool batch currently running, without cancelling
+        it.
+        """
+        message_id, position = await queue_chat_message(
+            info.context["session"], task_id, query,
+        )
+        return QueueMessagePayload(message_id=message_id, position=position)
+
+    @strawberry.mutation
+    async def unqueue_message(
+        self, info: strawberry.Info, task_id: str, message_id: str,
+    ) -> bool:
+        """Withdraw a queued message. False if the run already delivered it."""
+        return await unqueue_chat_message(
+            info.context["session"], task_id, message_id,
+        )
 
     @strawberry.mutation
     async def resume_task(self, info: strawberry.Info, task_id: str, answer: str) -> bool:

@@ -57,10 +57,11 @@ async def test_register_creates_conversation_message_and_job(jarvis, work_dir: P
     from sqlalchemy import select
 
     async with async_session() as s:
-        task_id, conv_id = await register_chat_task(
+        dispatch = await register_chat_task(
             s, query="hello there", model="test:model"
         )
         await s.commit()
+        task_id, conv_id = dispatch.task_id, dispatch.conversation_id
 
     assert task_id in _tasks, "TaskState must be registered before the commit"
 
@@ -126,10 +127,11 @@ async def test_full_chat_turn(jarvis, work_dir: Path):
 
     async with async_session() as s:
         model = await get_default_model(s)
-        task_id, conv_id = await register_chat_task(
+        dispatch = await register_chat_task(
             s, query="say hi in five words", model=model
         )
         await s.commit()
+        task_id, conv_id = dispatch.task_id, dispatch.conversation_id
 
     job = await jarvis.queue.claim(kinds=["chat"], worker_id="test", ttl_seconds=600)
     assert job is not None and job.id == task_id
@@ -181,11 +183,12 @@ async def test_throughput_is_measured_and_persisted(jarvis, work_dir: Path):
         # Long enough that generation spans well past _MIN_DECODE_SECONDS —
         # a one-line reply can legitimately arrive as a single buffered flush,
         # which reports prefill only and would make this assertion flaky.
-        task_id, conv_id = await register_chat_task(
+        dispatch = await register_chat_task(
             s, query="List the numbers 1 through 60 separated by commas. No other text.",
             model=model,
         )
         await s.commit()
+        task_id, conv_id = dispatch.task_id, dispatch.conversation_id
 
     job = await jarvis.queue.claim(kinds=["chat"], worker_id="test", ttl_seconds=600)
     assert job is not None

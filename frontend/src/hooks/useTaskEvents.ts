@@ -186,6 +186,17 @@ const taskEventsSubscription = graphql`
         }
         source
       }
+      ... on QueuedMessageEvent {
+        messageId
+        text
+        position
+      }
+      ... on QueuedWithdrawnEvent {
+        messageId
+      }
+      ... on QueuedConsumedEvent {
+        messageIds
+      }
       ... on InterruptEvent {
         interruptId
         question
@@ -407,6 +418,17 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             setState((s) => ({...s, todos}));
             break;
           }
+          case 'QueuedMessageEvent':
+          case 'QueuedWithdrawnEvent':
+          case 'QueuedConsumedEvent':
+            // The queue's source of truth is the `messages` rows themselves
+            // (status `queued`), which is what survives a reload and what a
+            // second tab sees. So these events only say "the queue moved" —
+            // refetch and let the store answer with what it is now. Delivery
+            // flips the row to `done`, so the same refetch is what promotes a
+            // queued bubble into an ordinary turn.
+            if (conversationId) void loadConversationPage(conversationId);
+            break;
           case 'InterruptEvent':
             setState((s) => ({
               ...s,
