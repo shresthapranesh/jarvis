@@ -28,9 +28,9 @@ from db.ops import (
     get_board_task,
     update_board_task,
     get_board_task_parents,
-    get_default_model,
     get_or_create_conversation,
     promote_ready_board_tasks,
+    resolve_model,
 )
 from core.state import (
     TaskState,
@@ -272,7 +272,7 @@ async def _run_board_task_inner(
     conv_id = board_task_conversation_id(task.id)
     try:
         async with async_session() as session:
-            model = task.model or await get_default_model(session)
+            model = await resolve_model(task.model, session)
             if invocation_context is not None:
                 invocation_context.run_config.model = model
                 invocation_context.session_id = conv_id or task.id
@@ -441,7 +441,7 @@ async def decompose_board_task(task_id: str) -> list[BoardTask]:
     Returns the created subtasks. Raises ValueError on bad state or a
     decomposer output that can't be parsed — the task is left untouched then."""
     from langchain_core.messages import HumanMessage, SystemMessage
-    from core.model_catalog import get_model_spec
+    from core.model_catalog import resolve_model_spec
     from db.models import BoardTaskLink
     from db.ops import create_board_task
 
@@ -453,9 +453,9 @@ async def decompose_board_task(task_id: str) -> list[BoardTask]:
             raise ValueError("only waiting (todo/ready/blocked) tasks can be decomposed")
         if await get_board_task_parents(session, task_id):
             raise ValueError("task already has dependencies — decompose only standalone tasks")
-        model = task.model or await get_default_model(session)
+        model = await resolve_model(task.model, session)
 
-    llm = get_model_spec(model).build_llm()
+    llm = resolve_model_spec(model).build_llm()
     response = await llm.ainvoke([
         SystemMessage(content=_DECOMPOSE_SYSTEM),
         HumanMessage(content=_DECOMPOSE_PROMPT.format(

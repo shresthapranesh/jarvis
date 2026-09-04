@@ -978,24 +978,67 @@ async def get_default_model(session: AsyncSession) -> str:
 
 
 async def resolve_model(explicit: str | None, session: AsyncSession | None = None) -> str:
-    """The model a run should actually use: `explicit` if set, else the default.
+    """The model a run should actually use: `explicit` if it still exists, else
+    the operator's default, else the catalog seed.
 
     Call this instead of writing `explicit or DEFAULT_MODEL`. That constant is
     the compile-time catalog seed, not the operator's choice, so falling back to
     it routes the run to a model the user never selected — the failure is silent
     until that provider errors and names a model nobody picked.
 
+    The catalog is editable at runtime while model ids live on long-lived rows
+    (automations, conversations, board tasks, workflow nodes), so a stored id
+    can name a model that has since been removed. That must not take the run
+    down: the model is how the work is carried out, not the work itself. An id
+    the catalog doesn't know is logged and dropped for the next fallback.
+
     Pass `session` when one is already open; otherwise a short-lived one is
     used, so this is safe to call from sync-ish contexts like workflow nodes.
     """
-    if explicit:
-        return explicit
     if session is not None:
-        return await get_default_model(session)
+        return await _resolve_model_in(explicit, session)
     from db import async_session
 
     async with async_session() as own_session:
-        return await get_default_model(own_session)
+        return await _resolve_model_in(explicit, own_session)
+
+
+async def _resolve_model_in(explicit: str | None, session: AsyncSession) -> str:
+    from core.model_catalog import DEFAULT_MODEL as _CATALOG_DEFAULT
+
+    if explicit and await _model_exists(explicit, session):
+        return explicit
+    if explicit:
+        logger.warning(
+            "model %r is not in the catalog (removed?) — falling back to the default",
+            explicit,
+        )
+
+    default = await get_default_model(session)
+    if default != explicit and await _model_exists(default, session):
+        return default
+    if default != _CATALOG_DEFAULT:
+        logger.warning(
+            "default.model %r is not in the catalog (removed?) — falling back to %s",
+            default, _CATALOG_DEFAULT,
+        )
+    return _CATALOG_DEFAULT
+
+
+async def _model_exists(model_id: str, session: AsyncSession) -> bool:
+    """Whether `model_id` is in the catalog, re-reading `models.custom` if not.
+
+    The custom-model cache is per-process, so a model registered by the CLI (or
+    another worker) after this process started is absent from it. Re-hydrating
+    before declaring an id dead keeps that from silently demoting a perfectly
+    good model to the default; the extra read only happens on the miss.
+    """
+    from core.model_catalog import is_valid_model, load_custom_models
+
+    if is_valid_model(model_id):
+        return True
+    load_custom_models(await get_custom_models(session))
+    return is_valid_model(model_id)
 
 
 # ── Custom (runtime-added) models ─────────────────────────────────────────────

@@ -12,9 +12,9 @@ from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.doc_index import embeddings_available
 from core.memory_store import upsert_memory
-from core.model_catalog import get_model_spec
+from core.model_catalog import resolve_model_spec
 from db import async_session
-from db.ops import count_memories, get_default_model, get_recent_messages, list_memories
+from db.ops import count_memories, get_recent_messages, list_memories, resolve_model
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def _coerce_items(raw: Any) -> list[dict]:
 
 
 async def _llm_json_items(model_id: str, system_prompt: str, human_content: str) -> list[dict]:
-    llm = get_model_spec(model_id).build_llm()
+    llm = resolve_model_spec(model_id).build_llm()
     response = await llm.ainvoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_content),
@@ -215,8 +215,7 @@ async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> s
             last_run_at = datetime.fromisoformat(ts)
 
     async with async_session() as session:
-        if model_id is None:
-            model_id = await get_default_model(session)
+        model_id = await resolve_model(model_id, session)
         messages = await get_recent_messages(session, since=last_run_at, limit=200)
         mem_count = await count_memories(session)
 
@@ -347,8 +346,7 @@ async def _consolidate_blob(store: AsyncSqliteStore, model_id: str | None) -> st
 
     # 2. Fetch recent messages and resolve model
     async with async_session() as session:
-        if model_id is None:
-            model_id = await get_default_model(session)
+        model_id = await resolve_model(model_id, session)
         messages = await get_recent_messages(session, since=last_run_at, limit=200)
 
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -374,7 +372,7 @@ async def _consolidate_blob(store: AsyncSqliteStore, model_id: str | None) -> st
     )
 
     # 5. Call LLM (single-shot, no agent loop)
-    llm = get_model_spec(model_id).build_llm()
+    llm = resolve_model_spec(model_id).build_llm()
     response = await llm.ainvoke([
         SystemMessage(content=_SYSTEM_PROMPT),
         HumanMessage(content=human_content),

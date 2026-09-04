@@ -20,7 +20,7 @@ from core.state import (
     stream_task_events,
 )
 from db import async_session
-from db.ops import add_message, get_default_model, get_or_create_conversation, get_setting
+from db.ops import add_message, get_or_create_conversation, get_setting, resolve_model
 from server.chat_runtime import enqueue_chat_task, route_to_live_run
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ async def _check_and_get_model(user_id: int | None, chat_id: int) -> str | None:
         allowed = {int(x.strip()) for x in raw.split(",") if x.strip()} if raw else set()
         if user_id not in allowed:
             return None
-        return await get_default_model(session)
+        return await resolve_model(None, session)
 
 
 # Sent instead of a second stream when a message lands mid-run. A bot chat is

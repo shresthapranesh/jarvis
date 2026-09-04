@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from core.agents import build_agent, is_valid_model
+from core.agents import build_agent
 from core.log_callback import AgentLogger
 from core.state import TaskState, get_async_checkpointer, get_store
 from db.ops import resolve_model
@@ -33,10 +33,9 @@ async def _drain_events(state: TaskState, websocket: WebSocket, cursor: int) -> 
 @router.websocket("/ws/live")
 async def live_ws(websocket: WebSocket) -> None:
     await websocket.accept()
+    # resolve_model degrades a removed/unknown id to the operator's default
+    # (logged), so what comes back is always callable.
     model = await resolve_model(websocket.query_params.get("model"))
-    if not is_valid_model(model):
-        await websocket.close(code=1008, reason=f"unknown model {model!r}")
-        return
 
     # One thread_id per socket lets the checkpointer chain turns together so
     # the in-graph summarization persists its trim across turns.

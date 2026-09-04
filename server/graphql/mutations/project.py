@@ -95,7 +95,6 @@ class ProjectMutation:
         Skips the quiet-period wait the scheduled sweep observes, so a user who
         just finished a session doesn't have to wait for the next tick.
         """
-        from core.model_catalog import is_valid_model
         from core.project_memory_consolidation import consolidate_project_memory
         from core.state import get_store
         from db.ops import resolve_model
@@ -103,9 +102,8 @@ class ProjectMutation:
         session = info.context["session"]
         if await get_project(session, id.node_id) is None:
             raise ValueError("project not found")
+        # resolve_model degrades a removed/unknown id to the operator's default.
         model_id = await resolve_model(model)
-        if not is_valid_model(model_id):
-            raise ValueError(f"unknown model {model_id!r}; query `models` for the catalog")
         return await consolidate_project_memory(
             get_store(), id.node_id, model_id=model_id, force=True
         )

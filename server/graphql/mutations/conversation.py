@@ -97,9 +97,11 @@ class ConversationMutation:
         input: StartTaskInput,
     ) -> StartTaskPayload:
         session = info.context["session"]
+        # resolve_model guarantees a model the catalog has: an id the request
+        # names that has since been removed degrades to the operator's default
+        # (logged) rather than failing the turn. The strict check belongs on the
+        # *write* boundary — updateConversation below — not here.
         model = await resolve_model(input.model, session)
-        if not is_valid_model(model):
-            raise ValueError(f"unknown model {model!r}; query `models` for the catalog")
 
         attachments: list[AttachmentIn] | None = None
         staging_paths: list[tuple[Path, Path]] = []

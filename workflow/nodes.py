@@ -16,7 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from core.agents import build_agent
-from core.model_catalog import DEFAULT_MODEL, get_model_spec
+from core.model_catalog import resolve_model_spec
 from core.approvals import record_blocking_request
 from core.state import InterruptRequest, TaskState, emit_event as _emit, task_id_of
 from db.ops import resolve_model
@@ -100,11 +100,12 @@ def _interpolate(
 
 
 def _get_model_spec(model_id: str):
-    """Return ModelSpec for model_id, falling back to DEFAULT_MODEL."""
-    try:
-        return get_model_spec(model_id)
-    except ValueError:
-        return get_model_spec(DEFAULT_MODEL)
+    """Return ModelSpec for model_id, falling back to DEFAULT_MODEL.
+
+    A node config pins a model id that the catalog can outlive; see
+    `core.model_catalog.resolve_model_spec`.
+    """
+    return resolve_model_spec(model_id)
 
 
 def _extract_tokens(content: Any) -> str:

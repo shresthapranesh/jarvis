@@ -35,10 +35,10 @@ from core.text_dedupe import dedupe_against
 from db.engine import async_session
 from db.models import Project
 from db.ops import (
-    get_default_model,
     get_project_activity_since,
     get_project_messages_since,
     list_projects,
+    resolve_model,
     update_project,
 )
 
@@ -184,13 +184,12 @@ async def _save_meta(
 
 
 async def _resolve_llm(model_id: str | None):
-    if model_id is None:
-        async with async_session() as session:
-            model_id = await get_default_model(session)
-    from core.model_catalog import get_model_spec
+    async with async_session() as session:
+        model_id = await resolve_model(model_id, session)
+    from core.model_catalog import resolve_model_spec
 
     try:
-        return get_model_spec(model_id).build_llm(), model_id
+        return resolve_model_spec(model_id).build_llm(), model_id
     except Exception as exc:
         logger.warning("project memory: cannot build LLM %s: %s", model_id, exc)
         return None, model_id

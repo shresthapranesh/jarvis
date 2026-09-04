@@ -34,6 +34,23 @@ from ..types.model_sync import DiscoveredModelInput
 _DEFAULT_MODEL_KEY = "default.model"
 
 
+async def _catalog_changed(session) -> ModelCatalog:
+    """Re-read the catalog after a write, dropping the compiled agent graphs.
+
+    A graph is cached under the model id it was built for, and a run naming a
+    model the catalog doesn't have is built from the default instead — so once a
+    model is removed, its id caches a default-model graph. Re-adding it later
+    would keep serving that graph until a restart. Editing the catalog is rare
+    and rebuilding is cheap, so drop the cache on every write rather than
+    reasoning about which edits can strand one.
+    """
+    from core.agents import invalidate_agent_cache
+
+    catalog = await load_model_catalog(session)
+    invalidate_agent_cache()
+    return catalog
+
+
 def _validated(model_id: str, provider: str | None) -> tuple[str, str]:
     """Normalize + validate a custom model id and provider (mirrors `model add`)."""
     model_id = model_id.strip()
@@ -69,7 +86,7 @@ class ModelsMutation:
         if any(m.get("id") == model_id for m in await get_custom_models(session)):
             raise ValueError(f"Model '{model_id}' already exists — edit it instead")
         await add_custom_model(session, model_id, label.strip() or model_id, prov)
-        return await load_model_catalog(session)
+        return await _catalog_changed(session)
 
     @strawberry.mutation
     async def update_model(
@@ -89,7 +106,7 @@ class ModelsMutation:
             raise ValueError(f"No custom model '{model_id}'")
         # add_custom_model upserts by id.
         await add_custom_model(session, model_id, label.strip() or model_id, prov)
-        return await load_model_catalog(session)
+        return await _catalog_changed(session)
 
     @strawberry.mutation
     async def add_discovered_models(
@@ -127,7 +144,7 @@ class ModelsMutation:
 
         for model_id, label, prov, window in validated:
             await add_custom_model(session, model_id, label, prov, window)
-        return await load_model_catalog(session)
+        return await _catalog_changed(session)
 
     @strawberry.mutation
     async def remove_model(self, info: strawberry.Info, id: str) -> ModelCatalog:
@@ -142,7 +159,7 @@ class ModelsMutation:
         # showing the dead id.
         if await get_default_model(session) == id:
             await set_setting(session, _DEFAULT_MODEL_KEY, DEFAULT_MODEL)
-        return await load_model_catalog(session)
+        return await _catalog_changed(session)
 
     @strawberry.mutation
     async def set_default_model(self, info: strawberry.Info, id: str) -> ModelCatalog:
@@ -154,4 +171,4 @@ class ModelsMutation:
         if not is_valid_model(id):
             raise ValueError(f"Unknown model '{id}'")
         await set_setting(session, _DEFAULT_MODEL_KEY, id)
-        return await load_model_catalog(session)
+        return await _catalog_changed(session)

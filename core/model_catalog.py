@@ -1,7 +1,10 @@
 """Model catalog — source of truth for available LLM models."""
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -205,13 +208,41 @@ def get_model_spec(model_id: str) -> ModelSpec:
     return spec
 
 
+def resolve_model_spec(model_id: str | None) -> ModelSpec:
+    """The catalog entry for `model_id`, degrading to `DEFAULT_MODEL` instead of raising.
+
+    A model id is stored on long-lived rows (an automation, a conversation, a
+    board task, a workflow node) but the catalog is editable at runtime, so any
+    of those rows can outlive the model it names — removing a custom model, or
+    an install whose `models.custom` row was never migrated, leaves ids pointing
+    at nothing. Read paths must not die for that: the run is what the operator
+    asked for, the model was only how it was to be carried out.
+
+    Sync, so this can only reach the compile-time seed. Anything with a DB
+    session should call `db.ops.resolve_model` first — it falls back to the
+    *operator's* `default.model`, and only what slips past it lands here.
+    """
+    try:
+        return get_model_spec(model_id or "")
+    except ValueError:
+        logger.warning(
+            "model %r is not in the catalog (removed?) — falling back to %s",
+            model_id, DEFAULT_MODEL,
+        )
+        return get_model_spec(DEFAULT_MODEL)
+
+
 def is_builtin_model(model_id: str) -> bool:
     """Whether `model_id` is compiled in — built-ins can't be edited or removed."""
     return any(m.id == model_id for m in BUILTIN_MODELS)
 
 
 def is_valid_model(model: str) -> bool:
-    """Whether `model` is in the catalog (built-in or custom). Checked at write
-    boundaries only — read paths stay permissive so old DB rows with stale model
-    strings still run through `DEFAULT_MODEL` fallback in `build_agent`."""
+    """Whether `model` is in the catalog (built-in or custom).
+
+    Checked at *write* boundaries — creating an automation, a board task, or
+    pinning a conversation's model — where a bad id should be refused while the
+    operator is still looking at it. Read paths stay permissive and degrade
+    instead: `db.ops.resolve_model` for anything with a session,
+    `resolve_model_spec` for the rest."""
     return any(m.id == model for m in available_models())

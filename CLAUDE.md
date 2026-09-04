@@ -228,6 +228,37 @@ The catalog merges two layers in `core/model_catalog.py`: `BUILTIN_MODELS` (comp
   - **Caching is decided per *upstream*, not per provider.** The `cache_control: ephemeral` blocks this app emits are Anthropic's spelling; OpenRouter forwards them to Anthropic upstreams and ignores them elsewhere, where caching is automatic (OpenAI, DeepSeek) or absent. `honors_cache_control(spec, enabled_providers)` in `core/model_catalog.py` is the single place that resolves it — `RunnerConfig.cache_enabled_providers` stays the operator switch, and this adds the sub-provider rule the switch can't express. Both `JarvisRunner.should_use_cache` and `_build_agent`'s no-runner fallback go through it, so they can't drift apart. Extended (`1h`) TTL stays anthropic-only.
 - All consumers go through `available_models()` / `get_model_spec()` / `is_valid_model()` (built-in ∪ custom, deduped). The frontend reads the catalog via the GraphQL `models` query (`queries/models.py`, async — re-hydrates from DB so runtime additions show without a restart) — dropdowns populate automatically. `ModelSpec` normalizes on its `id` field in the Relay store, so the settings page's `network-only` refetch also refreshes the chat model dropdown (`useModels`, `store-or-network`) without a reload.
 
+### A stored model id can outlive the model
+The catalog is editable at runtime (Settings → Models, `main.py model remove`) while
+model ids sit on long-lived rows — `Automation.model`, `Conversation.model`,
+`BoardTask.model`, a workflow node's `config.model`, the `default.model` setting, and a
+queued `Job`'s payload. Removing a custom model therefore leaves rows naming nothing, and
+`get_model_spec` raises `Unknown model '…'`. **Read paths degrade with a log instead** —
+the run is what the operator asked for; the model was only how it was to be carried out.
+
+Two layers, and a run should pass through both:
+- **`db.ops.resolve_model(explicit, session)`** — the async chokepoint. Chain:
+  `explicit` if the catalog has it → `default.model` if the catalog has it → the
+  compile-time seed, warning at each drop. It re-reads `models.custom` **before**
+  rejecting an id (`_model_exists`), because the custom-model cache is per-process and a
+  model registered by the CLI while the server is up is otherwise indistinguishable from
+  a removed one. Every runtime that picks a model calls it — chat, automation, board,
+  workflow nodes, the bots, both consolidation jobs, `/ws/live`, planning prefill.
+- **`core.model_catalog.resolve_model_spec(id)`** — the sync last line of defence, at
+  `_build_agent` and every bare `build_llm()` site. Only reaches `DEFAULT_MODEL` (no
+  session), and catches what no `resolve_model` covered: a `Job` payload whose model id
+  went stale between enqueue and claim.
+
+`is_valid_model` stays strict at **write** boundaries (`createAutomation`,
+`createBoardTask`, `updateConversation`) — a bad id is refused while the operator is
+still looking at it. Post-`resolve_model` validity checks are dead code by construction;
+don't add them back.
+
+Catalog writes (`addModel`/`updateModel`/`removeModel`/`addDiscoveredModels`/
+`setDefaultModel`) call `invalidate_agent_cache()` via `_catalog_changed`: a compiled
+graph is keyed by the model id it was built for, so a run naming a removed model caches a
+*default-model* graph under the dead id, which would survive re-adding it.
+
 ### Keeping the catalog honest (`model sync`)
 `core/model_discovery.py` enumerates a provider's live models and diffs them against the catalog. It is a **lint, not a source of truth** — the catalog stays `BUILTIN_MODELS` + the `models.custom` layer, because `BUILTIN_MODELS[0]` is the compile-time `DEFAULT_MODEL` and has to resolve with no network, no key, and no provider outage.
 

@@ -71,12 +71,23 @@ def run(
     """Run the research agent on a query and display the report."""
     from core.agents import build_agent
     from core.config import get_config
+    from core.model_catalog import is_valid_model
     from db.ops import get_default_model
     # Always hits the DB (also hydrates the custom-model cache via _run_db) so a
     # custom --model resolves through get_model_spec before build_agent.
     default_model = _run_db(lambda s: get_default_model(s))
     if model == DEFAULT_MODEL:
         model = default_model
+    # build_agent degrades to the seed on an unknown id, but it logs to the log
+    # file — on a CLI a typo'd --model would otherwise answer from a model the
+    # operator never asked for, with nothing on screen to say so.
+    if not is_valid_model(model):
+        fallback = default_model if is_valid_model(default_model) else DEFAULT_MODEL
+        typer.secho(
+            f"Unknown model '{model}' — running on {fallback} instead.",
+            fg=typer.colors.YELLOW, err=True,
+        )
+        model = fallback
     _setup_logging(debug, get_config().work_dir)
 
     full_query = query

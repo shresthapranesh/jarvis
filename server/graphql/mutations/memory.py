@@ -13,7 +13,6 @@ from core.memory_consolidation import (
     consolidate_memory,
 )
 from core.memory_store import embed_for_storage, upsert_memory
-from core.model_catalog import is_valid_model
 from core.state import get_store
 from db.models import Memory as MemoryModel
 from db.ops import create_memory, delete_memory, resolve_model, update_memory_item
@@ -57,9 +56,8 @@ class MemoryMutation:
 
     @strawberry.mutation
     async def consolidate_memory(self, model: str | None = None) -> str:
+        # resolve_model degrades a removed/unknown id to the operator's default.
         model_id = await resolve_model(model)
-        if not is_valid_model(model_id):
-            raise ValueError(f"unknown model {model_id!r}; query `models` for the catalog")
         return await consolidate_memory(get_store(), model_id=model_id)
 
     @strawberry.mutation

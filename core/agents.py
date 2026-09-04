@@ -37,6 +37,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
     get_model_spec,
     honors_cache_control,
     is_valid_model,
+    resolve_model_spec,
 )
 
 # Fallback for the no-runner path (CLI, tests). Mirrors
@@ -638,7 +639,11 @@ def _allowed(tools: list) -> list:
 def _build_agent(
     model: str, checkpointer, store: AsyncSqliteStore | None, board: bool = False
 ) -> CompiledStateGraph:
-    spec = get_model_spec(model)
+    # Degrade rather than raise on a stale id: this is the chokepoint every run
+    # kind reaches, and a conversation/automation/board row can outlive the
+    # model it names. Callers with a session resolve through db.ops.resolve_model
+    # first, which lands on the operator's default; this catches the rest.
+    spec = resolve_model_spec(model)
     llm = spec.build_llm()
     # Use runner's cache config if available (Jarvis runner seam), else local fallback.
     # Runner is set by entrypoint lifespan; CLI/tests have no runner.

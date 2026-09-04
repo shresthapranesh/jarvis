@@ -138,15 +138,11 @@ async def prefill_todos_with_llm(query: str, model_id: str | None = None) -> lis
     if os.environ.get(PLANNING_PREFILL_ENV, "").lower() not in ("1", "true", "yes"):
         return None
     try:
-        from core.model_catalog import DEFAULT_MODEL, get_model_spec
+        from core.model_catalog import resolve_model_spec
         from db.ops import resolve_model
 
         mid = await resolve_model(model_id)
-        try:
-            spec = get_model_spec(mid)
-        except ValueError:
-            spec = get_model_spec(DEFAULT_MODEL)
-        llm = spec.build_llm()
+        llm = resolve_model_spec(mid).build_llm()
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
