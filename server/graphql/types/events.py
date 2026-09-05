@@ -136,6 +136,10 @@ class ApprovalRequestEvent:
     # chat prompt must answer it with `resolveApproval(id)` rather than
     # `resumeTask`. None for the older interrupt-backed approvals.
     approval_id: str | None = None
+    # True when approving is what *performs* the operation: nothing is blocked,
+    # the run went on without it. The chat UI must not render this as a prompt
+    # the run is waiting on — see `core/approvals.gate_action`.
+    deferred: bool = False
 
 
 @strawberry.type
@@ -351,6 +355,7 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
             reason=data.get("reason", ""),
             args=_as_str(data.get("args", {})),
             approval_id=data.get("approval_id") or None,
+            deferred=bool(data.get("deferred", False)),
         )
     if event_name == "approval_resolved":
         return ApprovalResolvedEvent(

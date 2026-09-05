@@ -9,6 +9,7 @@ import {loadConversationPage} from '../relay/ConversationPageQuery';
 import {refreshDocumentList} from '../relay/DocumentListQuery';
 import {environment} from '../relay/environment';
 import {refreshTodoList} from '../relay/TodoListQuery';
+import {refreshPendingApprovals} from './usePendingApprovals';
 import {refreshRunningTasks} from './useRunningTasks';
 
 export interface BrowserStep {
@@ -209,6 +210,7 @@ const taskEventsSubscription = graphql`
         reason
         args
         approvalId
+        deferred
       }
       ... on ApprovalResolvedEvent {
         tool
@@ -441,11 +443,22 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             );
             break;
           case 'ApprovalRequestEvent': {
-            // Two shapes arrive here. An interrupt-backed approval is resumed
+            // Three shapes arrive here. An interrupt-backed approval is resumed
             // through the run (the InterruptEvent is the source of truth for
             // its id), while a per-tool gate carries `approvalId` and is
             // answered by resolving that row — the run is parked inside the
             // tool call and has no interrupt to resume.
+            //
+            // A `deferred` request blocks nothing: the operation was recorded
+            // instead of performed and the run carried on. Rendering it as a
+            // prompt would claim the run is waiting, and it would vanish with
+            // the run — so it is left to `DeferredApprovals`, which reads the
+            // durable rows. The event only says "look again now" instead of
+            // waiting out the inbox poll.
+            if (evt.deferred) {
+              void refreshPendingApprovals();
+              break;
+            }
             const q = `${evt.tool}: ${evt.reason}\n${evt.args ? `Args: ${evt.args}` : ''}`;
             setState((s) => ({
               ...s,

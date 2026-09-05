@@ -32,7 +32,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.tool_gate import GATE_SOURCE
+from core.tool_gate import GATE_SOURCE, announce_request
 from db import models as db_models
 from db import ops
 
@@ -218,6 +218,10 @@ async def gate_action(
         action_payload=json.dumps(payload, default=repr),
         parent_id=parent_id,
     )
+    # Nothing is blocked, but the conversation that asked for this deserves to
+    # be told it did not happen — otherwise the only trace is the agent
+    # mentioning it in prose, and the request lives solely in /approvals.
+    announce_request(row)
     raise ApprovalRequired(row)
 
 
@@ -327,7 +331,7 @@ async def _resolve_tool_gate(
     what lets the same gate work for a chat, a board task and a call made from
     the kernel process, which have nothing else in common.
     """
-    from core.tool_gate import notify_resolved
+    from core.tool_gate import announce_resolved, notify_resolved
 
     status = "approved" if approved else "denied"
     resolved = await ops.resolve_approval_row(
@@ -341,6 +345,9 @@ async def _resolve_tool_gate(
     # After the commit: an in-process waiter that wakes early would otherwise
     # re-read the row and still see `pending`.
     notify_resolved(row.id, approved=approved, answer=answer)
+    # The answer usually arrives from the inbox, so the conversation that is
+    # showing the prompt has to be told to stop showing it.
+    announce_resolved(resolved, approved=approved, answer=answer)
     return resolved
 
 

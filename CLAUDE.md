@@ -584,6 +584,20 @@ appear with no run in flight, so there is no push chokepoint to stop polling
 on; forced refreshes wait out an in-flight poll rather than adopting its
 pre-write snapshot) and a nav badge in `__root.tsx`.
 
+**Both shapes also surface in the conversation they came from**, but through
+different plumbing, because they mean different things:
+- **Blocking** → `InterruptPrompt` in the chat footer, driven by the run's
+  `approval_request` event. It takes free text (the question may be one) and it
+  is gated on a live run, which is correct: something is suspended right now.
+- **Deferred** → `components/DeferredApprovals.tsx`, driven by
+  `usePendingApprovals` filtered to `deferred && parent_id === conversationId`.
+  **Deliberately not event-sourced**: the operation was recorded instead of
+  performed and the run finished normally, so by the time anyone looks the
+  `TaskState` is usually gone — a card built from events would vanish with it,
+  and with a reload. `ApprovalRequestEvent.deferred` only nudges the poll so it
+  appears at once instead of a tick later; it must **not** set
+  `pendingInterrupt`, which would claim the run is waiting on an answer.
+
 > **Still unreachable:** `core/approval.py:request_tool_approval` (the blocking,
 > in-process helper) is called only by `delete_workflow`/`delete_automation` in
 > `tools/workflows.py`/`tools/automations.py`, both `[unbound]`. The gating that
@@ -705,6 +719,18 @@ interrupts immediately — that path is `CancelledError`, not the timeout.
 
 The cost is real and deliberate: a waiting run holds its worker slot (and, for
 an SDK call, its kernel) until answered or timed out. A timeout denies.
+
+**The request announces itself from the row, not from the caller**
+(`create_gate_request` → `announce_request`, and `_resolve_tool_gate` /
+`_expire` → `announce_resolved`, both writing straight onto the run's
+`TaskState` via `emit_event`). Three of the four gate creators are *outside* the
+agent graph — `requestToolApproval` (the SDK, from a kernel process) and
+`callMcpTool` run in the server's request path, and the answer usually arrives
+from the inbox — so announcing from the caller left those blocking a chat with
+nothing on screen but a spinner and the request visible only in `/approvals`.
+`create_gate_request` also stamps `task_id` by looking up the live run for the
+conversation (`live_task_id`), so the inbox can say which run is blocked even
+when the caller could not name it.
 
 **Frontend:** `components/settings/ToolsTab.tsx` (a fourth Settings tab, grouped
 by family then server/category, with search). `AgentTool` carries a plain `id`

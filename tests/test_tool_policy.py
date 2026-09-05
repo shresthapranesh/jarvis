@@ -301,3 +301,63 @@ async def test_ungated_calls_pass_straight_through(database):
 
     out = await graph.compile().ainvoke({"messages": []})
     assert out["messages"][-1].content == "got x"
+
+
+# ── Reaching the conversation, not just the inbox ────────────────────────────
+
+async def test_request_reaches_the_live_run_from_outside_the_graph(database):
+    """A gate created by a resolver (the SDK's `requestToolApproval`, or
+    `callMcpTool`) must still show up in the conversation it is blocking.
+
+    Announcing from the caller only covered the graph-bound path, so an SDK or
+    MCP call blocked the run with nothing on screen and the request visible
+    only in `/approvals`.
+    """
+    import json as _json
+
+    from core.state import TaskState, _tasks
+    from core.tool_gate import create_gate_request
+    from db import async_session
+
+    state = TaskState(kind="chat", parent_id="conv-live")
+    _tasks["task-live"] = state
+    try:
+        async with async_session() as session:
+            row = await create_gate_request(
+                session, tool_key="sdk:delete_skill", tool_name="jarvis.delete_skill",
+                args={"skill_id": "s-1"}, conversation_id="conv-live",
+            )
+        # …and the row is stamped with the run, so the inbox can name it.
+        assert row.task_id == "task-live"
+
+        assert [e["event"] for e in state.events] == ["approval_request"]
+        payload = _json.loads(state.events[0]["data"])
+        assert payload["approval_id"] == row.id
+        assert payload["tool"] == "jarvis.delete_skill"
+        assert payload["args"] == {"skill_id": "s-1"}
+
+        # Answering from the inbox has to clear the inline prompt too.
+        from core.approvals import resolve
+
+        async with async_session() as session:
+            await resolve(session, row.id, "approve")
+        assert [e["event"] for e in state.events] == [
+            "approval_request", "approval_resolved",
+        ]
+        assert _json.loads(state.events[1]["data"])["approved"] is True
+    finally:
+        _tasks.pop("task-live", None)
+
+
+async def test_no_live_run_is_not_an_error(database):
+    """Board tasks, automations and CLI runs gate the same way; a request with
+    no stream to announce on is normal, not a failure."""
+    from core.tool_gate import create_gate_request
+    from db import async_session
+
+    async with async_session() as session:
+        row = await create_gate_request(
+            session, tool_key="sdk:delete_skill", tool_name="jarvis.delete_skill",
+            args={}, conversation_id="conv-nobody-home",
+        )
+    assert row.task_id is None

@@ -11,6 +11,7 @@ import type {DocumentListQuery} from '../__generated__/DocumentListQuery.graphql
 import type {TodoListQuery} from '../__generated__/TodoListQuery.graphql';
 import {ActivitySidebar} from '../components/ActivitySidebar';
 import {ArtifactPanel} from '../components/ArtifactPanel';
+import {DeferredApprovals} from '../components/DeferredApprovals';
 import {FolderIcon} from '../components/icons';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
@@ -583,6 +584,7 @@ function ConversationPage() {
           showSpine && !isActive && conv.footerWithSpineCollapsed,
         )}
       >
+        <DeferredApprovals conversationId={id} />
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt
             taskId={runningMsg.id}

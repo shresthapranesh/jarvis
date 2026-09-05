@@ -34,13 +34,18 @@ QUERY = """{
 }"""
 
 
-async def _run(query: str = QUERY, *, caller: str = "human", variables=None):
+async def _run(
+    query: str = QUERY, *, caller: str = "human", variables=None,
+    conversation_id: str | None = None,
+):
     from db import async_session
     from server.graphql.schema import schema
 
     async with async_session() as s:
         result = await schema.execute(
-            query, context_value=_context(s, caller), variable_values=variables,
+            query,
+            context_value=_context(s, caller, conversation_id),
+            variable_values=variables,
         )
     return result
 
@@ -486,3 +491,51 @@ async def test_reconcile_is_idempotent(database):
     await reconcile_startup()
 
     assert len(await _pending()) == 1
+
+
+async def test_deferred_request_is_announced_in_the_conversation(database):
+    """A recorded action must reach the chat that asked for it, not only /approvals.
+
+    Nothing is blocked, so there is no prompt to render — the event is a nudge
+    telling the UI to re-read the durable rows, and `deferred` on it is what
+    stops the chat claiming the run is waiting on an answer.
+    """
+    from core.state import TaskState, _tasks
+
+    await _enable_gating()
+    _, gid = await _make_workflow()
+
+    state = TaskState(kind="chat", parent_id="conv-deferred")
+    _tasks["task-deferred"] = state
+    try:
+        result = await _run(
+            DELETE_WORKFLOW, caller="agent", variables={"id": gid},
+            conversation_id="conv-deferred",
+        )
+        assert result.errors  # recorded, not performed
+
+        assert [e["event"] for e in state.events] == ["approval_request"]
+        payload = json.loads(state.events[0]["data"])
+        assert payload["deferred"] is True
+        assert payload["tool"] == "delete_workflow"
+        assert payload["approval_id"] == (await _pending())[0]["id"]
+    finally:
+        _tasks.pop("task-deferred", None)
+
+
+async def test_ungated_action_announces_nothing(database):
+    """Gating off means the delete simply happens; a notice would be a lie."""
+    from core.state import TaskState, _tasks
+
+    _, gid = await _make_workflow()
+    state = TaskState(kind="chat", parent_id="conv-quiet")
+    _tasks["task-quiet"] = state
+    try:
+        result = await _run(
+            DELETE_WORKFLOW, caller="agent", variables={"id": gid},
+            conversation_id="conv-quiet",
+        )
+        assert not result.errors
+        assert state.events == []
+    finally:
+        _tasks.pop("task-quiet", None)

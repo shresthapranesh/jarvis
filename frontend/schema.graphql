@@ -17,6 +17,7 @@ type ApprovalRequestEvent {
   reason: String!
   args: String!
   approvalId: String
+  deferred: Boolean!
 }
 
 type ApprovalResolvedEvent {

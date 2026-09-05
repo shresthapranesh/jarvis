@@ -94,6 +94,101 @@ def safe_args(args: dict[str, Any] | None) -> dict[str, str]:
     return out
 
 
+# ── Telling the live run ─────────────────────────────────────────────────────
+
+def live_task_id(conversation_id: str | None) -> str | None:
+    """The in-flight run for this conversation, or None.
+
+    A reverse lookup by `parent_id` rather than an id field, for the reason
+    `core/state.task_id_of` gives. Used both to stamp the row (so the inbox can
+    say which run is blocked) and to find the stream to announce on.
+    """
+    if not conversation_id:
+        return None
+    try:
+        from core.state import _tasks
+
+        for task_id, state in _tasks.items():
+            if not state.done and state.parent_id == conversation_id:
+                return task_id
+    except Exception:
+        logger.debug("live task lookup failed", exc_info=True)
+    return None
+
+
+def _emit_to_run(task_id: str | None, event: str, **fields: Any) -> None:
+    """Append an event to a live run's stream. No-op when there is no run.
+
+    Written straight onto `TaskState` rather than through `ToolContext.emit`
+    because three of the four callers are *not* inside the agent graph: the
+    `requestToolApproval` resolver and `callMcpTool` run in the server's request
+    path, and resolution runs from whatever answered. A gate that only announced
+    itself from the graph is exactly how the SDK and MCP paths ended up blocking
+    a run with nothing on screen but a spinner.
+    """
+    if not task_id:
+        return
+    try:
+        from core.state import _tasks, emit_event
+
+        state = _tasks.get(task_id)
+        if state is None or state.done:
+            return
+        emit_event(state, event, **fields)
+    except Exception:
+        logger.debug("approval emit failed (%s)", event, exc_info=True)
+
+
+def announce_request(row) -> None:
+    """Put a pending request in front of the user in the conversation it came from.
+
+    The approvals inbox is the durable list; this is the copy that appears where
+    the person is actually looking. `approval_id` on the event is what tells the
+    chat UI to answer with `resolveApproval` rather than `resumeTask` — there is
+    no interrupt to resume, the run is parked inside the call.
+
+    `deferred` is derived from the row (`action is not None`) rather than passed
+    in, so it cannot disagree with what the inbox says about the same row. It
+    changes what the event *means*: a blocking request is a prompt the run is
+    waiting on, a deferred one is a notice that something was recorded and did
+    not happen — the run carried on without it.
+    """
+    try:
+        args = json.loads(row.args_json or "{}")
+    except Exception:
+        args = {}
+    deferred = row.action is not None
+    _emit_to_run(
+        row.task_id or live_task_id(row.parent_id),
+        "approval_request",
+        tool=row.tool or "",
+        reason=(
+            f"{row.label or 'This action'} was recorded, not performed \u2014 it runs "
+            "only once you approve it."
+            if deferred
+            else "This tool requires human approval (Settings \u2192 Tools)."
+        ),
+        args=args if isinstance(args, dict) else {},
+        approval_id=row.id,
+        deferred=deferred,
+    )
+
+
+def announce_resolved(row, *, approved: bool, answer: str = "") -> None:
+    """Clear the inline prompt once the row is answered — from anywhere.
+
+    The inbox, the chat prompt and a timeout all land here, so the conversation
+    stops asking regardless of where the answer came from.
+    """
+    _emit_to_run(
+        row.task_id or live_task_id(row.parent_id),
+        "approval_resolved",
+        tool=row.tool or "",
+        approved=approved,
+        answer=answer,
+    )
+
+
 # ── Creating the request ─────────────────────────────────────────────────────
 
 async def create_gate_request(
@@ -115,7 +210,10 @@ async def create_gate_request(
     from db import ops
 
     display = safe_args(args)
-    return await ops.create_approval(
+    # Stamp the run even when the caller could not name it: the SDK asks over
+    # HTTP from a kernel process and knows only its conversation.
+    task_id = task_id or live_task_id(conversation_id)
+    row = await ops.create_approval(
         session,
         source=GATE_SOURCE,
         kind="approval",
@@ -131,6 +229,8 @@ async def create_gate_request(
         action=None,
         action_payload=json.dumps({"tool_key": tool_key}),
     )
+    announce_request(row)
+    return row
 
 
 # ── Waiting ──────────────────────────────────────────────────────────────────
@@ -205,12 +305,14 @@ async def _expire(approval_id: str) -> None:
 
     try:
         async with async_session() as session:
-            await ops.resolve_approval_row(
+            row = await ops.resolve_approval_row(
                 session,
                 approval_id,
                 status="expired",
                 result="No answer before the approval timed out — the call was not run.",
             )
+        if row is not None:
+            announce_resolved(row, approved=False, answer="timed out")
     except Exception:
         logger.debug("could not expire approval %s", approval_id, exc_info=True)
 
@@ -224,13 +326,14 @@ async def await_tool_approval(
     args: dict[str, Any] | None = None,
     conversation_id: str | None = None,
     task_id: str | None = None,
-    emit: Any = None,
 ) -> tuple[bool, str]:
     """Record the request, tell the UI, block until answered.
 
-    `emit(event_name, **fields)` is optional — when the caller has a live stream
-    (a chat run), the request shows up inline in the conversation as well as in
-    the approvals inbox.
+    Announcing is `create_gate_request`'s job, not this function's, so a request
+    made anywhere else — the SDK over GraphQL, a resolver — reaches the
+    conversation on the same terms. Resolution announces itself for the same
+    reason (`core/approvals._resolve_tool_gate`): the answer usually arrives
+    from the inbox, where this coroutine is not.
     """
     from db.engine import async_session
 
@@ -245,26 +348,9 @@ async def await_tool_approval(
         )
         approval_id, question = row.id, row.question
 
-    if emit is not None:
-        try:
-            emit(
-                "approval_request",
-                tool=tool_name,
-                reason="This tool requires human approval (Settings → Tools).",
-                args=safe_args(args),
-                approval_id=approval_id,
-            )
-        except Exception:
-            logger.debug("approval_request emit failed", exc_info=True)
-
     logger.info("tool gate: waiting on approval %s for %s", approval_id, tool_name)
     approved, answer = await wait_for_gate(approval_id)
 
-    if emit is not None:
-        try:
-            emit("approval_resolved", tool=tool_name, approved=approved, answer=answer)
-        except Exception:
-            logger.debug("approval_resolved emit failed", exc_info=True)
     logger.info(
         "tool gate: %s %s (%s)", tool_name, "approved" if approved else "denied", approval_id
     )

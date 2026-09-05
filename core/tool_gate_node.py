@@ -29,7 +29,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
 
-from core.tool_gate import await_tool_approval, denial_message
+from core.tool_gate import await_tool_approval, denial_message, live_task_id
 from core.tool_policy import bound_key, mcp_key, needs_approval
 
 logger = logging.getLogger(__name__)
@@ -61,25 +61,6 @@ def tool_key_for(name: str, owners: dict[str, str] | None = None) -> str:
     return mcp_key(server, name) if server else bound_key(name)
 
 
-def _find_task_id(conversation_id: str | None) -> str | None:
-    """The live run for this conversation, so the row can be closed with it.
-
-    `TaskState` has no id field (the registry key is the id), so this is a
-    reverse lookup by `parent_id` — the same shape `core/state.task_id_of` uses.
-    """
-    if not conversation_id:
-        return None
-    try:
-        from core.state import _tasks
-
-        for task_id, state in _tasks.items():
-            if not state.done and state.parent_id == conversation_id:
-                return task_id
-    except Exception:
-        pass
-    return None
-
-
 def make_gated_tool_node(tools: list[Any]):
     """A drop-in replacement for `ToolNode(tools)` that honors tool policy."""
     inner = ToolNode(tools)
@@ -107,7 +88,7 @@ def make_gated_tool_node(tools: list[Any]):
         from tools.context import current_ctx
 
         ctx = current_ctx()
-        task_id = _find_task_id(ctx.conversation_id)
+        task_id = live_task_id(ctx.conversation_id)
 
         denied: list[ToolMessage] = []
         approved_ids: set[Any] = {call.get("id") for call in calls}
@@ -119,7 +100,6 @@ def make_gated_tool_node(tools: list[Any]):
                 args=call.get("args") or {},
                 conversation_id=ctx.conversation_id,
                 task_id=task_id,
-                emit=ctx.emit,
             )
             if not ok:
                 approved_ids.discard(call.get("id"))
