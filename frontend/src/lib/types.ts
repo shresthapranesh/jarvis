@@ -39,6 +39,9 @@ export interface Message {
   llm_ms: number | null;
   prefill_tps: number | null;
   eval_tps: number | null;
+  // Wall clock for the whole turn — what the user waited through, including
+  // queue wait, tools and any approval pause. Always larger than `llm_ms`.
+  duration_ms: number | null;
   created_at: string;
   steps: Step[];
 }
@@ -67,6 +70,7 @@ export interface RelayMessageNode {
   llmMs?: number | null | undefined;
   prefillTps?: number | null | undefined;
   evalTps?: number | null | undefined;
+  durationMs?: number | null | undefined;
   createdAt: string;
   steps: ReadonlyArray<{
     id: string;
@@ -508,6 +512,7 @@ export function mapMessage(m: RelayMessageNode): Message {
     llm_ms: m.llmMs ?? null,
     prefill_tps: m.prefillTps ?? null,
     eval_tps: m.evalTps ?? null,
+    duration_ms: m.durationMs ?? null,
     created_at: m.createdAt,
     steps: m.steps.map((s) => ({
       id: s.id,

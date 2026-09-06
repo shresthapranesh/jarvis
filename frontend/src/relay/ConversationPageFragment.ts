@@ -30,6 +30,7 @@ export const conversationPageFragment = graphql`
           llmMs
           prefillTps
           evalTps
+          durationMs
           createdAt
           steps {
             id

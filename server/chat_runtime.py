@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -104,11 +105,17 @@ async def _run_agent_task(
     ephemeral: bool = False
 
     async def finalize(content: str, final_status: str) -> None:
+        # The turn's wall clock, which is what the user actually waited through
+        # — `perf.llm_ms` only sums the round trips and so is always smaller.
+        # Measured from `state.started_at`, stamped when the run was registered
+        # (before the job was even committed), so queue wait counts too.
+        elapsed = (datetime.now(timezone.utc) - state.started_at).total_seconds()
         await _finalize_message(
             task_id, content, final_status,
             input_tokens=usage.input_tokens if usage.has_usage else None,
             output_tokens=usage.output_tokens if usage.has_usage else None,
             perf=perf.message_perf(),
+            duration_ms=round(elapsed * 1000.0, 1),
         )
 
     try:

@@ -142,12 +142,14 @@ async def update_message_usage(
     input_tokens: int | None,
     output_tokens: int | None,
     perf: dict[str, float | None] | None = None,
+    duration_ms: float | None = None,
 ) -> None:
-    """Record token usage and, when measured, throughput for one message.
+    """Record token usage and, when measured, timing for one message.
 
-    `perf` carries the keys produced by `PerfTracker.message_perf()`. Usage and
-    throughput are written together because they come from the same run and a
-    second round trip would just be a second commit on the same row.
+    `perf` carries the keys produced by `PerfTracker.message_perf()`;
+    `duration_ms` is the turn's wall clock, which no LLM callback can see.
+    They are written together because they come from the same run and a second
+    round trip would just be a second commit on the same row.
     """
     msg = await session.get(Message, message_id)
     if msg:
@@ -158,6 +160,8 @@ async def update_message_usage(
             msg.llm_ms = perf.get("llm_ms")
             msg.prefill_tps = perf.get("prefill_tps")
             msg.eval_tps = perf.get("eval_tps")
+        if duration_ms is not None:
+            msg.duration_ms = duration_ms
         await session.commit()
 
 

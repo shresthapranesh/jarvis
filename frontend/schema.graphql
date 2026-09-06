@@ -349,6 +349,7 @@ type Message implements Node {
   llmMs: Float
   prefillTps: Float
   evalTps: Float
+  durationMs: Float
   createdAt: DateTime!
   steps: [Step!]!
 }

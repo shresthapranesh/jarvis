@@ -824,11 +824,25 @@ Wiring: `_run_agent_task` creates the `PerfTracker` (`TaskState._perf_tracker`) 
 `core/plugins.py`), appending the handler directly if a plugin manager didn't. Per LLM call it emits
 `perf_update` → `PerfUpdateEvent` → `useTaskEvents.ts` (`perf` state) → the ActivitySidebar budget
 box. On finalize, `PerfTracker.message_perf()` persists `ttft_ms`/`llm_ms`/`prefill_tps`/`eval_tps`
-onto the `Message` row (nullable Floats, migrated in `db/engine.py:_migrate`), rendered by
-`PerfBadge` in `MessageBubble.tsx` as `TTFT / pp / tg` (llama.cpp's shorthand). `ttft_ms` is the
+onto the `Message` row (nullable Floats, migrated in `db/engine.py:_migrate`). `ttft_ms` is the
 **first** call's TTFT — what the user waited for; `llm_ms` sums every call's round trip and so is
 always less than the wall-clock turn. Only chat persists; other runtimes get the measurement
 through `build_callbacks` when they pass a tracker.
+
+**`Message.duration_ms` is the fifth column and the only one no callback can see**: the turn's wall
+clock, `now - TaskState.started_at` computed in `_run_agent_task`'s `finalize` and written by the
+same `update_message_usage` round trip. `started_at` is stamped when the run is *registered* (before
+its `Job` is even committed), so queue wait counts — it is what the user waited through, tools,
+retrieval and approval pauses included, and is therefore always ≥ `llm_ms`. It is written on every
+terminal branch, error runs included, so a turn that never reached an LLM still reports how long it
+took to fail.
+
+**None of this renders inline.** Five numbers under every settled turn was noise for the sake of the
+rare moment anyone reads them, so `MessageBubble.tsx`'s action row carries one ⓘ button and
+`DebugInfo` opens a popover with the measured rows (`debugRows`); the styles are the `debug` group in
+`MessageBubble.styles.ts`. It opens **upward** — the last turn in a thread sits flush against the
+composer. Unmeasured values are dropped rather than shown as 0: a missing rate means "couldn't be
+split", which is not the same as slow.
 
 ## MCP Tool Loader (ADK McpToolset analog)
 - `core/mcp.py`: `load_mcp_server_configs()` merges env `JARVIS_MCP_SERVERS` (JSON dict or list)

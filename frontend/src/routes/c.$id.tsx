@@ -356,6 +356,7 @@ function ConversationPage() {
       llm_ms: null,
       prefill_tps: null,
       eval_tps: null,
+      duration_ms: null,
       created_at: new Date().toISOString(),
       steps: [],
     });

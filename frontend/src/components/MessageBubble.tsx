@@ -60,7 +60,7 @@ import {describeStep, getStepPreview} from '../lib/steps';
 import {messageAnchorId} from '../lib/thread';
 import type {ArtifactCard, Message, Step} from '../lib/types';
 import {MessageArtifacts} from './MessageArtifacts';
-import {actions, badge, bubble, media, safety, working} from './MessageBubble.styles';
+import {actions, bubble, debug, media, safety, working} from './MessageBubble.styles';
 import {chipBtn, prose, stream, ThinkingDots, turn} from './ui';
 import {WorkerPanel} from './WorkerPanel';
 
@@ -90,12 +90,6 @@ function parseMultimodal(raw: string): ContentPart[] | null {
   return null;
 }
 
-function formatTokens(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
-
 function formatRate(tps: number) {
   return tps >= 100 ? String(Math.round(tps)) : tps.toFixed(1);
 }
@@ -104,46 +98,142 @@ function formatMs(ms: number) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
 }
 
-function TokenBadge({input, output}: {input: number | null; output: number | null}) {
-  if (input == null && output == null) return null;
+/** Wall clock for the whole turn: what the user actually waited through. */
+function formatDuration(ms: number) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60_000);
+  const secs = Math.round((ms % 60_000) / 1000);
+  return `${mins}m ${String(secs).padStart(2, '0')}s`;
+}
+
+function InfoIcon() {
   return (
-    <span
-      {...stylex.props(badge.base)}
-      title={`Tokens for this turn — input: ${(input ?? 0).toLocaleString()} (full context sent), output: ${(output ?? 0).toLocaleString()}`}
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
-      ↑ {formatTokens(input ?? 0)} ↓ {formatTokens(output ?? 0)}
-    </span>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-5" />
+      <path d="M12 8h.01" />
+    </svg>
   );
 }
 
-/** Throughput for the turn. Renders only the halves that were measurable — a
- *  missing rate means "couldn't be split", which is not the same as slow. */
-function PerfBadge({
-  ttftMs,
-  llmMs,
-  prefillTps,
-  evalTps,
-}: {
-  ttftMs: number | null;
-  llmMs: number | null;
-  prefillTps: number | null;
-  evalTps: number | null;
-}) {
-  if (ttftMs == null && prefillTps == null && evalTps == null) return null;
-  const title = [
-    ttftMs != null && `Time to first token: ${formatMs(ttftMs)}`,
-    prefillTps != null &&
-      `Prompt processing: ${formatRate(prefillTps)} tok/s (cache-read tokens excluded)`,
-    evalTps != null && `Generation: ${formatRate(evalTps)} tok/s`,
-    llmMs != null && `Total time in LLM calls: ${formatMs(llmMs)} (excludes tools and retrieval)`,
-  ]
-    .filter(Boolean)
-    .join('\n');
+type DebugRow = {label: string; value: string; hint?: string};
+
+/** The rows the panel shows, in reading order. Anything unmeasured is dropped
+ *  rather than rendered as 0 — a missing rate means "couldn't be split", which
+ *  is not the same as slow. */
+function debugRows(message: Message): DebugRow[] {
+  const rows: DebugRow[] = [];
+  if (message.duration_ms != null) {
+    rows.push({
+      label: 'Total time',
+      value: formatDuration(message.duration_ms),
+      hint: 'Wall clock for the turn — includes tools, retrieval and any wait for approval.',
+    });
+  }
+  if (message.llm_ms != null) {
+    rows.push({
+      label: 'In LLM calls',
+      value: formatMs(message.llm_ms),
+      hint: 'Summed round trips. Excludes tools and retrieval, so always less than total time.',
+    });
+  }
+  if (message.ttft_ms != null) {
+    rows.push({
+      label: 'First token',
+      value: formatMs(message.ttft_ms),
+      hint: 'Time to the first token of the run’s first LLM call.',
+    });
+  }
+  if (message.input_tokens != null || message.output_tokens != null) {
+    rows.push({
+      label: 'Tokens',
+      value: `↑ ${(message.input_tokens ?? 0).toLocaleString()}  ↓ ${(message.output_tokens ?? 0).toLocaleString()}`,
+      hint: 'Input (full context sent, summed over every call) and output.',
+    });
+  }
+  if (message.prefill_tps != null) {
+    rows.push({
+      label: 'Prompt processing',
+      value: `${formatRate(message.prefill_tps)} tok/s`,
+      hint: 'Prefill throughput, cache-read tokens excluded.',
+    });
+  }
+  if (message.eval_tps != null) {
+    rows.push({
+      label: 'Generation',
+      value: `${formatRate(message.eval_tps)} tok/s`,
+      hint: 'Decode throughput.',
+    });
+  }
+  if (message.model) rows.push({label: 'Model', value: message.model});
+  return rows;
+}
+
+/**
+ * Timing, token counts and throughput, folded behind one icon.
+ *
+ * These used to sit inline as two always-on badges, which put five numbers
+ * under every settled turn for the sake of the rare moment anyone reads them.
+ * Nothing here is needed to read the answer, so the row keeps only the icon.
+ */
+function DebugInfo({message}: {message: Message}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement | null>(null);
+  const rows = useMemo(() => debugRows(message), [message]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (rows.length === 0) return null;
+
   return (
-    <span {...stylex.props(badge.base, badge.perf)} title={title}>
-      {ttftMs != null && <span>{formatMs(ttftMs)} TTFT</span>}
-      {prefillTps != null && <span>{formatRate(prefillTps)} pp</span>}
-      {evalTps != null && <span>{formatRate(evalTps)} tg</span>}
+    <span {...stylex.props(debug.root)} ref={rootRef}>
+      <button
+        {...stylex.props(actions.copy, open && actions.copyActive)}
+        onClick={() => setOpen((v) => !v)}
+        title="Debug info"
+        aria-label="Debug info"
+        aria-expanded={open}
+        type="button"
+      >
+        <InfoIcon />
+      </button>
+      {open && (
+        <div {...stylex.props(debug.panel)} role="dialog" aria-label="Debug info">
+          <div {...stylex.props(debug.heading)}>Debug info</div>
+          <dl {...stylex.props(debug.list)}>
+            {rows.map((row) => (
+              <div key={row.label} {...stylex.props(debug.row)} title={row.hint}>
+                <dt {...stylex.props(debug.label)}>{row.label}</dt>
+                <dd {...stylex.props(debug.value)}>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
     </span>
   );
 }
@@ -561,13 +651,7 @@ export function MessageBubble({
             {message.steps.length} step{message.steps.length !== 1 ? 's' : ''}
           </button>
         )}
-        <TokenBadge input={message.input_tokens} output={message.output_tokens} />
-        <PerfBadge
-          ttftMs={message.ttft_ms}
-          llmMs={message.llm_ms}
-          prefillTps={message.prefill_tps}
-          evalTps={message.eval_tps}
-        />
+        <DebugInfo message={message} />
       </div>
     </div>
   );

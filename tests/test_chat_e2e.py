@@ -220,3 +220,6 @@ async def test_throughput_is_measured_and_persisted(jarvis, work_dir: Path):
     # prefill_tps is allowed to be None (a fully cache-served prefill), but not
     # zero — that would mean the aggregate counted a span against no tokens.
     assert assistant.prefill_tps is None or assistant.prefill_tps > 0
+    # The turn's wall clock spans everything the run did, so it can never be
+    # shorter than the LLM round trips it contains.
+    assert assistant.duration_ms is not None and assistant.duration_ms >= llm_ms

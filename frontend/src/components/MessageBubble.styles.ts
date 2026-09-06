@@ -107,21 +107,62 @@ export const actions = stylex.create({
     transition: 'color 0.15s, border-color 0.15s, background 0.15s',
   },
   copyDone: {color: colors.ok, borderColor: `rgba(${channels.ok}, 0.3)`},
+  /** Held lit while the button's popover is open. */
+  copyActive: {
+    color: colors.accent,
+    borderColor: `rgba(${channels.accent}, 0.4)`,
+    backgroundColor: `rgba(${channels.accent}, 0.08)`,
+  },
 });
 
-/** Token counts and throughput for the turn. */
-export const badge = stylex.create({
-  base: {
-    color: colors.textDim,
-    fontSize: type.tMicro,
-    whiteSpace: 'nowrap',
-    paddingBlock: 3,
-    paddingInline: 4,
+/**
+ * The debug popover behind the ⓘ button — token counts, throughput, model.
+ *
+ * Opens *upward*: the action row sits at the bottom of a turn, and the last
+ * turn in a thread is flush against the composer, where a downward panel would
+ * have nowhere to go. There is always content above.
+ */
+export const debug = stylex.create({
+  root: {position: 'relative', display: 'inline-flex'},
+  panel: {
+    position: 'absolute',
+    insetBlockEnd: 'calc(100% + 6px)',
+    insetInlineStart: 0,
+    zIndex: 50,
+    minWidth: 236,
+    // A model id is the one value long enough to blow the panel out; cap the
+    // width and let that row wrap rather than push past the thread column.
+    maxWidth: 'min(320px, 76vw)',
+    backgroundColor: colors.bg,
+    backgroundImage: `linear-gradient(180deg, rgba(${channels.tint}, 0.05), rgba(${channels.tint}, 0.02))`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderRadius: 3,
+    paddingBlock: 9,
+    paddingInline: 11,
+    boxShadow: `0 10px 34px rgba(${channels.shadow}, 0.4)`,
     cursor: 'default',
   },
-  /* pp = prompt processing (prefill), tg = text generation (eval) — the
-     llama.cpp shorthand, spelled out in the badge's title. */
-  perf: {display: 'inline-flex', gap: 6, fontVariantNumeric: 'tabular-nums'},
+  heading: {
+    fontSize: type.tMicro,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    color: colors.textFaint,
+    marginBlockEnd: 7,
+  },
+  list: {display: 'flex', flexDirection: 'column', gap: 4, margin: 0},
+  row: {display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 18},
+  label: {fontSize: type.tUi, color: colors.textDim, whiteSpace: 'nowrap'},
+  value: {
+    margin: 0,
+    fontSize: type.tUi,
+    fontFamily: type.mono,
+    fontVariantNumeric: 'tabular-nums',
+    color: colors.text,
+    textAlign: 'end',
+    overflowWrap: 'anywhere',
+  },
 });
 
 /** Historical rows the removed safety gates persisted as blocked. */

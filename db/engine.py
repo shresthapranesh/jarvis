@@ -93,7 +93,7 @@ def _migrate(conn: Connection) -> None:
         conn.execute(text("ALTER TABLE messages ADD COLUMN output_tokens INTEGER"))
     # Throughput columns — NULL on every pre-existing row, which is correct:
     # the timings were never measured and cannot be reconstructed after the fact.
-    for perf_col in ("ttft_ms", "llm_ms", "prefill_tps", "eval_tps"):
+    for perf_col in ("ttft_ms", "llm_ms", "prefill_tps", "eval_tps", "duration_ms"):
         if perf_col not in msg_cols:
             conn.execute(text(f"ALTER TABLE messages ADD COLUMN {perf_col} FLOAT"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))

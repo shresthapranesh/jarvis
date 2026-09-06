@@ -68,6 +68,10 @@ class Message(relay.Node):
     llm_ms: float | None
     prefill_tps: float | None
     eval_tps: float | None
+    # Wall clock for the whole turn — queue wait, tools and approval pauses
+    # included, so always larger than `llm_ms`. NULL on user messages and on
+    # rows written before the column existed.
+    duration_ms: float | None
     created_at: datetime
     steps: list[Step]
 
@@ -85,6 +89,7 @@ class Message(relay.Node):
             llm_ms=row.llm_ms,
             prefill_tps=row.prefill_tps,
             eval_tps=row.eval_tps,
+            duration_ms=row.duration_ms,
             created_at=row.created_at,
             steps=[Step.from_db(s) for s in sorted(row.steps, key=lambda x: x.seq)],
         )

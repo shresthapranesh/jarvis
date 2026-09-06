@@ -100,6 +100,12 @@ class Message(Base):
     llm_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     prefill_tps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     eval_tps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Wall-clock time the whole turn took, measured from `TaskState.started_at`
+    # (the moment the run was registered, i.e. when the user sent the message)
+    # to the final write of this row. Unlike `llm_ms` it includes everything the
+    # user actually waited through — queue wait, tools, retrieval, compaction,
+    # and any pause on a human approval.
+    duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")
