@@ -9,14 +9,18 @@ into later cells.
 (TAVILY_API_KEY) or Brave Search (BRAVE_API_KEY), in that order — and falls
 back to DuckDuckGo scraping (ddgs) keyless, mirroring how embeddings degrade.
 `read` fetches a URL and extracts the main article text with trafilatura,
-falling back to headless Chromium for JS-rendered pages.
+climbing to headless Chromium for JS-rendered pages and then to a real,
+persistent browser (tools/browser.py) for the sites that turn headless away.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -92,6 +96,18 @@ def search(query: str, max_results: int = 8) -> list[dict]:
     raise RuntimeError("all search providers failed — " + "; ".join(errors))
 
 
+def _read_cdp(url: str) -> str:
+    """Third rung: the persistent headed browser (tools/browser.py).
+
+    Reached only when the cheaper rungs came back near-empty, because it costs
+    a real browser and possibly a human's attention — and because for the
+    ordinary page it wins nothing the httpx fetch didn't already have.
+    """
+    from tools import browser as _browser
+
+    return _extract(_browser.fetch(url), url) or ""
+
+
 def _read_playwright(url: str) -> str:
     from playwright.sync_api import sync_playwright
 
@@ -115,34 +131,54 @@ def _extract(html: str, url: str) -> str | None:
     )
 
 
-def read(url: str, max_chars: int = 12_000, js: bool = False) -> str:
+def read(url: str, max_chars: int = 12_000, js: bool = False, browser: bool = False) -> str:
     """Fetch a URL and return its main text content (markup/nav/ads stripped).
 
-    Plain HTTP fetch + trafilatura extraction; automatically retries with
-    headless Chromium when the page looks JS-rendered (or pass js=True to
-    force it). Truncates to max_chars with an explicit marker.
+    Three rungs, climbed only as far as needed: a plain HTTP fetch, then
+    headless Chromium when the page looks JS-rendered (`js=True` forces it),
+    then a real headed browser with a persistent profile when headless comes
+    back empty — which is what gets past sites that turn automation away.
+    `browser=True` goes straight to that last rung and is worth reaching for by
+    name when a site is known to block the others. Truncates to max_chars with
+    an explicit marker.
     """
     text = ""
-    if not js:
+    errors: list[str] = []
+    if not js and not browser:
         try:
             r = httpx.get(
                 url, follow_redirects=True, timeout=20, headers={"User-Agent": _UA}
             )
             r.raise_for_status()
             text = _extract(r.text, url) or ""
-        except httpx.HTTPError:
-            pass  # fall through to the browser path
-    if len(text) < _JS_FALLBACK_THRESHOLD:
+        except httpx.HTTPError as exc:
+            errors.append(f"http: {exc}")  # fall through to the browser path
+    if not browser and len(text) < _JS_FALLBACK_THRESHOLD:
         try:
             browser_text = _read_playwright(url)
         except Exception as exc:
-            if not text:
-                return f"Failed to read {url!r}: {exc}"
+            errors.append(f"headless: {exc}")
+            logger.info("read(%s): headless rung failed: %s", url, exc)
             browser_text = ""
         if len(browser_text) > len(text):
             text = browser_text
+    if len(text) < _JS_FALLBACK_THRESHOLD:
+        # Last rung. An explicit browser=True reports its own failure, since
+        # the caller asked for this specifically; an automatic escalation stays
+        # quiet and keeps whatever the cheaper rungs managed to extract.
+        try:
+            real_text = _read_cdp(url)
+        except Exception as exc:
+            if browser and not text:
+                return f"Failed to read {url!r} in the browser: {exc}"
+            errors.append(f"browser: {exc}")
+            logger.info("read(%s): browser rung unavailable: %s", url, exc)
+            real_text = ""
+        if len(real_text) > len(text):
+            text = real_text
     if not text:
-        return f"No readable text extracted from {url!r}."
+        detail = f" ({'; '.join(errors)})" if errors else ""
+        return f"No readable text extracted from {url!r}.{detail}"
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n... [truncated {len(text) - max_chars} chars — call read(url, max_chars=...) for more]"
     return text

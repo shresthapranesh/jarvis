@@ -129,8 +129,11 @@ jarvis/
 │   │                     #   search via jarvis SDK
 │   ├── context.py        # current_ctx() — per-call ToolContext (code_session_key, conversation_id)
 │   ├── research.py       # [kernel-preloaded] search() (Tavily/Brave, ddgs fallback) + read()
-│   │                     #   (trafilatura extraction, Playwright fallback) — plain sync helpers
-│   │                     #   injected into every run_cell kernel (core/kernels.py), not bound tools
+│   │                     #   (trafilatura extraction; headless-Chromium then real-browser rungs)
+│   │                     #   — plain sync helpers injected into every run_cell kernel
+│   │                     #   (core/kernels.py), not bound tools
+│   ├── browser.py        # persistent headed Chromium over CDP — read()'s last rung. Attach/launch,
+│   │                     #   dedicated profile, challenge→human handoff. See "Web reading rungs".
 │   ├── web.py            # [unbound] web_search (ddgs), fetch_page, extract_links, playwright_browse
 │   ├── finance.py        # [unbound] get_stock_data, get_historical_prices, compare_stocks, …
 │   └── datetime.py       # [unbound] get_current_datetime
@@ -390,6 +393,20 @@ the SDK's `mcp` category (`lazy`) — see "Load modes" under MCP Tool Loader. It
 this section makes, applied to third-party tools nobody here wrote the schemas for.
 
 **Adding to the SDK:** define the function in `tools/sdk.py`, then register it in `_CATEGORIES` — `help()` renders signatures from `inspect.signature` + the docstring, so the docstring is the only documentation and costs zero tokens until discovered. If it needs a server-side side effect, add/route through a GraphQL mutation rather than writing the DB directly.
+
+### Web reading rungs (`tools/research.py` → `tools/browser.py`)
+`read(url)` climbs three rungs and stops at the first that returns real text: an httpx fetch + trafilatura, then headless Chromium (`js=True` forces it), then a **persistent headed browser** attached over CDP (`browser=True` goes straight there). The third rung exists for sites that turn automation away — the block is usually the headless fingerprint, a blank profile with no history, and a superhuman request rate, not the automation itself, so a real browser with a real profile is the fix rather than a disguise.
+
+**The browser is owned by neither process, and that is the point.** `read()` runs in a kernel (per-conversation, capped at 12, reaped at 30 min idle) while the gate and event stream live in the server. Server-owned would need a new transport to reach the kernel; kernel-owned would mean a Chrome per conversation, dying on reap. Attaching over CDP makes the browser a third process both can dial: its profile outlives every kernel, so a login done once holds for weeks.
+
+**Any Chromium, not just Chrome.** Attaching is browser-agnostic by construction — `connect_over_cdp` cannot tell what is listening. Only *launching* needs a binary, so that is the only place a preference exists: `browser.executable`, else the first `_CANDIDATES` entry present (mac: app bundles; Linux: `shutil.which`). Launch is detached, so the browser outlives the kernel that first wanted it.
+
+**The dedicated profile is mandatory, not tidiness.** Recent Chromium builds refuse to open a remote-debugging port on the *default* user-data-dir at all (any local process could otherwise read the cookie jar), so aiming at a real profile yields no listener and a mystifying timeout — and a separate profile is the containment boundary, since this rung reads untrusted pages and should reach only sites someone deliberately signed into in that window. Launch passes `--no-first-run --no-default-browser-check`; Brave and Edge otherwise park a welcome wizard in front of every page.
+
+**Challenge → human handoff.** A short body matching `_CHALLENGE_MARKERS` parks the read on a durable `Approval` row via the SDK's own gate helpers (`sdk:browser_challenge`) — same inbox, same chat prompt, and `core/kernels.py:_hold_for_approval` already suspends the 60s cell timeout while one is open. The human clears it in the visible window; the clearance cookie lands in the profile and every later read is clean. **The body-length gate is load-bearing**: matching the words alone made an essay about CAPTCHAs read as a CAPTCHA. With no conversation (CLI, bots, tests) the handoff is skipped rather than blocking on an answer nobody will give.
+
+Config: `browser.cdp_url` / `browser.executable` / `browser.profile_dir` (Settings → Config, or env `JARVIS_BROWSER_*`). Degrades rather than fails — no browser installed, or Linux with no `DISPLAY`/`WAYLAND_DISPLAY`, keeps `read()` on the headless rung. Pointing `browser.cdp_url` at another machine is a supported deployment: browser where the human is, jarvis on a server.
+
 
 ## Safety Posture
 There are **no runtime LLM safety gates** — the per-turn input/output judge (`core/safety.py`) and the earlier per-tool-call judge were both removed. Safety rests on two layers instead: the agent's operating constraints in `core/system_prompt.md` (no secret exfiltration, no secrets in replies, no working harm, injection resistance) and deployment isolation (run the app in a container / on an isolated box). Historical messages persisted with status `blocked` by the old gates still render with a banner in `MessageBubble.tsx`.
@@ -1081,7 +1098,7 @@ with it. The palette lives in `frontend/src/theme/`.
 
 ## Environment
 - Python 3.13, managed with `uv`.
-- Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI — used for OpenRouter, Meta), `langgraph-checkpoint-sqlite`, APScheduler, Playwright (the `read()` fallback in `tools/research.py`), faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
+- Backend stack: FastAPI + **Strawberry GraphQL** (`strawberry-graphql[fastapi]`, graphql-ws), SQLAlchemy async + `aiosqlite`, LangGraph/LangChain (Anthropic, AWS Bedrock, Google GenAI, Ollama, OpenAI — used for OpenRouter, Meta), `langgraph-checkpoint-sqlite`, APScheduler, Playwright (the headless and CDP `read()` rungs — `tools/research.py`, `tools/browser.py`), faster-whisper/mlx-whisper + piper-tts (audio), yfinance (finance tools).
 - Frontend stack: React 19, TanStack Router/Query, **Relay** (`babel-plugin-relay` run as a standalone Vite transform — see `vite.config.ts`), **StyleX** (`@stylexjs/unplugin`, a second independent Babel pass in the same config), Vite, TypeScript.
 - Tests: `uv run pytest` (pytest + pytest-asyncio, `asyncio_mode = "auto"`). Tests live in `tests/` and run against a throwaway `WORK_DIR` — never `~/.jarvis`. The `jarvis` fixture (`tests/conftest.py`) boots a full `JarvisRunner` in-process without uvicorn, the scheduler, or queue workers, so handlers can be driven directly and synchronously. Tests that call a real model are marked `llm` and skip without `GOOGLE_API_KEY`; run just those with `-m llm`.
 - No linter configured; use `uvx pyrefly check --summarize-errors` for Python type checking and `pnpm typecheck` for the frontend. Frontend formatting via `pnpm fmt` (oxfmt).

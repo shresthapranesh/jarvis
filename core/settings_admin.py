@@ -90,6 +90,24 @@ KNOWN_SETTINGS: tuple[SettingSpec, ...] = (
         placeholder="all",
     ),
     SettingSpec(
+        key="browser.cdp_url",
+        label="Browser CDP endpoint",
+        description="DevTools endpoint `read(url, browser=True)` attaches to. A browser is launched here on demand if nothing is listening; point it elsewhere to use one on another machine.",
+        placeholder="http://127.0.0.1:9222",
+    ),
+    SettingSpec(
+        key="browser.executable",
+        label="Browser executable",
+        description="Path to the Chromium-based browser to launch — Chrome, Brave, Edge, Chromium, Vivaldi. Unset probes the usual install locations. Only the launch path uses this; attaching works with whatever is already running.",
+        placeholder="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    ),
+    SettingSpec(
+        key="browser.profile_dir",
+        label="Browser profile directory",
+        description="Dedicated user-data-dir for that browser (default: <work_dir>/browser-profile). Log in here once and the cookies persist across runs. Never point this at your everyday profile: Chromium refuses remote debugging on the default profile, and a separate one keeps your other sessions out of the agent's reach.",
+        placeholder="~/.jarvis/browser-profile",
+    ),
+    SettingSpec(
         key="models.custom",
         label="Custom models",
         description="Models added at runtime, as JSON.",
