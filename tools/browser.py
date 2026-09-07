@@ -191,6 +191,31 @@ def _endpoint_live(url: str) -> bool:
         return False
 
 
+def _ensure_page(url: str) -> None:
+    """Make sure the browser has at least one page target.
+
+    Closing the last window does not quit Chromium on macOS — the process
+    stays up with the debugging port open and *no* page targets, and
+    `connect_over_cdp` then fails with a mystifying "Browser context
+    management is not supported" rather than anything about missing pages.
+    Opening a blank tab over the HTTP endpoint costs one request and turns a
+    hard failure into a browser that simply has a window again.
+    """
+    import httpx
+
+    base = url.rstrip("/")
+    try:
+        targets = httpx.get(f"{base}/json/list", timeout=_PROBE_TIMEOUT).json()
+        if any(t.get("type") == "page" for t in targets):
+            return
+        # PUT, not GET: Chromium made /json/new PUT-only to stop a stray page
+        # navigation from opening tabs in someone's browser.
+        httpx.put(f"{base}/json/new?about:blank", timeout=_PROBE_TIMEOUT)
+        logger.info("browser: no page target, opened a blank tab")
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.debug("browser: could not ensure a page target: %s", exc)
+
+
 def launch() -> bool:
     """Start a headed browser on the configured port. True if it came up.
 
@@ -248,8 +273,10 @@ def ensure_running() -> str:
     """
     url = cdp_url()
     if _endpoint_live(url):
+        _ensure_page(url)
         return url
     if launch():
+        _ensure_page(url)
         return url
     if not executable():
         raise BrowserUnavailable(
@@ -341,6 +368,29 @@ def _ask_human(url: str, marker: str) -> bool:
         return False
 
 
+def _announce(url: str, phase: str) -> None:
+    """Tell the live run a browse is happening, so the UI can offer the video.
+
+    Best-effort and deliberately silent on failure: this is a notification, and
+    a read must not fail because nobody was listening. Outside a conversation
+    (CLI, bots, tests) there is no run to announce onto and the mutation says
+    so by returning false — not an error.
+    """
+    try:
+        from tools import sdk
+
+        if not getattr(sdk, "_conversation_id", None):
+            return
+        sdk.api(
+            "mutation($u: String!, $p: String!, $c: String) {"
+            " browserActivity(url: $u, phase: $p, conversationId: $c) }",
+            {"u": url, "p": phase, "c": sdk._conversation_id},
+            timeout=5,
+        )
+    except Exception:
+        logger.debug("browser: activity announce failed", exc_info=True)
+
+
 # ── The one thing research.py calls ──────────────────────────────────────────
 
 def fetch(url: str, *, settle_ms: int = _SETTLE_MS, allow_handoff: bool = True) -> str:
@@ -349,6 +399,17 @@ def fetch(url: str, *, settle_ms: int = _SETTLE_MS, allow_handoff: bool = True) 
     On a challenge interstitial, asks a human to clear it and re-reads the page
     once they have. Raises BrowserUnavailable if this rung isn't usable here.
     """
+    _announce(url, "start")
+    try:
+        html = _fetch_inner(url, settle_ms=settle_ms, allow_handoff=allow_handoff)
+    except Exception:
+        _announce(url, "error")
+        raise
+    _announce(url, "done")
+    return html
+
+
+def _fetch_inner(url: str, *, settle_ms: int, allow_handoff: bool) -> str:
     with page() as tab:
         tab.goto(url, wait_until="domcontentloaded", timeout=_PAGE_TIMEOUT)
         tab.wait_for_timeout(settle_ms)

@@ -35,6 +35,9 @@ interface Props {
   streamingArtifacts?: ArtifactCard[];
   onOpenArtifact?: (id: string) => void;
   openArtifactId?: string | null;
+  /** Host of the page the live run is browsing, if any — drives the chip. */
+  browsingHost?: string | null;
+  onOpenBrowser?: () => void;
   /** Messages typed during the run and not yet delivered to it. */
   queuedMessages?: Message[];
   onUnqueue?: (messageId: string) => void;
@@ -58,6 +61,8 @@ export function MessageThread({
   spineCollapsed,
   artifactsByMessage,
   streamingArtifacts,
+  browsingHost,
+  onOpenBrowser,
   onOpenArtifact,
   openArtifactId,
   queuedMessages,
@@ -97,6 +102,8 @@ export function MessageThread({
           steps={streamingSteps ?? []}
           workers={streamingWorkers ?? []}
           onShowSteps={onShowSteps}
+          browsingHost={browsingHost}
+          onOpenBrowser={onOpenBrowser}
           artifacts={streamingArtifacts}
           onOpenArtifact={onOpenArtifact}
           openArtifactId={openArtifactId}

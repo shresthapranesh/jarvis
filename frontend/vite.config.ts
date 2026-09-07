@@ -58,6 +58,7 @@ export default defineConfig({
       '/uploads': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/ws/live': {target: 'ws://localhost:8000', ws: true},
+      '/ws/browser': {target: 'ws://localhost:8000', ws: true},
       '/tts': 'http://localhost:8000',
       '/transcribe': 'http://localhost:8000',
       '/artifacts': 'http://localhost:8000',

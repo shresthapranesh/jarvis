@@ -32,6 +32,7 @@ from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, 
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
 from .routes_documents import router as documents_router
+from .routes_browser import router as browser_router
 from .routes_live import router as live_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
@@ -260,6 +261,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from core.kernels import get_kernel_registry
         with contextlib.suppress(Exception):
             await get_kernel_registry().shutdown_all()
+        # Drop the screencast's CDP connection (the browser itself is
+        # detached and outlives us on purpose).
+        from core.browser_stream import shutdown_screencast
+        with contextlib.suppress(Exception):
+            await shutdown_screencast()
         # Close MCP clients
         try:
             from core.mcp import get_mcp_manager
@@ -398,6 +404,7 @@ app.add_middleware(
 
 app.include_router(media_router)
 app.include_router(live_router)
+app.include_router(browser_router)
 app.include_router(artifacts_router)
 app.include_router(documents_router)
 app.include_router(logs_router)

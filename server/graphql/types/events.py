@@ -32,8 +32,14 @@ class StepEvent:
 
 @strawberry.type
 class BrowserStepEvent:
-    thought: str   # JSON-encoded
-    actions: str   # JSON-encoded
+    """The agent reached the persistent browser. Drives the "browsing" chip.
+
+    Reshaped when it finally got a producer: the old thought/actions pair came
+    from the deleted browser_agent and nothing ever emitted it.
+    """
+
+    url: str
+    phase: str  # start | done | error
     source: str
 
 
@@ -283,8 +289,8 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
         )
     if event_name == "browser_step":
         return BrowserStepEvent(
-            thought=_as_str(data.get("thought")),
-            actions=_as_str(data.get("actions")),
+            url=_as_str(data.get("url")),
+            phase=data.get("phase", "start"),
             source=data.get("source", ""),
         )
     if event_name == "worker_start":

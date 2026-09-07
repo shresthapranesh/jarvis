@@ -39,6 +39,8 @@ jarvis/
 │   │                     #   now includes input_tokens/output_tokens/llm_calls/tool_calls/budget_exceeded + _budget_tracker
 │   ├── queue/            # Durable job queue: protocol.py (Job, JobQueue ABC),
 │   │                     #   sqlite.py (SqliteJobQueue), worker.py (Worker)
+│   ├── browser_stream.py # CDP Page.startScreencast → JPEG frames, fanned out to /ws/browser
+│   │                     #   subscribers. Server-side, its own CDP client. See "Watching the browser".
 │   ├── streaming.py      # TokenCoalescer, STREAM_MODES, _process_chunk(), _finalize_message()
 │   │                     #   forwards approval_request/approval_resolved/workflow_event/budget_exceeded
 │   ├── summarization.py  # DEPRECATED — use compaction.maybe_compact; kept for backwards compat
@@ -91,6 +93,7 @@ jarvis/
 │   ├── routes_documents.py    # REST: GET /documents/{id}/raw
 │   ├── routes_uploads.py      # REST: POST /uploads → staged file, returns opaque uploadId
 │   ├── routes_media.py        # REST: GET /health, POST /tts, POST /transcribe
+│   ├── routes_browser.py      # WS: /ws/browser (live browser frames, binary)
 │   ├── routes_live.py         # WS: /ws/live (live audio session)
 │   └── routes_logs.py         # REST: GET /server-logs, GET /server-logs/stream
 ├── workflow/
@@ -326,7 +329,7 @@ Conventions:
 ### Chat events
 `token`, `thinking_token`, `step`, `artifact`, `todos_updated`, `queued_message`, `queued_withdrawn`, `queued_consumed`, `worker_start`, `worker_step`, `worker_token`, `worker_done`, `browser_step`, `interrupt`, `interrupt_resolved`, `approval_request`, `approval_resolved`, `workflow_event`, `budget_exceeded`, `budget_update`, `perf_update`, `done`, `stopped`, `error`
 
-> `browser_step` currently has **no producer** — its only emitter was `tools/browser_agent.py`, which was deleted along with the `browser-use` dependency. The consumer plumbing (`core/streaming.py`, `BrowserStepEvent` in the `ChatEvent` union, the frontend hook) is left in place because removing a union member is a GraphQL schema change requiring a Relay regeneration. Wire a new emitter to it, or remove the plumbing as its own change.
+> `browser_step` has a producer again — `browserActivity` (`mutations/browser.py`), called by `tools/browser.py:_announce` around every `fetch()`. It was orphaned when `tools/browser_agent.py` was deleted with the `browser-use` dependency, and its payload was reshaped from the old `thought`/`actions` pair to `{url, phase}` (`start` | `done` | `error`) when it got one. See "Watching the browser".
 
 Worker lifecycle events (`worker_*`) stream live from `tools/workers.py` and — except `worker_token` — are also persisted as `Step` rows (`source="subagent"`, `subagent="<role>:<idx>"`, result capped at `WORKER_RESULT_PERSIST_CAP`), so the activity sidebar can rebuild per-worker groups after a reload.
 
@@ -406,6 +409,23 @@ this section makes, applied to third-party tools nobody here wrote the schemas f
 **Challenge → human handoff.** A short body matching `_CHALLENGE_MARKERS` parks the read on a durable `Approval` row via the SDK's own gate helpers (`sdk:browser_challenge`) — same inbox, same chat prompt, and `core/kernels.py:_hold_for_approval` already suspends the 60s cell timeout while one is open. The human clears it in the visible window; the clearance cookie lands in the profile and every later read is clean. **The body-length gate is load-bearing**: matching the words alone made an essay about CAPTCHAs read as a CAPTCHA. With no conversation (CLI, bots, tests) the handoff is skipped rather than blocking on an answer nobody will give.
 
 Config: `browser.cdp_url` / `browser.executable` / `browser.profile_dir` (Settings → Config, or env `JARVIS_BROWSER_*`). Degrades rather than fails — no browser installed, or Linux with no `DISPLAY`/`WAYLAND_DISPLAY`, keeps `read()` on the headless rung. Pointing `browser.cdp_url` at another machine is a supported deployment: browser where the human is, jarvis on a server.
+
+
+### Watching the browser (`core/browser_stream.py` → `/ws/browser`)
+The video counterpart to the reading rungs: a live view of the browser `read(url, browser=True)` drives, opened from a **"Browsing <host>"** chip under the streaming message and rendered in a resizable right panel (`components/BrowserPanel.tsx`).
+
+**The frames come from CDP, not a capture stack.** `Page.startScreencast` is what Chrome already does for DevTools' device mode, so the browser encodes the JPEGs and nothing here touches a screen. The server opens its **own** CDP client — CDP accepts concurrent clients, so the kernel's sync connection is undisturbed, and frames keep flowing between reads rather than only inside `fetch()`.
+
+**Binary over a WebSocket, not a GraphQL subscription.** Same carve-out `/ws/live` occupies: graphql-ws is JSON, and base64 would inflate every frame by a third while sharing a socket with the token stream. Text messages carry control (`status`, `meta`, `idle`), binary messages are frames. The client→server direction is accepted and ignored — the panel is view-only today, and that channel exists so input forwarding is later a new *message type* rather than a new transport.
+
+**Screencast runs only while someone watches.** `subscribe()` reference-counts: the first subscriber attaches and starts the cast, the last one stops it and drops the connection, so a closed panel costs no encoding. Per-subscriber queues are depth 1 and **drop-oldest** — a slow socket must never apply backpressure to the browser, and nobody rewinds live video.
+
+Three things learned by running it, each now a test:
+- **`_Subscriber` must be `@dataclass(eq=False)`.** The generated `__eq__` sets `__hash__ = None`, and it lives in a set — every connection failed on `subscribers.add`.
+- **A browser with no page target is unattachable.** Closing the last window doesn't quit Chromium; the port stays open with zero page targets and `connect_over_cdp` fails with *"Browser context management is not supported"*, which says nothing about pages. `tools/browser.py:_ensure_page` opens a blank tab over `PUT /json/new` first (PUT, not GET — Chromium made it so a stray navigation can't open tabs).
+- **Screencast only emits on paint.** Attaching to a page sitting still yields *nothing*, so the panel would wait on a first frame forever while everything worked. `_prime()` takes a one-shot `Page.captureScreenshot` on attach.
+
+`browser.close()` on a CDP-attached browser disconnects rather than quits — verified, and the persistent-profile design depends on it.
 
 
 ## Safety Posture

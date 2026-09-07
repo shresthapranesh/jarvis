@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
+import {kf} from '../theme/keyframes.stylex';
 import {channels, colors, type} from '../theme/tokens.stylex';
 
 /* ── Styles for MessageBubble.tsx ──────────────────────────────────────
@@ -207,4 +208,17 @@ export const media = stylex.create({
     maxWidth: '100%',
   },
   size: {color: `rgba(${channels.tint}, 0.45)`, fontSize: type.tMicro, marginInlineStart: 2},
+});
+
+/** The "browsing …" chip and the row it shares with the step count. */
+export const browseChip = stylex.create({
+  row: {display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'},
+  live: {
+    color: colors.signalLive,
+    borderColor: colors.signalLiveDim,
+    // Slow, not attention-grabbing: it marks a state, it isn't an alert.
+    animationName: kf.pulse,
+    animationDuration: '2.4s',
+    animationIterationCount: 'infinite',
+  },
 });

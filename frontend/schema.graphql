@@ -173,8 +173,8 @@ input BoardTaskUpdateInput {
 }
 
 type BrowserStepEvent {
-  thought: String!
-  actions: String!
+  url: String!
+  phase: String!
   source: String!
 }
 
@@ -456,6 +456,7 @@ type Mutation {
   resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!
   setToolPolicy(key: String!, enabled: Boolean = null, requiresApproval: Boolean = null): [AgentTool!]!
   requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = "{}", conversationId: String = null): ToolApprovalRequest!
+  browserActivity(url: String!, phase: String! = "start", conversationId: String = null): Boolean!
   setSetting(key: String!, value: String!, allowManaged: Boolean! = false): SettingWriteResult!
   deleteSetting(key: String!, allowManaged: Boolean! = false): SettingWriteResult!
   pruneCheckpoints(dryRun: Boolean! = false): CheckpointPruneResult!

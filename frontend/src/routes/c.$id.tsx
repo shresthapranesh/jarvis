@@ -11,6 +11,7 @@ import type {DocumentListQuery} from '../__generated__/DocumentListQuery.graphql
 import type {TodoListQuery} from '../__generated__/TodoListQuery.graphql';
 import {ActivitySidebar} from '../components/ActivitySidebar';
 import {ArtifactPanel} from '../components/ArtifactPanel';
+import {BrowserPanel} from '../components/BrowserPanel';
 import {DeferredApprovals} from '../components/DeferredApprovals';
 import {FolderIcon} from '../components/icons';
 import {InputBox} from '../components/InputBox';
@@ -101,7 +102,22 @@ function ConversationPage() {
     pendingInterrupt,
     budget: liveBudget,
     perf: livePerf,
+    browserSteps,
   } = useTaskEvents(streamTaskId, id) as any;
+
+  // The chip shows only while a browse is open — the last announcement wins,
+  // and `done`/`error` closes it. Anything else would invite you to watch a
+  // browser that has already moved on to some other page.
+  const browsingHost = useMemo(() => {
+    const list = browserSteps as {url: string; phase: string}[] | undefined;
+    const last = list && list.length > 0 ? list[list.length - 1] : null;
+    if (!last || last.phase !== 'start') return null;
+    try {
+      return new URL(last.url).host;
+    } catch {
+      return last.url.slice(0, 40);
+    }
+  }, [browserSteps]);
 
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
 
@@ -128,6 +144,7 @@ function ConversationPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelSteps, setPanelSteps] = useState<Step[]>([]);
   const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
+  const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
 
   // Persisted artifacts — keeps the FAB available after reload / on past
@@ -456,7 +473,8 @@ function ConversationPage() {
     return [];
   }, [isActive, steps, allMessages]);
 
-  const showSpine = !panelOpen && !artifactPanelOpen && (isActive || messages.length > 0);
+  const showSpine =
+    !panelOpen && !artifactPanelOpen && !browserPanelOpen && (isActive || messages.length > 0);
 
   // Jumping from the spine is the reader taking over the scroll position, so
   // it must release the pin first — otherwise the settle-window re-pin above
@@ -539,6 +557,8 @@ function ConversationPage() {
         containerRef={containerRef}
         isLoadingOlder={isLoadingPrevious}
         onShowSteps={handleShowSteps}
+        browsingHost={browsingHost}
+        onOpenBrowser={() => setBrowserPanelOpen(true)}
         artifactsByMessage={artifactsByMessage}
         streamingArtifacts={isActive ? streamingArtifacts : undefined}
         onOpenArtifact={handleOpenArtifact}
@@ -570,6 +590,7 @@ function ConversationPage() {
           onClose={() => setPanelOpen(false)}
         />
       )}
+      {browserPanelOpen && <BrowserPanel onClose={() => setBrowserPanelOpen(false)} />}
       {artifactPanelOpen && (
         <ArtifactPanel
           conversationId={id}

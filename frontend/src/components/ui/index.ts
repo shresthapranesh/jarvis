@@ -18,5 +18,6 @@
 export {btn, chipBtn, closeBtn, iconBtn} from './buttons';
 export {codeField, field} from './forms';
 export {badge, kindBadge, kindBadgeStyle, page} from './page';
+export {ResizeHandle, useResizableWidth} from './resize';
 export {errorBubble, prose, stream, ThinkingDots, turn, worker} from './run';
 export {modal, Switch} from './modal';

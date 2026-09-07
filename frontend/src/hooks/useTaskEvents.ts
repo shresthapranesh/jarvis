@@ -12,9 +12,12 @@ import {refreshTodoList} from '../relay/TodoListQuery';
 import {refreshPendingApprovals} from './usePendingApprovals';
 import {refreshRunningTasks} from './useRunningTasks';
 
+// One navigation of the persistent browser (tools/browser.py), announced by
+// the kernel through the browserActivity mutation. `phase` going to done/error
+// is what stops the chip pulsing — the browser itself stays up either way.
 export interface BrowserStep {
-  thought: unknown;
-  actions: unknown[];
+  url: string;
+  phase: 'start' | 'done' | 'error';
   at: string;
 }
 
@@ -147,8 +150,8 @@ const taskEventsSubscription = graphql`
         data
       }
       ... on BrowserStepEvent {
-        thought
-        actions
+        url
+        phase
         source
       }
       ... on WorkerStartEvent {
@@ -306,10 +309,10 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             break;
           }
           case 'BrowserStepEvent': {
-            const parsedActions = safeJsonParse(evt.actions);
+            const phase = evt.phase === 'done' || evt.phase === 'error' ? evt.phase : 'start';
             const browserStep: BrowserStep = {
-              thought: evt.thought,
-              actions: Array.isArray(parsedActions) ? parsedActions : [],
+              url: evt.url,
+              phase,
               at: new Date().toISOString(),
             };
             setState((s) => ({...s, browserSteps: [...s.browserSteps, browserStep]}));
@@ -556,12 +559,4 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
   }, [taskId]);
 
   return state;
-}
-
-function safeJsonParse(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 }

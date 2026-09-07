@@ -354,8 +354,8 @@ async def _process_chunk(
             coalescer.flush_all()
             emit_event(
                 state, "browser_step",
-                thought=data.get("thought"),
-                actions=data.get("actions"),
+                url=data.get("url"),
+                phase=data.get("phase", "start"),
                 source=source,
             )
         elif event_type in ("worker_start", "worker_step", "worker_token", "worker_done"):

@@ -11,6 +11,7 @@ from .mutations.approval import ApprovalMutation
 from .mutations.artifact import ArtifactMutation
 from .mutations.automation import AutomationMutation
 from .mutations.board_task import BoardTaskMutation
+from .mutations.browser import BrowserMutation
 from .mutations.conversation import ConversationMutation
 from .mutations.maintenance import MaintenanceMutation
 from .mutations.mcp import McpMutation
@@ -54,7 +55,7 @@ Mutation = merge_types("Mutation", (
     MemoryMutation, ConversationMutation, ArtifactMutation,
     AutomationMutation, BoardTaskMutation, WorkflowMutation,
     NotificationMutation, ProjectMutation, SkillMutation, TaskRunMutation,
-    McpMutation, ModelsMutation, ApprovalMutation, ToolMutation,
+    McpMutation, ModelsMutation, ApprovalMutation, ToolMutation, BrowserMutation,
     SettingMutation, MaintenanceMutation,
 ))
 Subscription = merge_types("Subscription", (

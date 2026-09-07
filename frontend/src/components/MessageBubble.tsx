@@ -59,8 +59,9 @@ import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep, getStepPreview} from '../lib/steps';
 import {messageAnchorId} from '../lib/thread';
 import type {ArtifactCard, Message, Step} from '../lib/types';
+import {GlobeIcon} from './icons';
 import {MessageArtifacts} from './MessageArtifacts';
-import {actions, bubble, debug, media, safety, working} from './MessageBubble.styles';
+import {actions, browseChip, bubble, debug, media, safety, working} from './MessageBubble.styles';
 import {chipBtn, prose, stream, ThinkingDots, turn} from './ui';
 import {WorkerPanel} from './WorkerPanel';
 
@@ -360,6 +361,9 @@ interface StreamingBubbleProps {
   artifacts?: ArtifactCard[];
   onOpenArtifact?: (id: string) => void;
   openArtifactId?: string | null;
+  /** Host of the page the agent is on, when a browse is in flight. */
+  browsingHost?: string | null;
+  onOpenBrowser?: () => void;
 }
 
 export function StreamingBubble({
@@ -371,6 +375,8 @@ export function StreamingBubble({
   artifacts,
   onOpenArtifact,
   openArtifactId,
+  browsingHost,
+  onOpenBrowser,
 }: StreamingBubbleProps) {
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
@@ -402,6 +408,20 @@ export function StreamingBubble({
     </button>
   );
 
+  // Only while a browse is actually in flight: the chip is an invitation to
+  // watch something happen, and offering it after the fact would open a panel
+  // showing whatever page the browser drifted to since.
+  const browsingButton = browsingHost && (
+    <button
+      {...stylex.props(chipBtn.base, browseChip.live)}
+      onClick={onOpenBrowser}
+      title={`Watch the browser — ${browsingHost}`}
+    >
+      <GlobeIcon size={11} />
+      Browsing {browsingHost}
+    </button>
+  );
+
   return (
     <div {...stylex.props(turn.base)}>
       {workers && workers.length > 0 && <WorkerPanel workers={workers} />}
@@ -429,8 +449,11 @@ export function StreamingBubble({
           ) : (
             preview && <div {...stylex.props(working.preview)}>{preview}</div>
           )}
-          {/* Section 3: step count */}
-          {stepsButton}
+          {/* Section 3: step count, and the live browser invitation */}
+          <span {...stylex.props(browseChip.row)}>
+            {stepsButton}
+            {browsingButton}
+          </span>
         </div>
       )}
       {/* Artifacts land mid-run, so they show as soon as the tool returns
@@ -443,7 +466,12 @@ export function StreamingBubble({
         />
       )}
       {/* After text starts streaming, still show step count */}
-      {text && stepsButton}
+      {text && (
+        <span {...stylex.props(browseChip.row)}>
+          {stepsButton}
+          {browsingButton}
+        </span>
+      )}
     </div>
   );
 }
