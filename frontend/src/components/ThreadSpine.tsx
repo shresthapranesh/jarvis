@@ -24,6 +24,10 @@ interface Props {
   budget?: Budget | null;
   /** Opens the full ActivitySidebar — the footer's job, not a dot's. */
   onExpand: () => void;
+  /** Reopens the browser panel. Set only once this conversation has browsed.
+   *  The rail carries it because the browser outlives the turn that opened it
+   *  — closing the panel must not strand you with no way back. */
+  onOpenBrowser?: () => void;
   /** Scrolls the thread to a turn. Owned by the route: it holds the scroller
    *  and the pin-to-bottom flag a jump has to release. */
   onJump: (messageId: string) => void;
@@ -58,6 +62,7 @@ export function ThreadSpine({
   isLive = false,
   budget,
   onExpand,
+  onOpenBrowser,
   onJump,
 }: Props) {
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -252,6 +257,11 @@ export function ThreadSpine({
         <button {...stylex.props(foot.expand)} onClick={onExpand}>
           Open details
         </button>
+        {onOpenBrowser && (
+          <button {...stylex.props(foot.expand)} onClick={onOpenBrowser} title="Watch the browser">
+            Browser
+          </button>
+        )}
       </footer>
     </aside>
   );

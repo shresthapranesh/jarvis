@@ -361,8 +361,8 @@ interface StreamingBubbleProps {
   artifacts?: ArtifactCard[];
   onOpenArtifact?: (id: string) => void;
   openArtifactId?: string | null;
-  /** Host of the page the agent is on, when a browse is in flight. */
-  browsingHost?: string | null;
+  /** The browser this turn touched, and whether a read is in flight now. */
+  browsing?: {host: string; live: boolean} | null;
   onOpenBrowser?: () => void;
 }
 
@@ -375,7 +375,7 @@ export function StreamingBubble({
   artifacts,
   onOpenArtifact,
   openArtifactId,
-  browsingHost,
+  browsing,
   onOpenBrowser,
 }: StreamingBubbleProps) {
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
@@ -408,17 +408,17 @@ export function StreamingBubble({
     </button>
   );
 
-  // Only while a browse is actually in flight: the chip is an invitation to
-  // watch something happen, and offering it after the fact would open a panel
-  // showing whatever page the browser drifted to since.
-  const browsingButton = browsingHost && (
+  // Present for the rest of the turn once the agent has browsed — the panel
+  // shows the live browser, which outlives any single read, so there is no
+  // reason to withdraw the way in the moment a read finishes.
+  const browsingButton = browsing && (
     <button
-      {...stylex.props(chipBtn.base, browseChip.live)}
+      {...stylex.props(chipBtn.base, browsing.live && browseChip.live)}
       onClick={onOpenBrowser}
-      title={`Watch the browser — ${browsingHost}`}
+      title={`Watch the browser — ${browsing.host}`}
     >
       <GlobeIcon size={11} />
-      Browsing {browsingHost}
+      {browsing.live ? `Browsing ${browsing.host}` : `Browser · ${browsing.host}`}
     </button>
   );
 

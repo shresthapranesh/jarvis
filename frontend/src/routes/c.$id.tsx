@@ -105,18 +105,21 @@ function ConversationPage() {
     browserSteps,
   } = useTaskEvents(streamTaskId, id) as any;
 
-  // The chip shows only while a browse is open — the last announcement wins,
-  // and `done`/`error` closes it. Anything else would invite you to watch a
-  // browser that has already moved on to some other page.
-  const browsingHost = useMemo(() => {
+  // The chip stays for the whole turn once the agent has browsed at all; only
+  // the pulse is tied to a browse being in flight. Gating the chip itself on
+  // `phase === 'start'` meant it vanished a second or two after you clicked it
+  // — a read finishes fast — taking the only way back into the panel with it.
+  const browsing = useMemo(() => {
     const list = browserSteps as {url: string; phase: string}[] | undefined;
     const last = list && list.length > 0 ? list[list.length - 1] : null;
-    if (!last || last.phase !== 'start') return null;
+    if (!last) return null;
+    let host: string;
     try {
-      return new URL(last.url).host;
+      host = new URL(last.url).host;
     } catch {
-      return last.url.slice(0, 40);
+      host = last.url.slice(0, 40);
     }
+    return {host, live: last.phase === 'start'};
   }, [browserSteps]);
 
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
@@ -557,7 +560,7 @@ function ConversationPage() {
         containerRef={containerRef}
         isLoadingOlder={isLoadingPrevious}
         onShowSteps={handleShowSteps}
-        browsingHost={browsingHost}
+        browsing={browsing}
         onOpenBrowser={() => setBrowserPanelOpen(true)}
         artifactsByMessage={artifactsByMessage}
         streamingArtifacts={isActive ? streamingArtifacts : undefined}
@@ -577,6 +580,7 @@ function ConversationPage() {
           isLive={isActive}
           budget={liveBudget}
           onExpand={() => handleShowSteps(spineSteps)}
+          onOpenBrowser={browsing ? () => setBrowserPanelOpen(true) : undefined}
           onJump={jumpToMessage}
         />
       )}
