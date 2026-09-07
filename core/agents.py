@@ -78,6 +78,7 @@ _SEGMENT_STABILITY: dict[str, int] = {
     "project_instructions": 3,  # user-owned, edited rarely
     "skills": 4,                # re-ranked per turn, stable within one turn
     "mcp_servers": 5,           # lazy MCP catalog; changes only on config edit
+    "browser": 6,               # environment fact; flips only when a browser starts/stops
 }
 _SEGMENT_STABILITY_DEFAULT = 50  # unknown names sort after all known ones
 
@@ -400,6 +401,73 @@ def _mcp_volatile_parts() -> list[CacheSegment]:
     ]
 
 
+# Probing CDP is a sub-millisecond local request, but `browser.cdp_url` may be
+# a remote host with a one-second timeout, and this runs inside the per-turn
+# retrieval path. Cached so a run of many turns pays it at most once a minute.
+_BROWSER_PROBE_TTL = 60.0
+_browser_probe: tuple[float, bool] = (0.0, False)
+
+
+def _browser_reachable() -> bool:
+    global _browser_probe
+    checked_at, was_up = _browser_probe
+    now = time.monotonic()
+    if now - checked_at < _BROWSER_PROBE_TTL:
+        return was_up
+    try:
+        from tools.browser import _endpoint_live, cdp_url
+
+        up = _endpoint_live(cdp_url())
+    except Exception as exc:
+        logger.debug("browser probe failed: %s", exc)
+        up = False
+    _browser_probe = (now, up)
+    return up
+
+
+def _browser_volatile_parts() -> list[CacheSegment]:
+    """Tell the agent a real browser is attached, when one actually is.
+
+    Same problem `_mcp_volatile_parts` solves, and the same answer: the
+    capability is reachable but nothing in the prompt reveals it, and the agent
+    cannot ask for what it has never heard of. `read()` alone leaves it
+    believing the ladder stops at headless Chromium, so a page that blocks
+    automation is a dead end — and an agent improvising with Playwright writes
+    `chromium.launch()`, re-creating the blocked headless rung while a
+    logged-in browser sits idle on the CDP port.
+
+    Conditional rather than a line in the system prompt, because a prompt line
+    is billed on every call of every run forever, including the majority that
+    never touch the web. This costs nothing when no browser is up, and when it
+    does appear it states a *fact* — one is running right now — which is a
+    stronger instruction than "you could".
+    """
+    if not _browser_reachable():
+        return []
+    return [
+        CacheSegment(
+            name="browser",
+            content=(
+                "## Live browser\n\n"
+                "A real Chromium with a persistent, logged-in profile is running and "
+                "attached over CDP. It is the way past sites that block automation, and "
+                "the only way to click, scroll, or fill a form.\n\n"
+                "- `read(url, browser=True)` — one-shot read of a page through it.\n"
+                "- Drive it from run_cell for anything interactive:\n"
+                "  ```python\n"
+                "  from tools.browser import page\n"
+                "  with page() as tab:      # full Playwright API\n"
+                "      tab.goto(url); tab.click(\"text=Next\"); tab.mouse.wheel(0, 800)\n"
+                "  ```\n"
+                "  The tab persists between cells and turns — reopen `page()` and it is "
+                "still where you left it, logged in. Never `chromium.launch()`: that "
+                "starts a fresh headless browser with no profile, which is what gets "
+                "blocked in the first place."
+            ),
+        )
+    ]
+
+
 async def _project_volatile_parts(project_id: str | None) -> list[CacheSegment]:
     """Project header, instructions, and shared memory as tagged cache segments.
 
@@ -497,7 +565,7 @@ async def _compute_retrieval(store, query: str) -> list[CacheSegment]:
             )
         except Exception:
             pass
-        return mem_parts + skill_parts + _mcp_volatile_parts()
+        return mem_parts + skill_parts + _mcp_volatile_parts() + _browser_volatile_parts()
     except Exception as exc:
         # Never let a cached failed task poison every iteration of the turn —
         # degrade to no retrieved context, matching the per-part fallbacks.

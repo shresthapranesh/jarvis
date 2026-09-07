@@ -231,3 +231,71 @@ async def test_available_never_launches_a_browser(database, monkeypatch):
     monkeypatch.setattr(browser, "_endpoint_live", lambda url: False)
     monkeypatch.setattr(browser, "launch", lambda: pytest.fail("probe launched a browser"))
     await _available()
+
+
+# ── Telling the agent the browser exists ─────────────────────────────────────
+#
+# The capability was reachable but invisible: nothing in the prompt mentioned
+# it, and an agent improvising with Playwright writes chromium.launch(), which
+# rebuilds the blocked headless rung instead of using the logged-in browser.
+
+def _clear_probe_cache():
+    from core import agents
+
+    agents._browser_probe = (0.0, False)
+
+
+def test_no_segment_when_no_browser_is_running(monkeypatch):
+    """A prompt line would be billed on every run; this costs nothing."""
+    from core import agents
+
+    _clear_probe_cache()
+    monkeypatch.setattr(browser, "_endpoint_live", lambda url: False)
+    assert agents._browser_volatile_parts() == []
+
+
+def test_segment_appears_when_a_browser_is_running(monkeypatch):
+    from core import agents
+
+    _clear_probe_cache()
+    monkeypatch.setattr(browser, "_endpoint_live", lambda url: True)
+    parts = agents._browser_volatile_parts()
+    assert len(parts) == 1
+    assert parts[0].name == "browser"
+    body = parts[0].content
+    assert "from tools.browser import page" in body
+    assert "browser=True" in body
+    # The specific wrong turn it exists to prevent.
+    assert "chromium.launch()" in body
+
+
+def test_segment_has_a_stability_rank(monkeypatch):
+    """Unranked segments sort last among cached blocks and churn the prefix."""
+    from core.agents import _SEGMENT_STABILITY
+
+    assert "browser" in _SEGMENT_STABILITY
+
+
+def test_probe_is_cached_not_run_per_iteration(monkeypatch):
+    """It sits in the per-turn retrieval path, and cdp_url may be remote."""
+    from core import agents
+
+    _clear_probe_cache()
+    calls = []
+    monkeypatch.setattr(browser, "_endpoint_live", lambda url: calls.append(url) or True)
+    for _ in range(5):
+        agents._browser_volatile_parts()
+    assert len(calls) == 1
+
+
+def test_probe_failure_is_not_fatal(monkeypatch):
+    """It runs on every turn; a raise here would break the whole run."""
+    from core import agents
+
+    _clear_probe_cache()
+
+    def _boom(url):
+        raise RuntimeError("bad cdp_url")
+
+    monkeypatch.setattr(browser, "_endpoint_live", _boom)
+    assert agents._browser_volatile_parts() == []

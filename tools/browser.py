@@ -206,13 +206,20 @@ def _ensure_page(url: str) -> None:
     base = url.rstrip("/")
     try:
         targets = httpx.get(f"{base}/json/list", timeout=_PROBE_TIMEOUT).json()
-        if any(t.get("type") == "page" for t in targets):
+        # Shape-checked, not trusted: `browser.cdp_url` can point at anything —
+        # a proxy, a different tool, an error page that happens to serve JSON —
+        # and an unchecked `t.get` there raises AttributeError from inside the
+        # path that is supposed to be degrading gracefully.
+        if not isinstance(targets, list):
+            logger.debug("browser: /json/list returned %s, not a list", type(targets).__name__)
+            return
+        if any(isinstance(t, dict) and t.get("type") == "page" for t in targets):
             return
         # PUT, not GET: Chromium made /json/new PUT-only to stop a stray page
         # navigation from opening tabs in someone's browser.
         httpx.put(f"{base}/json/new?about:blank", timeout=_PROBE_TIMEOUT)
         logger.info("browser: no page target, opened a blank tab")
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
         logger.debug("browser: could not ensure a page target: %s", exc)
 
 

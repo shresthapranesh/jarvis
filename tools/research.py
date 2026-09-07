@@ -30,6 +30,9 @@ _UA = (
 # Below this many extracted chars, assume the page needed JS and try Playwright.
 _JS_FALLBACK_THRESHOLD = 400
 
+# Per-rung failure text kept in the message the agent reads.
+_ERROR_CAP = 160
+
 
 def _search_tavily(query: str, max_results: int, api_key: str) -> list[dict]:
     r = httpx.post(
@@ -96,6 +99,17 @@ def search(query: str, max_results: int = 8) -> list[dict]:
     raise RuntimeError("all search providers failed — " + "; ".join(errors))
 
 
+def _rung_error(rung: str, exc: Exception) -> str:
+    """One line per failed rung. Capped, because these land in the agent's context.
+
+    Playwright in particular answers a missing binary with a multi-line ASCII
+    box; uncapped, a failed read spends several hundred tokens telling the
+    agent nothing it can act on.
+    """
+    text = " ".join(str(exc).split())
+    return f"{rung}: {text[:_ERROR_CAP]}" + ("…" if len(text) > _ERROR_CAP else "")
+
+
 def _read_cdp(url: str) -> str:
     """Third rung: the persistent headed browser (tools/browser.py).
 
@@ -152,12 +166,12 @@ def read(url: str, max_chars: int = 12_000, js: bool = False, browser: bool = Fa
             r.raise_for_status()
             text = _extract(r.text, url) or ""
         except httpx.HTTPError as exc:
-            errors.append(f"http: {exc}")  # fall through to the browser path
+            errors.append(_rung_error("http", exc))  # fall through to the browser path
     if not browser and len(text) < _JS_FALLBACK_THRESHOLD:
         try:
             browser_text = _read_playwright(url)
         except Exception as exc:
-            errors.append(f"headless: {exc}")
+            errors.append(_rung_error("headless", exc))
             logger.info("read(%s): headless rung failed: %s", url, exc)
             browser_text = ""
         if len(browser_text) > len(text):
@@ -171,14 +185,25 @@ def read(url: str, max_chars: int = 12_000, js: bool = False, browser: bool = Fa
         except Exception as exc:
             if browser and not text:
                 return f"Failed to read {url!r} in the browser: {exc}"
-            errors.append(f"browser: {exc}")
+            errors.append(_rung_error("browser", exc))
             logger.info("read(%s): browser rung unavailable: %s", url, exc)
             real_text = ""
         if len(real_text) > len(text):
             text = real_text
     if not text:
         detail = f" ({'; '.join(errors)})" if errors else ""
-        return f"No readable text extracted from {url!r}.{detail}"
+        # Teach the next move here rather than in the system prompt. This is
+        # the exact moment it is needed, and it costs nothing on the runs that
+        # never fail — where a standing prompt line would be billed anyway.
+        # It matters most when NO browser is running: the "Live browser"
+        # segment is absent then, so this is the only mention, and both paths
+        # below will start one on demand.
+        hint = (
+            " If the site blocks automation, retry with read(url, browser=True) to go "
+            "through a real logged-in browser, or drive the page yourself: "
+            "`from tools.browser import page`."
+        ) if not browser else ""
+        return f"No readable text extracted from {url!r}.{detail}{hint}"
     if len(text) > max_chars:
         text = text[:max_chars] + f"\n... [truncated {len(text) - max_chars} chars — call read(url, max_chars=...) for more]"
     return text

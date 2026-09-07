@@ -1,27 +1,23 @@
-from tools.code import run_cell
-from tools.datetime import get_current_datetime
-from tools.files import list_files, read_file, write_file
-from tools.finance import (
-    compare_stocks,
-    get_earnings,
-    get_historical_prices,
-    get_stock_data,
-    get_ticker_news,
-)
-from tools.web import extract_links, fetch_page, web_search
+"""Agent tools. Import the module you need — this package imports nothing.
 
-TOOLS = [
-    get_current_datetime,
-    run_cell,
-    web_search,
-    fetch_page,
-    extract_links,
-    get_stock_data,
-    get_historical_prices,
-    get_earnings,
-    compare_stocks,
-    get_ticker_news,
-    write_file,
-    read_file,
-    list_files,
-]
+It used to export a flat `TOOLS` list, from back when one registry was how the
+agent got its toolset. Nothing has read it since `core/agents.py` started
+composing per-role tool lists by importing each module directly, but it stayed
+and kept eagerly importing `tools.code` (and through it LangChain/LangGraph),
+`tools.finance` (yfinance) and the old `tools.web` — ~380ms and a large chunk
+of the dependency tree, paid by **every** process that touched any tool module.
+The kernel pays it at boot for `from tools.research import search, read`, where
+none of it is wanted.
+
+The layout, so the split stays deliberate:
+
+* `research.py` — the **web**: `search()` for leads, `read()` for a page's
+  text. Owns the fetch-and-extract ladder (httpx → headless Chromium →
+  the real browser below) and knows nothing about driving a session.
+* `browser.py` — the **browser**: one persistent, logged-in Chromium reached
+  over CDP. Owns finding/launching it, the dedicated profile, the tab, and the
+  challenge→human handoff. Knows nothing about extracting text.
+
+`research.py` depends on `browser.py`; never the reverse. Anything that reads
+*content* belongs in the first, anything that drives a *session* in the second.
+"""

@@ -137,7 +137,6 @@ jarvis/
 │   │                     #   (core/kernels.py), not bound tools
 │   ├── browser.py        # persistent headed Chromium over CDP — read()'s last rung. Attach/launch,
 │   │                     #   dedicated profile, challenge→human handoff. See "Web reading rungs".
-│   ├── web.py            # [unbound] web_search (ddgs), fetch_page, extract_links, playwright_browse
 │   ├── finance.py        # [unbound] get_stock_data, get_historical_prices, compare_stocks, …
 │   └── datetime.py       # [unbound] get_current_datetime
 └── frontend/             # React 19 + TanStack Router + Relay + Vite + TypeScript
@@ -397,6 +396,11 @@ this section makes, applied to third-party tools nobody here wrote the schemas f
 
 **Adding to the SDK:** define the function in `tools/sdk.py`, then register it in `_CATEGORIES` — `help()` renders signatures from `inspect.signature` + the docstring, so the docstring is the only documentation and costs zero tokens until discovered. If it needs a server-side side effect, add/route through a GraphQL mutation rather than writing the DB directly.
 
+### Web vs browser — the split
+`tools/research.py` is the **web**: `search()` for leads, `read()` for a page's text, and the fetch-and-extract ladder below. `tools/browser.py` is the **browser**: one persistent logged-in Chromium reached over CDP — finding or launching it, the dedicated profile, the tab, the challenge handoff. research depends on browser; never the reverse. Content goes in the first, session control in the second.
+
+`tools/web.py` is **gone** — `web_search`/`fetch_page`/`extract_links`/`playwright_browse` were untouched since the initial commit and each was a strictly worse duplicate of `research.py` (ddgs-only search, no trafilatura, a third Playwright call site). It survived only because `tools/__init__.py` still exported the flat `TOOLS` list nothing has read since `core/agents.py` began composing per-role lists by importing modules directly. That registry's eager imports cost **~380ms and pulled LangChain + yfinance into every process touching any tool module** — paid by every kernel at boot for `from tools.research import search, read`. The package now imports nothing: 388ms → 25ms.
+
 ### Web reading rungs (`tools/research.py` → `tools/browser.py`)
 `read(url)` climbs three rungs and stops at the first that returns real text: an httpx fetch + trafilatura, then headless Chromium (`js=True` forces it), then a **persistent headed browser** attached over CDP (`browser=True` goes straight there). The third rung exists for sites that turn automation away — the block is usually the headless fingerprint, a blank profile with no history, and a superhuman request rate, not the automation itself, so a real browser with a real profile is the fix rather than a disguise.
 
@@ -424,6 +428,10 @@ Three things learned by running it, each now a test:
 - **`_Subscriber` must be `@dataclass(eq=False)`.** The generated `__eq__` sets `__hash__ = None`, and it lives in a set — every connection failed on `subscribers.add`.
 - **A browser with no page target is unattachable.** Closing the last window doesn't quit Chromium; the port stays open with zero page targets and `connect_over_cdp` fails with *"Browser context management is not supported"*, which says nothing about pages. `tools/browser.py:_ensure_page` opens a blank tab over `PUT /json/new` first (PUT, not GET — Chromium made it so a stray navigation can't open tabs).
 - **Screencast only emits on paint.** Attaching to a page sitting still yields *nothing*, so the panel would wait on a first frame forever while everything worked. `_prime()` takes a one-shot `Page.captureScreenshot` on attach.
+
+**The agent is told the browser exists, but only when it does.** `_browser_volatile_parts()` (`core/agents.py`) injects a `## Live browser` cache segment naming `read(url, browser=True)` and `from tools.browser import page`, and returns `[]` when no CDP browser answers — the same trade `_mcp_volatile_parts` makes, for the same reason its docstring gives: the agent cannot ask for a capability it has never heard of. Conditional rather than a system-prompt line, because a prompt line is billed on every call of every run including the majority that never touch the web, and because when it does appear it states a *fact* ("one is running now"), which instructs better than "you could". It explicitly forbids `chromium.launch()`: an agent improvising with Playwright reaches for that by default and rebuilds the blocked headless rung while the logged-in browser sits idle. Segment name `browser`, ranked in `_SEGMENT_STABILITY`; the CDP probe is cached for 60s since `browser.cdp_url` may be a remote host and this sits in the per-turn retrieval path.
+
+The complement is `read()`'s failure string, which names both escapes when every rung came back empty. That path matters most when **no** browser is running — the segment is absent then, so it is the only mention, and both suggestions launch one on demand. Per-rung error text is capped at 160 chars: Playwright answers a missing binary with a multi-line ASCII box that would otherwise spend hundreds of tokens saying nothing actionable.
 
 **The way into the panel is a server query, not a derived value.** `browserAvailable` (`queries/browser.py`) probes the CDP endpoint; the spine's Browser button follows it. Deriving it from `browser_step` events instead cost two rounds of the same bug: the events belong to a run, and `useTaskEvents` wipes its state on every new task id — so the button vanished when a read finished, and again when the next message started a turn. The **chip** stays event-derived, which is right: it is the notification that a read is happening now, not the way in.
 

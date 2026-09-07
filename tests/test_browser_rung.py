@@ -143,3 +143,46 @@ def test_every_rung_failing_reports_what_broke(monkeypatch):
     out = research.read("https://example.com")
     assert "No readable text" in out
     assert "connection refused" in out and "no display available" in out
+
+
+# ── Failure messages the agent has to act on ─────────────────────────────────
+
+def test_failed_read_names_the_way_past_a_block(monkeypatch):
+    """The only mention of the browser when none is running — the "Live
+    browser" segment is absent then, and both suggestions launch one."""
+
+    def _fail(*a, **k):
+        raise research.httpx.ConnectError("refused")
+
+    monkeypatch.setattr(research.httpx, "get", _fail)
+    monkeypatch.setattr(research, "_read_playwright", lambda url: "")
+    monkeypatch.setattr(research, "_read_cdp", lambda url: "")
+    out = research.read("https://example.com")
+    assert "browser=True" in out
+    assert "from tools.browser import page" in out
+
+
+def test_an_explicit_browser_read_does_not_suggest_itself(monkeypatch):
+    monkeypatch.setattr(research, "_read_cdp", lambda url: "")
+    out = research.read("https://example.com", browser=True)
+    assert "browser=True" not in out
+
+
+def test_rung_errors_are_capped(monkeypatch):
+    """Playwright answers a missing binary with a multi-line ASCII box; uncapped
+    it spends hundreds of tokens telling the agent nothing actionable."""
+
+    def _fail(*a, **k):
+        raise research.httpx.ConnectError("x" * 4000)
+
+    monkeypatch.setattr(research.httpx, "get", _fail)
+    monkeypatch.setattr(research, "_read_playwright", lambda url: "")
+    monkeypatch.setattr(research, "_read_cdp", lambda url: "")
+    out = research.read("https://example.com")
+    assert len(out) < 800
+    assert "…" in out
+
+
+def test_rung_errors_are_flattened_to_one_line():
+    exc = RuntimeError("line one\n  line two\n  line three")
+    assert "\n" not in research._rung_error("headless", exc)
