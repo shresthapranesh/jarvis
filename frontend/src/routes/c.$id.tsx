@@ -20,6 +20,7 @@ import {MessageThread} from '../components/MessageThread';
 import {ThreadSpine} from '../components/ThreadSpine';
 import {page} from '../components/ui';
 import {refreshRunningTasks} from '../hooks/useRunningTasks';
+import {useBrowserAvailable} from '../hooks/useBrowserAvailable';
 import {useTaskEvents} from '../hooks/useTaskEvents';
 import {messageAnchorId} from '../lib/thread';
 import type {
@@ -105,10 +106,9 @@ function ConversationPage() {
     browserSteps,
   } = useTaskEvents(streamTaskId, id) as any;
 
-  // The chip stays for the whole turn once the agent has browsed at all; only
-  // the pulse is tied to a browse being in flight. Gating the chip itself on
-  // `phase === 'start'` meant it vanished a second or two after you clicked it
-  // — a read finishes fast — taking the only way back into the panel with it.
+  // The chip is the *notification* — "a read is happening, want to look?" — so
+  // it is legitimately scoped to the run that produced it. The way back into
+  // the panel is not: see `browserAvailable` below.
   const browsing = useMemo(() => {
     const list = browserSteps as {url: string; phase: string}[] | undefined;
     const last = list && list.length > 0 ? list[list.length - 1] : null;
@@ -121,6 +121,13 @@ function ConversationPage() {
     }
     return {host, live: last.phase === 'start'};
   }, [browserSteps]);
+
+  // Asked of the server, not derived from `browserSteps`. useTaskEvents wipes
+  // its state on every new task id, so anything derived from it disappears the
+  // moment you send the next message — which is exactly how the panel became
+  // unreachable twice. A browse announcement re-checks, since that is when a
+  // browser can appear mid-session.
+  const browserAvailable = useBrowserAvailable(browsing ? browsing.host : null);
 
   const [pendingUser, setPendingUser] = useState<Message | null>(null);
 
@@ -580,7 +587,7 @@ function ConversationPage() {
           isLive={isActive}
           budget={liveBudget}
           onExpand={() => handleShowSteps(spineSteps)}
-          onOpenBrowser={browsing ? () => setBrowserPanelOpen(true) : undefined}
+          onOpenBrowser={browserAvailable ? () => setBrowserPanelOpen(true) : undefined}
           onJump={jumpToMessage}
         />
       )}

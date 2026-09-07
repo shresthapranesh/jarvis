@@ -28,6 +28,7 @@ from .queries.approval import ApprovalQuery
 from .queries.artifact import ArtifactQuery
 from .queries.automation import AutomationQuery
 from .queries.board_task import BoardTaskQuery
+from .queries.browser import BrowserQuery
 from .queries.conversation import ConversationQuery
 from .queries.maintenance import MaintenanceQuery
 from .queries.mcp import McpQuery
@@ -49,7 +50,7 @@ Query = merge_types("Query", (
     ModelsQuery, MemoryQuery, ConversationQuery, ArtifactQuery,
     AutomationQuery, BoardTaskQuery, WorkflowQuery, NotificationQuery,
     ProjectQuery, SkillQuery, TaskRunQuery, McpQuery, ApprovalQuery,
-    ToolQuery, SettingQuery, MaintenanceQuery,
+    ToolQuery, BrowserQuery, SettingQuery, MaintenanceQuery,
 ))
 Mutation = merge_types("Mutation", (
     MemoryMutation, ConversationMutation, ArtifactMutation,

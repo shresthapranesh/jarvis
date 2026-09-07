@@ -412,7 +412,7 @@ Config: `browser.cdp_url` / `browser.executable` / `browser.profile_dir` (Settin
 
 
 ### Watching the browser (`core/browser_stream.py` → `/ws/browser`)
-The video counterpart to the reading rungs: a live view of the browser `read(url, browser=True)` drives, opened from a **"Browsing <host>"** chip under the streaming message and rendered in a resizable right panel (`components/BrowserPanel.tsx`).
+The video counterpart to the reading rungs: a live view of the browser `read(url, browser=True)` drives, rendered in a resizable right panel (`components/BrowserPanel.tsx`).
 
 **The frames come from CDP, not a capture stack.** `Page.startScreencast` is what Chrome already does for DevTools' device mode, so the browser encodes the JPEGs and nothing here touches a screen. The server opens its **own** CDP client — CDP accepts concurrent clients, so the kernel's sync connection is undisturbed, and frames keep flowing between reads rather than only inside `fetch()`.
 
@@ -424,6 +424,10 @@ Three things learned by running it, each now a test:
 - **`_Subscriber` must be `@dataclass(eq=False)`.** The generated `__eq__` sets `__hash__ = None`, and it lives in a set — every connection failed on `subscribers.add`.
 - **A browser with no page target is unattachable.** Closing the last window doesn't quit Chromium; the port stays open with zero page targets and `connect_over_cdp` fails with *"Browser context management is not supported"*, which says nothing about pages. `tools/browser.py:_ensure_page` opens a blank tab over `PUT /json/new` first (PUT, not GET — Chromium made it so a stray navigation can't open tabs).
 - **Screencast only emits on paint.** Attaching to a page sitting still yields *nothing*, so the panel would wait on a first frame forever while everything worked. `_prime()` takes a one-shot `Page.captureScreenshot` on attach.
+
+**The way into the panel is a server query, not a derived value.** `browserAvailable` (`queries/browser.py`) probes the CDP endpoint; the spine's Browser button follows it. Deriving it from `browser_step` events instead cost two rounds of the same bug: the events belong to a run, and `useTaskEvents` wipes its state on every new task id — so the button vanished when a read finished, and again when the next message started a turn. The **chip** stays event-derived, which is right: it is the notification that a read is happening now, not the way in.
+
+**The way into the panel is a server query, not a derived value.** `browserAvailable` (`queries/browser.py`) probes the CDP endpoint; the spine's Browser button follows it. Deriving it from `browser_step` events instead cost two rounds of the same bug: the events belong to a run, and `useTaskEvents` wipes its state on every new task id — so the button vanished when a read finished, and again when the next message started a turn. The **chip** stays event-derived, which is right: it is the notification that a read is happening now, not the way in.
 
 `browser.close()` on a CDP-attached browser disconnects rather than quits — verified, and the persistent-profile design depends on it.
 

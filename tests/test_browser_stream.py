@@ -182,3 +182,52 @@ async def test_announce_lands_on_the_conversations_live_run(database):
         assert payload["phase"] == "start"
     finally:
         _tasks.pop("task-browsing", None)
+
+
+# ── Availability ─────────────────────────────────────────────────────────────
+#
+# The UI asks this instead of deriving "can I open the panel" from browser_step
+# events, which vanish when a run ends and again when the next message resets
+# the stream state.
+
+AVAILABLE = "{ browserAvailable }"
+
+
+async def _available():
+    from db import async_session
+    from server.graphql.schema import schema
+
+    async with async_session() as s:
+        return await schema.execute(AVAILABLE, context_value=_context(s, "human"))
+
+
+async def test_available_is_true_when_a_browser_answers(database, monkeypatch):
+    monkeypatch.setattr(browser, "_endpoint_live", lambda url: True)
+    result = await _available()
+    assert not result.errors, result.errors
+    assert result.data == {"browserAvailable": True}
+
+
+async def test_available_is_false_when_nothing_is_listening(database, monkeypatch):
+    monkeypatch.setattr(browser, "_endpoint_live", lambda url: False)
+    result = await _available()
+    assert result.data == {"browserAvailable": False}
+
+
+async def test_available_fails_soft_rather_than_erroring(database, monkeypatch):
+    """It decides whether to render a button; a raise would blank the page."""
+
+    def _boom(url):
+        raise RuntimeError("no config")
+
+    monkeypatch.setattr(browser, "_endpoint_live", _boom)
+    result = await _available()
+    assert not result.errors
+    assert result.data == {"browserAvailable": False}
+
+
+async def test_available_never_launches_a_browser(database, monkeypatch):
+    """A page load must not be what opens a window on someone's screen."""
+    monkeypatch.setattr(browser, "_endpoint_live", lambda url: False)
+    monkeypatch.setattr(browser, "launch", lambda: pytest.fail("probe launched a browser"))
+    await _available()

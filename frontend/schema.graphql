@@ -591,6 +591,7 @@ type Query {
   mcpTools(server: String = null): [McpTool!]!
   pendingApprovals: [PendingApproval!]!
   tools: [AgentTool!]!
+  browserAvailable: Boolean!
   settings: [Setting!]!
   setting(key: String!): Setting!
   checkpointStats: CheckpointStats!
