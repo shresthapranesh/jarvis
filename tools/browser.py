@@ -1,11 +1,14 @@
-"""A real, persistent Chromium the agent can borrow — the rung above headless.
+"""A real, persistent Chromium the agent can borrow — the only browser rung.
 
-`tools/research.py:read()` climbs three rungs: a plain httpx fetch, then
-headless Chromium, then this one. The first two lose to sites that gate on a
-headless fingerprint, a blank profile with no history, or an interstitial
-challenge — not because the request is automated, but because it looks nothing
-like a person's browser. This rung is a browser started the way a person
-starts one: headed, with a profile that keeps its cookies between runs.
+`tools/research.py:read()` climbs two rungs: a plain httpx fetch, then this.
+There used to be a headless Chromium in between; it was removed because it
+answered the same question worse. A page that a plain fetch cannot read is
+either client-side rendered or refusing automation, and headless handles the
+first while being the *cause* of the second — a blank profile with no history
+and a fingerprint that says bot. This rung is a browser started the way a
+person starts one: headed, with a profile that keeps its cookies between runs,
+which answers both cases at once. Dropping it also means Playwright needs no
+downloaded browsers at all: `connect_over_cdp` speaks to one you already have.
 
 **The browser is owned by neither process.** `read()` runs in a kernel
 (`core/kernels.py`), while the approval gate and the event stream live in the
@@ -53,7 +56,7 @@ DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 _PROBE_TIMEOUT = 1.0        # per liveness poll against /json/version
 _LAUNCH_TIMEOUT = 25.0      # how long a cold browser gets to open its port
 _PAGE_TIMEOUT = 30_000      # ms, per navigation
-_SETTLE_MS = 1_500          # give client-side rendering a beat, as the headless rung does
+_SETTLE_MS = 1_500          # give client-side rendering a beat before reading the DOM
 _MAX_CHALLENGE_BODY = 1_500  # a real page has more text on it than an interstitial
 
 # Preference order for the launch path only. Chrome leads because it is the
@@ -171,8 +174,10 @@ def _has_display() -> bool:
     """Whether a headed browser can open a window here.
 
     macOS always can. On Linux a missing DISPLAY/WAYLAND_DISPLAY means a server
-    with no session attached, and this rung stays out of the way rather than
-    failing — the headless rung above it still works.
+    with no session attached. Since this is now the only browser rung, that
+    machine cannot render a page locally at all — point `browser.cdp_url` at a
+    browser on a machine that has a display, which is the supported remote
+    deployment.
     """
     if sys.platform == "darwin":
         return True
@@ -235,7 +240,7 @@ def launch() -> bool:
     if not exe:
         return False
     if not _has_display():
-        logger.info("browser: no display, staying on the headless rung")
+        logger.info("browser: no display; set browser.cdp_url to a remote browser")
         return False
 
     port = urlparse(url).port or 9222

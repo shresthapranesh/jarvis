@@ -1,5 +1,9 @@
 """The browser rung: resolution, challenge detection, and the escalation order.
 
+There are two rungs now — a plain fetch, then the real browser. The headless
+Chromium that used to sit between them was removed: it answered "the page is
+client-side rendered" while *being* the reason for "the site refused us".
+
 Nothing here launches a browser. What is worth pinning is the decision-making
 around it — which binary gets picked, when a page counts as a challenge, and
 that `read()` climbs to this rung only when the cheaper ones came back empty.
@@ -109,12 +113,11 @@ def test_browser_rung_is_not_reached_when_the_cheap_one_worked(monkeypatch):
     assert research.read("https://example.com").startswith("x")
 
 
-def test_browser_rung_runs_when_the_others_come_back_empty(monkeypatch):
+def test_browser_rung_runs_when_the_plain_fetch_comes_back_empty(monkeypatch):
     def _fail(*a, **k):
         raise research.httpx.ConnectError("blocked")
 
     monkeypatch.setattr(research.httpx, "get", _fail)
-    monkeypatch.setattr(research, "_read_playwright", lambda url: "")
     monkeypatch.setattr(research, "_read_cdp", lambda url: "the real article text " * 40)
     assert "the real article text" in research.read("https://example.com")
 
@@ -122,9 +125,6 @@ def test_browser_rung_runs_when_the_others_come_back_empty(monkeypatch):
 def test_browser_true_skips_straight_to_the_last_rung(monkeypatch):
     monkeypatch.setattr(
         research.httpx, "get", lambda *a, **k: pytest.fail("browser=True must not fetch over http")
-    )
-    monkeypatch.setattr(
-        research, "_read_playwright", lambda url: pytest.fail("browser=True must skip headless")
     )
     monkeypatch.setattr(research, "_read_cdp", lambda url: "from the real browser " * 40)
     assert "from the real browser" in research.read("https://example.com", browser=True)
@@ -135,7 +135,6 @@ def test_every_rung_failing_reports_what_broke(monkeypatch):
         raise research.httpx.ConnectError("connection refused")
 
     monkeypatch.setattr(research.httpx, "get", _fail)
-    monkeypatch.setattr(research, "_read_playwright", lambda url: "")
     def _no_browser(url):
         raise browser.BrowserUnavailable("no display available")
 
@@ -155,7 +154,6 @@ def test_failed_read_names_the_way_past_a_block(monkeypatch):
         raise research.httpx.ConnectError("refused")
 
     monkeypatch.setattr(research.httpx, "get", _fail)
-    monkeypatch.setattr(research, "_read_playwright", lambda url: "")
     monkeypatch.setattr(research, "_read_cdp", lambda url: "")
     out = research.read("https://example.com")
     assert "browser=True" in out
@@ -176,7 +174,6 @@ def test_rung_errors_are_capped(monkeypatch):
         raise research.httpx.ConnectError("x" * 4000)
 
     monkeypatch.setattr(research.httpx, "get", _fail)
-    monkeypatch.setattr(research, "_read_playwright", lambda url: "")
     monkeypatch.setattr(research, "_read_cdp", lambda url: "")
     out = research.read("https://example.com")
     assert len(out) < 800
@@ -186,3 +183,42 @@ def test_rung_errors_are_capped(monkeypatch):
 def test_rung_errors_are_flattened_to_one_line():
     exc = RuntimeError("line one\n  line two\n  line three")
     assert "\n" not in research._rung_error("headless", exc)
+
+
+# ── The headless rung is gone, and must stay gone ────────────────────────────
+
+def test_read_never_launches_a_browser_itself():
+    """The whole point: reads go through the persistent, logged-in browser.
+
+    A `chromium.launch()` here would reintroduce the blank profile whose
+    fingerprint is what sites refuse. Checked against the parsed module rather
+    than its text — prose about Playwright is fine, importing it is not.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(research))
+    imported = {
+        alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        for alias in node.names
+    } | {
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert "playwright" not in imported
+    attrs = {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+    }
+    assert "launch" not in attrs
+
+
+def test_js_still_forces_the_browser(monkeypatch):
+    """Older callers (and any conversation history) say js=True."""
+    monkeypatch.setattr(
+        research.httpx, "get", lambda *a, **k: pytest.fail("js=True must not fetch over http")
+    )
+    monkeypatch.setattr(research, "_read_cdp", lambda url: "rendered text " * 40)
+    assert "rendered text" in research.read("https://example.com", js=True)

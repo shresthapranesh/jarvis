@@ -40,7 +40,7 @@ Ordinary development work is fine even when it touches the network, runs shell c
 ## Common patterns
 Load once into a variable, then reuse in later cells:
   search("query")                  # preloaded → [{title, url, snippet}, ...]
-  read(url)                        # preloaded → article text, markup stripped (headless Chromium fallback; js=True to force)
+  read(url)                        # preloaded → article text, markup stripped (browser=True forces the real browser)
   import httpx, pandas as pd, numpy as np, yfinance as yf, datetime, subprocess
   Files: pathlib / open() directly — there are no separate file tools.
 

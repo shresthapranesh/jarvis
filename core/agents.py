@@ -430,11 +430,12 @@ def _browser_volatile_parts() -> list[CacheSegment]:
 
     Same problem `_mcp_volatile_parts` solves, and the same answer: the
     capability is reachable but nothing in the prompt reveals it, and the agent
-    cannot ask for what it has never heard of. `read()` alone leaves it
-    believing the ladder stops at headless Chromium, so a page that blocks
-    automation is a dead end — and an agent improvising with Playwright writes
-    `chromium.launch()`, re-creating the blocked headless rung while a
-    logged-in browser sits idle on the CDP port.
+    cannot ask for what it has never heard of. `read()`'s signature alone does
+    not say a real browser is attached or that it can be driven, so an
+    interactive page is a dead end — and an agent improvising with Playwright
+    writes `chromium.launch()`, standing up a fresh headless browser with no
+    profile (exactly what sites block) while a logged-in one sits idle on the
+    CDP port.
 
     Conditional rather than a line in the system prompt, because a prompt line
     is billed on every call of every run forever, including the majority that

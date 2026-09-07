@@ -9,8 +9,9 @@ into later cells.
 (TAVILY_API_KEY) or Brave Search (BRAVE_API_KEY), in that order — and falls
 back to DuckDuckGo scraping (ddgs) keyless, mirroring how embeddings degrade.
 `read` fetches a URL and extracts the main article text with trafilatura,
-climbing to headless Chromium for JS-rendered pages and then to a real,
-persistent browser (tools/browser.py) for the sites that turn headless away.
+escalating to the persistent real browser (tools/browser.py) when the plain
+fetch comes back empty — a refused request and a client-side-rendered page
+look the same from here, and one rung answers both.
 """
 
 from __future__ import annotations
@@ -27,8 +28,9 @@ _UA = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
-# Below this many extracted chars, assume the page needed JS and try Playwright.
-_JS_FALLBACK_THRESHOLD = 400
+# Below this many extracted chars, assume the fetch was refused or the page
+# renders client-side, and go to the real browser.
+_BROWSER_FALLBACK_THRESHOLD = 400
 
 # Per-rung failure text kept in the message the agent reads.
 _ERROR_CAP = 160
@@ -102,39 +104,24 @@ def search(query: str, max_results: int = 8) -> list[dict]:
 def _rung_error(rung: str, exc: Exception) -> str:
     """One line per failed rung. Capped, because these land in the agent's context.
 
-    Playwright in particular answers a missing binary with a multi-line ASCII
-    box; uncapped, a failed read spends several hundred tokens telling the
-    agent nothing it can act on.
+    Playwright answers a launch failure with a multi-line ASCII box; uncapped,
+    a failed read spends several hundred tokens telling the agent nothing it
+    can act on.
     """
     text = " ".join(str(exc).split())
     return f"{rung}: {text[:_ERROR_CAP]}" + ("…" if len(text) > _ERROR_CAP else "")
 
 
 def _read_cdp(url: str) -> str:
-    """Third rung: the persistent headed browser (tools/browser.py).
+    """Second rung: the persistent real browser (tools/browser.py).
 
-    Reached only when the cheaper rungs came back near-empty, because it costs
-    a real browser and possibly a human's attention — and because for the
-    ordinary page it wins nothing the httpx fetch didn't already have.
+    Reached when the plain fetch came back near-empty, because it costs a real
+    browser and possibly a human's attention — and because for the ordinary
+    page it wins nothing the httpx fetch already had.
     """
     from tools import browser as _browser
 
     return _extract(_browser.fetch(url), url) or ""
-
-
-def _read_playwright(url: str) -> str:
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        try:
-            page = browser.new_page(user_agent=_UA)
-            page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            page.wait_for_timeout(1_500)  # give client-side rendering a beat
-            html = page.content()
-        finally:
-            browser.close()
-    return _extract(html, url) or ""
 
 
 def _extract(html: str, url: str) -> str | None:
@@ -145,20 +132,19 @@ def _extract(html: str, url: str) -> str | None:
     )
 
 
-def read(url: str, max_chars: int = 12_000, js: bool = False, browser: bool = False) -> str:
+def read(url: str, max_chars: int = 12_000, browser: bool = False, js: bool = False) -> str:
     """Fetch a URL and return its main text content (markup/nav/ads stripped).
 
-    Three rungs, climbed only as far as needed: a plain HTTP fetch, then
-    headless Chromium when the page looks JS-rendered (`js=True` forces it),
-    then a real headed browser with a persistent profile when headless comes
-    back empty — which is what gets past sites that turn automation away.
-    `browser=True` goes straight to that last rung and is worth reaching for by
-    name when a site is known to block the others. Truncates to max_chars with
-    an explicit marker.
+    Two rungs: a plain HTTP fetch, then the persistent real browser when that
+    comes back empty — which is what gets past sites that refuse automation and
+    what renders a client-side page. `browser=True` (or the older `js=True`)
+    skips straight to it, worth naming when a site is known to block. Truncates
+    to max_chars with an explicit marker.
     """
+    browser = browser or js
     text = ""
     errors: list[str] = []
-    if not js and not browser:
+    if not browser:
         try:
             r = httpx.get(
                 url, follow_redirects=True, timeout=20, headers={"User-Agent": _UA}
@@ -166,20 +152,11 @@ def read(url: str, max_chars: int = 12_000, js: bool = False, browser: bool = Fa
             r.raise_for_status()
             text = _extract(r.text, url) or ""
         except httpx.HTTPError as exc:
-            errors.append(_rung_error("http", exc))  # fall through to the browser path
-    if not browser and len(text) < _JS_FALLBACK_THRESHOLD:
-        try:
-            browser_text = _read_playwright(url)
-        except Exception as exc:
-            errors.append(_rung_error("headless", exc))
-            logger.info("read(%s): headless rung failed: %s", url, exc)
-            browser_text = ""
-        if len(browser_text) > len(text):
-            text = browser_text
-    if len(text) < _JS_FALLBACK_THRESHOLD:
-        # Last rung. An explicit browser=True reports its own failure, since
-        # the caller asked for this specifically; an automatic escalation stays
-        # quiet and keeps whatever the cheaper rungs managed to extract.
+            errors.append(_rung_error("http", exc))  # fall through to the browser
+    if len(text) < _BROWSER_FALLBACK_THRESHOLD:
+        # An explicit browser=True reports its own failure, since the caller
+        # asked for this specifically; an automatic escalation stays quiet and
+        # keeps whatever the plain fetch managed to extract.
         try:
             real_text = _read_cdp(url)
         except Exception as exc:
@@ -196,8 +173,8 @@ def read(url: str, max_chars: int = 12_000, js: bool = False, browser: bool = Fa
         # the exact moment it is needed, and it costs nothing on the runs that
         # never fail — where a standing prompt line would be billed anyway.
         # It matters most when NO browser is running: the "Live browser"
-        # segment is absent then, so this is the only mention, and both paths
-        # below will start one on demand.
+        # segment is absent then, so this is the only mention, and the
+        # suggestion below starts one on demand.
         hint = (
             " If the site blocks automation, retry with read(url, browser=True) to go "
             "through a real logged-in browser, or drive the page yourself: "
