@@ -136,8 +136,8 @@ jarvis/
 │   │                     #   — plain sync helpers injected into every run_cell kernel
 │   │                     #   (core/kernels.py), not bound tools
 │   ├── browser.py        # persistent headed Chromium over CDP — read()'s only browser rung.
-│   │                     #   Attach/launch, dedicated profile, challenge→human handoff, page()
-│   │                     #   for driving it. See "Web reading rungs".
+│   │                     #   Attach/launch, dedicated profile, challenge→human handoff, apage()
+│   │                     #   for driving it. See "Driving the browser".
 │   ├── finance.py        # [unbound] get_stock_data, get_historical_prices, compare_stocks, …
 │   └── datetime.py       # [unbound] get_current_datetime
 └── frontend/             # React 19 + TanStack Router + Relay + Vite + TypeScript
@@ -412,6 +412,12 @@ this section makes, applied to third-party tools nobody here wrote the schemas f
 **Any Chromium, not just Chrome.** Attaching is browser-agnostic by construction — `connect_over_cdp` cannot tell what is listening. Only *launching* needs a binary, so that is the only place a preference exists: `browser.executable`, else the first `_CANDIDATES` entry present (mac: app bundles; Linux: `shutil.which`). Launch is detached, so the browser outlives the kernel that first wanted it.
 
 **The dedicated profile is mandatory, not tidiness.** Recent Chromium builds refuse to open a remote-debugging port on the *default* user-data-dir at all (any local process could otherwise read the cookie jar), so aiming at a real profile yields no listener and a mystifying timeout — and a separate profile is the containment boundary, since this rung reads untrusted pages and should reach only sites someone deliberately signed into in that window. Launch passes `--no-first-run --no-default-browser-check`; Brave and Edge otherwise park a welcome wizard in front of every page.
+
+**Sync vs async is not a style choice here.** `run_cell` executes inside the kernel's asyncio loop, and Playwright's sync API raises *"It looks like you are using Playwright Sync API inside the asyncio loop"* there — so `page()` (sync) is unusable from the only caller that matters, and `apage()` (async, `async with apage() as tab:`) is what the agent uses. `fetch()` bridges by running the sync body on a worker thread, which has no loop; only a `str` crosses back. `page()` now refuses inside a loop with a message naming `apage`, because Playwright's own error names the loop but not the escape.
+
+This shipped broken and green: every test ran in a plain process with no event loop, so the whole path passed while being unusable in the kernel. The tests that cover it are `async def` on purpose — pytest-asyncio runs those in a loop, which is the condition that was missing.
+
+**Announce from inside, after the browser is in hand.** `_announce(url, "start")` used to fire *before* the attempt, so a read that never reached a browser still lit the "browsing" chip; and `apage()` announces too, so driving the browser directly is visible in the UI rather than only `read(url, browser=True)`. The frontend drops the chip on `phase === "error"`.
 
 **Challenge → human handoff.** A short body matching `_CHALLENGE_MARKERS` parks the read on a durable `Approval` row via the SDK's own gate helpers (`sdk:browser_challenge`) — same inbox, same chat prompt, and `core/kernels.py:_hold_for_approval` already suspends the 60s cell timeout while one is open. The human clears it in the visible window; the clearance cookie lands in the profile and every later read is clean. **The body-length gate is load-bearing**: matching the words alone made an essay about CAPTCHAs read as a CAPTCHA. With no conversation (CLI, bots, tests) the handoff is skipped rather than blocking on an answer nobody will give.
 

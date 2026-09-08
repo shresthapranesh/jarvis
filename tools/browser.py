@@ -35,6 +35,7 @@ living, and it should reach only the sites someone deliberately signed into in
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -43,8 +44,9 @@ import sqlite3
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -303,23 +305,81 @@ def ensure_running() -> str:
     raise BrowserUnavailable(f"could not reach or start a browser at {url}")
 
 
+def _loop_running() -> bool:
+    """Whether this thread already has a running event loop.
+
+    Decides which Playwright API is legal here, and there is no third answer:
+    the sync API raises inside a loop, and the async one needs one.
+    """
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False
+
+
 @contextmanager
 def page() -> Iterator[Any]:
-    """A Playwright page on the persistent browser. Reuses its single tab.
+    """A Playwright page on the persistent browser, for **sync** callers.
 
     The tab is deliberately not closed on exit — it *is* the session, and
     reusing it keeps one window rather than accumulating one per read. Only the
     local Playwright connection is torn down; the browser was started outside
     this process and outlives it.
+
+    Refuses to run inside an event loop rather than letting Playwright raise.
+    The run_cell kernel has one, which made this the wrong entry point in the
+    one place it was most advertised — and Playwright's own message names the
+    asyncio loop without naming the fix.
     """
     from playwright.sync_api import sync_playwright
 
+    if _loop_running():
+        raise RuntimeError(
+            "page() is the sync Playwright API and cannot run inside an event "
+            "loop — the run_cell kernel has one. Use the async form instead:\n"
+            "    from tools.browser import apage\n"
+            "    async with apage() as tab:\n"
+            "        await tab.goto(url)\n"
+            "        await tab.click(sel)"
+        )
     endpoint = ensure_running()
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(endpoint)
         ctx = browser.contexts[0] if browser.contexts else browser.new_context()
         tab = ctx.pages[0] if ctx.pages else ctx.new_page()
         yield tab
+
+
+@asynccontextmanager
+async def apage() -> AsyncIterator[Any]:
+    """The same tab, for callers that already have an event loop.
+
+    This is the one the agent uses: run_cell executes inside the kernel's loop
+    (IPython autoawait makes `async with` work at cell top level), so the sync
+    form above is unusable there.
+
+    Announces the browse on the way in and out, so driving the browser directly
+    lights the same live-view chip a `read(url, browser=True)` does. Without
+    that, the only instrumented path was `fetch()`, and an agent doing anything
+    interactive was invisible to the UI.
+    """
+    from playwright.async_api import async_playwright
+
+    # ensure_running() probes over blocking httpx and may launch a browser.
+    endpoint = await asyncio.to_thread(ensure_running)
+    async with async_playwright() as p:
+        browser = await p.chromium.connect_over_cdp(endpoint)
+        ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+        tab = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        await asyncio.to_thread(_announce, tab.url or "", "start")
+        try:
+            yield tab
+        except BaseException:
+            await asyncio.to_thread(_announce, tab.url or "", "error")
+            raise
+        else:
+            await asyncio.to_thread(_announce, tab.url or "", "done")
 
 
 # ── Challenge handoff ────────────────────────────────────────────────────────
@@ -411,32 +471,52 @@ def fetch(url: str, *, settle_ms: int = _SETTLE_MS, allow_handoff: bool = True) 
     On a challenge interstitial, asks a human to clear it and re-reads the page
     once they have. Raises BrowserUnavailable if this rung isn't usable here.
     """
-    _announce(url, "start")
-    try:
-        html = _fetch_inner(url, settle_ms=settle_ms, allow_handoff=allow_handoff)
-    except Exception:
-        _announce(url, "error")
-        raise
-    _announce(url, "done")
-    return html
+    if _loop_running():
+        # `read()` is a plain sync function the agent calls from a cell, and the
+        # kernel's thread has a loop — so the sync Playwright API is illegal
+        # here. Run it on a worker thread, which has none. Only a `str` crosses
+        # back, so nothing thread-bound escapes.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(
+                _fetch_inner, url, settle_ms=settle_ms, allow_handoff=allow_handoff
+            ).result()
+    return _fetch_inner(url, settle_ms=settle_ms, allow_handoff=allow_handoff)
 
 
 def _fetch_inner(url: str, *, settle_ms: int, allow_handoff: bool) -> str:
+    """Sync body of `fetch`. Must run on a thread with no event loop."""
+    # Announced from *inside*, once the browser is actually in hand. Announcing
+    # before the attempt lit the "browsing" chip for reads that never reached a
+    # browser at all — which is how this looked fixed while being broken.
     with page() as tab:
-        tab.goto(url, wait_until="domcontentloaded", timeout=_PAGE_TIMEOUT)
-        tab.wait_for_timeout(settle_ms)
-        html = tab.content()
+        _announce(url, "start")
+        try:
+            html = _fetch_page(tab, url, settle_ms=settle_ms, allow_handoff=allow_handoff)
+        except Exception:
+            _announce(url, "error")
+            raise
+        _announce(url, "done")
+        return html
 
-        if not allow_handoff:
-            return html
-        marker = _challenge_marker(tab.title() or "", tab.inner_text("body") or "")
-        if not marker:
-            return html
 
-        logger.info("browser: challenge on %s (%r) — asking for a human", url, marker)
-        if not _ask_human(url, marker):
-            return html
-        # The human cleared it in the same tab; the clearance cookie is now in
-        # the profile, so this and every later read get the real page.
-        tab.wait_for_timeout(settle_ms)
-        return tab.content()
+def _fetch_page(tab: Any, url: str, *, settle_ms: int, allow_handoff: bool) -> str:
+    """Navigate an already-open tab and return its settled HTML."""
+    tab.goto(url, wait_until="domcontentloaded", timeout=_PAGE_TIMEOUT)
+    tab.wait_for_timeout(settle_ms)
+    html = tab.content()
+
+    if not allow_handoff:
+        return html
+    marker = _challenge_marker(tab.title() or "", tab.inner_text("body") or "")
+    if not marker:
+        return html
+
+    logger.info("browser: challenge on %s (%r) — asking for a human", url, marker)
+    if not _ask_human(url, marker):
+        return html
+    # The human cleared it in the same tab; the clearance cookie is now in the
+    # profile, so this and every later read get the real page.
+    tab.wait_for_timeout(settle_ms)
+    return tab.content()
+
+

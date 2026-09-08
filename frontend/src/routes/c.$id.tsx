@@ -112,8 +112,11 @@ function ConversationPage() {
   const browsing = useMemo(() => {
     const list = browserSteps as {url: string; phase: string}[] | undefined;
     const last = list && list.length > 0 ? list[list.length - 1] : null;
-    if (!last) return null;
-    let host: string;
+    // A browse that errored never reached a browser, so there is nothing to
+    // watch — showing the chip anyway is what made it look like the agent had
+    // browsed when the attempt had in fact failed outright.
+    if (!last || last.phase === 'error') return null;
+    let host = '';
     try {
       host = new URL(last.url).host;
     } catch {

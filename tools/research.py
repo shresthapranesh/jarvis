@@ -178,7 +178,8 @@ def read(url: str, max_chars: int = 12_000, browser: bool = False, js: bool = Fa
         hint = (
             " If the site blocks automation, retry with read(url, browser=True) to go "
             "through a real logged-in browser, or drive the page yourself: "
-            "`from tools.browser import page`."
+            "`from tools.browser import apage` then `async with apage() as tab:` "
+            "(async — this kernel runs an event loop)."
         ) if not browser else ""
         return f"No readable text extracted from {url!r}.{detail}{hint}"
     if len(text) > max_chars:

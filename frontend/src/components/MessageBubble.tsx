@@ -415,10 +415,18 @@ export function StreamingBubble({
     <button
       {...stylex.props(chipBtn.base, browsing.live && browseChip.live)}
       onClick={onOpenBrowser}
-      title={`Watch the browser — ${browsing.host}`}
+      title={browsing.host ? `Watch the browser — ${browsing.host}` : 'Watch the browser'}
     >
       <GlobeIcon size={11} />
-      {browsing.live ? `Browsing ${browsing.host}` : `Browser · ${browsing.host}`}
+      {/* Driving the browser directly announces before any navigation, so the
+          host is genuinely unknown at that point — say less rather than "undefined". */}
+      {browsing.live
+        ? browsing.host
+          ? `Browsing ${browsing.host}`
+          : 'Browsing'
+        : browsing.host
+          ? `Browser · ${browsing.host}`
+          : 'Browser'}
     </button>
   );
 

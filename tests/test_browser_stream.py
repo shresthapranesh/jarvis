@@ -263,8 +263,12 @@ def test_segment_appears_when_a_browser_is_running(monkeypatch):
     assert len(parts) == 1
     assert parts[0].name == "browser"
     body = parts[0].content
-    assert "from tools.browser import page" in body
     assert "browser=True" in body
+    # The async form specifically: the kernel runs an event loop, so a segment
+    # advertising sync `page()` sends the agent straight into a raise — which
+    # is exactly what it did until a real run caught it.
+    assert "apage" in body
+    assert "async with" in body
     # The specific wrong turn it exists to prevent.
     assert "chromium.launch()" in body
 

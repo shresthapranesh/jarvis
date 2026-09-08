@@ -222,3 +222,85 @@ def test_js_still_forces_the_browser(monkeypatch):
     )
     monkeypatch.setattr(research, "_read_cdp", lambda url: "rendered text " * 40)
     assert "rendered text" in research.read("https://example.com", js=True)
+
+
+# ── The environment the browser actually runs in ─────────────────────────────
+#
+# Every earlier test here ran in a plain process with no event loop, so the
+# whole browser path passed while being unusable from the only caller that
+# matters. run_cell executes inside the kernel's asyncio loop, where the sync
+# Playwright API raises "It looks like you are using Playwright Sync API inside
+# the asyncio loop." These tests are async on purpose: pytest-asyncio runs them
+# in a loop, which is the condition that was missing.
+
+async def test_sync_page_refuses_inside_a_loop_and_names_the_fix():
+    """It used to raise Playwright's message, which names the loop but not the
+    escape — the agent had to reverse-engineer `apage` from the source."""
+    with pytest.raises(RuntimeError, match="apage"):
+        with browser.page():
+            pass
+
+
+async def test_fetch_works_inside_a_loop(monkeypatch):
+    """`read(url, browser=True)` is called from a cell, i.e. inside the loop.
+
+    It runs the sync API on a worker thread; the regression is any refactor
+    that calls it directly again.
+    """
+    calls: list[str] = []
+    monkeypatch.setattr(browser, "_announce", lambda url, phase: calls.append(phase))
+    monkeypatch.setattr(browser, "ensure_running", lambda: "http://127.0.0.1:9222")
+
+    class _Tab:
+        url = "https://example.com/"
+
+        def goto(self, *a, **k): ...
+        def wait_for_timeout(self, *a): ...
+        def content(self): return "<html><body>plenty of real text</body></html>"
+        def title(self): return "Example"
+        def inner_text(self, _): return "plenty of real text " * 200
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _page():
+        yield _Tab()
+
+    monkeypatch.setattr(browser, "page", _page)
+    html = browser.fetch("https://example.com")
+    assert "real text" in html
+    assert calls == ["start", "done"]
+
+
+async def test_a_failed_browse_announces_error_not_success(monkeypatch):
+    """The chip claimed a browse that never reached a browser."""
+    calls: list[str] = []
+    monkeypatch.setattr(browser, "_announce", lambda url, phase: calls.append(phase))
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _page():
+        class _Tab:
+            def goto(self, *a, **k):
+                raise RuntimeError("navigation failed")
+        yield _Tab()
+
+    monkeypatch.setattr(browser, "page", _page)
+    with pytest.raises(RuntimeError):
+        browser.fetch("https://example.com")
+    assert calls == ["start", "error"]
+
+
+async def test_nothing_is_announced_when_no_browser_can_be_reached(monkeypatch):
+    """Announcing before the attempt is what lit the chip for a failed read."""
+    calls: list[str] = []
+    monkeypatch.setattr(browser, "_announce", lambda url, phase: calls.append(phase))
+
+    def _no_browser():
+        raise browser.BrowserUnavailable("nothing listening")
+
+    monkeypatch.setattr(browser, "ensure_running", _no_browser)
+    with pytest.raises(browser.BrowserUnavailable):
+        browser.fetch("https://example.com")
+    assert calls == []
