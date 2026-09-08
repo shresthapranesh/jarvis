@@ -357,23 +357,29 @@ async def index_document(document_id: str, text: str) -> int:
     # a 200-page PDF is dozens of batches and providers rate-limit.
     sem = asyncio.Semaphore(_EMBED_CONCURRENCY)
 
-    async def _embed(batch: list[str]) -> list[list[float]]:
+    async def _embed(batch: list[str]) -> np.ndarray:
         async with sem:
-            return await embedder.aembed_documents(batch)
+            vecs = await embedder.aembed_documents(batch)
+        # Narrow to float32 inside the task, so what is retained until the write
+        # is the array and not the provider's list-of-lists. A Python float costs
+        # ~32 bytes once its list slot is counted, against 4 in the array: at
+        # 3072 dimensions that is the difference between ~900MB and ~7GB for a
+        # document large enough to produce tens of thousands of chunks.
+        return np.asarray(vecs, dtype=np.float32)
 
     # gather preserves input order, so vectors still line up with chunk seq.
     results = await asyncio.gather(*(_embed(b) for b in batches))
-    vectors: list[list[float]] = [vec for batch_vecs in results for vec in batch_vecs]
+    vectors = np.concatenate(results) if results else np.empty((0, 0), dtype=np.float32)
 
     async with async_session() as session:
-        for seq, (chunk, vec) in enumerate(zip(chunks, vectors)):
+        for seq, chunk in enumerate(chunks):
             session.add(DocumentChunk(
                 id=str(uuid4()),
                 document_id=document_id,
                 conversation_id=conversation_id,
                 seq=seq,
                 text=chunk,
-                embedding=np.asarray(vec, dtype=np.float32).tobytes(),
+                embedding=vectors[seq].tobytes(),
             ))
         # Chunks and the 'indexed' flag land in one transaction, so a reader can
         # never see the flag before the rows it promises.
@@ -556,10 +562,13 @@ async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[di
         raise RuntimeError("no embedding model available (GOOGLE_API_KEY unset?)")
 
     async def _load_rows() -> list[Any]:
+        # Ranking needs ids and vectors, not prose. Selecting whole ORM objects
+        # pulled every chunk's `text` into memory to return six of them — at
+        # ~1.6KB a chunk that is the bulk of the read, and it grows with the
+        # conversation. Text for the survivors is fetched below, by id.
         async with async_session() as session:
             return list((await session.execute(
-                select(DocumentChunk, Document.filename)
-                .join(Document, DocumentChunk.document_id == Document.id)
+                select(DocumentChunk.id, DocumentChunk.embedding)
                 .where(DocumentChunk.conversation_id == conversation_id)
             )).all())
 
@@ -579,13 +588,11 @@ async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[di
     if not rows:
         return []
 
-    by_id: dict[str, tuple[DocumentChunk, str]] = {c.id: (c, fn) for c, fn in rows}
-
     dense: list[tuple[str, float]] = []
     if qvec is not None:
         # Chunks embedded by a different model are skipped inside cosine_ranking
         # (shape mismatch) rather than crashing the search.
-        dense = cosine_ranking(qvec, [(chunk.id, chunk.embedding) for chunk, _fn in rows])
+        dense = cosine_ranking(qvec, [(cid, emb) for cid, emb in rows])
 
     keep = select_hybrid(
         dense=dense,
@@ -596,9 +603,20 @@ async def search_chunks(conversation_id: str, query: str, k: int = 6) -> list[di
         label="documents",
     )
 
+    if not keep:
+        return []
+
+    async with async_session() as session:
+        hydrated = (await session.execute(
+            select(DocumentChunk, Document.filename)
+            .join(Document, DocumentChunk.document_id == Document.id)
+            .where(DocumentChunk.id.in_(keep))
+        )).all()
+    by_id = {c.id: (c, fn) for c, fn in hydrated}
+
     dense_scores = dict(dense)
     out: list[dict] = []
-    for chunk_id in keep:
+    for chunk_id in keep:            # `keep` is ranked; preserve that order
         entry = by_id.get(chunk_id)
         if entry is None:
             continue

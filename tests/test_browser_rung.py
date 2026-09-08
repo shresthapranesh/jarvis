@@ -157,7 +157,7 @@ def test_failed_read_names_the_way_past_a_block(monkeypatch):
     monkeypatch.setattr(research, "_read_cdp", lambda url: "")
     out = research.read("https://example.com")
     assert "browser=True" in out
-    assert "from tools.browser import page" in out
+    assert "from tools.browser import apage" in out
 
 
 def test_an_explicit_browser_read_does_not_suggest_itself(monkeypatch):

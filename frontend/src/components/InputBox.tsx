@@ -4,6 +4,7 @@ import {useEffect, useRef, useState} from 'react';
 import {useIsMobile} from '../hooks/useIsMobile';
 import {useModels} from '../hooks/useModels';
 import {useWhisperSTT} from '../hooks/useWhisperSTT';
+import {useToast} from '../lib/toast';
 import type {MediaAttachment, PersistedDocument} from '../lib/types';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
@@ -45,6 +46,17 @@ function fileTypeCategory(mimeType: string): 'image' | 'audio' | 'video' | 'docu
   return 'document';
 }
 
+// Mirrors _MAX_UPLOAD_BYTES in server/routes_uploads.py. Kept in sync by hand:
+// the two guards protect different things (browser memory vs. server disk), and
+// the client one has to fire before any bytes are read.
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 * 1024) return `${Math.round(n / 1024 ** 2)} MB`;
+  return `${Math.round(n / 1024)} KB`;
+}
+
 export function InputBox({
   onSubmit,
   disabled = false,
@@ -61,6 +73,7 @@ export function InputBox({
 }: Props) {
   const {data: catalog} = useModels();
   const isMobile = useIsMobile();
+  const toast = useToast();
   const [model, setModel] = useState('');
   const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -136,6 +149,17 @@ export function InputBox({
   function handleFiles(files: FileList | null) {
     if (!files) return;
     Array.from(files).forEach((file) => {
+      // Refuse oversized files here rather than at POST /uploads. The server
+      // caps at the same number, but by then the browser has already spent the
+      // memory: readAsDataURL builds a base64 copy ~1.33x the file, and past a
+      // few hundred MB that exceeds V8's max string length and simply fails.
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        toast.push(
+          `${file.name} is ${formatBytes(file.size)} — the limit is ${formatBytes(MAX_ATTACHMENT_BYTES)}.`,
+          'error',
+        );
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
@@ -148,6 +172,12 @@ export function InputBox({
           size: file.size,
         };
         setAttachments((prev) => [...prev, attachment]);
+      };
+      // Without this the attachment silently never appears: setAttachments is
+      // only called from onload, so a read that fails leaves no chip, no error,
+      // and a user who thinks they attached a file.
+      reader.onerror = () => {
+        toast.push(`Could not read ${file.name}${reader.error ? ` (${reader.error.name})` : ''}.`, 'error');
       };
       reader.readAsDataURL(file);
     });

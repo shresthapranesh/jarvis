@@ -33,6 +33,7 @@ import type {
   TodoStatus,
 } from '../lib/types';
 import {mapMessage} from '../lib/types';
+import {useToast} from '../lib/toast';
 import {uploadStagedAttachment} from '../lib/uploads';
 import {artifactListQuery} from '../relay/ArtifactListQuery';
 import {conversationPageFragment} from '../relay/ConversationPageFragment';
@@ -60,6 +61,7 @@ export const Route = createFileRoute('/c/$id')({
 });
 
 function ConversationPage() {
+  const toast = useToast();
   const {id} = Route.useParams();
   const {task: searchTaskId} = Route.useSearch();
   const navigate = useNavigate();
@@ -413,6 +415,11 @@ function ConversationPage() {
       if (attachments.some((a) => a.type === 'document')) {
         void refreshDocumentList(id);
       }
+    } catch (err) {
+      // Without this the turn fails silently: an oversized upload answers 413,
+      // uploadStagedAttachment throws, and a bare try/finally turned that into
+      // an unhandled rejection — the message never sent and nothing said so.
+      toast.push((err as Error).message || 'Could not send that message.', 'error');
     } finally {
       setPendingUser(null);
     }

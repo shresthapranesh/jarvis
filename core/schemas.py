@@ -73,6 +73,11 @@ class AttachmentIn(BaseModel):
     # what lets the agent open an attachment with code instead of reading its
     # text out of the prompt — see core/streaming.py:_tabular_part.
     document_path: str | None = None
+    # Why persistence failed, when it did. Carried into the message instead of
+    # only a log line: a failed write leaves document_id/document_path unset,
+    # and without this the turn proceeds as though the file were simply small —
+    # the agent then reports "the file doesn't exist" as its own conclusion.
+    persist_error: str | None = None
 
 
 class TTSRequest(BaseModel):

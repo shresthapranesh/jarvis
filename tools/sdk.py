@@ -285,22 +285,34 @@ def search_documents(query: str, k: int = 6) -> list[dict]:
     _wait_for_index("conversation_id = ?", (_conversation_id,))
     qvec = _embedder().embed_query(query)
     with _connect() as conn:
+        # Rank on ids and vectors only. Selecting `text` for every chunk read the
+        # whole conversation's prose into this kernel to return k of them.
         rows = conn.execute(
-            "SELECT c.embedding, c.document_id, c.seq, c.text, d.filename"
-            " FROM document_chunks c JOIN documents d ON c.document_id = d.id"
-            " WHERE c.conversation_id = ? AND c.embedding IS NOT NULL",
+            "SELECT id, embedding FROM document_chunks"
+            " WHERE conversation_id = ? AND embedding IS NOT NULL",
             (_conversation_id,),
         ).fetchall()
-    hits = _cosine_top_k(qvec, [(r["embedding"], r) for r in rows], k)
+        hits = _cosine_top_k(qvec, [(r["embedding"], r["id"]) for r in rows], k)
+        if not hits:
+            return []
+        placeholders = ",".join("?" * len(hits))
+        detail = conn.execute(
+            "SELECT c.id, c.document_id, c.seq, c.text, d.filename"
+            " FROM document_chunks c JOIN documents d ON c.document_id = d.id"
+            f" WHERE c.id IN ({placeholders})",
+            tuple(cid for _score, cid in hits),
+        ).fetchall()
+    by_id = {r["id"]: r for r in detail}
     return [
         {
-            "document_id": r["document_id"],
-            "filename": r["filename"],
-            "seq": r["seq"],
+            "document_id": by_id[cid]["document_id"],
+            "filename": by_id[cid]["filename"],
+            "seq": by_id[cid]["seq"],
             "score": round(score, 4),
-            "text": r["text"],
+            "text": by_id[cid]["text"],
         }
-        for score, r in hits
+        for score, cid in hits          # already ranked; keep that order
+        if cid in by_id
     ]
 
 

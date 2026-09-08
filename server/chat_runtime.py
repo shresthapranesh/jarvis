@@ -683,7 +683,14 @@ async def register_chat_task(
                 att.document_id = doc.id
                 att.document_path = str(doc_path)
             except Exception as e:
-                logger.warning("Failed to persist document %s: %s", att.name, e)
+                # Error, not warning: nothing downstream can recover from this,
+                # and the attachment is about to reach the model as a stub that
+                # promises a file which was never written.
+                logger.error(
+                    "Failed to persist document %s to %s: %s",
+                    att.name, cfg.documents_dir, e, exc_info=True,
+                )
+                att.persist_error = f"{type(e).__name__}: {e}"
 
     task_id = await enqueue_chat_task(
         session, query, model, conv.id, attachments=attachments, source="http",

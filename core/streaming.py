@@ -297,6 +297,18 @@ async def _build_message_content(
     )
     for idx, att in enumerate(attachments):
         data_url = f"data:{att.mime_type};base64,{att.data}"
+        if att.persist_error:
+            # Say so plainly. The alternative — falling through to the inline or
+            # indexed stub — describes a file that is not on disk, and the agent
+            # has no way to tell that from a file it simply failed to find.
+            parts.append({"type": "text", "text": (
+                f"[Attachment {att.name} could not be saved on the server "
+                f"({att.persist_error}), so it is not on disk and cannot be "
+                f"opened with code, searched, or read. Tell the user this "
+                f"failed — do not guess at its contents or look for it "
+                f"elsewhere.]"
+            )})
+            continue
         if att.type == "document":
             if idx in tabular_futures:
                 parts.append(_tabular_part(att, tabular_futures[idx].result()))
