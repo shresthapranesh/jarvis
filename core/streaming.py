@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import Sequence
 from typing import Any, TypeAlias
@@ -15,7 +16,7 @@ from db.ops import add_step, add_steps, close_open_approvals, update_message_con
 from langgraph.types import StreamMode
 
 from .doc_index import INLINE_THRESHOLD, embeddings_available, start_indexing
-from .document_extractor import extract_raw_text, format_inline
+from .document_extractor import MAX_CHARS, extract_raw_text, format_inline, is_tabular, is_text_tabular
 from .schemas import AttachmentIn
 from .approvals import record_blocking_request
 from .state import InterruptRequest, TaskState, emit_event
@@ -128,6 +129,92 @@ def _extract_for_message(mime_type: str, data: str, name: str) -> tuple[str | No
         return None, str(exc)
 
 
+_PREVIEW_LINES = 5
+_PREVIEW_BYTES = 64 * 1024
+_COUNT_BLOCK = 1024 * 1024
+
+
+def _routes_to_code(att: AttachmentIn) -> bool:
+    """True when this attachment reaches the agent as a path, not as text.
+
+    Requires a persisted file: sources that don't write a Document row (bots,
+    CLI) have nothing on disk to open, so they keep the inline path.
+    """
+    return (
+        att.type == "document"
+        and bool(att.document_path)
+        and is_tabular(att.mime_type, att.name)
+    )
+
+
+def _tabular_preview(path: str, mime_type: str, filename: str) -> dict:
+    """Executor target: head-of-file preview + line count for a tabular file.
+
+    Reads a bounded head for the preview and streams the remainder only to count
+    newlines, so an arbitrarily large CSV costs one sequential pass and constant
+    memory. Every field is optional by design — a preview that fails must not
+    stop the attachment from reaching the agent, which needs only the path.
+    """
+    info: dict[str, Any] = {"lines": None, "preview": None, "error": None, "bytes": None}
+    try:
+        info["bytes"] = os.path.getsize(path)
+        if not is_text_tabular(mime_type, filename):
+            return info
+        with open(path, "rb") as fh:
+            head = fh.read(_PREVIEW_BYTES)
+            info["preview"] = "\n".join(
+                head.decode("utf-8", errors="replace").splitlines()[:_PREVIEW_LINES]
+            )
+            count = head.count(b"\n")
+            while block := fh.read(_COUNT_BLOCK):
+                count += block.count(b"\n")
+        info["lines"] = count
+    except Exception as exc:
+        info["error"] = str(exc)
+    return info
+
+
+def _tabular_part(att: AttachmentIn, info: dict) -> dict:
+    """Stub for a tabular attachment: where the file is, not what it says.
+
+    The bytes are on disk and `run_cell` can open them, so the message carries a
+    path and a few head lines instead of the file's text. That is the whole point
+    of the branch — what anyone asks of a CSV is an aggregate, and neither pasted
+    rows nor embedded chunks can produce one. Line count and preview are stated
+    only when they were actually measured; a guess here would be read as fact.
+    """
+    size = info.get("bytes") or att.size
+    lines = info.get("lines")
+    header = (
+        f"[Tabular file attached: {att.name} — {size:,} bytes"
+        + (f", {lines:,} lines" if lines is not None else "")
+        + "]"
+    )
+    bits = [
+        header,
+        f"path: {att.document_path}",
+        "",
+        "The contents are NOT included here. Open the path with code in run_cell "
+        "— polars, pandas, or duckdb — and compute the answer. Do not read the "
+        "file into the conversation row by row.",
+    ]
+    if info.get("preview"):
+        bits += ["", f"First {_PREVIEW_LINES} lines:", info["preview"]]
+    if info.get("error"):
+        bits += ["", f"(preview unavailable: {info['error']} — the path above is still valid)"]
+    return {"type": "text", "text": "\n".join(bits)}
+
+
+def _path_note(att: AttachmentIn, why: str) -> str:
+    """The ' the file is also at <path>' clause, or nothing when it isn't."""
+    if not att.document_path:
+        return ""
+    return (
+        f" The file itself is at {att.document_path} — open it with code in "
+        f"run_cell when {why}."
+    )
+
+
 async def _document_part(att: AttachmentIn, raw: str | None, error: str | None) -> dict:
     """Build the message part for one document attachment.
 
@@ -154,11 +241,24 @@ async def _document_part(att: AttachmentIn, raw: str | None, error: str | None) 
                 f"(document_id={att.document_id!r}). Too large to include inline: "
                 f'use search_documents("...") to find relevant passages, or '
                 f"read_document({att.document_id!r}, offset=0) to read it sequentially. "
-                f"Those calls wait for indexing to finish, so the first one may pause briefly.]"
+                f"Those calls wait for indexing to finish, so the first one may pause briefly."
+                + _path_note(att, "computing over the whole document beats reading it in windows")
+                + "]"
             )}
         except Exception as exc:
             logger.warning("could not start indexing %s (%s) — inlining instead", att.name, exc)
-    return {"type": "text", "text": format_inline(att.name, raw)}
+    text = format_inline(att.name, raw)
+    if att.document_path and len(raw) > MAX_CHARS:
+        # The inline path truncates silently; saying so — and where the rest is —
+        # is what stops an answer confidently drawn from the first 80k characters.
+        text += (
+            f"\n[Only the first {MAX_CHARS:,} of {len(raw):,} characters are shown above. "
+            f"The complete file is at {att.document_path} — open it with code in run_cell "
+            f"to work with all of it.]"
+        )
+    elif att.document_path:
+        text += f"\n[File on disk: {att.document_path}]"
+    return {"type": "text", "text": text}
 
 
 async def _build_message_content(
@@ -171,13 +271,23 @@ async def _build_message_content(
 
     loop = asyncio.get_running_loop()
     doc_futures: dict[int, asyncio.Future[tuple[str | None, str | None]]] = {}
+    tabular_futures: dict[int, asyncio.Future[dict]] = {}
     for idx, att in enumerate(attachments):
-        if att.type == "document":
+        if att.type != "document":
+            continue
+        if _routes_to_code(att):
+            # Extraction is skipped entirely, not just discarded: decoding a
+            # 100MB CSV to a str only to throw it away is the cost this branch
+            # exists to avoid.
+            tabular_futures[idx] = loop.run_in_executor(
+                None, _tabular_preview, att.document_path or "", att.mime_type, att.name,
+            )
+        else:
             doc_futures[idx] = loop.run_in_executor(
                 None, _extract_for_message, att.mime_type, att.data, att.name,
             )
-    if doc_futures:
-        await asyncio.gather(*doc_futures.values())
+    if doc_futures or tabular_futures:
+        await asyncio.gather(*doc_futures.values(), *tabular_futures.values())
 
     parts: list[dict] = [{"type": "text", "text": query}]
     is_google = (
@@ -188,8 +298,11 @@ async def _build_message_content(
     for idx, att in enumerate(attachments):
         data_url = f"data:{att.mime_type};base64,{att.data}"
         if att.type == "document":
-            raw, error = doc_futures[idx].result()
-            parts.append(await _document_part(att, raw, error))
+            if idx in tabular_futures:
+                parts.append(_tabular_part(att, tabular_futures[idx].result()))
+            else:
+                raw, error = doc_futures[idx].result()
+                parts.append(await _document_part(att, raw, error))
         elif att.type == "image":
             parts.append({"type": "image_url", "image_url": {"url": data_url}})
         elif is_google:

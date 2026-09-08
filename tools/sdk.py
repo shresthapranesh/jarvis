@@ -229,6 +229,48 @@ def _wait_for_index(where: str, params: tuple) -> None:
         delay = min(delay * 1.5, _INDEX_POLL_MAX_DELAY)
 
 
+def list_documents() -> list[dict]:
+    """Files attached to this conversation: id, filename, size, on-disk path, index state.
+
+    `path` is the file exactly as uploaded. Open it with code when the answer is
+    a computation over the whole file rather than a passage of prose.
+    """
+    if not _conversation_id:
+        raise RuntimeError("No conversation scope — attachments are only available in chats.")
+    with _connect() as conn:
+        return [
+            dict(r)
+            for r in conn.execute(
+                "SELECT id, filename, mime_type, size, path, index_status, created_at"
+                " FROM documents WHERE conversation_id = ? ORDER BY created_at",
+                (_conversation_id,),
+            )
+        ]
+
+
+def document_path(document_id: str) -> str:
+    """The on-disk path of an attached file, for opening it with code.
+
+    Prefer this over read_document whenever the answer is a computation over the
+    whole file — a count, an aggregate, a filter, a join — rather than a passage
+    to quote. Raises if the id is unknown, belongs to another conversation, or
+    its file is gone.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT path, conversation_id FROM documents WHERE id = ?", (document_id,)
+        ).fetchone()
+    if row is None:
+        raise LookupError(f"No document {document_id!r}.")
+    if _conversation_id and row["conversation_id"] != _conversation_id:
+        raise LookupError(f"Document {document_id!r} is not attached to this conversation.")
+    if not os.path.exists(row["path"]):
+        raise LookupError(
+            f"Document {document_id!r} is registered but its file is missing from disk."
+        )
+    return row["path"]
+
+
 def search_documents(query: str, k: int = 6) -> list[dict]:
     """Top-k passages from this conversation's indexed attachments.
 
@@ -1173,8 +1215,8 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
         [list_artifacts, read_artifact, list_artifact_versions],
     ),
     "documents": (
-        "search/read large attached documents that were indexed",
-        [search_documents, read_document],
+        "attached files — on-disk paths to open with code, plus search/read for indexed text",
+        [list_documents, document_path, search_documents, read_document],
     ),
     "conversations": (
         "search and re-read past chats (in a project, its other conversations)",

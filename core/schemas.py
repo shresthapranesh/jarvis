@@ -69,6 +69,10 @@ class AttachmentIn(BaseModel):
     # chat handler chunk-index large documents instead of inlining them.
     # None for sources that don't persist documents (bots, CLI) → inlined.
     document_id: str | None = None
+    # The persisted file's location on disk, set alongside document_id. This is
+    # what lets the agent open an attachment with code instead of reading its
+    # text out of the prompt — see core/streaming.py:_tabular_part.
+    document_path: str | None = None
 
 
 class TTSRequest(BaseModel):

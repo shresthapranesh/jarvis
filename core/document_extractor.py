@@ -5,6 +5,54 @@ import re
 
 MAX_CHARS = 80_000
 
+# Tabular formats: files whose value is in their *structure*, not their prose.
+# Flattening these to text and embedding the result produces retrieval that
+# structurally cannot answer the question anyone actually asks of them — an
+# aggregate, a count, a filter — so they are routed to the kernel by path
+# instead of into the prompt. See core/streaming.py:_tabular_part.
+_TABULAR_EXTS = (".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".jsonl", ".ndjson")
+_TABULAR_MIMES = {
+    "text/csv",
+    "text/tab-separated-values",
+    "application/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.apache.parquet",
+    "application/x-parquet",
+    "application/x-ndjson",
+    "application/jsonl",
+}
+# The subset whose own bytes are line-oriented text, so a head-of-file read is
+# the real content rather than a decode of a binary container.
+_TEXT_TABULAR_EXTS = (".csv", ".tsv", ".jsonl", ".ndjson")
+_TEXT_TABULAR_MIMES = {
+    "text/csv",
+    "text/tab-separated-values",
+    "application/csv",
+    "application/x-ndjson",
+    "application/jsonl",
+}
+
+
+def is_tabular(mime_type: str, filename: str) -> bool:
+    """True for row/column data the agent should open with code, not read as text."""
+    return (
+        mime_type.lower() in _TABULAR_MIMES
+        or filename.lower().endswith(_TABULAR_EXTS)
+    )
+
+
+def is_text_tabular(mime_type: str, filename: str) -> bool:
+    """True when the file's own bytes are line-oriented text, so a head read previews it.
+
+    Narrower than `is_tabular` on purpose: previewing the first bytes of an
+    .xlsx or .parquet yields container framing, not rows.
+    """
+    return (
+        mime_type.lower() in _TEXT_TABULAR_MIMES
+        or filename.lower().endswith(_TEXT_TABULAR_EXTS)
+    )
+
 
 def extract_raw_text(mime_type: str, base64_data: str, filename: str) -> str:
     """Extract the full, untruncated document text. Raises on failure.

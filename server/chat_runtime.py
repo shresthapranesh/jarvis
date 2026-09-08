@@ -678,8 +678,10 @@ async def register_chat_task(
                 )
                 # Mark the attachment before enqueue_chat_task serializes it
                 # into the job payload — the chat handler uses this id to
-                # chunk-index large documents instead of inlining them.
+                # chunk-index large documents instead of inlining them, and the
+                # path to hand tabular files to the kernel rather than the prompt.
                 att.document_id = doc.id
+                att.document_path = str(doc_path)
             except Exception as e:
                 logger.warning("Failed to persist document %s: %s", att.name, e)
 
