@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -14,7 +15,7 @@ from core.doc_index import embeddings_available
 from core.memory_store import upsert_memory
 from core.model_catalog import resolve_model_spec
 from db import async_session
-from db.ops import count_memories, get_recent_messages, list_memories, resolve_model
+from db.ops import count_memories, get_messages_since, list_memories, resolve_model
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,20 @@ _MEMORY_KEY = "AGENTS.md"
 _LEGACY_MEMORY_KEY = "/AGENTS.md"
 _META_NS = ("memory_consolidation",)
 _META_KEY = "state"
+
+# One LLM call reads at most this much transcript. A pass then keeps going batch
+# by batch — each advancing the watermark only past what it actually read — up
+# to _MAX_BATCHES_PER_RUN, so a busy stretch is worked through over a few passes
+# instead of truncated. The cap bounds what one 6-hourly tick can spend.
+_BATCH_CHARS = 16_384
+_MAX_BATCHES_PER_RUN = 6
+_MSG_CAP = 500
+_FETCH_LIMIT = 200
+
+# The cron tick and the `consolidateMemory` mutation can both start a pass, and
+# both read from the same watermark — overlapping passes would extract the same
+# batch twice. Both run on the server's loop, so one in-process lock suffices.
+_run_lock = asyncio.Lock()
 
 
 async def _migrate_legacy_key(store: AsyncSqliteStore) -> None:
@@ -160,16 +175,62 @@ def _existing_block(existing: list) -> str:
     return "\n".join(f'- id={m.id} [{m.kind}] {m.text}' for m in existing)
 
 
-def _transcript_block(messages: list[dict], cap: int = 16_384) -> str:
+def _aware(dt: datetime) -> datetime:
+    """SQLite hands back naive datetimes; the watermark is compared in UTC."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _transcript_block(
+    messages: list[dict], cap: int = _BATCH_CHARS
+) -> tuple[str, datetime | None, int]:
+    """Render one batch: (transcript, consumed_through, messages_consumed).
+
+    `messages` must be oldest-first. Stops at the char budget, and *before* the
+    first reply still being written (`status == "running"`): that row was created
+    when its run started, so a watermark past it would never come back for the
+    finished text. `consumed_through` is the newest timestamp that made it in —
+    the furthest the caller may advance — and None when nothing could be read.
+    """
     lines: list[str] = []
     total = 0
+    consumed_through: datetime | None = None
     for m in messages:
-        line = f"[{m['created_at'][:16]}] {m['title']} | {m['role'].upper()}: {m['content'][:500]}"
-        if total + len(line) > cap:
+        if m.get("status") == "running":
+            break
+        stamp = _aware(m["created_at"])
+        line = f"[{stamp:%Y-%m-%d %H:%M}] {m['title']} | {m['role'].upper()}: {(m['content'] or '')[:_MSG_CAP]}"
+        if total + len(line) > cap and lines:
             break
         lines.append(line)
         total += len(line)
-    return "\n".join(lines)
+        consumed_through = stamp
+    return "\n".join(lines), consumed_through, len(lines)
+
+
+async def _load_watermark(store: AsyncSqliteStore) -> datetime | None:
+    """The created_at of the last message consolidated.
+
+    Falls back to `last_run_at`, which is what installs before the watermark
+    stored: it was the time of the last run, so every message older than it was
+    already handled (or, under the old fetch, skipped for good) — either way not
+    something to re-read.
+    """
+    meta = await store.aget(_META_NS, _META_KEY)
+    if meta is None:
+        return None
+    raw = meta.value.get("messages_through") or meta.value.get("last_run_at")
+    return _aware(datetime.fromisoformat(raw)) if raw else None
+
+
+async def _save_watermark(store: AsyncSqliteStore, messages_through: datetime) -> None:
+    await store.aput(
+        _META_NS,
+        _META_KEY,
+        {
+            "messages_through": messages_through.isoformat(),
+            "last_run_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
 
 async def _seed_from_blob(store: AsyncSqliteStore, model_id: str) -> int:
@@ -204,50 +265,82 @@ async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> s
 
     The LLM now emits explicit ops: add / update / delete.
     Temporary memories (e.g. 'for today only') are actively removed.
-    """
-    from core.memory_store import delete_memory_by_id, update_memory_with_embedding
 
-    meta = await store.aget(_META_NS, _META_KEY)
-    last_run_at: datetime | None = None
-    if meta is not None:
-        ts = meta.value.get("last_run_at")
-        if ts:
-            last_run_at = datetime.fromisoformat(ts)
+    Works through unconsolidated messages oldest-first, one budgeted batch per
+    LLM call, saving the watermark after each — see _BATCH_CHARS. Oldest-first
+    also makes contradictions resolve the right way: a later batch sees the
+    items an earlier one wrote and can update them.
+    """
+    watermark = await _load_watermark(store)
 
     async with async_session() as session:
         model_id = await resolve_model(model_id, session)
-        messages = await get_recent_messages(session, since=last_run_at, limit=200)
         mem_count = await count_memories(session)
-
-    now_iso = datetime.now(timezone.utc).isoformat()
 
     seeded = 0
     if mem_count == 0:
         seeded = await _seed_from_blob(store, model_id)
+    # Sized once per pass from the store as it stood, not per batch.
+    max_delete = max(5, int((mem_count + seeded) * 0.3))
 
-    async with async_session() as session:
-        existing = await list_memories(session)
-    existing_ids = {m.id for m in existing}
+    consumed = added = updated = deleted = batches = 0
+    backlog = False
+    while True:
+        async with async_session() as session:
+            messages = await get_messages_since(session, since=watermark, limit=_FETCH_LIMIT)
+            existing = await list_memories(session)
+        transcript, consumed_through, n = _transcript_block(messages)
+        if consumed_through is None:
+            break
+        if batches == _MAX_BATCHES_PER_RUN:
+            backlog = True
+            break
 
-    if not messages:
-        await store.aput(_META_NS, _META_KEY, {"last_run_at": now_iso})
+        ops = await _llm_json_items(
+            model_id,
+            _EXTRACT_SYSTEM_PROMPT,
+            f"Existing memory items:\n---\n{_existing_block(existing)}\n---\n\n"
+            f"Recent conversations ({n} messages):\n---\n"
+            f"{transcript}\n---\n\n"
+            f"Decide add/update/delete operations:",
+        )
+        a, u, d = await _apply_ops(ops, {m.id for m in existing}, max_delete - deleted)
+        added, updated, deleted = added + a, updated + u, deleted + d
+        # Saved per batch, so a failure in a later one keeps this one's progress.
+        watermark = consumed_through
+        await _save_watermark(store, watermark)
+        consumed += n
+        batches += 1
+
+    if not batches:
         return (
             f"seeded {seeded} items from blob; no new messages since last run"
             if seeded
             else "skipped: no new messages since last run"
         )
-
-    ops = await _llm_json_items(
-        model_id,
-        _EXTRACT_SYSTEM_PROMPT,
-        f"Existing memory items:\n---\n{_existing_block(existing)}\n---\n\n"
-        f"Recent conversations ({len(messages)} messages):\n---\n"
-        f"{_transcript_block(messages)}\n---\n\n"
-        f"Decide add/update/delete operations:",
+    logger.info(
+        "memory_consolidation: %d messages in %d batch(es) → +%d ~%d -%d (+%d seeded)%s",
+        consumed, batches, added, updated, deleted, seeded,
+        "; backlog remains" if backlog else "",
+    )
+    return (
+        f"consolidated {consumed} messages in {batches} batch(es) → "
+        f"+{added} ~{updated} -{deleted} (+{seeded} seeded)"
+        + ("; backlog remains for the next run" if backlog else "")
     )
 
+
+async def _apply_ops(
+    ops: list[dict], existing_ids: set[str], max_delete: int
+) -> tuple[int, int, int]:
+    """Apply one batch's add/update/delete ops. Returns (added, updated, deleted).
+
+    `max_delete` is what is left of the run's deletion budget, so the cap holds
+    across every batch of a pass rather than resetting per LLM call.
+    """
+    from core.memory_store import delete_memory_by_id, update_memory_with_embedding
+
     # Safety: cap deletions per run to avoid catastrophic hallucinated wipe
-    max_delete = max(5, int(len(existing_ids) * 0.3))
     if len([o for o in ops if o.get("op") == "delete"]) > max_delete:
         logger.warning(
             "memory_consolidation: LLM wants to delete %d > cap %d, truncating",
@@ -305,15 +398,7 @@ async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> s
         if await upsert_memory(text, kind):
             added += 1
 
-    await store.aput(_META_NS, _META_KEY, {"last_run_at": now_iso})
-    logger.info(
-        "memory_consolidation: %d messages → +%d ~%d -%d (+%d seeded)",
-        len(messages), added, updated, deleted, seeded,
-    )
-    return (
-        f"consolidated {len(messages)} messages → +{added} ~{updated} -{deleted} "
-        f"(+{seeded} seeded)"
-    )
+    return added, updated, deleted
 
 
 # ── Blob path (no embedder — original behavior) ────────────────────────────────
@@ -335,62 +420,75 @@ Rules:
 
 
 async def _consolidate_blob(store: AsyncSqliteStore, model_id: str | None) -> str:
-    """Read recent DB messages + current AGENTS.md, call LLM to update memory, write back."""
-    # 1. Read last-run timestamp
-    meta = await store.aget(_META_NS, _META_KEY)
-    last_run_at: datetime | None = None
-    if meta is not None:
-        ts = meta.value.get("last_run_at")
-        if ts:
-            last_run_at = datetime.fromisoformat(ts)
+    """Read unconsolidated DB messages + current AGENTS.md, call LLM to update memory, write back.
 
-    # 2. Fetch recent messages and resolve model
+    Same batching and watermark as _consolidate_items: one budgeted batch per
+    LLM call, oldest first, each folding into the document the previous one wrote.
+    """
+    watermark = await _load_watermark(store)
     async with async_session() as session:
         model_id = await resolve_model(model_id, session)
-        messages = await get_recent_messages(session, since=last_run_at, limit=200)
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    consumed = batches = 0
+    backlog = False
+    new_memory = ""
+    llm = None
+    while True:
+        async with async_session() as session:
+            messages = await get_messages_since(session, since=watermark, limit=_FETCH_LIMIT)
+        transcript, consumed_through, n = _transcript_block(messages)
+        if consumed_through is None:
+            break
+        if batches == _MAX_BATCHES_PER_RUN:
+            backlog = True
+            break
 
-    if not messages:
-        await store.aput(_META_NS, _META_KEY, {"last_run_at": now_iso})
+        mem_item = await store.aget(_MEMORY_NS, _MEMORY_KEY)
+        current_memory = ""
+        if mem_item is not None:
+            raw = mem_item.value.get("content", "")
+            current_memory = "\n".join(raw) if isinstance(raw, list) else raw
+        current_memory = current_memory[:8192]
+
+        human_content = (
+            f"Current AGENTS.md:\n---\n{current_memory or '(empty — first consolidation run)'}\n---\n\n"
+            f"Recent conversations ({n} messages):\n---\n"
+            + transcript
+            + "\n---\n\nWrite the updated AGENTS.md:"
+        )
+
+        # Single-shot, no agent loop.
+        llm = llm or resolve_model_spec(model_id).build_llm()
+        response = await llm.ainvoke([
+            SystemMessage(content=_SYSTEM_PROMPT),
+            HumanMessage(content=human_content),
+        ])
+        new_memory = _flatten(response.content).strip()[:32_000]
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        created_at = (mem_item.value.get("created_at") if mem_item else None) or now_iso
+        await store.aput(_MEMORY_NS, _MEMORY_KEY, {
+            "content": new_memory,
+            "encoding": "utf-8",
+            "created_at": created_at,
+            "modified_at": now_iso,
+        })
+        watermark = consumed_through
+        await _save_watermark(store, watermark)
+        consumed += n
+        batches += 1
+
+    if not batches:
         return "skipped: no new messages since last run"
-
-    # 3. Read current AGENTS.md from store
-    mem_item = await store.aget(_MEMORY_NS, _MEMORY_KEY)
-    current_memory = ""
-    if mem_item is not None:
-        raw = mem_item.value.get("content", "")
-        current_memory = "\n".join(raw) if isinstance(raw, list) else raw
-    current_memory = current_memory[:8192]
-
-    # 4. Build transcript excerpt (cap at ~16 KB)
-    human_content = (
-        f"Current AGENTS.md:\n---\n{current_memory or '(empty — first consolidation run)'}\n---\n\n"
-        f"Recent conversations ({len(messages)} messages):\n---\n"
-        + _transcript_block(messages)
-        + "\n---\n\nWrite the updated AGENTS.md:"
+    logger.info(
+        "memory_consolidation (blob): %d messages in %d batch(es) → %d chars%s",
+        consumed, batches, len(new_memory), "; backlog remains" if backlog else "",
     )
-
-    # 5. Call LLM (single-shot, no agent loop)
-    llm = resolve_model_spec(model_id).build_llm()
-    response = await llm.ainvoke([
-        SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(content=human_content),
-    ])
-    new_memory = _flatten(response.content).strip()[:32_000]
-
-    # 6. Write updated memory back to store
-    created_at = (mem_item.value.get("created_at") if mem_item else None) or now_iso
-    await store.aput(_MEMORY_NS, _MEMORY_KEY, {
-        "content": new_memory,
-        "encoding": "utf-8",
-        "created_at": created_at,
-        "modified_at": now_iso,
-    })
-    await store.aput(_META_NS, _META_KEY, {"last_run_at": now_iso})
-
-    logger.info("memory_consolidation (blob): %d messages → %d chars", len(messages), len(new_memory))
-    return f"consolidated {len(messages)} messages; memory is now {len(new_memory)} chars"
+    return (
+        f"consolidated {consumed} messages in {batches} batch(es); "
+        f"memory is now {len(new_memory)} chars"
+        + ("; backlog remains for the next run" if backlog else "")
+    )
 
 
 async def consolidate_memory(store: AsyncSqliteStore, model_id: str | None = None) -> str:
@@ -399,7 +497,10 @@ async def consolidate_memory(store: AsyncSqliteStore, model_id: str | None = Non
     Dispatches to the discrete-item path when an embedder is configured, else
     the single-blob path. Always migrates the legacy key first.
     """
-    await _migrate_legacy_key(store)
-    if embeddings_available():
-        return await _consolidate_items(store, model_id)
-    return await _consolidate_blob(store, model_id)
+    if _run_lock.locked():
+        return "skipped: a consolidation pass is already running"
+    async with _run_lock:
+        await _migrate_legacy_key(store)
+        if embeddings_available():
+            return await _consolidate_items(store, model_id)
+        return await _consolidate_blob(store, model_id)

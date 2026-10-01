@@ -450,7 +450,7 @@ async def get_project_activity_since(
     decide how long material has been waiting, and the char total to decide
     whether an LLM call is worth spending, all before fetching any content.
     Incognito conversations are excluded here for the same reason
-    `get_recent_messages` excludes them: they must never reach memory.
+    `get_messages_since` excludes them: they must never reach memory.
     """
     q = (
         select(
@@ -480,9 +480,8 @@ async def get_project_messages_since(
 
     Oldest-first is load-bearing: the consolidation job walks these under a char
     budget and advances its watermark only as far as it actually consumed, so a
-    backlog is picked up by the next run instead of being silently skipped (the
-    bug `get_recent_messages` still has — it takes the newest N and advances the
-    watermark past everything).
+    backlog is picked up by the next run instead of being silently skipped.
+    `get_messages_since` is the same query for the user-memory job.
     """
     q = (
         select(
@@ -915,32 +914,48 @@ async def finish_workflow_run(
         await session.commit()
 
 
-async def get_recent_messages(
+async def get_messages_since(
     session: AsyncSession,
     since: datetime | None = None,
     limit: int = 200,
 ) -> list[dict]:
-    """Fetch recent user/assistant messages across all conversations, oldest-first."""
+    """User/assistant messages across all conversations after `since`, **oldest first**.
+
+    The user-memory counterpart of `get_project_messages_since`, and oldest-first
+    for the same reason: the consolidation job consumes these under a budget and
+    advances its watermark only as far as it got, so a backlog carries over to
+    the next pass. (Its predecessor took the newest N and the job then advanced
+    past everything, silently dropping whatever didn't fit.) `since` is
+    exclusive — it is the last message already consumed. `status` is included so
+    the caller can stop before a reply that is still being written.
+    """
     q = (
-        select(Message.role, Message.content, Message.created_at, Conversation.title)
+        select(
+            Message.role,
+            Message.content,
+            Message.created_at,
+            Message.status,
+            Conversation.title,
+        )
         .join(Conversation, Message.conversation_id == Conversation.id)
         .where(Message.role.in_(["user", "assistant"]))
         # Incognito conversations must never feed long-term memory consolidation.
         .where(Conversation.ephemeral == False)  # noqa: E712
-        .order_by(Message.created_at.desc())
+        .order_by(Message.created_at.asc())
         .limit(limit)
     )
     if since is not None:
-        q = q.where(Message.created_at >= since)
+        q = q.where(Message.created_at > since)
     rows = (await session.execute(q)).all()
     return [
         {
             "role": r.role,
             "content": r.content,
-            "created_at": r.created_at.isoformat(),
+            "created_at": r.created_at,
+            "status": r.status,
             "title": r.title or "Untitled",
         }
-        for r in reversed(rows)
+        for r in rows
     ]
 
 

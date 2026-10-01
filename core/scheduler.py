@@ -249,7 +249,10 @@ def _run_memory_consolidation() -> None:
         state._main_loop,
     )
     try:
-        result = future.result(timeout=300)
+        # A pass can run up to _MAX_BATCHES_PER_RUN LLM calls back to back. The
+        # wait only bounds this scheduler thread — timing out doesn't cancel the
+        # pass — so a short one just logs a "failure" for work still in progress.
+        result = future.result(timeout=1800)
         logger.info("memory consolidation: %s", result)
     except Exception:
         logger.exception("memory consolidation failed")
