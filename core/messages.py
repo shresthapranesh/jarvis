@@ -282,6 +282,40 @@ def estimate_tokens(messages: list[AnyMessage], llm) -> int:
         return estimate_tokens_heuristic(messages)
 
 
+def history_tokens_from_usage(messages: list[AnyMessage], overhead_tokens: int) -> int | None:
+    """History size taken from the provider's own count on the previous call.
+
+    The latest AIMessage's `usage_metadata.input_tokens` is the exact size of
+    the request that produced it — every message before it, plus the non-history
+    part of that request (system prompt, cached segments, volatile tail, tool
+    schemas), which the caller estimates as `overhead_tokens` and is subtracted
+    so the result means what `compact_threshold` means: history only. Measured
+    on gemma-4-31b-it that overhead is ~8k tokens, so leaving it in would trip a
+    12k threshold on a near-empty conversation.
+
+    Then add what has arrived since: the response itself (`output_tokens`, which
+    includes reasoning that `strip_historical_thinking` later drops — an
+    overestimate bounded by one response) and the heuristic over the tail.
+
+    Returns None when the latest AIMessage carries no input count, so the caller
+    can fall back. This is what replaced `estimate_tokens` on the agent loop:
+    for Google that is one blocking `count_tokens` HTTP call *per message*
+    (2.1s for 20 messages, measured), run on the event loop.
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        msg = messages[i]
+        if not isinstance(msg, AIMessage):
+            continue
+        usage = msg.usage_metadata or {}
+        input_tokens = usage.get("input_tokens") or 0
+        if input_tokens <= 0:
+            return None
+        history_then = max(0, input_tokens - overhead_tokens)
+        output_tokens = usage.get("output_tokens") or 0
+        return history_then + output_tokens + estimate_tokens_heuristic(messages[i + 1:])
+    return None
+
+
 def _make_system_message(static_text: str, volatile_text: str, cache: bool) -> SystemMessage:
     """Legacy single-breakpoint builder. Kept for backwards compat.
 

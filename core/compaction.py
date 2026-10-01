@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from .messages import (
     elide_stale_tool_results,
     estimate_tokens,
     estimate_tokens_heuristic,
+    history_tokens_from_usage,
     message_text,
 )
 
@@ -55,6 +57,13 @@ COMPACT_THRESHOLD_MAX = 200_000
 COMPACT_THRESHOLD_MIN = 12_000
 # Applied when the model's window is unknown (see ModelSpec.context_window).
 COMPACT_THRESHOLD_DEFAULT = 80_000
+
+# A usage-derived count below this fraction of the chars/4 heuristic is not
+# believed. Real text runs well under 8 chars/token, so a figure that low means
+# the provider's number does not cover the whole prompt (a prefix-cache hit it
+# left out, a truncated prompt) or the overhead estimate swallowed it — and an
+# undercount is the dangerous direction, since compaction would never fire.
+USAGE_SANITY_FLOOR = 0.5
 
 
 def compact_threshold(model: str | None = None) -> int:
@@ -339,6 +348,7 @@ async def maybe_compact(
     summarizer,
     threshold: int | None = None,
     keep_recent_groups: int = KEEP_RECENT_GROUPS,
+    usage_overhead_tokens: int | None = None,
 ) -> CompactionResult:
     """Incremental sliding-window summarization with caching.
 
@@ -347,6 +357,12 @@ async def maybe_compact(
     - Most recent user group is pinned always-kept
     - Kept window forced to start with user if possible
     - Merges ALL prior summaries, not just first
+
+    Pass `usage_overhead_tokens` (the estimated non-history part of a request)
+    to count from the previous call's reported usage instead of re-tokenizing —
+    see `history_tokens_from_usage`. Leave it None when the provider's
+    `input_tokens` does not cover the whole prompt (Ollama's
+    `prompt_eval_count` omits a KV-cached prefix).
 
     Always returns a `CompactionResult`; `compacted` says whether summarization
     actually fired. Every early return still carries the leaned view, so the
@@ -363,20 +379,38 @@ async def maybe_compact(
     no_compaction = CompactionResult(messages=leaned_for_count)
 
     heuristic = estimate_tokens_heuristic(leaned_for_count)
-    if heuristic <= int(th * 0.8):
-        logger.debug(
-            "compact check: ~%d tokens / %d msgs under %d threshold — skip (heuristic)",
-            heuristic,
-            len(leaned_for_count),
-            th,
-        )
-        return no_compaction
+    token_count: int | None = None
+    source = "count"
+    if usage_overhead_tokens is not None:
+        from_usage = history_tokens_from_usage(messages, usage_overhead_tokens)
+        if from_usage is not None and from_usage >= heuristic * USAGE_SANITY_FLOOR:
+            token_count, source = from_usage, "usage"
+        elif from_usage is not None:
+            logger.debug(
+                "compact check: usage says ~%d but heuristic ~%d — not trusted, counting",
+                from_usage,
+                heuristic,
+            )
 
-    token_count = estimate_tokens(leaned_for_count, llm)
+    if token_count is None:
+        if heuristic <= int(th * 0.8):
+            logger.debug(
+                "compact check: ~%d tokens / %d msgs under %d threshold — skip (heuristic)",
+                heuristic,
+                len(leaned_for_count),
+                th,
+            )
+            return no_compaction
+        # Off the loop: for several providers this is a synchronous network call
+        # (Google: one count_tokens request per message), and on the loop it
+        # stalls every live subscription and every other run until it returns.
+        token_count = await asyncio.to_thread(estimate_tokens, leaned_for_count, llm)
+
     if token_count <= th:
         logger.debug(
-            "compact check: %d tokens / %d msgs under %d threshold — skip",
+            "compact check: %d tokens (%s) / %d msgs under %d threshold — skip",
             token_count,
+            source,
             len(leaned_for_count),
             th,
         )
@@ -426,8 +460,9 @@ async def maybe_compact(
         return no_compaction
 
     logger.info(
-        "compact triggered: %d tokens (leaned %d msgs) / %d raw msgs / %d groups -> keeping %d recent groups (from idx %d), summarizing %d old groups%s",
+        "compact triggered: %d tokens (%s, leaned %d msgs) / %d raw msgs / %d groups -> keeping %d recent groups (from idx %d), summarizing %d old groups%s",
         token_count,
+        source,
         len(leaned_for_count),
         len(messages),
         len(groups),

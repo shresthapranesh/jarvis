@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sqlite3 as _sqlite3
 import time
@@ -12,6 +13,7 @@ from typing import Annotated, NotRequired, TypedDict
 
 from langchain_core.messages import AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -745,6 +747,21 @@ def _allowed(tools: list) -> list:
     return kept
 
 
+def _schema_tokens(tools: list) -> int:
+    """chars/4 estimate of the bound tool schemas, as the provider is sent them.
+
+    Measured against Google's own count for the main toolset: 817 estimated vs
+    919 real — close enough for an overhead that is subtracted, not billed.
+    """
+    total = 0
+    for tool in tools:
+        try:
+            total += len(json.dumps(convert_to_openai_tool(tool)))
+        except Exception:  # an exotic MCP schema — skip it rather than fail the build
+            continue
+    return total // 4
+
+
 def _build_agent(
     model: str, checkpointer, store: AsyncSqliteStore | None, board: bool = False
 ) -> CompiledStateGraph:
@@ -895,6 +912,12 @@ def _build_agent(
     )
     if cache_ttl != "5m":
         logger.info("agent %s: cache_control ttl=%s", model, cache_ttl)
+    # Compaction counts history from the previous call's reported usage, minus
+    # this estimate of everything else in the request (see
+    # history_tokens_from_usage). The bound schemas are fixed per compiled
+    # graph, so they're measured once. None opts out: Ollama's
+    # prompt_eval_count leaves out a KV-cached prefix, so it would undercount.
+    tool_schema_tokens = _schema_tokens(main_tools) if spec.provider != "ollama" else None
 
     # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
 
@@ -975,11 +998,20 @@ def _build_agent(
         # groups/removes against raw_messages, and hands back the leaned view it
         # already built — re-running apply_per_call_compaction here would repeat
         # the elide and grouping passes on every iteration. See core/compaction.py.
+        usage_overhead_tokens = None
+        if tool_schema_tokens is not None:
+            overhead_chars = (
+                len(_SYSTEM_PROMPT)
+                + sum(len(s.content) for s in cache_segments)
+                + len(volatile_suffix)
+            )
+            usage_overhead_tokens = tool_schema_tokens + overhead_chars // 4
         compaction = await maybe_compact(
             raw_messages,
             llm=llm,
             summarizer=llm_for_summary,
             threshold=compaction_threshold,
+            usage_overhead_tokens=usage_overhead_tokens,
         )
         messages_for_llm = compaction.messages
         state_update_msgs = compaction.state_update

@@ -200,6 +200,142 @@ async def test_maybe_compact_summarizer_failure_falls_back_to_leaned_view():
     assert result.messages, "must still return a usable history"
 
 
+# ── compaction counts from reported usage, never on the event loop ───────────
+
+class _NoCountLLM:
+    """Fails the test if the provider's token counter is reached at all."""
+
+    def get_num_tokens_from_messages(self, messages) -> int:
+        raise AssertionError("token counter called despite usage being available")
+
+
+def _with_usage(msg: AIMessage, input_tokens: int, output_tokens: int = 0) -> AIMessage:
+    msg.usage_metadata = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+    return msg
+
+
+def _long_history(n_turns: int = 12, payload: int = 400) -> list:
+    messages: list = [HumanMessage(content="start", id="u0")]
+    for i in range(n_turns):
+        messages.extend(_tool_turn(i, "y" * payload))
+    messages.append(HumanMessage(content="latest question", id="u_last"))
+    return messages
+
+
+def test_history_tokens_from_usage_subtracts_overhead_and_adds_the_tail():
+    from core.messages import estimate_tokens_heuristic, history_tokens_from_usage
+
+    tail = [ToolMessage(content="t" * 400, tool_call_id="c", id="t1", name="run_cell")]
+    messages = [
+        HumanMessage(content="q", id="u0"),
+        _with_usage(AIMessage(content="", id="a0"), input_tokens=9_000, output_tokens=50),
+        *tail,
+    ]
+    assert history_tokens_from_usage(messages, overhead_tokens=8_000) == (
+        1_000 + 50 + estimate_tokens_heuristic(tail)
+    )
+    # Overhead larger than the request clamps at zero rather than going negative.
+    assert history_tokens_from_usage(messages, overhead_tokens=20_000) == (
+        50 + estimate_tokens_heuristic(tail)
+    )
+
+
+def test_history_tokens_from_usage_none_without_a_reported_count():
+    """Only the latest AIMessage is the anchor — an older one with usage is not
+    reached past a newer one without, since its tail would span unknown text."""
+    from core.messages import history_tokens_from_usage
+
+    assert history_tokens_from_usage([HumanMessage(content="q")], 0) is None
+    messages = [
+        _with_usage(AIMessage(content="old", id="a0"), input_tokens=5_000),
+        HumanMessage(content="q", id="u1"),
+        AIMessage(content="no usage", id="a1"),
+    ]
+    assert history_tokens_from_usage(messages, 0) is None
+
+
+async def test_maybe_compact_uses_usage_and_never_calls_the_counter():
+    """Over threshold per reported usage → compacts with no counter call, even
+    though the chars/4 heuristic alone would have skipped."""
+    from core.compaction import maybe_compact
+
+    messages = _long_history()
+    messages[-3] = _with_usage(messages[-3], input_tokens=50_000)  # ai_11
+
+    result = await maybe_compact(
+        messages,
+        llm=_NoCountLLM(),
+        summarizer=_RecordingSummarizer(),
+        threshold=20_000,
+        usage_overhead_tokens=8_000,
+    )
+    assert result.compacted is True
+
+
+async def test_maybe_compact_overhead_keeps_a_short_history_under_threshold():
+    """The reported input includes ~8k of system prompt + schemas. Without the
+    overhead subtraction a 12k threshold would compact a near-empty thread."""
+    from core.compaction import maybe_compact
+
+    messages = _long_history(n_turns=3, payload=40)
+    messages[-3] = _with_usage(messages[-3], input_tokens=12_500)
+
+    summarizer = _RecordingSummarizer()
+    result = await maybe_compact(
+        messages,
+        llm=_NoCountLLM(),
+        summarizer=summarizer,
+        threshold=12_000,
+        usage_overhead_tokens=8_200,
+    )
+    assert result.compacted is False
+    assert summarizer.calls == 0
+
+
+async def test_maybe_compact_distrusts_an_implausibly_low_usage_count():
+    """A count far below the heuristic (a prefix-cache hit the provider left out)
+    falls back to counting, rather than letting compaction never fire."""
+    from core.compaction import maybe_compact
+
+    messages = _long_history(payload=4_000)
+    messages[-3] = _with_usage(messages[-3], input_tokens=10)
+
+    result = await maybe_compact(
+        messages,
+        llm=_FakeLLM(),
+        summarizer=_RecordingSummarizer(),
+        threshold=100,
+        usage_overhead_tokens=0,
+    )
+    assert result.compacted is True
+
+
+async def test_maybe_compact_fallback_count_runs_off_the_event_loop():
+    """The counter is a synchronous network call for Google/Anthropic. It must run
+    in a worker thread so it cannot stall every other run and subscription."""
+    import threading
+
+    from core.compaction import maybe_compact
+
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+
+    class _ThreadRecordingLLM:
+        def get_num_tokens_from_messages(self, messages) -> int:
+            seen.append(threading.get_ident())
+            return 0
+
+    await maybe_compact(
+        _long_history(), llm=_ThreadRecordingLLM(), summarizer=_RecordingSummarizer(), threshold=100
+    )
+    assert seen, "heuristic is over 80% of threshold, so the counter should run"
+    assert loop_thread not in seen
+
+
 # ── batched step persistence ─────────────────────────────────────────────────
 
 async def _steps_for(message_id: str) -> list:
