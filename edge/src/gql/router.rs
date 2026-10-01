@@ -139,8 +139,8 @@ mod tests {
         let q = "query R($id: ID!) { node(id: $id) { __typename id } }";
         let conv = json!({"id": "Q29udmVyc2F0aW9uOmFiYw=="}); // Conversation:abc
         assert_eq!(decide(&owned(), q, None, &conv), Decision::Edge);
-        let wf = json!({"id": "V29ya2Zsb3c6YWJj"}); // Workflow:abc
-        assert_eq!(decide(&owned(), q, None, &wf), Decision::Backend("node type Workflow".into()));
+        let other = json!({"id": "UnVubmluZ1Rhc2s6YWJj"}); // RunningTask:abc
+        assert_eq!(decide(&owned(), q, None, &other), Decision::Backend("node type RunningTask".into()));
     }
 
     #[test]

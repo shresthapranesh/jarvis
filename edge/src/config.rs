@@ -12,6 +12,8 @@ pub struct Config {
     /// The Python server, which now listens behind the edge.
     pub backend: String,
     pub db_path: PathBuf,
+    /// Where artifact files live (`AppConfig.artifacts_dir`).
+    pub artifacts_dir: PathBuf,
 }
 
 impl Config {
@@ -29,7 +31,11 @@ impl Config {
         if !backend.starts_with("http://") {
             return Err(format!("JARVIS_BACKEND_URL must be an http:// URL, got {backend}"));
         }
-        Ok(Self { bind, backend, db_path: db_path()? })
+        let artifacts_dir = match std::env::var("ARTIFACTS_DIR") {
+            Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+            _ => work_dir()?.join("artifacts"),
+        };
+        Ok(Self { bind, backend, db_path: db_path()?, artifacts_dir })
     }
 
     /// `ws://` twin of `backend`, for proxying WebSocket upgrades.
@@ -56,12 +62,16 @@ fn db_path() -> Result<PathBuf, String> {
             return Ok(PathBuf::from(path));
         }
     }
-    let work_dir = match std::env::var("WORK_DIR") {
-        Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+    Ok(work_dir()?.join("database.db"))
+}
+
+/// `$WORK_DIR`, else `~/.jarvis`.
+fn work_dir() -> Result<PathBuf, String> {
+    match std::env::var("WORK_DIR") {
+        Ok(dir) if !dir.is_empty() => Ok(PathBuf::from(dir)),
         _ => {
             let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-            PathBuf::from(home).join(".jarvis")
+            Ok(PathBuf::from(home).join(".jarvis"))
         }
-    };
-    Ok(work_dir.join("database.db"))
+    }
 }

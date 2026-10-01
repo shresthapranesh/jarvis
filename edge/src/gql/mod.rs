@@ -5,13 +5,20 @@
 //! the schema can't validate falls through to Python — so an un-ported field
 //! means "served by Python", never "broken".
 
+pub mod artifact;
+pub mod automation;
+pub mod board;
 pub mod codec;
 pub mod conversation;
+pub mod memory;
 pub mod node;
 pub mod project;
 pub mod router;
+pub mod settings_lists;
+pub mod workflow;
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use async_graphql::parser::parse_schema;
 use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
@@ -19,16 +26,32 @@ use async_graphql::{EmptyMutation, EmptySubscription, MergedObject, Schema};
 use sqlx::SqlitePool;
 
 #[derive(MergedObject, Default)]
-pub struct Query(conversation::ConversationQuery, project::ProjectQuery, node::NodeQuery);
+pub struct Query(
+    conversation::ConversationQuery,
+    project::ProjectQuery,
+    artifact::ArtifactQuery,
+    automation::AutomationQuery,
+    board::BoardTaskQuery,
+    workflow::WorkflowQuery,
+    settings_lists::ListsQuery,
+    memory::MemoryQuery,
+    node::NodeQuery,
+);
 
 pub type EdgeSchema = Schema<Query, EmptyMutation, EmptySubscription>;
 
-pub fn build(pool: SqlitePool) -> EdgeSchema {
+/// Process-level facts resolvers need besides the pool.
+pub struct EdgeData {
+    pub artifacts_dir: PathBuf,
+}
+
+pub fn build(pool: SqlitePool, data: EdgeData) -> EdgeSchema {
     Schema::build(Query::default(), EmptyMutation, EmptySubscription)
         // Python serves introspection: it knows the whole schema, this one
         // only a slice of it. (The router also never sends `__schema` here.)
         .disable_introspection()
         .data(pool)
+        .data(data)
         .finish()
 }
 

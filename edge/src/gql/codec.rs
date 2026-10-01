@@ -27,8 +27,35 @@ pub fn decode_global_id(id: &str) -> Result<(String, String), String> {
 }
 
 /// strawberry's `DateTime`, which serializes with Python's `isoformat()`.
+///
+/// Decodes straight from a SQLAlchemy `DATETIME` column, so row structs can
+/// hold it directly.
 #[derive(Clone, Debug)]
 pub struct DateTime(pub String);
+
+impl sqlx::Type<sqlx::Sqlite> for DateTime {
+    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
+        <String as sqlx::Type<sqlx::Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &sqlx::sqlite::SqliteTypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Sqlite>>::compatible(ty)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for DateTime {
+    fn decode(value: sqlx::sqlite::SqliteValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        Ok(iso_from_db(<&str as sqlx::Decode<sqlx::Sqlite>>::decode(value)?))
+    }
+}
+
+impl DateTime {
+    /// The UTC-aware form: `isoformat()` of a datetime given `tzinfo=utc`,
+    /// which is what `types/approval.py:_utc` hands strawberry.
+    pub fn utc(&self) -> DateTime {
+        DateTime(format!("{}+00:00", self.0))
+    }
+}
 
 #[Scalar(name = "DateTime")]
 impl ScalarType for DateTime {

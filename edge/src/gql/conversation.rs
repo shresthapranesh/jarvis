@@ -6,13 +6,15 @@ use std::collections::HashMap;
 use async_graphql::{ComplexObject, Context, ID, Object, Result, SimpleObject};
 use sqlx::SqlitePool;
 
-use super::codec::{DateTime, decode_cursor, decode_global_id, encode_cursor, global_id, iso_from_db};
+use super::codec::{DateTime, decode_cursor, decode_global_id, encode_cursor, global_id};
 use super::project::Project;
 
-#[derive(SimpleObject, Clone)]
+#[derive(SimpleObject, sqlx::FromRow, Clone)]
 #[graphql(complex)]
 pub struct Conversation {
-    pub id: ID,
+    #[graphql(skip)]
+    #[sqlx(rename = "id")]
+    pub raw_id: String,
     pub title: Option<String>,
     pub model: String,
     pub surface: String,
@@ -20,54 +22,26 @@ pub struct Conversation {
     pub ephemeral: bool,
     pub project_id: Option<String>,
     pub created_at: DateTime,
-    #[graphql(skip)]
-    pub raw_id: String,
-}
-
-#[derive(sqlx::FromRow)]
-pub struct ConversationRow {
-    id: String,
-    title: Option<String>,
-    model: String,
-    surface: String,
-    pinned: bool,
-    ephemeral: bool,
-    project_id: Option<String>,
-    created_at: String,
 }
 
 pub const CONVERSATION_COLUMNS: &str =
     "id, title, model, surface, pinned, ephemeral, project_id, created_at";
 
-impl From<ConversationRow> for Conversation {
-    fn from(r: ConversationRow) -> Self {
-        Self {
-            id: global_id("Conversation", &r.id),
-            title: r.title,
-            model: r.model,
-            surface: r.surface,
-            pinned: r.pinned,
-            ephemeral: r.ephemeral,
-            project_id: r.project_id,
-            created_at: iso_from_db(&r.created_at),
-            raw_id: r.id,
-        }
-    }
-}
-
 impl Conversation {
     pub async fn by_id(pool: &SqlitePool, raw_id: &str) -> Result<Option<Self>> {
-        let row: Option<ConversationRow> =
-            sqlx::query_as(&format!("SELECT {CONVERSATION_COLUMNS} FROM conversations WHERE id = ?"))
-                .bind(raw_id)
-                .fetch_optional(pool)
-                .await?;
-        Ok(row.map(Into::into))
+        Ok(sqlx::query_as(&format!("SELECT {CONVERSATION_COLUMNS} FROM conversations WHERE id = ?"))
+            .bind(raw_id)
+            .fetch_optional(pool)
+            .await?)
     }
 }
 
 #[ComplexObject]
 impl Conversation {
+    pub async fn id(&self) -> ID {
+        global_id("Conversation", &self.raw_id)
+    }
+
     async fn project(&self, ctx: &Context<'_>) -> Result<Option<Project>> {
         match &self.project_id {
             Some(pid) => Project::by_id(ctx.data()?, pid).await,
@@ -102,7 +76,7 @@ impl Conversation {
         }
         sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT ?");
 
-        let mut q = sqlx::query_as::<_, MessageRow>(&sql).bind(&self.raw_id);
+        let mut q = sqlx::query_as::<_, Message>(&sql).bind(&self.raw_id);
         if let Some((ts, id)) = &cursor {
             q = q.bind(ts).bind(ts).bind(id);
         }
@@ -129,9 +103,12 @@ impl Conversation {
     }
 }
 
-#[derive(SimpleObject, Clone)]
+#[derive(SimpleObject, sqlx::FromRow, Clone)]
+#[graphql(complex)]
 pub struct Message {
-    pub id: ID,
+    #[graphql(skip)]
+    #[sqlx(rename = "id")]
+    pub raw_id: String,
     pub role: String,
     pub content: String,
     pub model: Option<String>,
@@ -144,26 +121,9 @@ pub struct Message {
     pub eval_tps: Option<f64>,
     pub duration_ms: Option<f64>,
     pub created_at: DateTime,
+    /// Loaded alongside the page (`with_steps`), ordered by `seq`.
+    #[sqlx(skip)]
     pub steps: Vec<Step>,
-    #[graphql(skip)]
-    pub raw_id: String,
-}
-
-#[derive(sqlx::FromRow)]
-pub struct MessageRow {
-    id: String,
-    role: String,
-    content: String,
-    model: Option<String>,
-    status: String,
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
-    ttft_ms: Option<f64>,
-    llm_ms: Option<f64>,
-    prefill_tps: Option<f64>,
-    eval_tps: Option<f64>,
-    duration_ms: Option<f64>,
-    created_at: String,
 }
 
 const MESSAGE_COLUMNS: &str = "id, role, content, model, status, input_tokens, output_tokens, \
@@ -171,93 +131,60 @@ const MESSAGE_COLUMNS: &str = "id, role, content, model, status, input_tokens, o
 
 impl Message {
     pub async fn by_id(pool: &SqlitePool, raw_id: &str) -> Result<Option<Self>> {
-        let row: Option<MessageRow> =
-            sqlx::query_as(&format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?"))
-                .bind(raw_id)
-                .fetch_optional(pool)
-                .await?;
+        let row: Option<Message> = sqlx::query_as(&format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE id = ?"))
+            .bind(raw_id)
+            .fetch_optional(pool)
+            .await?;
         Ok(match row {
-            Some(r) => Self::with_steps(pool, vec![r]).await?.pop(),
+            Some(m) => Self::with_steps(pool, vec![m]).await?.pop(),
             None => None,
         })
     }
 
     /// Attach steps to a page of messages in one query (the Python side's
-    /// `selectinload`), each message's steps ordered by `seq`.
-    async fn with_steps(pool: &SqlitePool, rows: Vec<MessageRow>) -> Result<Vec<Self>> {
-        let mut by_message: HashMap<String, Vec<Step>> = HashMap::new();
-        if !rows.is_empty() {
-            let placeholders = vec!["?"; rows.len()].join(", ");
-            let sql = format!(
-                "SELECT id, message_id, node, source, subagent, data, seq, created_at FROM steps \
-                 WHERE message_id IN ({placeholders}) ORDER BY seq, rowid"
-            );
-            let mut q = sqlx::query_as::<_, StepRow>(&sql);
-            for r in &rows {
-                q = q.bind(&r.id);
-            }
-            for s in q.fetch_all(pool).await? {
-                by_message.entry(s.message_id.clone()).or_default().push(s.into());
-            }
+    /// `selectinload`).
+    async fn with_steps(pool: &SqlitePool, mut messages: Vec<Self>) -> Result<Vec<Self>> {
+        if messages.is_empty() {
+            return Ok(messages);
         }
-        Ok(rows
-            .into_iter()
-            .map(|r| Self {
-                id: global_id("Message", &r.id),
-                steps: by_message.remove(&r.id).unwrap_or_default(),
-                role: r.role,
-                content: r.content,
-                model: r.model,
-                status: r.status,
-                input_tokens: r.input_tokens,
-                output_tokens: r.output_tokens,
-                ttft_ms: r.ttft_ms,
-                llm_ms: r.llm_ms,
-                prefill_tps: r.prefill_tps,
-                eval_tps: r.eval_tps,
-                duration_ms: r.duration_ms,
-                created_at: iso_from_db(&r.created_at),
-                raw_id: r.id,
-            })
-            .collect())
+        let placeholders = vec!["?"; messages.len()].join(", ");
+        let sql = format!(
+            "SELECT id, message_id, node, source, subagent, data, seq, created_at FROM steps \
+             WHERE message_id IN ({placeholders}) ORDER BY seq, rowid"
+        );
+        let mut q = sqlx::query_as::<_, Step>(&sql);
+        for m in &messages {
+            q = q.bind(&m.raw_id);
+        }
+        let mut by_message: HashMap<String, Vec<Step>> = HashMap::new();
+        for s in q.fetch_all(pool).await? {
+            by_message.entry(s.message_id.clone()).or_default().push(s);
+        }
+        for m in &mut messages {
+            m.steps = by_message.remove(&m.raw_id).unwrap_or_default();
+        }
+        Ok(messages)
     }
 }
 
-#[derive(SimpleObject, Clone)]
+#[ComplexObject]
+impl Message {
+    pub async fn id(&self) -> ID {
+        global_id("Message", &self.raw_id)
+    }
+}
+
+#[derive(SimpleObject, sqlx::FromRow, Clone)]
 pub struct Step {
     pub id: String,
+    #[graphql(skip)]
+    pub message_id: String,
     pub node: String,
     pub source: String,
     pub subagent: Option<String>,
     pub data: Option<String>,
     pub seq: i64,
     pub created_at: DateTime,
-}
-
-#[derive(sqlx::FromRow)]
-struct StepRow {
-    id: String,
-    message_id: String,
-    node: String,
-    source: String,
-    subagent: Option<String>,
-    data: Option<String>,
-    seq: i64,
-    created_at: String,
-}
-
-impl From<StepRow> for Step {
-    fn from(r: StepRow) -> Self {
-        Self {
-            id: r.id,
-            node: r.node,
-            source: r.source,
-            subagent: r.subagent,
-            data: r.data,
-            seq: r.seq,
-            created_at: iso_from_db(&r.created_at),
-        }
-    }
 }
 
 #[derive(SimpleObject)]
@@ -303,11 +230,11 @@ impl ConversationQuery {
             sql.push_str(" AND surface = ?");
         }
         sql.push_str(" ORDER BY pinned DESC, created_at DESC");
-        let mut q = sqlx::query_as::<_, ConversationRow>(&sql);
+        let mut q = sqlx::query_as(&sql);
         if let Some(s) = &surface {
             q = q.bind(s);
         }
-        Ok(q.fetch_all(pool).await?.into_iter().map(Into::into).collect())
+        Ok(q.fetch_all(pool).await?)
     }
 
     async fn conversation(&self, ctx: &Context<'_>, id: ID) -> Result<Option<Conversation>> {

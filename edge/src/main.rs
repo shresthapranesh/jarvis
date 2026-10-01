@@ -33,7 +33,8 @@ async fn main() {
     // The parity tests diff this against the Python schema's SDL.
     if std::env::args().any(|a| a == "--print-schema") {
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");
-        print!("{}", gql::build(pool).sdl());
+        let data = gql::EdgeData { artifacts_dir: Default::default() };
+        print!("{}", gql::build(pool, data).sdl());
         return;
     }
 
@@ -69,7 +70,8 @@ async fn main() {
         }
     };
 
-    let schema = gql::build(pool);
+    let data = gql::EdgeData { artifacts_dir: config.artifacts_dir.clone() };
+    let schema = gql::build(pool, data);
     let owned = gql::owned_root_fields(&schema);
     let http = reqwest::Client::builder()
         // A proxy hands redirects to the client; it never follows them.
