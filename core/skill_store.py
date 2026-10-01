@@ -124,28 +124,31 @@ async def search_skills(query: str, *, k: int, skills: list[Skill]) -> list[dict
     return [{"name": n, "description": d} for _, n, d in scored[:k]]
 
 
-async def skill_catalog(query: str) -> list[dict]:
+async def skill_catalog(query: str) -> tuple[list[dict], bool]:
     """Name + description of the enabled skills to surface this turn.
 
-    Small catalogs (or keyless / no-embedder setups) surface every enabled
-    skill; larger ones narrow to the top-K whose descriptions best match
-    `query`, falling back to a capped slice if retrieval yields nothing. Bodies
-    are never included — the agent pulls those on demand via ``use_skill``.
-    Trivial queries (greetings) return empty to avoid wasteful injection.
+    Returns ``(skills, ranked)``. Small catalogs (or keyless / no-embedder
+    setups) surface every enabled skill, unranked — the same list on every
+    turn, trivial ones included, so it can sit in the cached prompt prefix.
+    Larger ones narrow to the top-K whose descriptions best match `query`,
+    falling back to a capped slice if retrieval yields nothing; that list
+    changes with the query, so ``ranked`` tells the caller to keep it out of
+    the cached prefix. Trivial queries (greetings) skip ranking and return
+    nothing. Bodies are never included — the agent pulls those on demand via
+    ``use_skill``.
     """
     from core.doc_index import _is_trivial_query
-
-    if _is_trivial_query(query):
-        return []
 
     async with async_session() as session:
         skills = await list_skills(session, enabled_only=True)
     if not skills:
-        return []
+        return [], False
 
     full = [{"name": s.name, "description": s.description} for s in skills]
     if len(skills) <= _CATALOG_FULL_THRESHOLD or not embeddings_available():
-        return full
+        return full, False
 
+    if _is_trivial_query(query):
+        return [], True
     hits = await search_skills(query, k=_CATALOG_TOPK, skills=skills)
-    return hits if hits else full[:_CATALOG_TOPK]
+    return (hits if hits else full[:_CATALOG_TOPK]), True

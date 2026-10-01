@@ -110,6 +110,12 @@ def honors_cache_control(spec: "ModelSpec", enabled_providers: Iterable[str]) ->
     """
     if spec.provider not in set(enabled_providers):
         return False
+    if spec.provider == "bedrock":
+        # Breakpoints reach Bedrock as Converse `cachePoint` blocks. Only
+        # Claude ids (`us.anthropic.claude-…`) are known to accept them; an
+        # unsupported block on another model risks a validation error on
+        # every call rather than a silent no-op, so nothing else gets one.
+        return "anthropic." in spec.id.partition(":")[2].lower()
     if spec.provider == "openrouter":
         # A leading `~` marks an alias route (`~anthropic/claude-sonnet-latest`),
         # which resolves to the same upstream as the pinned ids beside it.

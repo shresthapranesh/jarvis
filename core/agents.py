@@ -76,7 +76,7 @@ _SEGMENT_STABILITY: dict[str, int] = {
     "core_memory": 1,           # always-on memory items; changes only on write
     "project_header": 2,        # project identity + standing instructions prose
     "project_instructions": 3,  # user-owned, edited rarely
-    "skills": 4,                # re-ranked per turn, stable within one turn
+    "skills": 4,                # full catalog only — a ranked shortlist is cacheable=False
     "mcp_servers": 5,           # lazy MCP catalog; changes only on config edit
     "browser": 6,               # environment fact; flips only when a browser starts/stops
 }
@@ -254,8 +254,7 @@ async def _memory_volatile_parts(store, query: str) -> list[CacheSegment]:
 
     With an embedder: always-on `core` items + the top-k `fact` items retrieved
     for `query` (the latest user turn's text). Without one: today's single
-    AGENTS.md blob. Trivial queries (greetings) skip fact retrieval and, if core
-    is large, skip the instructional header to save tokens.
+    AGENTS.md blob. Trivial queries (greetings) skip fact retrieval only.
 
     Each section is tagged with its own cacheability rather than left for the
     caller to infer from its heading text — `## Relevant Memories` re-ranks every
@@ -274,15 +273,6 @@ async def _memory_volatile_parts(store, query: str) -> list[CacheSegment]:
         is_trivial = False
 
     core = await load_core()
-
-    # For trivial greetings (hi, thanks), don't inject fact memories and
-    # skip the instructional header if core is empty — saves ~100 tokens and
-    # 2 embedding calls (already saved via cache, but also token cost)
-    if is_trivial:
-        if core:
-            # Only core identity, no header, no relevant search
-            return [CacheSegment(name="core_memory", content=f"## Agent Memory\n\n{core}")]
-        return []
 
     # Lead with a short how-to so the agent knows it can WRITE memory, not just
     # read the items injected below. Gated on embeddings_available() (same
@@ -304,7 +294,11 @@ async def _memory_volatile_parts(store, query: str) -> list[CacheSegment]:
     ]
     if core:
         parts.append(CacheSegment(name="core_memory", content=f"## Agent Memory\n\n{core}"))
-    if query:
+    # The how-to and core items are emitted on trivial turns too: they sit in
+    # the cached prefix ahead of the conversation, so a "thanks" that dropped
+    # them would rewrite that prefix and re-bill the whole history twice — once
+    # dropping them, once restoring them on the next real question.
+    if query and not is_trivial:
         try:
             hits = await search_memory(query, k=6)
         except Exception as exc:
@@ -328,14 +322,16 @@ async def _skills_volatile_parts(query: str) -> list[CacheSegment]:
     """Build the `## Available Skills` section.
 
     Surfaces only enabled skills' name + description (the routing key), narrowed
-    to the latest user turn when the catalog is large. Semi-stable: the ranking
-    can shift between turns but holds for a whole turn's iterations, so it gets
-    its own cached block placed after the fully-stable ones. The body stays out;
-    the agent pulls it with `use_skill(name)`. Returns [] when there are no
-    skills, so nothing about skills appears in the prompt until at least one exists.
+    to the latest user turn when the catalog is large. The full list is the
+    same every turn and is cached; a narrowed list re-ranks per user turn, and
+    anything cached ahead of the conversation that changes per turn re-bills
+    the whole history, so that one goes to the uncached tail instead. The body
+    stays out; the agent pulls it with `use_skill(name)`. Returns [] when there
+    are no skills, so nothing about skills appears in the prompt until at least
+    one exists.
     """
     try:
-        catalog = await skill_catalog(query)
+        catalog, ranked = await skill_catalog(query)
     except Exception as exc:
         logger.warning("skill catalog retrieval failed: %s", exc)
         return []
@@ -345,6 +341,7 @@ async def _skills_volatile_parts(query: str) -> list[CacheSegment]:
     return [
         CacheSegment(
             name="skills",
+            cacheable=not ranked,
             content=(
                 "## Available Skills\n\n"
                 "Reusable procedures you can apply. When one clearly fits the task, call "
@@ -767,7 +764,9 @@ def _build_agent(
                 history = strip_historical_thinking(history)
                 history = repair_orphan_tool_calls(history)
                 response = await role_llm.ainvoke(
-                    build_llm_messages(prompt, use_cache, history),
+                    build_llm_messages(
+                        prompt, use_cache, history, cache_provider=spec.provider
+                    ),
                     config=config,
                 )
                 return {"messages": [response]}
@@ -866,9 +865,10 @@ def _build_agent(
         costs 2 graph steps (model + tools) instead of 3. With recursion_limit=100
         the agent gets ~50 useful round-trips, which is plenty for code-first work.
 
-        multi-breakpoint caching: memory+skills+project instructions are
-        placed in separate cached blocks (up to 4 breakpoints), while todos and
-        project memory (which can change mid-turn via tools) stay volatile.
+        Caching: memory+skills+project instructions are cached system blocks
+        ahead of the history, which carries a rolling breakpoint; todos, project
+        memory and retrieved memories (which change per turn or mid-turn) go in
+        an uncached tail after it. See build_llm_messages.
         """
         _phase = _PhaseTimer()
         raw_messages = list(state.get("messages", []))
@@ -954,6 +954,7 @@ def _build_agent(
             volatile_suffix=volatile_suffix,
             cache_segments=cache_segments if cache_segments else None,
             cache_ttl=cache_ttl,
+            cache_provider=spec.provider,
         )
         t_build = _phase.lap()
 

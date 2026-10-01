@@ -188,6 +188,12 @@ def repair_orphan_tool_calls(messages: list[AnyMessage]) -> list[AnyMessage]:
 TOOL_RESULT_KEEP_TURNS = 4
 TOOL_RESULT_ELIDE_MIN_CHARS = 2500
 TOOL_RESULT_ELIDE_HEAD_CHARS = 400
+# The elision boundary advances in jumps of this many AI turns rather than one.
+# Eliding rewrites a message that is already in the cached prompt prefix, so a
+# boundary that slides every turn busts the history cache on every LLM call; a
+# stepped one keeps the prefix byte-identical for `step` calls in between, at
+# the price of up to `step - 1` extra turns of unclipped output.
+TOOL_RESULT_ELIDE_STEP = 4
 
 
 def elide_stale_tool_results(
@@ -196,6 +202,7 @@ def elide_stale_tool_results(
     keep_turns: int = TOOL_RESULT_KEEP_TURNS,
     min_chars: int = TOOL_RESULT_ELIDE_MIN_CHARS,
     head_chars: int = TOOL_RESULT_ELIDE_HEAD_CHARS,
+    step: int = TOOL_RESULT_ELIDE_STEP,
 ) -> list[AnyMessage]:
     """Clip bulky ToolMessages older than the last ``keep_turns`` AI turns.
 
@@ -205,17 +212,19 @@ def elide_stale_tool_results(
     list content (vision blocks, structured tool results) passes through, as
     do results at or under ``min_chars``.
 
+    The boundary is counted from the *start* of history and moves in jumps of
+    ``step`` AI turns, so between jumps every call elides exactly the same
+    messages and the cached prefix survives (see TOOL_RESULT_ELIDE_STEP).
+    ``step=1`` is the old slide-by-one behaviour.
+
     NOTE: this is step 1 of `core/compaction.py:apply_per_call_compaction()`
     which also collapses old tool_call groups into short stubs.
     """
-    cutoff = 0
-    seen_ai = 0
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], AIMessage):
-            seen_ai += 1
-            if seen_ai >= keep_turns:
-                cutoff = i
-                break
+    ai_positions = [i for i, m in enumerate(messages) if isinstance(m, AIMessage)]
+    stale = len(ai_positions) - keep_turns
+    if stale <= 0:
+        return messages
+    cutoff = ai_positions[(stale // max(step, 1)) * max(step, 1)]
     if cutoff == 0:
         return messages
     result = list(messages)
@@ -348,6 +357,7 @@ def build_llm_messages(
     volatile_suffix: str = "",
     cache_segments: list[Any] | None = None,
     cache_ttl: str = "5m",
+    cache_provider: str = "anthropic",
 ) -> list[AnyMessage]:
     """Build the message list for an LLM call with exactly one SystemMessage.
 
@@ -359,15 +369,26 @@ def build_llm_messages(
     embedded SystemMessages into the prompt text and prepend a single
     SystemMessage at index 0.
 
-    ``system_text`` is the *static* (cacheable) prefix. ``volatile_suffix``
-    (memory, todos, …) plus any folded summarizer SystemMessages form the
-    volatile region, which is placed after the cache breakpoint so it can
-    change every turn without busting the cached prefix.
+    ``system_text`` is the *static* prefix; ``cache_segments`` are the stable
+    sections after it; ``volatile_suffix`` (relevant memories, todos, project
+    memory, …) is what may change on every call.
 
-    multi-breakpoint: if ``cache_segments`` (list[CacheSegment]) is
-    provided and cache=True, builds up to 4 cache-controlled blocks
-    (system + core_memory + skills + project_instructions), keeping volatile
-    suffix (todos, summaries) uncached. See core/context_cache.py.
+    With ``cache=True`` the request is laid out most-stable-first, because a
+    prefix cache is invalidated from the first changed byte onward:
+
+        system: static ▸ cacheable segments ▸ conversation summary
+        history (normalized; rolling breakpoint on its newest markable message)
+        tail: one user message carrying volatile_suffix
+
+    The summary is the only SystemMessage that reaches history, and it changes
+    only when compaction rewrites the history anyway, so it costs nothing to
+    cache. The volatile tail sits after the last breakpoint, so changing it
+    re-bills only itself. ``cache_provider`` picks the breakpoint spelling — see
+    ContextCacheConfig.mark.
+
+    With ``cache=False`` the old single-system-message layout is unchanged:
+    everything, volatile and summary included, is concatenated into the system
+    prompt and history passes through as-is.
     """
     extras: list[str] = []
     rest: list[AnyMessage] = []
@@ -378,6 +399,18 @@ def build_llm_messages(
                 extras.append(text)
         else:
             rest.append(m)
+
+    if cache:
+        return _build_cached_llm_messages(
+            system_text,
+            rest,
+            summaries=extras,
+            volatile_text=volatile_suffix.strip(),
+            cache_segments=list(cache_segments or []),
+            cache_ttl=cache_ttl,
+            cache_provider=cache_provider,
+        )
+
     volatile_parts = [p for p in [volatile_suffix.strip(), *extras] if p]
     volatile_text = "\n\n".join(volatile_parts)
 
@@ -388,3 +421,64 @@ def build_llm_messages(
             )
         ] + rest
     return [_make_system_message(system_text, volatile_text, cache)] + rest
+
+
+# Volatile per-call context rides at the end of the request as a user message,
+# so it has to say plainly that the user didn't write it — otherwise "Current
+# Tasks" or a planning directive reads as the user's newest instruction.
+_TURN_CONTEXT_OPEN = (
+    "<turn_context>\n"
+    "Context the application attached for this step (memories retrieved for the "
+    "current request, task list, project state). It is not a message from the user.\n\n"
+)
+_TURN_CONTEXT_CLOSE = "\n</turn_context>"
+
+
+def _build_cached_llm_messages(
+    system_text: str,
+    rest: list[AnyMessage],
+    *,
+    summaries: list[str],
+    volatile_text: str,
+    cache_segments: list[Any],
+    cache_ttl: str,
+    cache_provider: str,
+) -> list[AnyMessage]:
+    """The cache=True layout described in build_llm_messages."""
+    from core.context_cache import (
+        CacheSegment,
+        ContextCacheConfig,
+        build_cached_system_message,
+        mark_history,
+        normalize_history_content,
+    )
+
+    cfg = ContextCacheConfig(enabled=True, cache_ttl=cache_ttl, provider=cache_provider)
+    segments = [s for s in cache_segments if s.cacheable]
+    if summaries:
+        segments.append(
+            CacheSegment(name="conversation_summary", content="\n\n".join(summaries))
+        )
+    system, _stats = build_cached_system_message(
+        static_prompt=system_text,
+        # Non-cacheable segments belong in the tail with the rest of the
+        # volatile content, not after the system breakpoints.
+        segments=segments,
+        use_cache=True,
+        config=cfg,
+    )
+    volatile_parts = [s.content for s in cache_segments if not s.cacheable and s.content.strip()]
+    if volatile_text:
+        volatile_parts.append(volatile_text)
+
+    messages = mark_history(normalize_history_content(rest), cfg)
+    if volatile_parts:
+        body = "\n\n".join(volatile_parts)
+        messages.append(
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": f"{_TURN_CONTEXT_OPEN}{body}{_TURN_CONTEXT_CLOSE}"}
+                ]
+            )
+        )
+    return [system, *messages]

@@ -7,12 +7,25 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
 
-# Anthropic/Bedrock allow up to 4 cache breakpoints per request.
+# Anthropic/Bedrock allow up to 4 cache breakpoints per request. The system
+# message spends at most two (static prompt, end of the stable segments) and
+# the history one (mark_history), so the budget is never the limiting factor.
 MAX_CACHE_BREAKPOINTS = 4
+
+# Providers whose LangChain integration only understands a standalone
+# `{"cachePoint": ...}` block. ChatBedrockConverse rebuilds every text block as
+# `{"text": ...}` and silently drops a `cache_control` key on it, so marking
+# Bedrock the Anthropic way sends a request with no cache points at all.
+_CACHE_POINT_PROVIDERS = frozenset({"bedrock"})
+
+# ChatOpenAI (the OpenRouter integration) keeps `cache_control` on user and
+# assistant content parts but strips it from role=tool messages, so a tool
+# result can't carry the history breakpoint there.
+_TOOL_MESSAGE_UNMARKABLE_PROVIDERS = frozenset({"openrouter"})
 
 
 @dataclass
@@ -81,15 +94,20 @@ class ContextCacheConfig:
     """Jarvis-like config for how caching is applied.
 
     enabled: whether caching is on (model provider supports it)
-    max_breakpoints: max cache_control blocks (Anthropic limit 4)
-    min_chars_for_cache: don't cache tiny segments (< this) — waste of breakpoint
+    max_breakpoints: max breakpoints per request (Anthropic/Bedrock limit 4)
+    min_chars_for_cache: retained for RunnerConfig compatibility. Placement no
+        longer depends on segment size: one breakpoint closes every block before
+        it, so a small segment rides in the cached prefix without spending one.
     cache_ttl: "5m" (API default) or "1h" — see resolve_cache_ttl
+    provider: decides how a breakpoint is spelled (`cache_control` key vs a
+        Bedrock `cachePoint` block) and which messages can carry one
     """
 
     enabled: bool = True
     max_breakpoints: int = MAX_CACHE_BREAKPOINTS
     min_chars_for_cache: int = 50
     cache_ttl: str = DEFAULT_CACHE_TTL
+    provider: str = "anthropic"
 
     def cache_control(self) -> dict[str, str]:
         """The cache_control payload for one block.
@@ -100,6 +118,19 @@ class ContextCacheConfig:
         if self.cache_ttl == DEFAULT_CACHE_TTL:
             return {"type": "ephemeral"}
         return {"type": "ephemeral", "ttl": self.cache_ttl}
+
+    def mark(self, blocks: list[Any]) -> list[Any]:
+        """Return `blocks` with a breakpoint closing the last one.
+
+        Bedrock gets a trailing `cachePoint` block; everything else gets
+        `cache_control` on the last block itself. Never mutates `blocks`.
+        """
+        if self.provider in _CACHE_POINT_PROVIDERS:
+            return [*blocks, {"cachePoint": {"type": "default"}}]
+        last = blocks[-1]
+        if isinstance(last, str):
+            last = {"type": "text", "text": last}
+        return [*blocks[:-1], {**last, "cache_control": self.cache_control()}]
 
 
 @dataclass
@@ -131,11 +162,16 @@ def build_cached_system_message(
     """Build a SystemMessage with explicit cache breakpoints (caching pattern).
 
     Layout when use_cache=True:
-        [0] static_prompt (cached)
-        [1] segment[0] (cached if cacheable and big enough and budget)
-        [2] segment[1] (cached ...)
-        [3] ...
-        [N] concatenated non-cached + volatile_suffix (not cached)
+        static_prompt                          ← breakpoint
+        cacheable segments, in the given order ← one breakpoint after the last
+        non-cacheable segments + volatile_suffix (unmarked)
+
+    Every cacheable segment stays in the cached region whatever its size; a
+    breakpoint covers all blocks before it, so per-segment breakpoints only buy
+    a fallback for when a *later* segment changes, which is not worth the
+    budget the history breakpoint needs. Callers on the agent path pass no
+    volatile content here — it goes after the history (build_llm_messages), so
+    churning it can't invalidate the cached conversation.
 
     When use_cache=False: single text block with all concatenated.
 
@@ -165,45 +201,25 @@ def build_cached_system_message(
     blocks: list[dict[str, Any] | str] = []
     stats.breakpoints_used = 0
 
-    # Block 0: static prompt — always cached, first breakpoint
+    # Static prompt — shared by every conversation, so it gets its own breakpoint.
     if static_prompt.strip():
-        blocks.append(
-            {"type": "text", "text": static_prompt, "cache_control": cfg.cache_control()}
-        )
+        blocks.extend(cfg.mark([{"type": "text", "text": static_prompt}]))
         stats.breakpoints_used = 1
         stats.segments_cached = 1
         stats.cached_tokens_est += len(static_prompt) // 4
 
-    # Remaining cache budget: max_breakpoints - 1 (volatile must stay uncached)
-    # Actually we want last block to be uncached volatile, so reserve 0 for it.
-    # We have max_breakpoints total blocks can be marked cached. If we have N cached
-    # blocks, last cached block's breakpoint still valid. Volatile after it is uncached.
-    cache_budget = cfg.max_breakpoints - stats.breakpoints_used
+    stats.segments_total = len(all_segments)
+    cached_parts = [s for s in all_segments if s.cacheable]
+    # Counted below via the joined volatile block, so no per-segment increment.
+    non_cached_parts = [s.content for s in all_segments if not s.cacheable]
 
-    cached_parts: list[CacheSegment] = []
-    non_cached_parts: list[str] = []
-
-    for seg in all_segments:
-        stats.segments_total += 1
-        is_big_enough = len(seg.content) >= cfg.min_chars_for_cache
-        if seg.cacheable and is_big_enough and cache_budget > 0:
-            # Will be its own cached block
-            cached_parts.append(seg)
-            cache_budget -= 1
-        else:
-            # Goes to volatile concatenation — counted below via the joined
-            # volatile block, so no per-segment increment here (would double-count).
-            non_cached_parts.append(seg.content)
-
-    # Emit cached segments as individual blocks
-    for seg in cached_parts:
-        blocks.append(
-            {"type": "text", "text": seg.content, "cache_control": cfg.cache_control()}
-        )
-        stats.segments_cached += 1
+    if cached_parts:
+        blocks.extend(cfg.mark([{"type": "text", "text": s.content} for s in cached_parts]))
         stats.breakpoints_used += 1
-        stats.cached_tokens_est += seg.tokens_estimate or 0
-        logger.debug("cache segment %s cached: ~%d tokens", seg.name, seg.tokens_estimate or 0)
+        for seg in cached_parts:
+            stats.segments_cached += 1
+            stats.cached_tokens_est += seg.tokens_estimate or 0
+            logger.debug("cache segment %s cached: ~%d tokens", seg.name, seg.tokens_estimate or 0)
 
     # Final volatile block: non-cached segments + volatile_suffix (no cache_control)
     volatile_parts = [p for p in non_cached_parts if p and p.strip()]
@@ -235,3 +251,82 @@ def build_cached_system_message(
     )
 
     return SystemMessage(content=blocks), stats
+
+
+# ── History breakpoint ───────────────────────────────────────────────────────
+
+def _is_tool_result_carrier(msg: AnyMessage) -> bool:
+    content = getattr(msg, "content", None)
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+    )
+
+
+def normalize_history_content(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """Give every user/tool message list-of-blocks content.
+
+    The history breakpoint can only be attached to a block, so the message
+    carrying it is sent as `[{"type": "text", ...}]` — and on the next call,
+    when the breakpoint has moved on, that same message must serialize the same
+    way or the prefix it was cached under no longer matches (langchain_anthropic
+    sends a plain-string ToolMessage as `"content": "r"`, a list one as a list
+    of blocks). Converting all of them makes marked and unmarked differ only by
+    the breakpoint itself. AI messages are never marked, so they're left alone.
+    """
+    out: list[AnyMessage] = []
+    for m in messages:
+        content = m.content
+        if (
+            isinstance(m, (HumanMessage, ToolMessage))
+            and isinstance(content, str)
+            and content.strip()
+        ):
+            m = m.model_copy(update={"content": [{"type": "text", "text": content}]})
+        out.append(m)
+    return out
+
+
+def _markable(msg: AnyMessage, provider: str) -> bool:
+    if isinstance(msg, (AIMessage, SystemMessage)):
+        # An AI message's last block may be tool_use or thinking, and the
+        # integrations disagree on whether either can take a breakpoint.
+        return False
+    if not isinstance(msg, (HumanMessage, ToolMessage)):
+        return False
+    if provider in _TOOL_MESSAGE_UNMARKABLE_PROVIDERS and (
+        isinstance(msg, ToolMessage) or _is_tool_result_carrier(msg)
+    ):
+        return False
+    content = msg.content
+    if not isinstance(content, list) or not content:
+        return False
+    if provider in _CACHE_POINT_PROVIDERS:
+        return True
+    # cache_control has to sit on the block itself: only a non-empty text
+    # block or a tool_result is safe on every Anthropic-shaped integration.
+    last = content[-1]
+    if isinstance(last, str):
+        return bool(last.strip())
+    if not isinstance(last, dict):
+        return False
+    if last.get("type") == "text":
+        return bool(str(last.get("text", "")).strip())
+    return last.get("type") == "tool_result"
+
+
+def mark_history(messages: list[AnyMessage], config: ContextCacheConfig) -> list[AnyMessage]:
+    """Put the rolling breakpoint on the newest message that can carry one.
+
+    Prefix caching reuses everything up to the latest breakpoint a previous
+    request wrote, so marking the end of the history each call is what lets
+    the next call — one tool round-trip later, or the next turn — read the
+    whole conversation from cache instead of paying for it again. Expects
+    `normalize_history_content` to have run, so the candidate's content is
+    already a block list. Returns `messages` unchanged when nothing qualifies.
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        msg = messages[i]
+        if _markable(msg, config.provider):
+            marked = msg.model_copy(update={"content": config.mark(list(msg.content))})
+            return [*messages[:i], marked, *messages[i + 1:]]
+    return messages

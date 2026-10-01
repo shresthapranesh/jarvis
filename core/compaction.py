@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 KEEP_RECENT_GROUPS = 2  # keep last N groups verbatim (user asked 2, but pinning may expand)
 KEEP_LAST_TOOL_GROUPS_RAW = 4  # per-call: keep last 4 tool_call groups full (aligned with elide TOOL_RESULT_KEEP_TURNS=4)
+# Collapse old groups in batches of this many, for the same reason elision is
+# stepped (messages.TOOL_RESULT_ELIDE_STEP): a stub replacing a group rewrites
+# the cached prefix from that point on, so collapsing one more group per call
+# would bust the history cache on every agent-loop iteration.
+TOOL_GROUP_COLLAPSE_STEP = 4
 TOOL_RESULT_COLLAPSE_MAX_CHARS = 300
 
 
@@ -220,8 +225,14 @@ def collapse_old_tool_results(
     *,
     keep_last_tool_groups: int = KEEP_LAST_TOOL_GROUPS_RAW,
     groups: list[MessageGroup] | None = None,
+    step: int = TOOL_GROUP_COLLAPSE_STEP,
 ) -> list[AnyMessage]:
     """Per-call, non-persistent collapse of old tool_call groups into short AIMessage stubs.
+
+    Keeps between `keep_last_tool_groups` and `keep_last_tool_groups + step - 1`
+    groups raw: the collapsed count only grows in multiples of `step`, so the
+    stubbed prefix is identical across the calls in between (see
+    TOOL_GROUP_COLLAPSE_STEP). `step=1` is the old collapse-one-per-call behaviour.
 
     `groups` lets a caller that already grouped `messages` hand the result in
     rather than paying for a second O(n) pass; it must be the grouping of
@@ -230,10 +241,12 @@ def collapse_old_tool_results(
     if groups is None:
         groups = group_messages(messages)
     tool_groups = [g for g in groups if g.kind == "tool_call"]
-    if len(tool_groups) <= keep_last_tool_groups:
+    stale = len(tool_groups) - keep_last_tool_groups
+    collapse_count = (stale // max(step, 1)) * max(step, 1) if stale > 0 else 0
+    if collapse_count == 0:
         return messages
 
-    to_collapse_ids = set(g.id for g in tool_groups[:-keep_last_tool_groups])
+    to_collapse_ids = set(g.id for g in tool_groups[:collapse_count])
 
     new_messages: list[AnyMessage] = []
     for g in groups:

@@ -17,13 +17,13 @@ jarvis/
 │   ├── messages.py       # LLM-message hygiene: elide_stale_tool_results, strip_historical_thinking,
 │   │                     #   repair_orphan_tool_calls, build_llm_messages (+ estimate_tokens)
 │   │                     #   _is_tool_result_carrier covers Anthropic HumanMessage tool_result blocks
-│   │                     #   multi-breakpoint via context_cache.CacheSegment
+│   │                     #   cached layout: system ▸ history (rolling breakpoint) ▸ volatile tail
 │   ├── compaction.py     # group_messages(), apply_per_call_compaction() (elide + collapse_old_tool_results),
 │   │                     #   maybe_compact() -> CompactionResult — incremental sliding-window summarization
 │   │                     #   with cached summary; always returns the leaned view (see "Compaction contract")
 │   │                     #   (MAF-inspired grouping, ADK-inspired token-budget, pins recent user)
 │   ├── context_cache.py  # ADK ContextCacheConfig analog — CacheSegment, ContextCacheConfig,
-│   │                     #   build_cached_system_message() multi-breakpoint (max 4)
+│   │                     #   build_cached_system_message(), mark_history() — per-provider breakpoints
 │   ├── runner.py         # ADK Runner analog — JarvisRunner owns checkpointer/store/queue/http,
 │   │                     #   should_use_cache(), get_context_cache_config(), get_budget_limits(), build_agent()
 │   ├── approval.py       # ADK LongRunningFunctionTool analog — request_tool_approval() via interrupt,
@@ -800,10 +800,61 @@ with `resolveApproval` instead of `resumeTask`, since there is no interrupt to
 resume — the run is parked inside the tool call.
 
 ## Context Caching + Runner (ADK Runner / ContextCacheConfig analog)
+A prefix cache reuses a request up to the latest breakpoint an *earlier* request
+wrote, and is invalidated from the first changed byte onward. So the design rule is
+not "mark the stable blocks" but **"the next call's payload must start with this
+call's payload"** — and the conversation history, which is most of the tokens in an
+agent loop, has to be inside the cached prefix. With `cache=True`,
+`build_llm_messages` lays every request out most-stable-first:
+
+```
+system:  static prompt ▸bp  cacheable segments + conversation summary ▸bp
+history: normalized; rolling ▸bp on the newest markable message
+tail:    one user message, <turn_context>…</turn_context> — everything volatile
+```
+
+- **Volatile content goes at the end, not in the system message.** Retrieved
+  memories, todos, project memory, the planning directive and a ranked skill
+  shortlist change per turn or mid-turn; placed before the history (as they used to
+  be) they invalidated the entire cached conversation on every call. In the tail they
+  re-bill only themselves. "Volatile suffix" elsewhere in this file means this tail.
+  The wrapper says plainly that the user didn't write it.
+- **The summary is cached.** It's the only SystemMessage that reaches history and
+  changes only when compaction rewrites the history anyway.
+- **Rolling history breakpoint** (`context_cache.mark_history`) on the newest
+  message that can carry one. `normalize_history_content` first turns every
+  user/tool string into a one-text-block list, because langchain_anthropic sends a
+  string ToolMessage as `"content": "r"` and a marked one as a block list — without
+  it the marked and unmarked forms of the same message serialize differently.
+- **Breakpoint spelling is per provider** (`ContextCacheConfig.provider`, fed
+  `spec.provider` as `cache_provider`). Anthropic/OpenRouter: `cache_control` on the
+  block. **Bedrock: a standalone `{"cachePoint": …}` block** — `ChatBedrockConverse`
+  rebuilds text blocks as `{"text": …}` and silently drops `cache_control`, so
+  before this every Bedrock call ran with no caching at all. OpenRouter's
+  `ChatOpenAI` strips `cache_control` from role=tool, so there the history marker
+  sits on the newest *user* message. AI messages are never marked (their last block
+  may be tool_use/thinking). At most 3 breakpoints per request.
+- **Bedrock caching is Claude-only** (`honors_cache_control`): a `cachePoint` on a
+  model without prompt caching risks failing every call.
+- **Per-call compaction is stepped** so it stops rewriting the cached prefix:
+  `elide_stale_tool_results` and `collapse_old_tool_results` move their boundary in
+  jumps of 4 (`TOOL_RESULT_ELIDE_STEP`, `TOOL_GROUP_COLLAPSE_STEP`) counted from the
+  start of history, so 3 calls in 4 keep their whole prefix (slide-by-one kept ~1 in
+  5). `step=1` restores the old behaviour.
+- **Anything in the cached system region must be stable across turns, not just
+  within one.** Hence `memory_howto`/`core_memory` are emitted on trivial turns too
+  (dropping them for a "thanks" rewrote the prefix twice), and `skill_catalog`
+  returns `(skills, ranked)`: the full catalog is cached, a ranked top-K shortlist is
+  `cacheable=False`.
+- `tests/test_prompt_cache_layout.py` renders requests through the real
+  integrations and asserts the prefix property directly — a mock would accept any
+  layout.
+
 - `core/context_cache.py`: `CacheSegment` (name, content, cacheable, token_est),
-  `ContextCacheConfig` (enabled, max_breakpoints=4, min_chars=50, cache_ttl),
-  `build_cached_system_message()` builds a `SystemMessage` with up to 4
-  `cache_control: ephemeral` blocks. Logs per-call cache stats.
+  `ContextCacheConfig` (enabled, max_breakpoints=4, min_chars=50 — retained for
+  `RunnerConfig`, no longer affects placement — cache_ttl, provider),
+  `build_cached_system_message()` (static ▸bp, cacheable segments ▸bp, then any
+  uncached text), `mark_history()`, `normalize_history_content()`.
   - **Cache TTL** is `5m` (the API default) unless `JARVIS_CACHE_TTL=1h`.
     `resolve_cache_ttl(provider)` gates it to **anthropic only** — Bedrock's
     Converse API models cache points differently, and an unsupported field there
@@ -813,19 +864,14 @@ resume — the run is parked inside the tool call.
     win: cache *writes* bill at 2x base instead of 1.25x, so it only pays off if
     reads land within the hour. Resolved once per compiled agent in
     `_build_agent`, alongside `use_cache`.
-  - Layout: [system prompt cached] + [core_memory cached] + [skills cached] +
-    [project_instructions cached] + [project_memory + todos volatile uncached].
-  - Tiny segments (<50 chars) skip cache to avoid breakpoint waste.
-  - ADK pattern: stable content (system, memory, skills, instructions) gets its
-    own cached block; highly volatile (todos, project_memory live edits,
-    summary SystemMessages folded from history) stays after last breakpoint.
-- `core/messages.py`: legacy `_make_system_message()` (single breakpoint) kept,
-  new `_make_system_message_multi()` delegates to `context_cache`. `build_llm_messages()`
-  now accepts `cache_segments: list[CacheSegment]` for multi-breakpoint.
+- `core/messages.py`: `build_llm_messages(..., cache_segments, cache_ttl,
+  cache_provider)` — `cache=True` goes through `_build_cached_llm_messages` (the
+  layout above); `cache=False` keeps the old single concatenated system prompt via
+  `_make_system_message()` / `_make_system_message_multi()`.
 - `core/agents.py`: `model_request_node` classifies `_retrieved_volatile_parts`
-  + `_project_volatile_parts` into cacheable vs volatile: agent memory,
-  relevant memories, skills, project header/instructions → cached;
-  project memory, current tasks → volatile suffix. Logs cache stats via
+  + `_project_volatile_parts` into cacheable vs volatile: memory how-to, core
+  memory, full skill catalog, project header/instructions, MCP, browser → cached;
+  relevant memories, ranked skills, project memory, current tasks → tail. Logs cache stats via
   `get_last_cache_stats()`. Loads MCP tools via `get_mcp_tools_sync()` (ADK McpToolset)
   and appends to both main and general/researcher worker tool lists.
 - `core/runner.py`: `JarvisRunner` (ADK Runner analog) owns checkpointer/store/
@@ -988,7 +1034,7 @@ contract with langchain-mcp-adapters that a mock would happily agree with while 
 
 ## Memory Feature
 Agent memory has **two layers**, selected by whether an embedder is configured (`embeddings_available()`):
-- **With an embedder (default): discrete vector memory.** Atomic items live in the `Memory` SQL table (`kind` = `core` | `fact`), embedded on write. `core/memory_store.py` exposes `upsert_memory`, `load_core` (always-on `core` items), and `search_memory` (top-k cosine over `fact` items). The agent reads/writes via the `remember` / `search_memory` tools (`tools/memory.py`, bound only when embeddings are available). Each turn `core/agents.py` (`_memory_volatile_parts`) injects the `core` items + the items retrieved for the current user turn into the system prompt's **volatile suffix** (after the cache breakpoint).
+- **With an embedder (default): discrete vector memory.** Atomic items live in the `Memory` SQL table (`kind` = `core` | `fact`), embedded on write. `core/memory_store.py` exposes `upsert_memory`, `load_core` (always-on `core` items), and `search_memory` (top-k cosine over `fact` items). The agent reads/writes via the `remember` / `search_memory` tools (`tools/memory.py`, bound only when embeddings are available). Each turn `core/agents.py` (`_memory_volatile_parts`) injects the `core` items into the cached system region and the items retrieved for the current user turn into the uncached **tail** after the history (see "Context Caching").
 - **Without an embedder (keyless/Ollama): a single free-text blob.** Falls back to one `AGENTS.md` blob in the LangGraph store under the `_MEMORY_NS`/`_MEMORY_KEY` keys (`core/memory_consolidation.py`), accessed via `get_store()`. `consolidate_memory()` collapses/merges it; `_migrate_legacy_key()` upgrades the old key on read.
 
 GraphQL `agentMemory` query + `updateMemory` (blob) / `updateMemoryItem` (discrete) mutations expose both; `frontend/src/components/MemoryView.tsx` + the `/memory` route render and edit them.
@@ -1026,7 +1072,7 @@ A **project** groups web conversations under shared context (claude.ai-style): `
 ## Skills Feature
 A **skill** is a named, reusable procedure the agent can author and later reload: a `description` (the routing key, embedded for intent retrieval) plus a `body` (the full instructions, loaded on demand). Stored in the `Skill` SQL table.
 - **Agent tools** (`tools/skills.py`, all bound): `use_skill(name)` loads a body to follow; `manage_skills(action=list/create/update/delete, ...)` curates them.
-- **Surfacing** (`core/skill_store.py`): each description is embedded; `skill_catalog(query)` returns enabled skills ranked by intent match, which `core/agents.py` (`_skills_volatile_parts`) injects as a `## Available Skills` list — **name + description only** — in the volatile suffix. The body stays out of context until `use_skill` pulls it.
+- **Surfacing** (`core/skill_store.py`): each description is embedded; `skill_catalog(query)` returns `(skills, ranked)` — every enabled skill when the catalog is small (≤8) or there's no embedder, else the top-K ranked by intent match — which `core/agents.py` (`_skills_volatile_parts`) injects as a `## Available Skills` list — **name + description only**. The full list is cached; a ranked shortlist changes per turn, so it goes to the uncached tail. The body stays out of context until `use_skill` pulls it.
 - **GraphQL + UI**: `skills` query + `createSkill`/`updateSkill`/`deleteSkill` mutations (`server/graphql/queries|mutations/skill.py`, type in `types/skill.py`); `frontend/src/components/SkillsView.tsx` + the `/skills` route manage them.
 
 ## Notifications
@@ -1069,7 +1115,7 @@ Compile-time default is `google_genai:gemma-4-31b-it` (requires `GOOGLE_API_KEY`
 `Conversation.model` is **sticky per-conversation**: the chat `startTask` mutation updates it whenever the request's model differs from the stored value, and the InputBox commits a conversation-update mutation on dropdown change so a model picked mid-conversation persists across reloads. The frontend seeds the dropdown from `conversation.model`, falling back to the catalog default only when no conversation exists yet.
 
 ## LLM-call node requirement
-Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks). Loop nodes should also run `apply_per_call_compaction()` (token hygiene: `elide_stale_tool_results` + `collapse_old_tool_results`, per-call only, checkpointer keeps full text) from `core/compaction.py`. `group_messages()` handles Anthropic HumanMessage tool_result carriers via `_is_tool_result_carrier`. For multi-breakpoint caching, pass `cache_segments: list[CacheSegment]` from `core/context_cache.py` to `build_llm_messages`.
+Any new agent-loop node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (all defined in `core/messages.py`) on the history **before** `.ainvoke` — otherwise Bedrock/Anthropic reject the call (orphaned tool calls / stale thinking blocks). Loop nodes should also run `apply_per_call_compaction()` (token hygiene: `elide_stale_tool_results` + `collapse_old_tool_results`, per-call only, checkpointer keeps full text) from `core/compaction.py`. `group_messages()` handles Anthropic HumanMessage tool_result carriers via `_is_tool_result_carrier`. For caching, pass `cache_segments: list[CacheSegment]` from `core/context_cache.py` and `cache_provider=spec.provider` to `build_llm_messages` — the provider decides how breakpoints are spelled, and the default (`anthropic`) is silently ignored by Bedrock.
 
 ### Reasoning blocks have three spellings
 `_THINKING_TYPES` in `core/messages.py` must list **`thinking`, `redacted_thinking` *and* `reasoning`** — the first two are Anthropic's names, the third is LangChain's v1 content-block name for the same thing. Providers dereference these blocks unguarded, so a spelling missing from that set is a block that survives into history and crashes a *different* provider later. Concretely: a Meta run persists `{"type": "reasoning", "summary": [], ...}` blocks that carry no `reasoning` key, `langchain_google_genai` does a bare `part["reasoning"]`, and every subsequent Gemini call on that thread dies with `KeyError: 'reasoning'` in ~7ms — before any network request, so it reads like a model outage rather than a history problem. Threads are shared across models, so this is cross-provider contamination, not a per-provider concern. `_THINKING_KWARGS` strips the same content from `additional_kwargs`.
