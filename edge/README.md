@@ -74,5 +74,35 @@ Splitting one operation across both servers is never attempted.
    you do.
 4. `uv run pytest tests/test_edge_parity.py` and `cargo test` in `edge/`.
 
-Ported so far: `conversations`, `conversation`, `projects`, `project`, and
-`node` for Conversation / Message / Project.
+## What the edge serves
+
+Every query that reads only the database and files:
+
+| Domain | Root fields |
+|---|---|
+| conversations | `conversations`, `conversation` (+ the message connection) |
+| projects | `projects`, `project` |
+| artifacts & documents | `artifacts`, `artifact`, `artifactVersions`, `documents` |
+| automations | `automationRuns` |
+| task board | `boardTasks`, `boardTask` |
+| workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
+| lists | `notificationChannels`, `skills`, `pendingApprovals` |
+| memory | `memories`, `memoryActivities`, `memoryUsage` |
+| Relay | `node` for every Node type except `Automation` |
+
+## What stays in Python, and why
+
+These answer from state the Python process holds, not from rows. Each one
+moves when the thing it reads moves.
+
+| Root field | Reads | Moves with |
+|---|---|---|
+| `automations`, `automation` | `nextRunAt` is APScheduler's next fire time, DST handling included | the scheduler |
+| `runningTasks` | the in-memory `_tasks` registry | the job queue + event stream |
+| `todos`, `agentMemory`, `checkpointStats` | LangGraph's checkpointer and store (`checkpoints.db`, serialized) | the agent loop (Phase 2) |
+| `models`, `modelSync` | the built-in catalog compiled into `core/model_catalog.py`; provider APIs | the catalog becoming data |
+| `tools` | the bound-tool list, the SDK catalogue, loaded MCP tools | the agent loop |
+| `mcpServers`, `mcpTools` | the live `McpManager` | MCP (Phase 2) |
+| `settings`, `setting` | the `KNOWN_SETTINGS` registry in `core/settings_admin.py` | the registry becoming data |
+| `voiceStatus` | Piper voice file layout in `core/voice.py` | audio |
+| `browserAvailable` | a CDP probe that may be `https://` (the edge has no TLS yet) | the edge gaining TLS |

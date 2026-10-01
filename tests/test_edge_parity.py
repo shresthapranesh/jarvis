@@ -43,6 +43,19 @@ PARITY_OPERATIONS = {
     "ConversationPageRefetchQuery",
     "ProjectsQuery",
     "ProjectQuery",
+    "ArtifactDetailQuery",
+    "ArtifactListQuery",
+    "DocumentListQuery",
+    "AutomationRunsQuery",
+    "BoardTasksQuery",
+    "WorkflowListQuery",
+    "WorkflowDetailQuery",
+    "WorkflowRunsQuery",
+    "WorkflowRunDetailQuery",
+    "NotificationChannelsQuery",
+    "SkillsQuery",
+    "PendingApprovalsQuery",
+    "MemoriesQuery",
 }
 
 
@@ -251,6 +264,158 @@ async def test_node_resolves_messages_and_projects(seeded, edge):
     await _assert_same(edge, query, {"id": _gid("Project", "p1")})
 
 
+# ── the other domains ────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+async def domains(database, work_dir: Path) -> dict[str, str]:
+    """One of everything the remaining list/detail pages show, including the
+    shapes that are easy to get subtly wrong."""
+    from datetime import timedelta
+
+    from db import async_session
+    from db.models import (
+        Approval, Artifact, ArtifactVersion, Automation, AutomationRun, BoardTask, BoardTaskLink,
+        Conversation, Document, Memory, MemoryActivity, NotificationChannel, Skill, Workflow, WorkflowRun,
+    )
+
+    art_dir = work_dir / "artifacts"
+    art_dir.mkdir(parents=True, exist_ok=True)
+    (art_dir / "a-crlf.md").write_bytes(b"# Title\r\nline two\rline three\n")
+    (art_dir / "a-crlf_v1.md").write_bytes(b"# Title\r\nv1")
+    (art_dir / "a-crlf_v2.md").write_text("# Title\nv2")
+    (art_dir / "a-binary.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+    now = datetime.now(timezone.utc)
+
+    async with async_session() as s:
+        s.add(Conversation(id="c1", title="t", model="m", created_at=_ts(2026, 2, 1)))
+        s.add_all([
+            Artifact(id="a-crlf", title="Notes", filename=str(art_dir / "a-crlf.md"), conversation_id="c1",
+                     message_id="m-x", created_at=_ts(2026, 2, 1, 1), updated_at=_ts(2026, 2, 1, 3)),
+            Artifact(id="a-binary", title="Chart", filename=str(art_dir / "a-binary.png"), kind="image",
+                     mime_type="image/png", conversation_id="c1", created_at=_ts(2026, 2, 1, 2), updated_at=_ts(2026, 2, 1, 2)),
+            # The file is gone: content reads as "".
+            Artifact(id="a-missing", title="Gone", filename=str(art_dir / "nope.md"), created_at=_ts(2026, 2, 2), updated_at=_ts(2026, 2, 2)),
+            ArtifactVersion(id="v2", artifact_id="a-crlf", version=2, title="Notes", filename=str(art_dir / "a-crlf_v2.md"), created_at=_ts(2026, 2, 1, 3)),
+            ArtifactVersion(id="v1", artifact_id="a-crlf", version=1, title="Notes", filename=str(art_dir / "a-crlf_v1.md"), created_at=_ts(2026, 2, 1, 1)),
+            Document(id="d2", conversation_id="c1", filename="b.csv", mime_type="text/csv", size=10, path="/x/b", created_at=_ts(2026, 2, 1, 5)),
+            Document(id="d1", conversation_id="c1", message_id="m-x", filename="a.pdf", mime_type="application/pdf", size=2048, path="/x/a", created_at=_ts(2026, 2, 1, 4)),
+        ])
+        s.add_all([
+            # Day-of-month AND day-of-week, the APScheduler reading.
+            Automation(id="au-and", name="first monday", input_type="prompt", prompt_text="p", schedule="0 9 1 * 1",
+                       created_at=_ts(2026, 1, 1), updated_at=_ts(2026, 1, 2)),
+            Automation(id="au-weekdays", name="weekdays", input_type="monitor", prompt_text="watch", schedule="30 8 * * 1-5",
+                       notifications='[{"channel": "x"}]', created_at=_ts(2026, 1, 2), updated_at=_ts(2026, 1, 2)),
+            Automation(id="au-off", name="disabled", input_type="code", code_text="print(1)", schedule="0 9 * * *",
+                       enabled=False, stateful=True, created_at=_ts(2026, 1, 3), updated_at=_ts(2026, 1, 3)),
+            Automation(id="au-hook", name="hook", input_type="webhook", webhook_url="http://x", webhook_method="POST",
+                       webhook_headers='{"a": "b"}', webhook_body="{}", schedule="not a cron",
+                       created_at=_ts(2026, 1, 4), updated_at=_ts(2026, 1, 4)),
+            AutomationRun(id="r-old", automation_id="au-and", status="done", triggered_by="schedule", output="o",
+                          started_at=now - timedelta(days=9), finished_at=now - timedelta(days=9)),
+            AutomationRun(id="r-ok", automation_id="au-and", status="no_change", triggered_by="schedule",
+                          started_at=now - timedelta(days=3), finished_at=now - timedelta(days=3)),
+            AutomationRun(id="r-err", automation_id="au-and", status="error", triggered_by="manual", error="boom",
+                          started_at=now - timedelta(days=1)),
+            AutomationRun(id="r-w", automation_id="au-weekdays", status="running", triggered_by="manual",
+                          started_at=now - timedelta(hours=1)),
+        ])
+        s.add_all([
+            BoardTask(id="b-root", title="ship", priority=5, status="todo", created_at=_ts(2026, 3, 1)),
+            BoardTask(id="b-a", title="part a", body="do a", priority=5, status="done", summary="did a",
+                      result_metadata='{"k": 1}', job_id="job-1", started_at=_ts(2026, 3, 1, 1), finished_at=_ts(2026, 3, 1, 2),
+                      created_at=_ts(2026, 3, 1, 0, 0, 1)),
+            BoardTask(id="b-b", title="part b", priority=9, status="blocked", blocked_reason="?", blocked_kind="needs_input",
+                      failure_count=2, created_by="agent", model="m", skill="s", created_at=_ts(2026, 3, 2)),
+            BoardTask(id="b-arch", title="old", status="archived", created_at=_ts(2026, 2, 1)),
+            BoardTaskLink(id="l1", parent_id="b-a", child_id="b-root"),
+            BoardTaskLink(id="l2", parent_id="b-b", child_id="b-root"),
+        ])
+        s.add_all([
+            Workflow(id="w1", name="flow", definition='{"nodes": [], "edges": []}', created_at=_ts(2026, 4, 1), updated_at=_ts(2026, 4, 2)),
+            Workflow(id="w2", name="flow 2", description="d", notifications="[]", created_at=_ts(2026, 4, 3), updated_at=_ts(2026, 4, 3)),
+            WorkflowRun(id="wr1", workflow_id="w1", status="done", inputs='{"a": 1}', outputs="{}", node_results="[]",
+                        started_at=_ts(2026, 4, 2, 1), finished_at=_ts(2026, 4, 2, 2)),
+            WorkflowRun(id="wr2", workflow_id="w1", status="error", error="x", started_at=_ts(2026, 4, 2, 3)),
+        ])
+        s.add_all([
+            NotificationChannel(id="n2", name="discord", type="discord", target="123", created_at=_ts(2026, 5, 2)),
+            NotificationChannel(id="n1", name="tg", type="telegram", target="-100", created_at=_ts(2026, 5, 1)),
+            Skill(id="s2", name="zeta", description="z", body="Z", enabled=False, created_at=_ts(2026, 5, 1)),
+            Skill(id="s1", name="alpha", description="a", body="A", created_at=_ts(2026, 5, 1)),
+        ])
+        s.add_all([
+            Approval(id="ap-block", source="chat", kind="approval", question="delete?", label="Delete", tool="rm",
+                     args_json='{"p": 1}', parent_id="c1", requested_at=_ts(2026, 6, 1, 1, 0, 0, 5)),
+            Approval(id="ap-deferred", source="deferred", action="delete_workflow", requested_at=_ts(2026, 6, 1, 2)),
+            Approval(id="ap-done", source="chat", status="approved", requested_at=_ts(2026, 6, 1, 3)),
+        ])
+        s.add_all([
+            Memory(id="mem-core", kind="core", text="name is Sam", updated_at=_ts(2026, 7, 1)),
+            Memory(id="mem-fact", kind="fact", text="likes tea", updated_at=_ts(2026, 7, 2, 0, 0, 0, 120)),
+            MemoryActivity(id="ma1", memory_id="mem-fact", kind="fact", score=0.81, query="drinks", source="retrieval",
+                           conversation_id="c1", accessed_at=_ts(2026, 7, 3)),
+            MemoryActivity(id="ma2", memory_id="mem-fact", kind="fact", source="explicit_search", accessed_at=_ts(2026, 7, 4, 1, 2, 3, 4)),
+        ])
+        await s.commit()
+    return {}
+
+
+async def test_artifacts_and_documents(domains, edge):
+    await _assert_same(edge, _relay_text("ArtifactListQuery"), {"conversationId": None})
+    await _assert_same(edge, _relay_text("ArtifactListQuery"), {"conversationId": "c1"})
+    for raw in ("a-crlf", "a-binary", "a-missing", "nope"):
+        await _assert_same(edge, _relay_text("ArtifactDetailQuery"), {"id": _gid("Artifact", raw)})
+    await _assert_same(edge, _relay_text("DocumentListQuery"), {"conversationId": "c1"})
+    await _assert_same(edge, """query { artifactVersions(artifactId: "a-crlf") { id artifactId version title filename createdAt content } }""")
+    await _assert_same(edge, """query { artifacts { id versionCount content versions { version content } } }""")
+
+
+async def test_automation_runs(domains, edge):
+    for automation in ("au-and", "au-weekdays", "au-hook"):
+        await _assert_same(edge, _relay_text("AutomationRunsQuery"), {"automationId": _gid("Automation", automation)})
+
+
+async def test_board(domains, edge):
+    for include in (False, True):
+        await _assert_same(edge, _relay_text("BoardTasksQuery"), {"includeArchived": include})
+    fields = "id title parentIds childIds conversationId runId startedAt finishedAt"
+    await _assert_same(edge, f'query($id: ID!) {{ boardTask(id: $id) {{ {fields} }} }}', {"id": _gid("BoardTask", "b-root")})
+    # Through `node`, Python leaves the link lists empty; so does the edge.
+    await _assert_same(edge, f'query($id: ID!) {{ node(id: $id) {{ ... on BoardTask {{ {fields} }} }} }}', {"id": _gid("BoardTask", "b-root")})
+
+
+async def test_workflows(domains, edge):
+    await _assert_same(edge, _relay_text("WorkflowListQuery"))
+    await _assert_same(edge, _relay_text("WorkflowDetailQuery"), {"id": _gid("Workflow", "w1")})
+    await _assert_same(edge, _relay_text("WorkflowRunsQuery"), {"workflowId": _gid("Workflow", "w1")})
+    await _assert_same(edge, _relay_text("WorkflowRunDetailQuery"), {"id": _gid("WorkflowRun", "wr2")})
+
+
+async def test_small_lists(domains, edge):
+    await _assert_same(edge, _relay_text("NotificationChannelsQuery"))
+    await _assert_same(edge, _relay_text("SkillsQuery"))
+    data = await _assert_same(edge, _relay_text("PendingApprovalsQuery"))
+    assert [a["id"] for a in data["data"]["pendingApprovals"]] == ["ap-deferred", "ap-block"]
+
+
+async def test_memories(domains, edge):
+    await _assert_same(edge, _relay_text("MemoriesQuery"))
+    full = "id kind text updatedAt lastUsedAt useCount activities(limit: 1) { id memoryId conversationId kind score query source accessedAt }"
+    await _assert_same(edge, f'{{ memories(kind: "fact") {{ {full} }} }}')
+    await _assert_same(edge, f"{{ memoryUsage {{ {full} }} }}")
+    await _assert_same(edge, '{ memoryActivities(memoryId: "mem-fact") { id accessedAt score } }')
+
+
+@pytest.mark.parametrize("type_name, raw", [
+    ("Artifact", "a-crlf"), ("Document", "d1"), ("AutomationRun", "r-err"),
+    ("Workflow", "w2"), ("WorkflowRun", "wr1"), ("NotificationChannel", "n1"), ("Skill", "s2"),
+])
+async def test_node_resolves_every_type(domains, edge, type_name, raw):
+    await _assert_same(edge, "query($id: ID!) { node(id: $id) { __typename id } }", {"id": _gid(type_name, raw)})
+
+
 # ── routing ──────────────────────────────────────────────────────────────────
 
 
@@ -263,10 +428,13 @@ async def test_node_resolves_messages_and_projects(seeded, edge):
         '{ conversations { id } todos(conversationId: "c-old") { text } }',
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
+        # Automation stays with the scheduler: nextRunAt is APScheduler's answer.
+        "{ automations { id nextRunAt } }",
+        '{ node(id: "QXV0b21hdGlvbjphdS1hbmQ=") { id } }',
         # Mutations always go to Python in this phase.
         'mutation { deleteConversation(id: "x") }',
         # A node id of a type the edge can't resolve.
-        '{ node(id: "V29ya2Zsb3c6YWJj") { id } }',
+        '{ node(id: "UnVubmluZ1Rhc2s6YWJj") { id } }',
     ],
 )
 async def test_unowned_operations_are_proxied(seeded, edge, query):
