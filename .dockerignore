@@ -33,6 +33,7 @@ logs/
 *.log
 
 # Build outputs
+edge/target/
 build/
 dist/
 *.spec

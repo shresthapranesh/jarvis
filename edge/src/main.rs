@@ -1,0 +1,129 @@
+//! jarvis-edge — the Rust front of the jarvis server.
+//!
+//! Phase 1 of moving off Python: the edge owns the public port, answers the
+//! GraphQL operations it has been taught, and proxies everything else to the
+//! Python server behind it. See `edge/README.md`.
+
+mod config;
+mod db;
+mod gql;
+mod graphql;
+mod proxy;
+
+use std::collections::HashSet;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use axum::Router;
+use axum::extract::DefaultBodyLimit;
+use axum::routing::post;
+
+use crate::config::Config;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub config: Arc<Config>,
+    pub schema: gql::EdgeSchema,
+    pub owned: Arc<HashSet<String>>,
+    pub http: reqwest::Client,
+}
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+async fn main() {
+    // The parity tests diff this against the Python schema's SDL.
+    if std::env::args().any(|a| a == "--print-schema") {
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");
+        print!("{}", gql::build(pool).sdl());
+        return;
+    }
+
+    let level = std::env::var("JARVIS_EDGE_LOG")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(tracing::Level::INFO);
+    // The level applies to the edge's own logs; dependencies (hyper, sqlx)
+    // stay at warn, or debug drowns in connection-pool chatter.
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_target(false))
+        .with(
+            tracing_subscriber::filter::Targets::new()
+                .with_target("jarvis_edge", level)
+                .with_default(tracing::Level::WARN.min(level)),
+        )
+        .init();
+
+    let config = match Config::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("{e}");
+            std::process::exit(2);
+        }
+    };
+    let pool = match db::pool(&config.db_path) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("database {}: {e}", config.db_path.display());
+            std::process::exit(2);
+        }
+    };
+
+    let schema = gql::build(pool);
+    let owned = gql::owned_root_fields(&schema);
+    let http = reqwest::Client::builder()
+        // A proxy hands redirects to the client; it never follows them.
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("http client");
+
+    let mut fields: Vec<_> = owned.iter().cloned().collect();
+    fields.sort();
+    tracing::info!(
+        "edge on {} → backend {} · db {} · serving {}",
+        config.bind,
+        config.backend,
+        config.db_path.display(),
+        fields.join(", ")
+    );
+
+    let bind = config.bind;
+    let state = AppState { config: Arc::new(config), schema, owned: Arc::new(owned), http };
+    let app = Router::new()
+        // GET /graphql (the subscription WebSocket) falls through to the proxy.
+        .route("/graphql", post(graphql::post).fallback(proxy::any))
+        .fallback(proxy::any)
+        // Python sets no request-size limit on /graphql; neither does the edge.
+        .layer(DefaultBodyLimit::disable())
+        .with_state(state);
+
+    let listener = match tokio::net::TcpListener::bind(bind).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("bind {bind}: {e}");
+            std::process::exit(2);
+        }
+    };
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .with_graceful_shutdown(shutdown())
+        .await
+        .expect("server");
+}
+
+async fn shutdown() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let term = async {
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            s.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = term => {}
+    }
+}

@@ -1,0 +1,33 @@
+[package]
+name = "jarvis-edge"
+version = "0.1.0"
+edition = "2024"
+# The resolver picks dependency versions this toolchain can build, so a
+# fresh `cargo build` doesn't drift onto crates that need a newer rustc.
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+async-graphql = { version = "7", default-features = false }
+# The parser's non-const Value (it can hold $variables) isn't re-exported.
+async-graphql-value = "7"
+axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+dotenvy = "0.15"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio-tungstenite = "0.29"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

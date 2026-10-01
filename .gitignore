@@ -20,3 +20,5 @@ backups/
 .DS_Store
 # TypeScript incremental build cache — local only, rewritten by every build
 frontend/*.tsbuildinfo
+# Rust edge build output
+edge/target/
