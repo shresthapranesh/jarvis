@@ -29,6 +29,7 @@ _MAX_OVERFLOW = int(os.environ.get("JARVIS_DB_MAX_OVERFLOW", "13"))
 _FTS_TABLES = (
     ("memories_fts", "memories", "text"),
     ("document_chunks_fts", "document_chunks", "text"),
+    ("conversation_episodes_fts", "conversation_episodes", "text"),
     # Messages have no embeddings, so this one is not a hybrid arm — it is the
     # whole of `jarvis.search_conversations` (tools/sdk.py).
     ("messages_fts", "messages", "content"),

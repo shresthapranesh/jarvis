@@ -319,11 +319,17 @@ class CompactionResult:
 
     `state_update` is the RemoveMessage list + summary to write back into graph
     state; empty unless `compacted` is True.
+
+    `episode` is the summary of just the chunk this call evicted (before it was
+    merged into the running summary), and `evicted_ids` the ids of the messages
+    it covers — what core/episodes.py stores so the detail outlives the merge.
     """
 
     messages: list[AnyMessage]
     state_update: list = field(default_factory=list)
     compacted: bool = False
+    episode: str | None = None
+    evicted_ids: list[str] = field(default_factory=list)
 
 
 async def maybe_compact(
@@ -503,5 +509,11 @@ async def maybe_compact(
     new_messages_for_llm = apply_per_call_compaction([summary_msg] + kept_messages)
 
     return CompactionResult(
-        messages=new_messages_for_llm, state_update=state_update, compacted=True
+        messages=new_messages_for_llm,
+        state_update=state_update,
+        compacted=True,
+        episode=delta_summary_text,
+        evicted_ids=[
+            str(m.id) for g in groups_to_summarize for m in g.messages if getattr(m, "id", None)
+        ],
     )

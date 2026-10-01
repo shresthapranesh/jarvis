@@ -543,12 +543,41 @@ _RETRIEVAL_CACHE_MAX = 256
 _retrieval_cache: "OrderedDict[str, asyncio.Task[list[CacheSegment]]]" = OrderedDict()
 
 
-async def _compute_retrieval(store, query: str) -> list[CacheSegment]:
-    """Memory + skills sections, fetched concurrently (deduplicated via query cache)."""
+async def _episode_volatile_parts(conversation_id: str | None, query: str) -> list[CacheSegment]:
+    """Compacted-away stretches of this conversation that bear on `query`.
+
+    Uncached: which episodes match changes with every user turn. Empty for any
+    conversation that has never compacted, which is nearly all of them.
+    """
+    if not conversation_id:
+        return []
+    from core.episodes import render_episodes, search_episodes
+
     try:
-        mem_parts, skill_parts = await asyncio.gather(
+        episodes = await search_episodes(conversation_id, query)
+    except Exception as exc:
+        logger.warning("episode retrieval failed: %s", exc)
+        return []
+    if not episodes:
+        return []
+    return [
+        CacheSegment(
+            name="earlier_in_conversation",
+            content=render_episodes(episodes),
+            cacheable=False,
+        )
+    ]
+
+
+async def _compute_retrieval(
+    store, query: str, conversation_id: str | None = None
+) -> list[CacheSegment]:
+    """Memory, skills and episode sections, fetched concurrently (deduplicated via query cache)."""
+    try:
+        mem_parts, skill_parts, episode_parts = await asyncio.gather(
             _memory_volatile_parts(store, query),
             _skills_volatile_parts(query),
+            _episode_volatile_parts(conversation_id, query),
         )
         # Emit cache stats for /server-logs observability (debug level per-turn,
         # info level periodically via doc_index itself)
@@ -566,7 +595,10 @@ async def _compute_retrieval(store, query: str) -> list[CacheSegment]:
             )
         except Exception:
             pass
-        return mem_parts + skill_parts + _mcp_volatile_parts() + _browser_volatile_parts()
+        return (
+            mem_parts + skill_parts + episode_parts
+            + _mcp_volatile_parts() + _browser_volatile_parts()
+        )
     except Exception as exc:
         # Never let a cached failed task poison every iteration of the turn —
         # degrade to no retrieved context, matching the per-part fallbacks.
@@ -574,30 +606,38 @@ async def _compute_retrieval(store, query: str) -> list[CacheSegment]:
         return []
 
 
-def _get_retrieval_task(store, query: str, key: str) -> "asyncio.Task[list[CacheSegment]]":
+def _get_retrieval_task(
+    store, query: str, key: str, conversation_id: str | None = None
+) -> "asyncio.Task[list[CacheSegment]]":
     task = _retrieval_cache.get(key)
     if task is not None:
         _retrieval_cache.move_to_end(key)
         return task
-    task = asyncio.create_task(_compute_retrieval(store, query))
+    task = asyncio.create_task(_compute_retrieval(store, query, conversation_id))
     _retrieval_cache[key] = task
     while len(_retrieval_cache) > _RETRIEVAL_CACHE_MAX:
         _retrieval_cache.popitem(last=False)
     return task
 
 
-def prefetch_retrieval(store, query: str, key: str) -> None:
+def prefetch_retrieval(store, query: str, key: str, conversation_id: str | None = None) -> None:
     """Kick off this turn's memory+skill retrieval without awaiting it.
 
     Called by triggers (chat_runtime) with the id they will stamp on the
     user's HumanMessage, so the work overlaps the input safety gate and the
     graph's first `_retrieved_volatile_parts` call finds it already in flight.
     """
-    _get_retrieval_task(store, query, key)
+    _get_retrieval_task(store, query, key, conversation_id)
 
 
-async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[CacheSegment]:
-    """Memory + skills sections as tagged cache segments, cached per user turn."""
+async def _retrieved_volatile_parts(
+    store, messages: list[AnyMessage], conversation_id: str | None = None
+) -> list[CacheSegment]:
+    """Memory, skills and episode sections as tagged cache segments, cached per user turn.
+
+    The cache key is the user message id, which is unique to one conversation,
+    so `conversation_id` never needs to be part of it.
+    """
     key = None
     for m in reversed(messages):
         if isinstance(m, HumanMessage):
@@ -605,8 +645,8 @@ async def _retrieved_volatile_parts(store, messages: list[AnyMessage]) -> list[C
             break
     query = _latest_user_text(messages)
     if key is None:
-        return await _compute_retrieval(store, query)
-    return list(await _get_retrieval_task(store, query, key))
+        return await _compute_retrieval(store, query, conversation_id)
+    return list(await _get_retrieval_task(store, query, key, conversation_id))
 
 
 # ── Mid-run message queue ────────────────────────────────────────────────────
@@ -884,7 +924,9 @@ def _build_agent(
         # design (see _project_volatile_parts). Awaiting them in sequence put
         # that round-trip on the critical path of all ~50 iterations of a run.
         retrieved_segments, project_segments = await asyncio.gather(
-            _retrieved_volatile_parts(store, raw_messages),
+            _retrieved_volatile_parts(
+                store, raw_messages, (config.get("configurable") or {}).get("thread_id")
+            ),
             _project_volatile_parts((config.get("configurable") or {}).get("project_id")),
         )
         t_context = _phase.lap()
@@ -941,6 +983,21 @@ def _build_agent(
         )
         messages_for_llm = compaction.messages
         state_update_msgs = compaction.state_update
+        if compaction.compacted and compaction.episode:
+            # Compaction already spent two LLM calls on this iteration; one more
+            # embedding is noise next to them, and awaiting it keeps the episode
+            # from racing the next turn's retrieval. Best-effort: losing an
+            # episode only loses detail the running summary still outlines.
+            try:
+                from core.episodes import record_episode
+
+                await record_episode(
+                    (config.get("configurable") or {}).get("thread_id") or "",
+                    compaction.episode,
+                    compaction.evicted_ids,
+                )
+            except Exception as exc:
+                logger.warning("episode recording failed: %s", exc)
         t_compaction = _phase.lap()
 
         messages_for_llm = strip_historical_thinking(messages_for_llm)

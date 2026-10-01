@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Approval, Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
+from db.models import Approval, Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, ConversationEpisode, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -1484,6 +1484,61 @@ async def search_chunks_lexical(
         return [r[0] for r in rows.all()]
     except Exception as exc:
         logger.warning("lexical chunk search failed (%s) — dense-only this turn", exc)
+        return []
+
+
+# ── Conversation episodes ─────────────────────────────────────────────────────
+
+async def create_episode(
+    session: AsyncSession,
+    *,
+    episode_id: str,
+    conversation_id: str,
+    text: str,
+    embedding: bytes | None,
+) -> bool:
+    """Insert an episode unless one with this id exists. Returns True if written.
+
+    Ids are derived from what was evicted (core/episodes.py), so a replayed
+    compaction step lands here as a no-op rather than a duplicate.
+    """
+    if await session.get(ConversationEpisode, episode_id) is not None:
+        return False
+    session.add(
+        ConversationEpisode(
+            id=episode_id, conversation_id=conversation_id, text=text, embedding=embedding
+        )
+    )
+    await session.commit()
+    return True
+
+
+async def list_episodes(session: AsyncSession, conversation_id: str) -> list[ConversationEpisode]:
+    """A conversation's episodes, oldest first."""
+    rows = await session.execute(
+        select(ConversationEpisode)
+        .where(ConversationEpisode.conversation_id == conversation_id)
+        .order_by(ConversationEpisode.created_at.asc())
+    )
+    return list(rows.scalars())
+
+
+async def search_episodes_lexical(
+    session: AsyncSession, conversation_id: str, match_expr: str, *, limit: int = 20
+) -> list[str]:
+    """Episode ids in `conversation_id` matching `match_expr`, best BM25 rank first."""
+    try:
+        rows = await session.execute(sa_text("""
+            SELECT e.id AS id
+            FROM conversation_episodes_fts f
+            JOIN conversation_episodes e ON e.rowid = f.rowid
+            WHERE conversation_episodes_fts MATCH :q AND e.conversation_id = :cid
+            ORDER BY bm25(conversation_episodes_fts)
+            LIMIT :limit
+        """), {"q": match_expr, "cid": conversation_id, "limit": limit})
+        return [r[0] for r in rows.all()]
+    except Exception as exc:
+        logger.warning("lexical episode search failed (%s) — dense-only this turn", exc)
         return []
 
 

@@ -136,7 +136,7 @@ async def _run_agent_task(
             if not ctx.session_id:
                 ctx.session_id = conv_id
             ctx.state.set(f"session:{conv_id}:last_query", query[:200])
-        prefetch_retrieval(store, query, user_msg_id)
+        prefetch_retrieval(store, query, user_msg_id, conv_id)
         content_task = asyncio.create_task(_build_message_content(query, attachments, model))
         scope_task = asyncio.create_task(_resolve_conv_scope(conv_id))
 
@@ -343,7 +343,7 @@ async def queue_chat_message(session: AsyncSession, task_id: str, text: str) -> 
     # here — with the id the drain will deliver — keeps that work off the
     # critical path of the iteration that consumes it.
     try:
-        prefetch_retrieval(get_store(), text, msg.id)
+        prefetch_retrieval(get_store(), text, msg.id, conv_id)
     except Exception as exc:
         logger.debug("queued-message retrieval prefetch skipped: %s", exc)
     emit_event(state, "queued_message", message_id=msg.id, text=text, position=position)

@@ -52,6 +52,36 @@ class Conversation(Base):
     documents: Mapped[list["Document"]] = relationship(
         "Document", back_populates="conversation", cascade="all, delete-orphan"
     )
+    episodes: Mapped[list["ConversationEpisode"]] = relationship(
+        "ConversationEpisode", back_populates="conversation", cascade="all, delete-orphan"
+    )
+
+
+class ConversationEpisode(Base):
+    """The summary of one stretch of a conversation that compaction evicted.
+
+    Compaction folds each evicted chunk into a single running summary capped at
+    ~800 words, so in a thread that never ends (a bot chat, a stateful
+    automation) every merge loses detail for good. The per-chunk summary is
+    kept here as well, embedded, and retrieved by relevance on later turns —
+    the running summary says what the conversation has been about, an episode
+    says what was actually decided in that stretch. Scoped to one
+    conversation and deleted with it. See core/episodes.py.
+    """
+
+    __tablename__ = "conversation_episodes"
+
+    # Derived from the conversation and the evicted message ids, so a replayed
+    # compaction step writes the same row instead of a second one.
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id"), nullable=False, index=True
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="episodes")
 
 
 class Project(Base):
