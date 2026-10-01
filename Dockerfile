@@ -19,8 +19,23 @@ COPY frontend/ ./
 RUN pnpm build
 
 
+##############################
+# Stage 2 — build Rust edge  #
+##############################
+# The edge owns port 8000 and proxies what it hasn't taken over yet to the
+# Python server behind it. See edge/README.md.
+FROM rust:1.88-slim-bookworm AS edge
+WORKDIR /app/edge
+COPY edge/Cargo.toml edge/Cargo.lock ./
+COPY edge/src ./src
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/edge/target \
+    cargo build --release --locked \
+ && cp target/release/jarvis-edge /usr/local/bin/jarvis-edge
+
+
 #################################
-# Stage 2 — python runtime/app  #
+# Stage 3 — python runtime/app  #
 #################################
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS runtime
 
@@ -64,6 +79,7 @@ RUN if [ "$INSTALL_BROWSERS" = "true" ]; then \
 # App source + the prebuilt SPA from stage 1.
 COPY . .
 COPY --from=frontend /app/static/dist /app/static/dist
+COPY --from=edge /usr/local/bin/jarvis-edge /usr/local/bin/jarvis-edge
 
 # Run unprivileged. /data holds the SQLite DBs + artifacts/documents — mount a
 # volume there to persist them across container restarts.
@@ -77,5 +93,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"
 
-# Bind 0.0.0.0 INSIDE the container; publish to 127.0.0.1 on the host (compose).
-CMD ["uvicorn", "server.entrypoint:app", "--host", "0.0.0.0", "--port", "8000"]
+# The edge binds 0.0.0.0 INSIDE the container; publish to 127.0.0.1 on the host
+# (compose). Python stays on 127.0.0.1:8001, reachable only through the edge.
+ENV JARVIS_EDGE_BIND=0.0.0.0:8000
+CMD ["edge/serve.sh"]

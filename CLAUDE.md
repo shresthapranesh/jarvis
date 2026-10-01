@@ -7,6 +7,8 @@ Multi-agent AI research platform. Users submit queries via web UI or CLI; specia
 
 The API is **GraphQL-first** (Strawberry + FastAPI). Queries/mutations go over HTTP POST `/graphql`; live event streams go over `graphql-ws` WebSocket subscriptions on the same path. A handful of REST endpoints remain only for things that don't fit GraphQL (raw binary download, file upload, audio TTS/transcription, the live-audio WebSocket, log tailing, health). The frontend uses **Relay** against that schema.
 
+**A Rust edge (`edge/`) is being put in front of it** — Phase 1 of moving everything to Rust so jarvis runs on old, low-RAM hardware. The edge owns port 8000, answers the GraphQL query operations ported so far straight from SQLite, and reverse-proxies everything else (other operations, mutations, subscriptions, REST, WebSockets, the SPA) to Python on 8001. Python still owns the schema and every write; a type is ported to Rust whole or not at all, and every ported operation is diffed against Python by `tests/test_edge_parity.py`. See `edge/README.md` for routing, the wire-format contracts and the porting checklist.
+
 Long-running work (chat / automation / workflow runs) is dispatched through a **durable SQLite-backed job queue** rather than bare `asyncio.create_task`: a mutation enqueues a `Job` row and pre-registers an in-memory `TaskState`; a background `Worker` claims the job and runs its handler. This survives restarts and gives a single cancellation path (`job.id == task_id`).
 
 ```
@@ -162,7 +164,9 @@ jarvis/
 
 **Backend:**
 ```bash
-uv run uvicorn server.entrypoint:app --reload   # start API server on :8000 (GraphQL at /graphql)
+uv run uvicorn server.entrypoint:app --reload --port 8001   # Python, behind the edge
+cd edge && cargo run                                       # Rust edge on :8000 (GraphQL at /graphql)
+uv run uvicorn server.entrypoint:app --reload   # …or Python alone on :8000 — still fully works
 uv run python main.py run "<query>"             # CLI one-shot query
 uv add <package>                                # add dependency (updates pyproject.toml + uv.lock)
 ```
