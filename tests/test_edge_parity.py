@@ -19,12 +19,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
 import re
 import shutil
-import socket
 import subprocess
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,8 +29,9 @@ from typing import Any
 import httpx
 import pytest
 
+from edge_support import _gid, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+
 ROOT = Path(__file__).resolve().parent.parent
-EDGE_DIR = ROOT / "edge"
 GENERATED = ROOT / "frontend" / "src" / "__generated__"
 
 # Every frontend query whose root fields the edge implements must be listed
@@ -57,61 +55,12 @@ PARITY_OPERATIONS = {
     "SkillsQuery",
     "PendingApprovalsQuery",
     "MemoriesQuery",
+    # Diffed against live runs in test_edge_runs.py.
+    "RunningTasksQuery",
 }
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture(scope="session")
-def edge_binary() -> Path:
-    if shutil.which("cargo") is None:
-        pytest.skip("cargo not installed")
-    subprocess.run(
-        ["cargo", "build", "--quiet", "--manifest-path", str(EDGE_DIR / "Cargo.toml")],
-        check=True,
-    )
-    return EDGE_DIR / "target" / "debug" / "jarvis-edge"
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@contextlib.asynccontextmanager
-async def _run_edge(edge_binary: Path, work_dir: Path, db: Path):
-    """An edge over `db`, its artifacts under `work_dir`, with a dead backend."""
-    port, dead = _free_port(), _free_port()
-    env = {
-        **os.environ,
-        "DATABASE_URL": f"sqlite+aiosqlite:///{db}",
-        "WORK_DIR": str(work_dir),
-        "JARVIS_EDGE_BIND": f"127.0.0.1:{port}",
-        # Nothing listens here: a proxied operation fails loudly.
-        "JARVIS_BACKEND_URL": f"http://127.0.0.1:{dead}",
-        "JARVIS_EDGE_LOG": "warn",
-    }
-    env.pop("ARTIFACTS_DIR", None)
-    # cwd = work_dir so the edge's .env lookup can't find the repo's .env.
-    proc = subprocess.Popen([str(edge_binary)], env=env, cwd=work_dir)
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        try:
-            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
-            break
-        except OSError:
-            await asyncio.sleep(0.05)
-    else:
-        proc.kill()
-        pytest.fail("edge did not start")
-    try:
-        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=10) as client:
-            yield client
-    finally:
-        proc.terminate()
-        proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -169,12 +118,6 @@ async def seeded(database) -> dict[str, str]:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-
-
-def _gid(type_name: str, raw: str) -> str:
-    from strawberry.relay.utils import to_base64
-
-    return to_base64(type_name, raw)
 
 
 def _relay_text(operation: str) -> str:

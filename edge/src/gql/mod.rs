@@ -10,20 +10,23 @@ pub mod automation;
 pub mod board;
 pub mod codec;
 pub mod conversation;
+pub mod events;
 pub mod memory;
 pub mod node;
 pub mod project;
 pub mod router;
+pub mod runs;
 pub mod settings_lists;
 pub mod workflow;
 pub mod write;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_graphql::parser::parse_schema;
 use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
-use async_graphql::{EmptySubscription, MergedObject, Schema};
+use async_graphql::{MergedObject, Schema};
 use sqlx::SqlitePool;
 
 #[derive(MergedObject, Default)]
@@ -36,6 +39,7 @@ pub struct Query(
     workflow::WorkflowQuery,
     settings_lists::ListsQuery,
     memory::MemoryQuery,
+    runs::RunQuery,
     node::NodeQuery,
 );
 
@@ -47,22 +51,24 @@ pub struct Mutation(
     workflow::WorkflowMutation,
     settings_lists::ListsMutation,
     memory::MemoryMutation,
+    runs::RunMutation,
 );
 
-pub type EdgeSchema = Schema<Query, Mutation, EmptySubscription>;
+pub type EdgeSchema = Schema<Query, Mutation, runs::RunSubscription>;
 
 /// Process-level facts resolvers need besides the pool.
 pub struct EdgeData {
     pub artifacts_dir: PathBuf,
 }
 
-pub fn build(pool: SqlitePool, data: EdgeData) -> EdgeSchema {
-    Schema::build(Query::default(), Mutation::default(), EmptySubscription)
+pub fn build(pool: SqlitePool, data: EdgeData, runs: Arc<crate::runs::Registry>) -> EdgeSchema {
+    Schema::build(Query::default(), Mutation::default(), runs::RunSubscription)
         // Python serves introspection: it knows the whole schema, this one
         // only a slice of it. (The router also never sends `__schema` here.)
         .disable_introspection()
         .data(pool)
         .data(data)
+        .data(runs)
         .finish()
 }
 

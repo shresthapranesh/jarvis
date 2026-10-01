@@ -201,7 +201,65 @@ class TaskState:
         return drained
 
 
-_tasks: dict[str, TaskState] = {}
+class RegistryObserver:
+    """Told about every run that enters or leaves `_tasks`, and every change to
+    one. The edge link (core/edge_link.py) is the only implementation; the
+    base class is the no-op used when there is no edge."""
+
+    def task_added(self, task_id: str, state: TaskState) -> None: ...
+    def task_removed(self, task_id: str) -> None: ...
+    def task_changed(self, state: TaskState) -> None: ...
+
+
+_observer = RegistryObserver()
+
+
+def set_registry_observer(observer: RegistryObserver | None) -> None:
+    global _observer
+    _observer = observer or RegistryObserver()
+
+
+class TaskRegistry(dict[str, TaskState]):
+    """`_tasks` — a dict that reports every add and remove to the observer.
+
+    Runs are registered and dropped from half a dozen places (each runtime's
+    trigger, `run_scaffold`, the board's stop path, a delayed `pop` after the
+    linger), so the hook lives on the container rather than at the call sites:
+    a new call site can't forget it.
+    """
+
+    def __setitem__(self, task_id: str, state: TaskState) -> None:
+        super().__setitem__(task_id, state)
+        _observer.task_added(task_id, state)
+
+    def __delitem__(self, task_id: str) -> None:
+        super().__delitem__(task_id)
+        _observer.task_removed(task_id)
+
+    def pop(self, task_id, *default):  # type: ignore[override]
+        present = task_id in self
+        value = super().pop(task_id, *default)
+        if present:
+            _observer.task_removed(task_id)
+        return value
+
+    def setdefault(self, task_id: str, state: TaskState) -> TaskState:  # type: ignore[override]
+        if task_id not in self:
+            self[task_id] = state
+        return self[task_id]
+
+    def update(self, *args, **kwargs) -> None:  # type: ignore[override]
+        for task_id, state in dict(*args, **kwargs).items():
+            self[task_id] = state
+
+    def clear(self) -> None:
+        removed = list(self)
+        super().clear()
+        for task_id in removed:
+            _observer.task_removed(task_id)
+
+
+_tasks: TaskRegistry = TaskRegistry()
 
 
 def task_id_of(state: TaskState) -> str | None:
@@ -225,6 +283,8 @@ def _resolve_waiters(state: TaskState) -> None:
         if not fut.done():
             fut.set_result(None)
     state._waiters.clear()
+    # Always on the loop (see `_notify`), so the observer needn't be thread-safe.
+    _observer.task_changed(state)
 
 
 def _notify(state: TaskState) -> None:

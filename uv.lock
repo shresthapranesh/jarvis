@@ -1374,6 +1374,7 @@ dependencies = [
     { name = "trafilatura" },
     { name = "typer" },
     { name = "uvicorn" },
+    { name = "websockets" },
     { name = "yfinance" },
 ]
 
@@ -1423,6 +1424,7 @@ requires-dist = [
     { name = "trafilatura", specifier = ">=2.1.0" },
     { name = "typer", specifier = "~=0.24" },
     { name = "uvicorn", specifier = "~=0.44" },
+    { name = "websockets", specifier = ">=15" },
     { name = "yfinance", specifier = "~=1.3" },
 ]
 

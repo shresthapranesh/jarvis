@@ -164,7 +164,8 @@ jarvis/
 
 **Backend:**
 ```bash
-uv run uvicorn server.entrypoint:app --reload --port 8001   # Python, behind the edge
+JARVIS_EDGE_URL=http://127.0.0.1:8000 \
+  uv run uvicorn server.entrypoint:app --reload --port 8001   # Python, behind the edge, linked
 cd edge && cargo run                                       # Rust edge on :8000 (GraphQL at /graphql)
 uv run uvicorn server.entrypoint:app --reload   # …or Python alone on :8000 — still fully works
 uv run python main.py run "<query>"             # CLI one-shot query
@@ -326,6 +327,8 @@ Lifecycle:
 4. **The handler appends to `TaskState.events` and calls `_notify(state)`** to wake waiters.
 5. **The client opens a subscription** — `taskEvents(taskId)` (chat), `automationRunEvents`, or `workflowRunEvents` — whose resolver yields via `stream_task_events(state)` (a cursor+waiter loop). If the task isn't in `_tasks`, the resolver falls back to the DB to emit a final `done`/`error` and closes. Frontend hooks: `useTaskEvents.ts`, `useAutomationRunEvents.ts`, `useWorkflowRunEvents.ts`.
 6. **Cancellation is unified.** `stopRunningTask` (`mutations/task_run.py`; chat also has a per-kind `stopTask`) flips in-process `TaskState` flags (`cancelled`, `_stop_event`, cancels `resume_future`) for an immediate stop **and** calls `get_queue().cancel(task_id)` for the durable/cross-process path. `job.id == task_id` for all three kinds.
+
+**With the Rust edge in front**, steps 5–6 are the edge's: Python reports `_tasks` over the worker link (`core/edge_link.py` → the edge's `/internal/worker`), and the edge serves the subscriptions, `runningTasks` and the stop mutations from its mirror, sending `cancel` back over the link. `_tasks` is a `TaskRegistry` (a dict that reports adds/removes) and `_resolve_waiters` reports changes, so producers need nothing new — but **every event must still go through `emit_event`**, the one append the link ships. See `edge/README.md` → "The worker link".
 
 Conventions:
 - **Do not `_tasks.setdefault(...)`** in handlers — the trigger pre-sets it; use `state = _tasks[task_id]` (handlers only re-create it on the restart-resume path).
