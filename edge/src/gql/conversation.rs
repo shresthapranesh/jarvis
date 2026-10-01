@@ -242,3 +242,46 @@ impl ConversationQuery {
         Conversation::by_id(ctx.data()?, &raw).await
     }
 }
+
+#[derive(Default)]
+pub struct ConversationMutation;
+
+#[Object]
+impl ConversationMutation {
+    // Rename or pin. A `model` change is validated against the model
+    // catalog, which lives in Python, so the router sends any call that sets
+    // one there (`router::Walk::field_rule`); `model` is declared here only so
+    // the signature matches.
+    async fn update_conversation(
+        &self,
+        ctx: &Context<'_>,
+        id: ID,
+        title: Option<String>,
+        model: Option<String>,
+        pinned: Option<bool>,
+    ) -> Result<Conversation> {
+        if model.is_some() {
+            return Err("a model change must be routed to the backend".into());
+        }
+        if title.is_none() && pinned.is_none() {
+            return Err("no fields to update".into());
+        }
+        let (_, raw) = decode_global_id(&id)?;
+        let pool: &SqlitePool = ctx.data()?;
+        let mut conv = Conversation::by_id(pool, &raw).await?.ok_or("conversation not found")?;
+        if let Some(t) = title {
+            conv.title = Some(t);
+        }
+        if let Some(p) = pinned {
+            conv.pinned = p;
+        }
+        // Conversation has no updated_at column.
+        sqlx::query("UPDATE conversations SET title = ?, pinned = ? WHERE id = ?")
+            .bind(&conv.title)
+            .bind(conv.pinned)
+            .bind(&raw)
+            .execute(pool)
+            .await?;
+        Ok(conv)
+    }
+}

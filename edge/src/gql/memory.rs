@@ -124,3 +124,17 @@ impl MemoryQuery {
         list_memories(ctx.data()?, None).await
     }
 }
+
+#[derive(Default)]
+pub struct MemoryMutation;
+
+#[Object]
+impl MemoryMutation {
+    // False when there was nothing to delete. The item's access log is left
+    // behind, as Python leaves it: there's no ORM relationship and foreign
+    // keys are off, so its `ON DELETE CASCADE` never fires there either.
+    async fn delete_memory(&self, ctx: &Context<'_>, id: String) -> Result<bool> {
+        let deleted = sqlx::query("DELETE FROM memories WHERE id = ?").bind(&id).execute(ctx.data::<SqlitePool>()?).await?;
+        Ok(deleted.rows_affected() > 0)
+    }
+}

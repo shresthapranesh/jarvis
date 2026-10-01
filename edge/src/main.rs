@@ -10,7 +10,6 @@ mod gql;
 mod graphql;
 mod proxy;
 
-use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -24,7 +23,7 @@ use crate::config::Config;
 pub struct AppState {
     pub config: Arc<Config>,
     pub schema: gql::EdgeSchema,
-    pub owned: Arc<HashSet<String>>,
+    pub owned: Arc<gql::router::Owned>,
     pub http: reqwest::Client,
 }
 
@@ -79,7 +78,7 @@ async fn main() {
         .build()
         .expect("http client");
 
-    let mut fields: Vec<_> = owned.iter().cloned().collect();
+    let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
     fields.sort();
     tracing::info!(
         "edge on {} → backend {} · db {} · serving {}",

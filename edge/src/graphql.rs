@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
 use crate::AppState;
-use crate::gql::router::{Decision, decide};
+use crate::gql::router::{Caller, Decision, decide};
 use crate::proxy;
 
 #[derive(Deserialize)]
@@ -37,9 +37,15 @@ pub async fn post(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<
     // Batched arrays, multipart uploads and anything else unusual: Python.
     let parsed = is_json.then(|| serde_json::from_slice::<Body_>(&bytes).ok()).flatten();
 
+    // Same reading as `server/graphql/context.py:get_context`.
+    let caller = match parts.headers.get("x-jarvis-caller").and_then(|v| v.to_str().ok()) {
+        Some(v) if v.trim().eq_ignore_ascii_case("agent") => Caller::Agent,
+        _ => Caller::Human,
+    };
+
     if let Some(op) = parsed {
         let variables = op.variables.unwrap_or(serde_json::Value::Null);
-        match decide(&state.owned, &op.query, op.operation_name.as_deref(), &variables) {
+        match decide(&state.owned, &op.query, op.operation_name.as_deref(), &variables, caller) {
             Decision::Edge => {
                 let mut request = async_graphql::Request::new(op.query)
                     .variables(async_graphql::Variables::from_json(variables));
