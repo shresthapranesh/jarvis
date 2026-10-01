@@ -16,13 +16,14 @@ pub mod project;
 pub mod router;
 pub mod settings_lists;
 pub mod workflow;
+pub mod write;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use async_graphql::parser::parse_schema;
 use async_graphql::parser::types::{TypeKind, TypeSystemDefinition};
-use async_graphql::{EmptyMutation, EmptySubscription, MergedObject, Schema};
+use async_graphql::{EmptySubscription, MergedObject, Schema};
 use sqlx::SqlitePool;
 
 #[derive(MergedObject, Default)]
@@ -38,7 +39,17 @@ pub struct Query(
     node::NodeQuery,
 );
 
-pub type EdgeSchema = Schema<Query, EmptyMutation, EmptySubscription>;
+#[derive(MergedObject, Default)]
+pub struct Mutation(
+    conversation::ConversationMutation,
+    project::ProjectMutation,
+    artifact::ArtifactMutation,
+    workflow::WorkflowMutation,
+    settings_lists::ListsMutation,
+    memory::MemoryMutation,
+);
+
+pub type EdgeSchema = Schema<Query, Mutation, EmptySubscription>;
 
 /// Process-level facts resolvers need besides the pool.
 pub struct EdgeData {
@@ -46,7 +57,7 @@ pub struct EdgeData {
 }
 
 pub fn build(pool: SqlitePool, data: EdgeData) -> EdgeSchema {
-    Schema::build(Query::default(), EmptyMutation, EmptySubscription)
+    Schema::build(Query::default(), Mutation::default(), EmptySubscription)
         // Python serves introspection: it knows the whole schema, this one
         // only a slice of it. (The router also never sends `__schema` here.)
         .disable_introspection()
@@ -55,20 +66,21 @@ pub fn build(pool: SqlitePool, data: EdgeData) -> EdgeSchema {
         .finish()
 }
 
-/// Root query fields this schema defines, read back from its own SDL so the
+/// Root fields this schema defines, read back from its own SDL so the
 /// routing table can't drift from what's actually implemented.
-pub fn owned_root_fields(schema: &EdgeSchema) -> HashSet<String> {
+pub fn owned_root_fields(schema: &EdgeSchema) -> router::Owned {
     let doc = parse_schema(schema.sdl()).expect("the edge's own SDL parses");
-    doc.definitions
-        .into_iter()
-        .find_map(|def| match def {
-            TypeSystemDefinition::Type(t) if t.node.name.node == "Query" => match t.node.kind {
-                TypeKind::Object(obj) => {
-                    Some(obj.fields.into_iter().map(|f| f.node.name.node.to_string()).collect())
-                }
+    let fields_of = |type_name: &str| -> HashSet<String> {
+        doc.definitions
+            .iter()
+            .find_map(|def| match def {
+                TypeSystemDefinition::Type(t) if t.node.name.node == type_name => match &t.node.kind {
+                    TypeKind::Object(obj) => Some(obj.fields.iter().map(|f| f.node.name.node.to_string()).collect()),
+                    _ => None,
+                },
                 _ => None,
-            },
-            _ => None,
-        })
-        .unwrap_or_default()
+            })
+            .unwrap_or_default()
+    };
+    router::Owned { query: fields_of("Query"), mutation: fields_of("Mutation") }
 }

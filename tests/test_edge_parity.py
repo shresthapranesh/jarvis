@@ -17,6 +17,7 @@ Skipped when `cargo` isn't installed.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -79,17 +80,20 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.fixture
-async def edge(database, work_dir: Path, edge_binary: Path):
+@contextlib.asynccontextmanager
+async def _run_edge(edge_binary: Path, work_dir: Path, db: Path):
+    """An edge over `db`, its artifacts under `work_dir`, with a dead backend."""
     port, dead = _free_port(), _free_port()
     env = {
         **os.environ,
-        "DATABASE_URL": f"sqlite+aiosqlite:///{work_dir}/database.db",
+        "DATABASE_URL": f"sqlite+aiosqlite:///{db}",
+        "WORK_DIR": str(work_dir),
         "JARVIS_EDGE_BIND": f"127.0.0.1:{port}",
         # Nothing listens here: a proxied operation fails loudly.
         "JARVIS_BACKEND_URL": f"http://127.0.0.1:{dead}",
         "JARVIS_EDGE_LOG": "warn",
     }
+    env.pop("ARTIFACTS_DIR", None)
     # cwd = work_dir so the edge's .env lookup can't find the repo's .env.
     proc = subprocess.Popen([str(edge_binary)], env=env, cwd=work_dir)
     deadline = time.monotonic() + 10
@@ -108,6 +112,12 @@ async def edge(database, work_dir: Path, edge_binary: Path):
     finally:
         proc.terminate()
         proc.wait(timeout=5)
+
+
+@pytest.fixture
+async def edge(database, work_dir: Path, edge_binary: Path):
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
+        yield client
 
 
 def _ts(*args: int) -> datetime:
@@ -416,6 +426,251 @@ async def test_node_resolves_every_type(domains, edge, type_name, raw):
     await _assert_same(edge, "query($id: ID!) { node(id: $id) { __typename id } }", {"id": _gid(type_name, raw)})
 
 
+# ── mutations ────────────────────────────────────────────────────────────────
+#
+# A mutation's result can't be compared against a server that already ran it,
+# so each one runs twice: through Python on the test database, and through the
+# edge on a byte-identical copy (`twin`). Then the responses, every table and
+# every artifact file are compared. Only what is generated fresh — uuid ids and
+# "now" timestamps — is masked.
+
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+_STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(\+00:00)?$")
+
+
+def _mask(value: Any, since: datetime, dirs: tuple[str, ...]) -> Any:
+    """Replace what legitimately differs between the two runs."""
+    import base64
+
+    if isinstance(value, dict):
+        return {k: _mask(v, since, dirs) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mask(v, since, dirs) for v in value]
+    if not isinstance(value, str):
+        return value
+    for d in dirs:
+        value = value.replace(d, "<dir>")
+    if m := _STAMP.match(value):
+        stamp = datetime.fromisoformat(f"{m[1]}T{m[2]}{m[3] or ''}").replace(tzinfo=timezone.utc)
+        if stamp >= since:
+            return "<now>"
+    with contextlib.suppress(Exception):
+        decoded = base64.b64decode(value, validate=True).decode()
+        if ":" in decoded and _UUID.search(decoded):
+            return "<new-gid>"
+    return _UUID.sub("<uuid>", value)
+
+
+def _dump(db: Path) -> dict[str, list[dict]]:
+    """Every row of every app table, order-independent."""
+    import sqlite3
+
+    with contextlib.closing(sqlite3.connect(db)) as conn:
+        conn.row_factory = sqlite3.Row
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%'"
+        )]
+        return {t: [dict(r) for r in conn.execute(f"SELECT * FROM {t} ORDER BY rowid")] for t in tables}
+
+
+def _files(directory: Path) -> dict[str, bytes]:
+    return {p.name: p.read_bytes() for p in sorted(directory.glob("*"))} if directory.exists() else {}
+
+
+class Twin:
+    """Python on the test database, the edge on a copy of it."""
+
+    def __init__(self, edge: httpx.AsyncClient, a_dir: Path, b_dir: Path):
+        self.edge, self.a_dir, self.b_dir = edge, a_dir, b_dir
+        self.dirs = (str(a_dir), str(b_dir))
+        # Anything stamped after the copy was taken was written by a mutation
+        # under test, on both sides, milliseconds apart.
+        self.since = datetime.now(timezone.utc).replace(microsecond=0)
+
+    async def run(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        from db import async_session
+        from server.graphql.extensions import SESSION_LOCK_KEY
+        from server.graphql.schema import schema
+
+        since = self.since
+        async with async_session() as s:
+            res = await schema.execute(
+                query, variable_values=variables,
+                context_value={"session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": "human"},
+            )
+        python = {"data": res.data}
+        if res.errors:
+            python["errors"] = [{"message": e.message, "path": e.path} for e in res.errors]
+
+        resp = await self.edge.post("/graphql", json={"query": query, "variables": variables or {}})
+        assert resp.status_code == 200, f"edge proxied instead of answering ({resp.status_code})"
+        body = resp.json()
+        edge = {"data": body.get("data")}
+        if body.get("errors"):
+            edge["errors"] = [{"message": e["message"], "path": e.get("path")} for e in body["errors"]]
+
+        assert _mask(edge, since, self.dirs) == _mask(python, since, self.dirs), query
+        a, b = _dump(self.a_dir / "database.db"), _dump(self.b_dir / "database.db")
+        for table in a:
+            assert _mask(b[table], since, self.dirs) == _mask(a[table], since, self.dirs), f"{table} after {query}"
+        assert _files(self.b_dir / "artifacts") == _files(self.a_dir / "artifacts"), f"files after {query}"
+        return python
+
+
+@pytest.fixture
+async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: Path):
+    import sqlite3
+
+    from db import async_session
+    from db.models import Artifact, DocumentChunk
+
+    async with async_session() as s:
+        # One markdown artifact with a live file and no history (the v1
+        # migration path), and indexed chunks for a document.
+        (work_dir / "artifacts" / "a-plain.md").write_bytes(b"old\r\nbody")
+        s.add(Artifact(id="a-plain", title="Plain", filename=str(work_dir / "artifacts" / "a-plain.md"),
+                       created_at=_ts(2026, 2, 3), updated_at=_ts(2026, 2, 3)))
+        s.add_all([
+            DocumentChunk(id="ch1", document_id="d1", conversation_id="c1", seq=0, text="alpha beta"),
+            DocumentChunk(id="ch2", document_id="d1", conversation_id="c1", seq=1, text="gamma"),
+        ])
+        await s.commit()
+
+    b_dir = tmp_path_factory.mktemp("twin")
+    with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
+            contextlib.closing(sqlite3.connect(b_dir / "database.db")) as dst:
+        src.backup(dst)
+        # The copy's file paths point at its own artifact directory.
+        for table, col in (("artifacts", "filename"), ("artifact_versions", "filename")):
+            dst.execute(f"UPDATE {table} SET {col} = replace({col}, ?, ?)", (str(work_dir), str(b_dir)))
+        dst.commit()
+    shutil.copytree(work_dir / "artifacts", b_dir / "artifacts")
+
+    async with _run_edge(edge_binary, b_dir, b_dir / "database.db") as client:
+        yield Twin(client, work_dir, b_dir)
+
+
+async def test_project_mutations(twin):
+    fields = "id name description instructions memory createdAt updatedAt conversationCount"
+    create = f"mutation($input: ProjectCreateInput!) {{ createProject(input: $input) {{ {fields} }} }}"
+    await twin.run(create, {"input": {"name": "  Spaced  ", "description": None}})
+    await twin.run(create, {"input": {"name": "Full", "description": "d", "instructions": "be brief"}})
+    await twin.run(create, {"input": {"name": "   "}})
+
+    update = f"mutation($id: ID!, $input: ProjectUpdateInput!) {{ updateProject(id: $id, input: $input) {{ {fields} }} }}"
+    p1 = _gid("Project", "p1")
+    await twin.run(update, {"id": p1, "input": {"name": " Renamed ", "memory": "- new fact"}})
+    await twin.run(update, {"id": p1, "input": {"description": "", "instructions": "x"}})
+    await twin.run(update, {"id": p1, "input": {}})
+    await twin.run(update, {"id": p1, "input": {"name": " "}})
+    await twin.run(update, {"id": _gid("Project", "nope"), "input": {"name": "x"}})
+
+    member = "mutation($c: ID!, $p: ID) { setConversationProject(conversationId: $c, projectId: $p) { id projectId project { id } } }"
+    await twin.run(member, {"c": _gid("Conversation", "c-old"), "p": _gid("Project", "p2")})
+    await twin.run(member, {"c": _gid("Conversation", "c-old"), "p": None})
+    await twin.run(member, {"c": _gid("Conversation", "telegram_1"), "p": p1})
+    await twin.run(member, {"c": _gid("Conversation", "c-old"), "p": _gid("Project", "nope")})
+    await twin.run(member, {"c": _gid("Conversation", "nope"), "p": p1})
+
+    delete = "mutation($id: ID!) { deleteProject(id: $id) }"
+    await twin.run(delete, {"id": p1})  # c-proj keeps existing, unlinked
+    await twin.run(delete, {"id": p1})
+
+
+async def test_notification_channel_mutations(twin):
+    fields = "id name type target createdAt updatedAt"
+    create = f"mutation($input: NotificationChannelCreateInput!) {{ createNotificationChannel(input: $input) {{ {fields} }} }}"
+    await twin.run(create, {"input": {"name": " ops ", "type": "telegram", "target": " -42 "}})
+    await twin.run(create, {"input": {"name": "x", "type": "discord", "target": "  "}})
+    await twin.run(create, {"input": {"name": "", "type": "discord", "target": "1"}})
+
+    update = f"mutation($id: ID!, $input: NotificationChannelUpdateInput!) {{ updateNotificationChannel(id: $id, input: $input) {{ {fields} }} }}"
+    n1 = _gid("NotificationChannel", "n1")
+    await twin.run(update, {"id": n1, "input": {"name": " renamed ", "target": " 7 "}})
+    await twin.run(update, {"id": n1, "input": {}})  # still bumps updatedAt
+    await twin.run(update, {"id": n1, "input": {"target": " "}})
+    await twin.run(update, {"id": _gid("NotificationChannel", "nope"), "input": {"name": "x"}})
+
+    # A workflow that delivers to n1 blocks deleting it.
+    await twin.run(
+        "mutation($id: ID!, $input: WorkflowUpdateInput!) { updateWorkflow(id: $id, input: $input) { id } }",
+        {"id": _gid("Workflow", "w2"), "input": {"notifications": '[{"id": "n1"}, "junk"]'}},
+    )
+    delete = "mutation($id: ID!) { deleteNotificationChannel(id: $id) }"
+    await twin.run(delete, {"id": n1})
+    await twin.run(delete, {"id": _gid("NotificationChannel", "n2")})
+    await twin.run(delete, {"id": _gid("NotificationChannel", "n2")})
+
+
+async def test_workflow_mutations(twin):
+    fields = "id name description definition notifications createdAt updatedAt"
+    create = f"mutation($input: WorkflowCreateInput!) {{ createWorkflow(input: $input) {{ {fields} }} }}"
+    await twin.run(create, {"input": {"name": "new"}})  # definition defaults to "{}"
+    await twin.run(create, {"input": {"name": "  untrimmed ", "description": "d", "definition": '{"nodes": [1]}', "notifications": "[]"}})
+
+    update = f"mutation($id: ID!, $input: WorkflowUpdateInput!) {{ updateWorkflow(id: $id, input: $input) {{ {fields} }} }}"
+    w1 = _gid("Workflow", "w1")
+    await twin.run(update, {"id": w1, "input": {}})  # unchanged, no bump
+    await twin.run(update, {"id": w1, "input": {"name": "renamed", "definition": "{}"}})
+    await twin.run(update, {"id": _gid("Workflow", "nope"), "input": {"name": "x"}})
+    await twin.run(update, {"id": _gid("Workflow", "nope"), "input": {}})
+
+    delete = "mutation($id: ID!) { deleteWorkflow(id: $id) }"
+    await twin.run(delete, {"id": w1})  # its runs go too
+    await twin.run(delete, {"id": w1})
+
+
+async def test_skill_memory_and_conversation_mutations(twin):
+    await twin.run("mutation($id: ID!) { deleteSkill(id: $id) }", {"id": _gid("Skill", "s1")})
+    await twin.run("mutation($id: ID!) { deleteSkill(id: $id) }", {"id": _gid("Skill", "s1")})
+    # The access log outlives the item, as it does in Python.
+    await twin.run('mutation { deleteMemory(id: "mem-fact") }')
+    await twin.run('mutation { deleteMemory(id: "mem-fact") }')
+
+    update = "mutation($id: ID!, $title: String, $pinned: Boolean) { updateConversation(id: $id, title: $title, pinned: $pinned) { id title pinned model } }"
+    c = _gid("Conversation", "c-old")
+    await twin.run(update, {"id": c, "title": "Renamed", "pinned": None})
+    await twin.run(update, {"id": c, "pinned": True})
+    await twin.run(update, {"id": c, "title": "", "pinned": False})
+    await twin.run(update, {"id": c})
+    await twin.run(update, {"id": _gid("Conversation", "nope"), "pinned": True})
+
+
+async def test_artifact_and_document_mutations(twin):
+    fields = "id title filename kind updatedAt content versionCount versions { version title filename content createdAt }"
+    update = f"mutation($id: ID!, $title: String, $content: String) {{ updateArtifact(id: $id, title: $title, content: $content) {{ {fields} }} }}"
+    await twin.run(update, {"id": _gid("Artifact", "a-crlf"), "title": "Retitled"})
+    await twin.run(update, {"id": _gid("Artifact", "a-crlf"), "content": "# v3\nbody"})  # v1, v2 exist → v3
+    await twin.run(update, {"id": _gid("Artifact", "a-plain"), "title": "Both", "content": "new"})  # migrates v1
+    await twin.run(update, {"id": _gid("Artifact", "a-missing"), "content": "first"})  # no live file → v1 is new
+    await twin.run(update, {"id": _gid("Artifact", "a-binary"), "content": "x"})
+    await twin.run(update, {"id": _gid("Artifact", "nope"), "title": "x"})
+
+    restore = f"mutation($id: ID!, $v: Int!) {{ restoreArtifactVersion(id: $id, version: $v) {{ {fields} }} }}"
+    await twin.run(restore, {"id": _gid("Artifact", "a-crlf"), "v": 1})
+    await twin.run(restore, {"id": _gid("Artifact", "a-crlf"), "v": 99})
+
+    await twin.run("mutation($id: ID!) { deleteArtifact(id: $id) }", {"id": _gid("Artifact", "a-crlf")})
+    await twin.run("mutation($id: ID!) { deleteArtifact(id: $id) }", {"id": _gid("Artifact", "a-crlf")})
+    # Chunks go with the document; the FTS delete triggers must run in the edge's SQLite too.
+    await twin.run("mutation($id: ID!) { deleteDocument(id: $id) }", {"id": _gid("Document", "d1")})
+    await twin.run("mutation($id: ID!) { deleteDocument(id: $id) }", {"id": _gid("Document", "d1")})
+
+
+async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
+    # A model change needs the catalog, which is in Python.
+    resp = await edge.post("/graphql", json={
+        "query": "mutation($id: ID!, $m: String) { updateConversation(id: $id, model: $m) { id } }",
+        "variables": {"id": _gid("Conversation", "c-old"), "m": "google_genai:x"},
+    })
+    assert resp.status_code == 502
+    # An agent's delete is approval-gated in Python; a human's isn't.
+    for mutation in ("deleteWorkflow", "deleteSkill"):
+        q = f'mutation {{ {mutation}(id: "{_gid("Workflow", "nope")}") }}'
+        assert (await edge.post("/graphql", json={"query": q}, headers={"X-Jarvis-Caller": "agent"})).status_code == 502
+        assert (await edge.post("/graphql", json={"query": q})).status_code == 200
+
+
 # ── routing ──────────────────────────────────────────────────────────────────
 
 
@@ -455,10 +710,16 @@ def _signature(field) -> tuple[str, dict[str, tuple[str, Any]]]:
     return str(field.type), args
 
 
+def _input_signature(field) -> tuple[str, Any]:
+    from graphql import Undefined
+
+    return str(field.type), None if field.default_value is Undefined else field.default_value
+
+
 def test_edge_schema_is_a_subset_of_python(edge_binary):
     """Every type and field the edge defines exists in Python with the same
     type and arguments — the edge may lag Python, never contradict it."""
-    from graphql import GraphQLInterfaceType, GraphQLObjectType, build_schema
+    from graphql import GraphQLInputObjectType, GraphQLInterfaceType, GraphQLObjectType, build_schema
 
     from server.graphql.schema import schema
 
@@ -466,7 +727,16 @@ def test_edge_schema_is_a_subset_of_python(edge_binary):
     python = build_schema(schema.as_str())
 
     for name, rtype in rust.type_map.items():
-        if name.startswith("__") or not isinstance(rtype, (GraphQLObjectType, GraphQLInterfaceType)):
+        if name.startswith("__"):
+            continue
+        if isinstance(rtype, GraphQLInputObjectType):
+            ptype = python.type_map.get(name)
+            assert isinstance(ptype, GraphQLInputObjectType), f"input {name} is not in the Python schema"
+            assert {f: _input_signature(v) for f, v in rtype.fields.items()} == {
+                f: _input_signature(v) for f, v in ptype.fields.items()
+            }, f"input {name} differs"
+            continue
+        if not isinstance(rtype, (GraphQLObjectType, GraphQLInterfaceType)):
             continue
         ptype = python.type_map.get(name)
         assert ptype is not None, f"{name} is not in the Python schema"
@@ -475,7 +745,7 @@ def test_edge_schema_is_a_subset_of_python(edge_binary):
             assert _signature(rfield) == _signature(ptype.fields[fname]), f"{name}.{fname} differs"
         # A non-root type is fully ported or not at all: a missing field would
         # make an owned operation fail validation and fall back on every call.
-        if name != "Query":
+        if name not in ("Query", "Mutation"):
             assert set(rtype.fields) == set(ptype.fields), f"{name} is partially ported"
 
 

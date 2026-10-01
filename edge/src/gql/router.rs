@@ -4,6 +4,8 @@
 //! operation only if it can answer all of it. Splitting one operation across
 //! two servers would mean merging two partial results, and the two can't
 //! share a transaction.
+//!
+//! A few root fields are owned only for some calls — see `Walk::field_rule`.
 
 use std::collections::HashSet;
 
@@ -24,11 +26,27 @@ pub enum Decision {
     Backend(String),
 }
 
+/// Root fields the edge's schema defines, per operation type.
+#[derive(Default)]
+pub struct Owned {
+    pub query: HashSet<String>,
+    pub mutation: HashSet<String>,
+}
+
+/// Who sent the request. The `jarvis` SDK sends `X-Jarvis-Caller: agent`
+/// (`server/graphql/context.py`); everything else is a human.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Caller {
+    Human,
+    Agent,
+}
+
 pub fn decide(
-    owned: &HashSet<String>,
+    owned: &Owned,
     query: &str,
     operation_name: Option<&str>,
     variables: &serde_json::Value,
+    caller: Caller,
 ) -> Decision {
     let doc = match parse_query(query) {
         Ok(doc) => doc,
@@ -38,10 +56,13 @@ pub fn decide(
     let Some(op) = select_operation(&doc, operation_name) else {
         return Decision::Backend("operation not found".into());
     };
-    if op.ty != OperationType::Query {
-        return Decision::Backend(format!("{:?}", op.ty).to_lowercase());
-    }
-    match check_selection(owned, &doc, &op.selection_set.node, variables) {
+    let fields = match op.ty {
+        OperationType::Query => &owned.query,
+        OperationType::Mutation => &owned.mutation,
+        OperationType::Subscription => return Decision::Backend("subscription".into()),
+    };
+    let walk = Walk { owned: fields, doc: &doc, variables, caller };
+    match walk.check(&op.selection_set.node) {
         Ok(()) => Decision::Edge,
         Err(why) => Decision::Backend(why),
     }
@@ -57,51 +78,71 @@ fn select_operation<'a>(doc: &'a ExecutableDocument, name: Option<&str>) -> Opti
     }
 }
 
-fn check_selection(
-    owned: &HashSet<String>,
-    doc: &ExecutableDocument,
-    set: &SelectionSet,
-    variables: &serde_json::Value,
-) -> Result<(), String> {
-    for item in &set.items {
-        match &item.node {
-            Selection::Field(field) => {
-                let name = field.node.name.node.as_str();
-                match name {
-                    "__typename" => {}
-                    "node" => owns_node_id(&field.node, variables)?,
-                    _ if owned.contains(name) => {}
-                    _ => return Err(format!("root field {name}")),
-                }
-            }
-            Selection::InlineFragment(frag) => {
-                check_selection(owned, doc, &frag.node.selection_set.node, variables)?
-            }
-            Selection::FragmentSpread(spread) => {
-                let name = &spread.node.fragment_name.node;
-                let frag = doc.fragments.get(name).ok_or_else(|| format!("unknown fragment {name}"))?;
-                check_selection(owned, doc, &frag.node.selection_set.node, variables)?
-            }
-        }
-    }
-    Ok(())
+struct Walk<'a> {
+    owned: &'a HashSet<String>,
+    doc: &'a ExecutableDocument,
+    variables: &'a serde_json::Value,
+    caller: Caller,
 }
 
-/// `node(id:)` resolves any type, so it's owned per call: only when the id
-/// names a type this schema implements.
-fn owns_node_id(field: &Field, variables: &serde_json::Value) -> Result<(), String> {
-    let id = match field.get_argument("id").map(|v| &v.node) {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Variable(var)) => match variables.get(var.as_str()) {
-            Some(serde_json::Value::String(s)) => s.clone(),
-            _ => return Err("node id variable".into()),
-        },
-        _ => return Err("node id".into()),
-    };
-    match decode_global_id(&id) {
-        Ok((ty, _)) if NODE_TYPES.contains(&ty.as_str()) => Ok(()),
-        Ok((ty, _)) => Err(format!("node type {ty}")),
-        Err(e) => Err(e),
+impl Walk<'_> {
+    fn check(&self, set: &SelectionSet) -> Result<(), String> {
+        for item in &set.items {
+            match &item.node {
+                Selection::Field(field) => {
+                    let name = field.node.name.node.as_str();
+                    if name != "__typename" && !self.owned.contains(name) {
+                        return Err(format!("root field {name}"));
+                    }
+                    self.field_rule(name, &field.node)?;
+                }
+                Selection::InlineFragment(frag) => self.check(&frag.node.selection_set.node)?,
+                Selection::FragmentSpread(spread) => {
+                    let name = &spread.node.fragment_name.node;
+                    let frag = self.doc.fragments.get(name).ok_or_else(|| format!("unknown fragment {name}"))?;
+                    self.check(&frag.node.selection_set.node)?
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Root fields the edge owns for only some calls.
+    fn field_rule(&self, name: &str, field: &Field) -> Result<(), String> {
+        match name {
+            // Resolves any type, so owned per id: only types the edge implements.
+            "node" => {
+                let Some(serde_json::Value::String(id)) = self.argument(field, "id") else {
+                    return Err("node id".into());
+                };
+                match decode_global_id(&id) {
+                    Ok((ty, _)) if NODE_TYPES.contains(&ty.as_str()) => Ok(()),
+                    Ok((ty, _)) => Err(format!("node type {ty}")),
+                    Err(e) => Err(e),
+                }
+            }
+            // A model change is checked against the model catalog, which
+            // lives in Python.
+            "updateConversation" if self.is_set(field, "model") => Err("model change".into()),
+            // An agent's delete may need a human's approval first
+            // (`core/approvals.py:gate_action`); a human's click is the approval.
+            "deleteWorkflow" | "deleteSkill" if self.caller == Caller::Agent => {
+                Err(format!("{name} by the agent is approval-gated"))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// An argument's value as JSON, through `$variables`. `None` when absent.
+    fn argument(&self, field: &Field, name: &str) -> Option<serde_json::Value> {
+        match &field.get_argument(name)?.node {
+            Value::Variable(var) => self.variables.get(var.as_str()).cloned(),
+            other => other.clone().into_const().and_then(|v| v.into_json().ok()),
+        }
+    }
+
+    fn is_set(&self, field: &Field, name: &str) -> bool {
+        !matches!(self.argument(field, name), None | Some(serde_json::Value::Null))
     }
 }
 
@@ -110,49 +151,82 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn owned() -> HashSet<String> {
-        ["conversations", "conversation", "projects", "project", "node"].map(String::from).into()
+    fn owned() -> Owned {
+        Owned {
+            query: ["conversations", "conversation", "projects", "project", "node"].map(String::from).into(),
+            mutation: ["createProject", "updateConversation", "deleteWorkflow", "deleteSkill"].map(String::from).into(),
+        }
+    }
+
+    fn decide_h(q: &str, vars: serde_json::Value) -> Decision {
+        decide(&owned(), q, None, &vars, Caller::Human)
     }
 
     #[test]
     fn owned_query_goes_to_edge() {
         let q = "query ConversationListQuery { conversations { id title } }";
-        assert_eq!(decide(&owned(), q, None, &json!({})), Decision::Edge);
+        assert_eq!(decide_h(q, json!({})), Decision::Edge);
     }
 
     #[test]
     fn mixed_query_goes_to_backend() {
         let q = "query { conversations { id } todos(conversationId: \"x\") { text } }";
-        assert_eq!(decide(&owned(), q, None, &json!({})), Decision::Backend("root field todos".into()));
+        assert_eq!(decide_h(q, json!({})), Decision::Backend("root field todos".into()));
     }
 
     #[test]
-    fn mutations_and_introspection_go_to_backend() {
-        let m = "mutation { pinConversation(id: \"x\") { id } }";
-        assert!(matches!(decide(&owned(), m, None, &json!({})), Decision::Backend(_)));
-        let i = "{ __schema { types { name } } }";
-        assert!(matches!(decide(&owned(), i, None, &json!({})), Decision::Backend(_)));
+    fn unowned_mutations_subscriptions_and_introspection_go_to_backend() {
+        for q in [
+            "mutation { startTask(input: {query: \"x\"}) { taskId } }",
+            "mutation { createProject(input: {name: \"a\"}) { id } startTask(input: {query: \"x\"}) { taskId } }",
+            "subscription { taskEvents(taskId: \"x\") { __typename } }",
+            "{ __schema { types { name } } }",
+        ] {
+            assert!(matches!(decide_h(q, json!({})), Decision::Backend(_)), "{q}");
+        }
+    }
+
+    #[test]
+    fn owned_mutation_goes_to_edge() {
+        assert_eq!(decide_h("mutation { createProject(input: {name: \"a\"}) { id } }", json!({})), Decision::Edge);
+    }
+
+    #[test]
+    fn model_change_goes_to_backend() {
+        let q = "mutation U($id: ID!, $model: String, $pinned: Boolean) { updateConversation(id: $id, model: $model, pinned: $pinned) { id } }";
+        assert_eq!(decide_h(q, json!({"id": "x", "pinned": true})), Decision::Edge);
+        assert_eq!(decide_h(q, json!({"id": "x", "model": null, "pinned": true})), Decision::Edge);
+        assert_eq!(decide_h(q, json!({"id": "x", "model": "m"})), Decision::Backend("model change".into()));
+        let literal = "mutation { updateConversation(id: \"x\", model: \"m\") { id } }";
+        assert_eq!(decide_h(literal, json!({})), Decision::Backend("model change".into()));
+    }
+
+    #[test]
+    fn agent_deletes_go_to_backend() {
+        let q = "mutation { deleteWorkflow(id: \"x\") }";
+        assert_eq!(decide(&owned(), q, None, &json!({}), Caller::Human), Decision::Edge);
+        assert!(matches!(decide(&owned(), q, None, &json!({}), Caller::Agent), Decision::Backend(_)));
     }
 
     #[test]
     fn node_routes_by_the_id_type() {
         let q = "query R($id: ID!) { node(id: $id) { __typename id } }";
         let conv = json!({"id": "Q29udmVyc2F0aW9uOmFiYw=="}); // Conversation:abc
-        assert_eq!(decide(&owned(), q, None, &conv), Decision::Edge);
+        assert_eq!(decide_h(q, conv), Decision::Edge);
         let other = json!({"id": "UnVubmluZ1Rhc2s6YWJj"}); // RunningTask:abc
-        assert_eq!(decide(&owned(), q, None, &other), Decision::Backend("node type RunningTask".into()));
+        assert_eq!(decide_h(q, other), Decision::Backend("node type RunningTask".into()));
     }
 
     #[test]
     fn root_fragments_are_followed() {
         let q = "query { ...F } fragment F on Query { conversations { id } todos(conversationId: \"x\") { text } }";
-        assert!(matches!(decide(&owned(), q, None, &json!({})), Decision::Backend(_)));
+        assert!(matches!(decide_h(q, json!({})), Decision::Backend(_)));
     }
 
     #[test]
     fn named_operation_is_selected() {
         let q = "query A { conversations { id } } query B { todos(conversationId: \"x\") { text } }";
-        assert_eq!(decide(&owned(), q, Some("A"), &json!({})), Decision::Edge);
-        assert!(matches!(decide(&owned(), q, Some("B"), &json!({})), Decision::Backend(_)));
+        assert_eq!(decide(&owned(), q, Some("A"), &json!({}), Caller::Human), Decision::Edge);
+        assert!(matches!(decide(&owned(), q, Some("B"), &json!({}), Caller::Human), Decision::Backend(_)));
     }
 }

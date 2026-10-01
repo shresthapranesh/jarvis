@@ -110,6 +110,17 @@ pub fn iso_from_db(stored: &str) -> DateTime {
     }
 }
 
+/// Now, as SQLAlchemy stores a `_now()` default: UTC, space-separated, six
+/// fractional digits.
+pub fn now_stored() -> String {
+    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.6f").to_string()
+}
+
+/// A fresh row id, as `str(uuid4())`.
+pub fn new_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 /// An ISO timestamp (as a cursor carries it) → the stored text it compares
 /// against. SQLAlchemy always binds six fractional digits.
 pub fn db_from_iso(iso: &str) -> Option<String> {
