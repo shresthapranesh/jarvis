@@ -8,14 +8,17 @@ mod config;
 mod db;
 mod gql;
 mod graphql;
+mod link;
 mod proxy;
+mod pyjson;
+mod runs;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::post;
+use axum::routing::{get, post};
 
 use crate::config::Config;
 
@@ -25,6 +28,8 @@ pub struct AppState {
     pub schema: gql::EdgeSchema,
     pub owned: Arc<gql::router::Owned>,
     pub http: reqwest::Client,
+    /// The live-run mirror the worker link feeds (`runs.rs`).
+    pub runs: Arc<runs::Registry>,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -33,7 +38,7 @@ async fn main() {
     if std::env::args().any(|a| a == "--print-schema") {
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");
         let data = gql::EdgeData { artifacts_dir: Default::default() };
-        print!("{}", gql::build(pool, data).sdl());
+        print!("{}", gql::build(pool, data, Default::default()).sdl());
         return;
     }
 
@@ -70,7 +75,8 @@ async fn main() {
     };
 
     let data = gql::EdgeData { artifacts_dir: config.artifacts_dir.clone() };
-    let schema = gql::build(pool, data);
+    let runs: Arc<runs::Registry> = Default::default();
+    let schema = gql::build(pool, data, runs.clone());
     let owned = gql::owned_root_fields(&schema);
     let http = reqwest::Client::builder()
         // A proxy hands redirects to the client; it never follows them.
@@ -89,10 +95,11 @@ async fn main() {
     );
 
     let bind = config.bind;
-    let state = AppState { config: Arc::new(config), schema, owned: Arc::new(owned), http };
+    let state = AppState { config: Arc::new(config), schema, owned: Arc::new(owned), http, runs };
     let app = Router::new()
         // GET /graphql (the subscription WebSocket) falls through to the proxy.
-        .route("/graphql", post(graphql::post).fallback(proxy::any))
+        .route("/graphql", post(graphql::post).get(graphql::websocket).fallback(proxy::any))
+        .route("/internal/worker", get(link::upgrade))
         .fallback(proxy::any)
         // Python sets no request-size limit on /graphql; neither does the edge.
         .layer(DefaultBodyLimit::disable())

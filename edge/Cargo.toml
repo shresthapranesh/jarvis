@@ -11,7 +11,10 @@ publish = false
 async-graphql = { version = "7", default-features = false }
 # The parser's non-const Value (it can hold $variables) isn't re-exported.
 async-graphql-value = "7"
+# The subscription WebSocket (graphql-ws and graphql-transport-ws).
+async-graphql-axum = "7"
 axum = { version = "0.8", features = ["ws"] }
+async-stream = "0.3"
 base64 = "0.22"
 # Timestamps for rows the edge writes, in SQLAlchemy's stored format.
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
@@ -19,7 +22,10 @@ dotenvy = "0.15"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 reqwest = { version = "0.12", default-features = false, features = ["stream"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: event payloads are re-serialized the way Python does it,
+# and Python keeps dict insertion order.
+serde_json = { version = "1", features = ["preserve_order"] }
+indexmap = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tokio-tungstenite = "0.29"

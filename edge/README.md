@@ -16,8 +16,8 @@ browser / SDK ──▶ edge :8000 ──(ported operation)──▶ SQLite
 ## Running it
 
 ```bash
-# terminal 1 — Python, moved off :8000
-uv run uvicorn server.entrypoint:app --reload --port 8001
+# terminal 1 — Python, moved off :8000, reporting its runs to the edge
+JARVIS_EDGE_URL=http://127.0.0.1:8000 uv run uvicorn server.entrypoint:app --reload --port 8001
 # terminal 2 — the edge, on :8000 (what vite and the jarvis SDK already target)
 cd edge && cargo run
 ```
@@ -47,6 +47,34 @@ to Python:
   only partly ported.
 
 Splitting one operation across both servers is never attempted.
+
+## The worker link (`/internal/worker`)
+
+Runs still execute in Python, but the edge serves everyone watching them.
+Python dials a loopback-only WebSocket on the edge (`core/edge_link.py`, when
+`JARVIS_EDGE_URL` is set) and reports its run registry: each run's
+registration, every event `emit_event` appends (raw `{"event", "data"}`
+records), state changes (done, cancelled, interrupt, token counters) and
+removal. The edge keeps a mirror (`src/runs.rs`) and sends `cancel` back.
+
+- **Nothing is durable on the link.** Every (re)connect starts with a
+  snapshot of `_tasks` including each run's full event history, which
+  reconciles everything: an edge restart, a dropped link, a worker restart.
+  `hello.instance` says whether a reconnect is the same process (runs carry
+  over, subscribers keep their place) or a new one (every mirrored run is
+  gone; its subscribers end with the DB fallback).
+- **Events are raw; typing is the edge's.** The same `done` record is a
+  `DoneEvent` to `taskEvents` and an `AutomationDoneEvent` to
+  `automationRunEvents`, so each subscription coerces (`src/gql/events.rs`),
+  keeping Python's `data.get` / truthiness / `str()` semantics and
+  `json.dumps` byte for byte for the fields that embed JSON text
+  (`src/pyjson.rs`).
+- **The registration race.** A mutation hands out a run id over HTTP while
+  the worker reports the run over the link. A subscription for an unknown run
+  whose DB row still says "in progress" waits up to 2 s for it to register.
+- **Only while linked.** The subscription socket, `runningTasks` and the stop
+  mutations are served by the edge only while a worker is linked; otherwise
+  they go to Python as before.
 
 ## Contracts with the Python side
 
@@ -100,6 +128,11 @@ Mutations that only write rows and files:
 | workflows | `createWorkflow`, `updateWorkflow`, `deleteWorkflow` (human callers) |
 | lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `deleteSkill` (human callers) |
 | memory | `deleteMemory` |
+| runs (worker linked) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun` |
+
+And while a worker is linked: every subscription (`taskEvents`,
+`automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`) and
+`runningTasks`, from the run mirror.
 
 Three are owned per call (`router.rs:Walk::field_rule`):
 `updateConversation` goes to Python when it sets `model` (validated against the
@@ -121,7 +154,6 @@ moves when the thing it reads moves.
 | Root field | Reads | Moves with |
 |---|---|---|
 | `automations`, `automation` | `nextRunAt` is APScheduler's next fire time, DST handling included | the scheduler |
-| `runningTasks` | the in-memory `_tasks` registry | the job queue + event stream |
 | `todos`, `agentMemory`, `checkpointStats` | LangGraph's checkpointer and store (`checkpoints.db`, serialized) | the agent loop (Phase 2) |
 | `models`, `modelSync` | the built-in catalog compiled into `core/model_catalog.py`; provider APIs | the catalog becoming data |
 | `tools` | the bound-tool list, the SDK catalogue, loaded MCP tools | the agent loop |
@@ -132,7 +164,8 @@ moves when the thing it reads moves.
 
 | Mutations | Touch | Move with |
 |---|---|---|
-| `startTask`, `stopTask`, `queueMessage`, `unqueueMessage`, `resumeTask`, `stopRunningTask`, `runWorkflow`, `stopWorkflowRun`, `resumeWorkflowRun`, `resolveWorkflowApproval`, `triggerAutomation`, `stopAutomationRun`, `browserActivity` | `TaskState`, the job queue, run handlers | the job queue + event stream |
+| `startTask`, `runWorkflow`, `triggerAutomation` | registration work that's still Python's: attachments → documents, model resolution, queued-message routing | the run triggers |
+| `queueMessage`, `unqueueMessage`, `resumeTask`, `resumeWorkflowRun`, `resolveWorkflowApproval`, `stopBoardTask`, `browserActivity` | a running handler's `TaskState` (pending input, the resume future) | link control messages for each |
 | `deleteConversation`, `discardConversation` | the LangGraph thread and the conversation's kernel | the agent loop |
 | `createAutomation`, `updateAutomation`, `deleteAutomation` | scheduler registration | the scheduler |
 | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `decomposeBoardTask`, `deleteBoardTask`, `stopBoardTask` | the board dispatcher, model validation, an LLM (decompose) | the job queue |

@@ -2,7 +2,11 @@
 
 use std::net::SocketAddr;
 
+use async_graphql::http::ALL_WEBSOCKET_PROTOCOLS;
+use async_graphql_axum::{GraphQLProtocol, GraphQLWebSocket};
 use axum::Json;
+use axum::extract::FromRequestParts;
+use axum::extract::ws::WebSocketUpgrade;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{StatusCode, header};
@@ -45,7 +49,7 @@ pub async fn post(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<
 
     if let Some(op) = parsed {
         let variables = op.variables.unwrap_or(serde_json::Value::Null);
-        match decide(&state.owned, &op.query, op.operation_name.as_deref(), &variables, caller) {
+        match decide(&state.owned, &op.query, op.operation_name.as_deref(), &variables, caller, state.runs.link_up()) {
             Decision::Edge => {
                 let mut request = async_graphql::Request::new(op.query)
                     .variables(async_graphql::Variables::from_json(variables));
@@ -75,4 +79,37 @@ fn failed_before_execution(resp: &async_graphql::Response) -> bool {
     !resp.errors.is_empty()
         && resp.data == async_graphql::Value::Null
         && resp.errors.iter().all(|e| e.path.is_empty())
+}
+
+/// `GET /graphql`: the subscription WebSocket. Served here while a worker is
+/// linked — the run mirror is then current — and proxied to Python otherwise,
+/// for the whole connection: graphql-ws multiplexes every subscription a
+/// client has over one socket, so the choice is per connection, not per
+/// operation.
+pub async fn websocket(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> Response {
+    let is_upgrade = req
+        .headers()
+        .get(header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+    if !is_upgrade || !state.runs.link_up() {
+        return proxy::any(State(state), ConnectInfo(peer), req).await;
+    }
+    let (mut parts, _) = req.into_parts();
+    let protocol = match GraphQLProtocol::from_request_parts(&mut parts, &state).await {
+        Ok(p) => p,
+        Err(rejection) => return rejection.into_response(),
+    };
+    let upgrade = match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
+        Ok(u) => u,
+        Err(rejection) => return rejection.into_response(),
+    };
+    let schema = state.schema.clone();
+    upgrade
+        .protocols(ALL_WEBSOCKET_PROTOCOLS)
+        .on_upgrade(move |socket| GraphQLWebSocket::new(socket, schema, protocol).serve())
 }

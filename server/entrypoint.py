@@ -193,6 +193,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("runner init failed: %s", exc)
 
         _reaper_task = asyncio.create_task(_run_lock_reaper(state._queue))
+        # Mirror live runs into the Rust edge, when one fronts this process
+        # (JARVIS_EDGE_URL). Before the workers, so the first run is reported.
+        from core.edge_link import start_edge_link, stop_edge_link
+        start_edge_link()
         _automation_worker_task = asyncio.create_task(_build_automation_worker(state._queue).run())
         _workflow_worker_task = asyncio.create_task(_build_workflow_worker(state._queue).run())
         _chat_worker_task = asyncio.create_task(_build_chat_worker(state._queue).run())
@@ -256,6 +260,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _reaper_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await _reaper_task
+
+        # After the workers, so a handler's final events still reach the edge.
+        await stop_edge_link()
 
         # Tear down any live run_cell kernels (workers are already stopped).
         from core.kernels import get_kernel_registry

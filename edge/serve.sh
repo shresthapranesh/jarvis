@@ -11,6 +11,10 @@ set -u
 
 backend_port="${JARVIS_BACKEND_PORT:-8001}"
 export JARVIS_BACKEND_URL="${JARVIS_BACKEND_URL:-http://127.0.0.1:${backend_port}}"
+# Python reports its live runs to the edge over loopback (core/edge_link.py);
+# the edge serves subscriptions and the run registry from that mirror.
+edge_bind="${JARVIS_EDGE_BIND:-127.0.0.1:8000}"
+export JARVIS_EDGE_URL="${JARVIS_EDGE_URL:-http://127.0.0.1:${edge_bind##*:}}"
 
 uvicorn server.entrypoint:app --host 127.0.0.1 --port "${backend_port}" &
 "${JARVIS_EDGE_BIN:-jarvis-edge}" &

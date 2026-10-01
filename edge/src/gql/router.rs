@@ -33,6 +33,11 @@ pub struct Owned {
     pub mutation: HashSet<String>,
 }
 
+/// Fields that read or steer the live-run mirror (`runs.rs`). It's only
+/// current while a worker is linked, so without one they're Python's.
+const LINKED_FIELDS: &[&str] =
+    &["runningTasks", "stopRunningTask", "stopTask", "stopAutomationRun", "stopWorkflowRun"];
+
 /// Who sent the request. The `jarvis` SDK sends `X-Jarvis-Caller: agent`
 /// (`server/graphql/context.py`); everything else is a human.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +52,7 @@ pub fn decide(
     operation_name: Option<&str>,
     variables: &serde_json::Value,
     caller: Caller,
+    link_up: bool,
 ) -> Decision {
     let doc = match parse_query(query) {
         Ok(doc) => doc,
@@ -59,9 +65,10 @@ pub fn decide(
     let fields = match op.ty {
         OperationType::Query => &owned.query,
         OperationType::Mutation => &owned.mutation,
+        // Over HTTP; the edge serves subscriptions on its WebSocket.
         OperationType::Subscription => return Decision::Backend("subscription".into()),
     };
-    let walk = Walk { owned: fields, doc: &doc, variables, caller };
+    let walk = Walk { owned: fields, doc: &doc, variables, caller, link_up };
     match walk.check(&op.selection_set.node) {
         Ok(()) => Decision::Edge,
         Err(why) => Decision::Backend(why),
@@ -83,6 +90,7 @@ struct Walk<'a> {
     doc: &'a ExecutableDocument,
     variables: &'a serde_json::Value,
     caller: Caller,
+    link_up: bool,
 }
 
 impl Walk<'_> {
@@ -109,6 +117,9 @@ impl Walk<'_> {
 
     /// Root fields the edge owns for only some calls.
     fn field_rule(&self, name: &str, field: &Field) -> Result<(), String> {
+        if LINKED_FIELDS.contains(&name) && !self.link_up {
+            return Err(format!("{name} needs a linked worker"));
+        }
         match name {
             // Resolves any type, so owned per id: only types the edge implements.
             "node" => {
@@ -153,13 +164,13 @@ mod tests {
 
     fn owned() -> Owned {
         Owned {
-            query: ["conversations", "conversation", "projects", "project", "node"].map(String::from).into(),
+            query: ["conversations", "conversation", "projects", "project", "node", "runningTasks"].map(String::from).into(),
             mutation: ["createProject", "updateConversation", "deleteWorkflow", "deleteSkill"].map(String::from).into(),
         }
     }
 
     fn decide_h(q: &str, vars: serde_json::Value) -> Decision {
-        decide(&owned(), q, None, &vars, Caller::Human)
+        decide(&owned(), q, None, &vars, Caller::Human, true)
     }
 
     #[test]
@@ -204,8 +215,15 @@ mod tests {
     #[test]
     fn agent_deletes_go_to_backend() {
         let q = "mutation { deleteWorkflow(id: \"x\") }";
-        assert_eq!(decide(&owned(), q, None, &json!({}), Caller::Human), Decision::Edge);
-        assert!(matches!(decide(&owned(), q, None, &json!({}), Caller::Agent), Decision::Backend(_)));
+        assert_eq!(decide(&owned(), q, None, &json!({}), Caller::Human, true), Decision::Edge);
+        assert!(matches!(decide(&owned(), q, None, &json!({}), Caller::Agent, true), Decision::Backend(_)));
+    }
+
+    #[test]
+    fn linked_fields_need_a_worker() {
+        let q = "{ runningTasks { id } }";
+        assert_eq!(decide(&owned(), q, None, &json!({}), Caller::Human, true), Decision::Edge);
+        assert!(matches!(decide(&owned(), q, None, &json!({}), Caller::Human, false), Decision::Backend(_)));
     }
 
     #[test]
@@ -226,7 +244,7 @@ mod tests {
     #[test]
     fn named_operation_is_selected() {
         let q = "query A { conversations { id } } query B { todos(conversationId: \"x\") { text } }";
-        assert_eq!(decide(&owned(), q, Some("A"), &json!({}), Caller::Human), Decision::Edge);
-        assert!(matches!(decide(&owned(), q, Some("B"), &json!({}), Caller::Human), Decision::Backend(_)));
+        assert_eq!(decide(&owned(), q, Some("A"), &json!({}), Caller::Human, true), Decision::Edge);
+        assert!(matches!(decide(&owned(), q, Some("B"), &json!({}), Caller::Human, true), Decision::Backend(_)));
     }
 }

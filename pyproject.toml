@@ -41,6 +41,7 @@ dependencies = [
     "trafilatura>=2.1.0",
     "typer~=0.24",
     "uvicorn~=0.44",
+    "websockets>=15",
     "yfinance~=1.3",
 ]
 
