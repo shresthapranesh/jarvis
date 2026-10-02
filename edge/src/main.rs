@@ -6,13 +6,16 @@
 
 mod catalog;
 mod config;
+mod cron;
 mod db;
 mod gql;
 mod graphql;
+mod jobs;
 mod link;
 mod proxy;
 mod pyjson;
 mod runs;
+mod schedule;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,6 +34,8 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// The live-run mirror the worker link feeds (`runs.rs`).
     pub runs: Arc<runs::Registry>,
+    /// Every timer, and the board dispatcher (`schedule.rs`).
+    pub scheduler: Arc<schedule::Scheduler>,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -42,8 +47,17 @@ async fn main() {
             artifacts_dir: Default::default(),
             documents_dir: Default::default(),
             staging_dir: Default::default(),
+            tz: chrono_tz::Tz::UTC,
         };
         print!("{}", gql::build(pool, data, Default::default()).sdl());
+        return;
+    }
+
+    // The schedule tests diff this against APScheduler: one JSON case per
+    // stdin line, `{"expr", "tz", "now", "count"}` → the next `count` fire
+    // times, each computed from the one before, or `null` if it won't parse.
+    if std::env::args().any(|a| a == "--cron-next") {
+        cron_next();
         return;
     }
 
@@ -79,13 +93,17 @@ async fn main() {
         }
     };
 
+    let tz = schedule::resolve_tz(&pool).await;
     let data = gql::EdgeData {
         artifacts_dir: config.artifacts_dir.clone(),
         documents_dir: config.documents_dir.clone(),
         staging_dir: config.staging_dir.clone(),
+        tz,
     };
     let runs: Arc<runs::Registry> = Default::default();
     let schema = gql::build(pool.clone(), data, runs.clone());
+    let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
+    tokio::spawn(scheduler.clone().run());
     tokio::spawn(sweep_pending_runs(runs.clone(), pool));
     let owned = gql::owned_root_fields(&schema);
     let http = reqwest::Client::builder()
@@ -105,7 +123,7 @@ async fn main() {
     );
 
     let bind = config.bind;
-    let state = AppState { config: Arc::new(config), schema, owned: Arc::new(owned), http, runs };
+    let state = AppState { config: Arc::new(config), schema, owned: Arc::new(owned), http, runs, scheduler };
     let app = Router::new()
         // GET /graphql (the subscription WebSocket) falls through to the proxy.
         .route("/graphql", post(graphql::post).get(graphql::websocket).fallback(proxy::any))
@@ -134,6 +152,30 @@ async fn sweep_pending_runs(runs: Arc<runs::Registry>, pool: sqlx::SqlitePool) {
     loop {
         tick.tick().await;
         runs.sweep_pending(&pool).await;
+    }
+}
+
+fn cron_next() {
+    use std::io::BufRead;
+    for line in std::io::stdin().lock().lines() {
+        let case: serde_json::Value = serde_json::from_str(&line.expect("stdin")).expect("a JSON case");
+        let tz: chrono_tz::Tz = case["tz"].as_str().expect("tz").parse().expect("a zone");
+        let mut now = chrono::DateTime::parse_from_rfc3339(case["now"].as_str().expect("now")).expect("an instant").to_utc();
+        let out = match cron::Trigger::parse(case["expr"].as_str().expect("expr"), tz) {
+            Err(_) => serde_json::Value::Null,
+            Ok(trigger) => {
+                let mut fires = vec![];
+                let mut prev = None;
+                for _ in 0..case["count"].as_u64().unwrap_or(1) {
+                    let Some(next) = trigger.next_fire(prev.as_ref(), now) else { break };
+                    fires.push(serde_json::Value::String(next.isoformat()));
+                    now = next.to_utc();
+                    prev = Some(next);
+                }
+                serde_json::Value::Array(fires)
+            }
+        };
+        println!("{out}");
     }
 }
 

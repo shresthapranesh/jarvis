@@ -204,25 +204,6 @@ async fn insert_message(
     Ok(id)
 }
 
-/// `SqliteJobQueue.enqueue`'s row. Returns its `created_at`.
-async fn insert_job(tx: &mut Transaction<'_, Sqlite>, id: &str, kind: &str, payload: &Value) -> Result<String> {
-    let now = now_stored();
-    sqlx::query(
-        "INSERT INTO jobs (id, kind, payload, status, run_at, attempts, max_attempts, last_error, locked_by, \
-         locked_until, cancel_requested, created_at, updated_at, completed_at) \
-         VALUES (?, ?, ?, 'pending', ?, 0, 3, NULL, NULL, NULL, 0, ?, ?, NULL)",
-    )
-    .bind(id)
-    .bind(kind)
-    .bind(pyjson::dumps(payload))
-    .bind(&now)
-    .bind(&now)
-    .bind(&now)
-    .execute(&mut **tx)
-    .await?;
-    Ok(now)
-}
-
 /// Mirror the run, then commit its rows and wake the worker. Mirrored first,
 /// as the Python triggers registered before committing: once the job is
 /// visible a worker may claim it, and its report must find the run.
@@ -407,7 +388,7 @@ impl StartMutation {
         if !attachments.is_empty() {
             payload["attachments"] = attachments.iter().map(Attachment::dump).collect();
         }
-        let enqueued_at = insert_job(&mut tx, &task_id, "chat", &payload).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload).await?;
         commit_run(registry, tx, &task_id, "chat", first_chars(&input.query, 60), &conversation_id, &enqueued_at).await?;
 
         // The bytes now live in documents_dir or the job payload.
@@ -494,7 +475,7 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"workflow_id": workflow_id, "inputs": inputs});
-        let enqueued_at = insert_job(&mut tx, &run_id, "workflow", &payload).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload).await?;
         commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at).await?;
         Ok(run_id)
     }
@@ -549,7 +530,7 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"automation_id": automation_id, "triggered_by": "manual"});
-        let enqueued_at = insert_job(&mut tx, &run_id, "automation", &payload).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload).await?;
         commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at).await?;
         Ok(run_id)
     }

@@ -125,6 +125,49 @@ and registers it. Then:
   leaves the mirror only when its job ends unclaimed (a 5 s sweep against
   `jobs`, for a handler that returned before registering, say).
 
+## The scheduler (`src/schedule.rs`, `src/cron.rs`)
+
+Every timer the Python server ran is the edge's, so that between jobs Python
+has nothing to do:
+
+| timer | when | does |
+|---|---|---|
+| each enabled automation | its cron schedule | enqueues an `automation` job |
+| board dispatch | every 15 s, and when Python sends `dispatch` | `dispatch_board_tasks`, in the edge |
+| memory consolidation | `0 */6 * * *` | enqueues a `maintenance` job |
+| project memory | every 30 min | enqueues a `maintenance` job |
+| checkpoint prune | `20 * * * *` | enqueues a `maintenance` job |
+| staging cleanup | `0 * * * *` | deletes abandoned uploads, in the edge |
+| memory-activity prune | `0 4 * * *` | deletes old access-log rows, in the edge |
+
+Python behind the edge (`JARVIS_EDGE_URL` set — `core/edge_link.py:behind_edge`)
+registers none of these but the idle-kernel reaper (kernels are its own
+children). Its `dispatch_board_tasks()` sends `dispatch` instead of claiming
+cards itself, `_register_scheduler_job` / `_remove_scheduler_job` send
+`schedules`, and a `maintenance` worker runs the three sweeps that need it
+(`core/scheduler.py:MAINTENANCE_TASKS`). The decision is configuration, not
+link state, so a reconnecting link can't leave both sides firing.
+
+- **Cron is APScheduler's, not a library's.** `cron.rs` ports
+  `CronTrigger.from_crontab` (after `normalize_crontab`) with Python's
+  `zoneinfo` arithmetic: day-of-month AND day-of-week, a fire time in a
+  spring-forward gap keeping its wall clock with the pre-transition offset,
+  `fold` in an overlap. `tests/test_edge_schedule.py` diffs it against
+  APScheduler on 13,200 cases — 14 zones, every 2026 DST transition, 50
+  expression shapes — and `Automation.nextRunAt` against Python's.
+- **Firing follows APScheduler's job options**: missed runs coalesce, a run
+  later than its grace period (60 s for automations) is skipped, and nothing
+  missed while the edge was down is caught up.
+- **A schedule is re-checked at fire time** against the row, so one disabled
+  or deleted a moment ago doesn't fire from a stale copy. Schedules reload
+  300 ms after `schedules` and every 60 s regardless.
+- **The zone** is the `scheduler.timezone` setting, else `JARVIS_TIMEZONE`,
+  else `TZ`, else the system zone, else UTC — read at startup, as Python reads
+  it.
+- **Maintenance jobs coalesce**: none is enqueued while one for the same
+  sweep is pending or running, so a machine that was off doesn't come back to
+  a backlog.
+
 ## Contracts with the Python side
 
 - **Python owns the schema** (`init_db` + `_migrate`). The edge creates no
@@ -160,12 +203,12 @@ Every query that reads only the database and files:
 | conversations | `conversations`, `conversation` (+ the message connection) |
 | projects | `projects`, `project` |
 | artifacts & documents | `artifacts`, `artifact`, `artifactVersions`, `documents` |
-| automations | `automationRuns` |
+| automations | `automations` (with `nextRunAt`), `automation`, `automationRuns` |
 | task board | `boardTasks`, `boardTask` |
 | workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
 | lists | `notificationChannels`, `skills`, `pendingApprovals` |
 | memory | `memories`, `memoryActivities`, `memoryUsage` |
-| Relay | `node` for every Node type except `Automation` |
+| Relay | `node` for every Node type |
 
 Mutations that only write rows and files:
 
@@ -204,7 +247,6 @@ moves when the thing it reads moves.
 
 | Root field | Reads | Moves with |
 |---|---|---|
-| `automations`, `automation` | `nextRunAt` is APScheduler's next fire time, DST handling included | the scheduler |
 | `todos`, `agentMemory`, `checkpointStats` | LangGraph's checkpointer and store (`checkpoints.db`, serialized) | the agent loop (Phase 2) |
 | `models`, `modelSync` | `ModelSpec` rendering and provider APIs (the catalog itself is data now: `core/builtin_models.json`) | porting the catalog type |
 | `tools` | the bound-tool list, the SDK catalogue, loaded MCP tools | the agent loop |
@@ -217,7 +259,7 @@ moves when the thing it reads moves.
 |---|---|---|
 | `stopBoardTask`, `browserActivity` | the board row and a running handler's `TaskState`; the agent's kernel is the only caller of the latter | the board dispatcher; the agent loop |
 | `deleteConversation`, `discardConversation` | the LangGraph thread and the conversation's kernel | the agent loop |
-| `createAutomation`, `updateAutomation`, `deleteAutomation` | scheduler registration | the scheduler |
+| `createAutomation`, `updateAutomation`, `deleteAutomation` | cron validation with APScheduler's messages; deleting the backing conversation's LangGraph thread and kernel | the agent loop (Python reports each change to the edge's scheduler: `schedules`) |
 | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `decomposeBoardTask`, `deleteBoardTask`, `stopBoardTask` | the board dispatcher, model validation, an LLM (decompose) | the job queue |
 | `addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill` | embeddings (Gemini) on write | embeddings |
 | `updateMemory`, `deleteAgentMemory`, `consolidateMemory`, `consolidateProjectMemory` | the LangGraph store; an LLM | the agent loop |

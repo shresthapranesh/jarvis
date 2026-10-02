@@ -63,8 +63,18 @@ async def dispatch_board_tasks() -> int:
 
     Returns the number of tasks dispatched. Serialized by a lock so an
     interval tick and a mutation-triggered kick can't double-claim a task.
+
+    Behind the Rust edge the edge is the one dispatcher (`edge/src/schedule.rs`)
+    — two would race for the same cards across processes — so a kick here
+    asks it for a pass and reports nothing dispatched itself.
     """
     from sqlalchemy import func, select
+
+    from core.edge_link import behind_edge, notify_edge
+
+    if behind_edge():
+        notify_edge("dispatch")
+        return 0
 
     async with _dispatch_lock:
         async with async_session() as session:

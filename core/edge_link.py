@@ -4,7 +4,8 @@ The edge (`edge/`) serves every subscription and the run registry
 (`runningTasks`, the stop mutations), but runs still execute here. So this
 process reports to it over one loopback WebSocket, `/internal/worker`:
 
-    worker → edge   hello, snapshot, register, events, state, unregister, reply
+    worker → edge   hello, snapshot, register, events, state, unregister, reply,
+                    dispatch, schedules
     edge → worker   cancel, wake, adopt_queued, call
 
 The edge also *starts* runs (`startTask`, `runWorkflow`, `triggerAutomation`):
@@ -49,7 +50,7 @@ from core.state import (
 
 logger = logging.getLogger("jarvis.edge_link")
 
-PROTOCOL = 2
+PROTOCOL = 3
 _BACKOFF_SECONDS = (0.2, 0.5, 1.0, 2.0, 5.0)
 # Counters (tokens, LLM calls) are written by callbacks that don't always
 # notify, so state is also re-checked on a timer.
@@ -312,6 +313,27 @@ async def _dispatch(method: str, params: dict[str, Any]) -> Any:
 
 
 _link: EdgeLink | None = None
+
+
+def behind_edge() -> bool:
+    """Whether this process runs behind the Rust edge (`JARVIS_EDGE_URL`).
+
+    Then the edge owns every timer — cron automations, the board dispatcher,
+    the maintenance sweeps — and this process only runs what they enqueue.
+    Decided by configuration rather than by whether the link is up at this
+    instant, so a reconnecting link can never leave both sides firing (or
+    neither). `core/scheduler.py` and `server/task_board_runtime.py` ask.
+    """
+    return bool(os.environ.get("JARVIS_EDGE_URL", "").strip())
+
+
+def notify_edge(kind: str) -> None:
+    """Tell the edge something it schedules changed: `dispatch` (run a board
+    dispatch pass now) or `schedules` (re-read the automations' cron
+    schedules). Best effort — with the link down, the edge's own periodic
+    pass picks the change up instead."""
+    if _link is not None and _link._ws is not None:
+        _link._send({"type": kind})
 
 
 def start_edge_link() -> EdgeLink | None:

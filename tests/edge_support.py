@@ -104,6 +104,6 @@ async def fake_worker(client: httpx.AsyncClient):
             assert time.monotonic() < deadline, "the edge never saw the fake worker"
             await asyncio.sleep(0.05)
         try:
-            yield
+            yield ws
         finally:
             reader.cancel()

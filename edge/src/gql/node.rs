@@ -7,7 +7,7 @@ use async_graphql::{Context, ID, Interface, Object, Result};
 use sqlx::SqlitePool;
 
 use super::artifact::{Artifact, Document};
-use super::automation::AutomationRun;
+use super::automation::{Automation, AutomationRun};
 use super::board::BoardTask;
 use super::codec::decode_global_id;
 use super::conversation::{Conversation, Message};
@@ -19,6 +19,7 @@ use super::workflow::{Workflow, WorkflowRun};
 /// [`resolve`].
 pub const NODE_TYPES: &[&str] = &[
     "Artifact",
+    "Automation",
     "AutomationRun",
     "BoardTask",
     "Conversation",
@@ -35,6 +36,7 @@ pub const NODE_TYPES: &[&str] = &[
 #[graphql(field(name = "id", ty = "ID", desc = "The Globally Unique ID of this object"))]
 pub enum Node {
     Artifact(Artifact),
+    Automation(Automation),
     AutomationRun(AutomationRun),
     BoardTask(BoardTask),
     Conversation(Conversation),
@@ -50,6 +52,7 @@ pub enum Node {
 async fn resolve(pool: &SqlitePool, ty: &str, raw: &str) -> Result<Option<Node>> {
     Ok(match ty {
         "Artifact" => Artifact::by_id(pool, raw).await?.map(Node::Artifact),
+        "Automation" => Automation::by_id(pool, raw).await?.map(Node::Automation),
         "AutomationRun" => AutomationRun::by_id(pool, raw).await?.map(Node::AutomationRun),
         "BoardTask" => BoardTask::by_id(pool, raw).await?.map(Node::BoardTask),
         "Conversation" => Conversation::by_id(pool, raw).await?.map(Node::Conversation),
