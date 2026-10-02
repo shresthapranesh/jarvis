@@ -1,5 +1,6 @@
-//! `/internal/worker` — the WebSocket the Python worker reports its runs over.
-//! The other end, and the protocol, are in `core/edge_link.py`.
+//! `/internal/worker` — the WebSocket the Python worker reports its runs over,
+//! and the edge steers them through. The other end, and the protocol, are in
+//! `core/edge_link.py`.
 //!
 //! Loopback only: whoever connects here can publish events into any run's
 //! stream. The edge has no other authentication, and doesn't pretend this is
@@ -19,7 +20,7 @@ use tokio::sync::mpsc;
 use crate::AppState;
 use crate::runs::{Fields, Registry, Reported};
 
-pub const PROTOCOL: u64 = 1;
+pub const PROTOCOL: u64 = 2;
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -44,6 +45,15 @@ enum FromWorker {
     },
     Unregister {
         task_id: String,
+    },
+    /// The answer to a `call` (`Registry::call`).
+    Reply {
+        id: u64,
+        ok: bool,
+        #[serde(default)]
+        value: Value,
+        #[serde(default)]
+        error: Option<String>,
     },
 }
 
@@ -99,6 +109,10 @@ async fn serve(socket: WebSocket, registry: std::sync::Arc<Registry>) {
             Ok(FromWorker::Events { task_id, from, events }) => registry.events(session, &task_id, from, events),
             Ok(FromWorker::State { task_id, fields }) => registry.state(session, &task_id, fields),
             Ok(FromWorker::Unregister { task_id }) => registry.unregister(session, &task_id),
+            Ok(FromWorker::Reply { id, ok, value, error }) => {
+                let reply = if ok { Ok(value) } else { Err(error.unwrap_or_else(|| "the worker call failed".into())) };
+                registry.reply(session, id, reply)
+            }
             Ok(FromWorker::Hello { .. }) => tracing::warn!("worker link: repeated hello ignored"),
             Err(e) => tracing::warn!("worker link: bad message: {e}"),
         }

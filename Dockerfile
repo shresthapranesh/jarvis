@@ -28,6 +28,8 @@ FROM rust:1.88-slim-bookworm AS edge
 WORKDIR /app/edge
 COPY edge/Cargo.toml edge/Cargo.lock ./
 COPY edge/src ./src
+# The model catalog Python loads; the edge compiles it in (src/catalog.rs).
+COPY core/builtin_models.json /app/core/builtin_models.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/edge/target \
     cargo build --release --locked \

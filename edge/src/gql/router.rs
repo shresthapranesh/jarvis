@@ -33,10 +33,25 @@ pub struct Owned {
     pub mutation: HashSet<String>,
 }
 
-/// Fields that read or steer the live-run mirror (`runs.rs`). It's only
-/// current while a worker is linked, so without one they're Python's.
-const LINKED_FIELDS: &[&str] =
-    &["runningTasks", "stopRunningTask", "stopTask", "stopAutomationRun", "stopWorkflowRun"];
+/// Fields that read or steer the live-run mirror (`runs.rs`), or start a run
+/// for a worker to claim. The mirror is only current while a worker is
+/// linked, and only a linked worker is woken for a new job, so without one
+/// they're Python's.
+const LINKED_FIELDS: &[&str] = &[
+    "runningTasks",
+    "stopRunningTask",
+    "stopTask",
+    "stopAutomationRun",
+    "stopWorkflowRun",
+    "startTask",
+    "queueMessage",
+    "unqueueMessage",
+    "resumeTask",
+    "runWorkflow",
+    "resumeWorkflowRun",
+    "resolveWorkflowApproval",
+    "triggerAutomation",
+];
 
 /// Who sent the request. The `jarvis` SDK sends `X-Jarvis-Caller: agent`
 /// (`server/graphql/context.py`); everything else is a human.

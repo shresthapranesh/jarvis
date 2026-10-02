@@ -12,12 +12,17 @@ from strawberry import relay
 from core.agents import is_valid_model
 from core.config import get_config
 from core.schemas import AttachmentIn
-from core.state import _tasks, emit_event
-from db.ops import close_open_approvals, delete_conversation, resolve_model, update_conversation
+from core.state import _tasks
+from db.ops import delete_conversation, resolve_model, update_conversation
 
 from ..types.conversation import Conversation
 from ..types.upload import UploadReferenceInput
-from server.chat_runtime import queue_chat_message, register_chat_task, unqueue_chat_message
+from server.chat_runtime import (
+    queue_chat_message,
+    register_chat_task,
+    resume_chat_task,
+    unqueue_chat_message,
+)
 
 
 @strawberry.input
@@ -169,22 +174,7 @@ class ConversationMutation:
 
     @strawberry.mutation
     async def resume_task(self, info: strawberry.Info, task_id: str, answer: str) -> bool:
-        state = _tasks.get(task_id)
-        if state is None:
-            raise ValueError("task not found")
-        if state.resume_future is None or state.resume_future.done():
-            raise ValueError("no pending interrupt for this task")
-
-        pending_id = state.pending_interrupt_id
-        state.resume_future.set_result(answer)
-        emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
-        # Answering from the conversation and answering from the inbox are two
-        # views of one question — clear it from both, whichever was used.
-        await close_open_approvals(
-            info.context["session"], task_id=task_id,
-            status="answered", result="Delivered to the run.",
-        )
-        state.clear_interrupt()
+        await resume_chat_task(info.context["session"], task_id, answer)
         return True
 
     @strawberry.mutation

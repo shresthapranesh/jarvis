@@ -464,7 +464,7 @@ async def automation_job_handler(job: Job) -> None:
     # null-model run falling back to the wrong provider.
     state = get_or_create_task_state(
         run_id, kind="automation", label=auto.name, parent_id=automation_id,
-        model=await _resolve_model(auto),
+        model=await _resolve_model(auto), job=job,
     )
 
     async with queue_cancel_watch(run_id, state):

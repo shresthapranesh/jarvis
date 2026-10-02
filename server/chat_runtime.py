@@ -363,6 +363,27 @@ async def unqueue_chat_message(session: AsyncSession, task_id: str, message_id: 
     return True
 
 
+async def resume_chat_task(session: AsyncSession, task_id: str, answer: str) -> None:
+    """Hand `answer` to the run paused on an interrupt (`resumeTask`)."""
+    from db.ops import close_open_approvals
+
+    state = _tasks.get(task_id)
+    if state is None:
+        raise ValueError("task not found")
+    if state.resume_future is None or state.resume_future.done():
+        raise ValueError("no pending interrupt for this task")
+
+    pending_id = state.pending_interrupt_id
+    state.resume_future.set_result(answer)
+    emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
+    # Answering from the conversation and answering from the inbox are two
+    # views of one question — clear it from both, whichever was used.
+    await close_open_approvals(
+        session, task_id=task_id, status="answered", result="Delivered to the run.",
+    )
+    state.clear_interrupt()
+
+
 def in_flight_chat_task(conv_id: str) -> str | None:
     """The chat run currently up on `conv_id`, or None if it is idle.
 
@@ -517,7 +538,7 @@ async def chat_job_handler(job: Job) -> None:
     else:
         label = query[:60]
     state = get_or_create_task_state(
-        task_id, kind="chat", label=label, parent_id=conv_id, model=model,
+        task_id, kind="chat", label=label, parent_id=conv_id, model=model, job=job,
     )
 
     await _adopt_queued_messages(conv_id, state)

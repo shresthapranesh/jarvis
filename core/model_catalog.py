@@ -1,8 +1,10 @@
 """Model catalog — source of truth for available LLM models."""
 
+import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -133,20 +135,16 @@ def honors_cache_control(spec: "ModelSpec", enabled_providers: Iterable[str]) ->
 #             honest window here is whatever num_ctx is set to, which this
 #             process can't see — so fall back to the flat default.
 #   models at or past the knowledge cutoff, where a number would be invented.
-BUILTIN_MODELS: tuple[ModelSpec, ...] = (
-    ModelSpec("google_genai:gemma-4-31b-it",           "Gemma 4 31B (Google)",      "google_genai"),
-    ModelSpec("google_genai:gemma-4-26b-a4b-it",       "Gemma 4 26B (Google)",      "google_genai"),
-    ModelSpec("google_genai:gemini-2.5-pro",           "Gemini 2.5 Pro (Google)",   "google_genai", 1_048_576),
-    ModelSpec("google_genai:gemini-2.0-flash",         "Gemini 2.0 Flash (Google)", "google_genai", 1_048_576),
-    ModelSpec("google_genai:gemini-3.1-flash-lite",    "Gemini 3.1 Flash Lite (Google)", "google_genai"),
-    ModelSpec("ollama:gemma4:26b",                     "Gemma 4 26B (Ollama)",  "ollama"),
-    ModelSpec("ollama:llama3.3",                       "Llama 3.3 (Ollama)",    "ollama"),
-    ModelSpec("ollama:qwen3:32b",                      "Qwen3 32B (Ollama)",    "ollama"),
-    ModelSpec("bedrock:us.anthropic.claude-sonnet-4-6",                      "Claude Sonnet 4.6 (AWS Bedrock)",    "bedrock",  200_000),
-    ModelSpec("anthropic:claude-opus-4-7",                                   "Claude Opus 4.7 (Anthropic)",        "anthropic"),
-    ModelSpec("anthropic:claude-sonnet-4-6",                                 "Claude Sonnet 4.6 (Anthropic)",      "anthropic"),
-    ModelSpec("anthropic:claude-haiku-4-5-20251001",                         "Claude Haiku 4.5 (Anthropic)",       "anthropic", 200_000),
-    ModelSpec("meta:muse-spark-1.1",                                         "Muse Spark 1.1 (Meta)",              "meta"),
+#
+# The entries themselves live in `builtin_models.json`, beside this file: the
+# Rust edge (`edge/src/catalog.rs`) compiles the same file in, because it
+# resolves a run's model when it creates the run, and two copies of the list
+# would drift the first time a model was added to only one of them.
+_BUILTIN_MODELS_FILE = Path(__file__).with_name("builtin_models.json")
+
+BUILTIN_MODELS: tuple[ModelSpec, ...] = tuple(
+    ModelSpec(r["id"], r["label"], r["provider"], r.get("context_window"))
+    for r in json.loads(_BUILTIN_MODELS_FILE.read_text())
 )
 
 DEFAULT_MODEL: str = BUILTIN_MODELS[0].id

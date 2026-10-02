@@ -32,6 +32,9 @@ class SqliteJobQueue(JobQueue):
     def _signal_wake(self) -> None:
         self._wake_event.set()
 
+    def wake(self) -> None:
+        self._signal_wake()
+
     async def _wait_for_signal(self, timeout: float) -> None:
         try:
             await asyncio.wait_for(self._wake_event.wait(), timeout=timeout)
@@ -109,6 +112,8 @@ class SqliteJobQueue(JobQueue):
             job_id_str = candidate.id
             job_kind = candidate.kind
             job_payload_str = candidate.payload
+            job_created_at = candidate.created_at
+            job_cancel_requested = bool(candidate.cancel_requested)
             new_attempts = candidate.attempts + 1
             new_lock_until = now + timedelta(seconds=ttl_seconds)
 
@@ -139,6 +144,13 @@ class SqliteJobQueue(JobQueue):
                 payload=json.loads(job_payload_str),
                 attempts=new_attempts,
                 locked_until=new_lock_until,
+                # SQLite hands back naive datetimes; every stamp here is UTC.
+                created_at=(
+                    job_created_at.replace(tzinfo=timezone.utc)
+                    if job_created_at is not None and job_created_at.tzinfo is None
+                    else job_created_at
+                ),
+                cancel_requested=job_cancel_requested,
             )
 
     async def extend_lock(

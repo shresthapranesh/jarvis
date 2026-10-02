@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.queue import CANCEL_POLL_INTERVAL_SECONDS, JobQueue
+from core.queue import CANCEL_POLL_INTERVAL_SECONDS, Job, JobQueue
 from core.state import (
     TaskState,
     _notify,
@@ -127,19 +127,32 @@ def get_or_create_task_state(
     label: str,
     parent_id: str | None,
     model: str | None = None,
+    job: Job | None = None,
 ) -> TaskState:
     """The state the trigger pre-registered, or a fresh one.
 
-    The trigger sets `_tasks[task_id]` before its commit so a subscriber cannot
-    race the worker; a job re-claimed after a restart has no such trigger left,
-    which is the only path that creates one here.
+    A trigger in this process sets `_tasks[task_id]` before its commit so a
+    subscriber cannot race the worker. Two kinds of job have no such state:
+    one enqueued by the Rust edge, which pre-registers the run in its own
+    mirror instead (`edge/src/runs.rs`), and one re-claimed after a restart.
+    Those are created here, from the `job`: started when it was enqueued, and
+    already cancelled if a stop arrived before any worker claimed it.
     """
     state = _tasks.get(task_id)
-    if state is not None:
-        return state
-    state = TaskState(kind=kind, label=label, parent_id=parent_id)  # type: ignore[arg-type]
-    _tasks[task_id] = state
-    log_task_created(task_id, state, model)
+    if state is None:
+        state = TaskState(kind=kind, label=label, parent_id=parent_id)  # type: ignore[arg-type]
+        if job is not None and job.created_at is not None:
+            state.started_at = job.created_at
+        # Set before the registry reports the run, so the edge never mirrors
+        # it un-cancelled.
+        if job is not None and job.cancel_requested:
+            state.cancelled = True
+            state._stop_event.set()
+        _tasks[task_id] = state
+        log_task_created(task_id, state, model)
+    elif job is not None and job.cancel_requested and not state.cancelled:
+        state.cancelled = True
+        state._stop_event.set()
     return state
 
 
