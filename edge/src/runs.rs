@@ -1,21 +1,38 @@
 //! The edge's mirror of live runs — `core/state.py:_tasks`, as reported over
-//! the worker link (`link.rs`).
+//! the worker link (`link.rs`), plus the runs the edge started itself.
 //!
-//! A run's events are kept whole, in order, for as long as Python keeps the
-//! run registered, so a subscriber that arrives late replays from the first
-//! event — exactly what `stream_task_events` did against `TaskState.events`.
+//! A run's events are kept whole, in order, for as long as it is registered,
+//! so a subscriber that arrives late replays from the first event — exactly
+//! what `stream_task_events` did against `TaskState.events`.
 //!
 //! Every change bumps the run's `watch` version; subscribers wait on that.
 //! A run that disappears without finishing (its worker restarted, or the
 //! snapshot after a reconnect doesn't carry it) is marked `gone`, and its
 //! subscribers end with the same DB fallback a fresh subscription would get.
+//!
+//! **Two owners.** A run a worker registers is the worker's: the worker sends
+//! its every event. A run the edge starts (`startTask` and the other triggers,
+//! `gql/start.rs`) is the edge's own until a worker claims its job — it is
+//! *pending*, the edge may append events to it (a message queued onto it),
+//! and a new worker process doesn't end it, because no worker had it. The
+//! claim is the worker's `register` for that id: from then on the worker's
+//! event 0 follows whatever the edge appended (`worker_base`).
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use indexmap::IndexMap;
 use serde::Deserialize;
-use serde_json::Value;
-use tokio::sync::{mpsc, watch};
+use serde_json::{Value, json};
+use sqlx::SqlitePool;
+use tokio::sync::{mpsc, oneshot, watch};
+
+use crate::pyjson;
+
+/// How long a `call` waits for the worker's reply.
+const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Everything `runningTasks` shows besides identity.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -48,6 +65,12 @@ pub struct RunState {
     pub fields: Fields,
     /// Removed without finishing; see the module docs.
     pub gone: bool,
+    /// Where the worker's event 0 sits in `events`. `None` while the run is
+    /// pending — the edge's own, not yet claimed by any worker.
+    pub worker_base: Option<usize>,
+    /// A message was queued onto the run while it was pending, so the worker
+    /// that claims it is told to look for queued messages again.
+    queued_while_pending: bool,
 }
 
 pub struct Run {
@@ -58,13 +81,8 @@ pub struct Run {
 }
 
 impl Run {
-    fn new(id: String, meta: Meta, events: Vec<Value>, fields: Fields) -> Arc<Self> {
-        Arc::new(Self {
-            id,
-            meta,
-            state: Mutex::new(RunState { events, fields, gone: false }),
-            version: watch::channel(0).0,
-        })
+    fn new(id: String, meta: Meta, state: RunState) -> Arc<Self> {
+        Arc::new(Self { id, meta, state: Mutex::new(state), version: watch::channel(0).0 })
     }
 
     pub fn subscribe(&self) -> watch::Receiver<u64> {
@@ -72,18 +90,60 @@ impl Run {
     }
 
     /// Apply a change and wake every subscriber.
-    pub fn update(&self, f: impl FnOnce(&mut RunState)) {
-        f(&mut self.state.lock().expect("run state lock"));
+    pub fn update<R>(&self, f: impl FnOnce(&mut RunState) -> R) -> R {
+        let out = f(&mut self.state.lock().expect("run state lock"));
         self.version.send_modify(|v| *v += 1);
+        out
     }
 
     pub fn fields(&self) -> Fields {
         self.state.lock().expect("run state lock").fields.clone()
     }
+
+    /// Whether a worker has claimed the run.
+    pub fn claimed(&self) -> bool {
+        self.state.lock().expect("run state lock").worker_base.is_some()
+    }
+
+    /// Append an event the edge produced, as `emit_event` would have. Only
+    /// while the run is pending: once a worker has claimed it, every event is
+    /// the worker's, and this returns false.
+    pub fn emit_local(&self, event: &str, data: &Value) -> bool {
+        self.update(|st| {
+            if st.worker_base.is_some() {
+                return false;
+            }
+            st.events.push(record(event, data));
+            true
+        })
+    }
+
+    /// `emit_local` of a `queued_message`, remembering that the claiming
+    /// worker must adopt it.
+    pub fn queue_local(&self, message_id: &str, text: &str, position: i64) -> bool {
+        self.update(|st| {
+            if st.worker_base.is_some() {
+                return false;
+            }
+            st.queued_while_pending = true;
+            st.events.push(record(
+                "queued_message",
+                &json!({"message_id": message_id, "text": text, "position": position}),
+            ));
+            true
+        })
+    }
+}
+
+/// `{"event": name, "data": json.dumps(payload)}`.
+fn record(event: &str, data: &Value) -> Value {
+    json!({"event": event, "data": pyjson::dumps(data)})
 }
 
 /// Edge → worker control messages, already serialized.
 pub type ControlTx = mpsc::UnboundedSender<String>;
+
+type Reply = Result<Value, String>;
 
 #[derive(Default)]
 struct Inner {
@@ -94,6 +154,9 @@ struct Inner {
     /// The last worker instance seen, kept across a disconnect: whether a
     /// reconnect is the same process is a question about the one *before*.
     last_instance: Option<String>,
+    /// Calls awaiting the worker's reply, by call id, with the session they
+    /// were sent on.
+    calls: HashMap<u64, (u64, oneshot::Sender<Reply>)>,
 }
 
 struct Link {
@@ -106,7 +169,8 @@ pub struct Registry {
     /// Bumped on every registration, so a subscriber waiting for a run that
     /// hasn't been reported yet can wake when it is.
     registered: watch::Sender<u64>,
-    sessions: std::sync::atomic::AtomicU64,
+    sessions: AtomicU64,
+    call_ids: AtomicU64,
 }
 
 impl Default for Registry {
@@ -114,7 +178,8 @@ impl Default for Registry {
         Self {
             inner: Mutex::default(),
             registered: watch::channel(0).0,
-            sessions: std::sync::atomic::AtomicU64::new(0),
+            sessions: AtomicU64::new(0),
+            call_ids: AtomicU64::new(0),
         }
     }
 }
@@ -149,23 +214,138 @@ impl Registry {
         }
     }
 
+    /// A job was just committed: have the worker claim it now rather than at
+    /// its next poll.
+    pub fn wake(&self) {
+        self.control(&json!({"type": "wake"}));
+    }
+
+    /// Run `method` in the worker — the operations that act on a run's
+    /// in-memory state there — and return its result, or the error message
+    /// the worker's own resolver would have raised.
+    pub async fn call(&self, method: &str, params: Value) -> Reply {
+        let id = self.call_ids.fetch_add(1, Ordering::SeqCst) + 1;
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut inner = self.lock();
+            let Some(link) = &inner.link else {
+                return Err("no worker is linked".into());
+            };
+            let msg = json!({"type": "call", "id": id, "method": method, "params": params});
+            if link.control.send(msg.to_string()).is_err() {
+                return Err("no worker is linked".into());
+            }
+            let session = link.session;
+            inner.calls.insert(id, (session, tx));
+        }
+        let out = tokio::time::timeout(CALL_TIMEOUT, rx).await;
+        self.lock().calls.remove(&id);
+        match out {
+            Ok(Ok(reply)) => reply,
+            Ok(Err(_)) => Err("the worker link dropped before it answered".into()),
+            Err(_) => Err("the worker did not answer in time".into()),
+        }
+    }
+
+    // ── runs the edge starts ────────────────────────────────────────────────
+
+    /// Mirror a run the edge is about to commit a job for, so a subscriber
+    /// that gets its id back finds it — what the Python triggers did by
+    /// setting `_tasks[task_id]` before their commit. If a worker somehow
+    /// registered the id first, that run stands.
+    pub fn pre_register(&self, id: &str, meta: Meta) -> Arc<Run> {
+        let mut inner = self.lock();
+        if let Some(run) = inner.runs.get(id) {
+            return run.clone();
+        }
+        let run = Run::new(id.to_string(), meta, RunState::default());
+        inner.runs.insert(id.to_string(), run.clone());
+        drop(inner);
+        self.registered.send_modify(|v| *v += 1);
+        run
+    }
+
+    /// Undo `pre_register` for a job that was never committed.
+    pub fn discard_pending(&self, id: &str) {
+        let mut inner = self.lock();
+        if inner.runs.get(id).is_some_and(|run| !run.claimed()) {
+            if let Some(run) = inner.runs.shift_remove(id) {
+                mark_gone(&run);
+            }
+        }
+    }
+
+    /// Tell the worker that claimed `id` to adopt messages queued onto it;
+    /// `announce` names those it should also announce with `queued_message`.
+    pub fn adopt_queued(&self, id: &str, announce: &[&str]) {
+        self.control(&json!({"type": "adopt_queued", "task_id": id, "announce": announce}));
+    }
+
+    /// The chat run up on a conversation — `in_flight_chat_task`: the first,
+    /// in registration order, that hasn't finished.
+    pub fn in_flight_chat(&self, conversation_id: &str) -> Option<Arc<Run>> {
+        self.lock()
+            .runs
+            .values()
+            .find(|run| {
+                run.meta.kind == "chat"
+                    && run.meta.parent_id.as_deref() == Some(conversation_id)
+                    && !run.fields().done
+            })
+            .cloned()
+    }
+
+    /// End pending runs whose job finished without any worker reporting it —
+    /// the handler returned before registering (its automation was deleted,
+    /// say), or the job failed first. Their subscribers fall back to the DB.
+    pub async fn sweep_pending(&self, pool: &SqlitePool) {
+        let pending: Vec<Arc<Run>> = self.all().into_iter().filter(|run| !run.claimed()).collect();
+        for run in pending {
+            let status: Option<String> = match sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?")
+                .bind(&run.id)
+                .fetch_optional(pool)
+                .await
+            {
+                Ok(status) => status,
+                Err(e) => {
+                    tracing::warn!("sweeping pending runs: {e}");
+                    return;
+                }
+            };
+            if matches!(status.as_deref(), Some("pending" | "running")) {
+                continue;
+            }
+            let mut inner = self.lock();
+            if inner.runs.get(&run.id).is_some_and(|r| Arc::ptr_eq(r, &run) && !run.claimed()) {
+                inner.runs.shift_remove(&run.id);
+                drop(inner);
+                tracing::info!("run {} ended unclaimed (job {})", run.id, status.as_deref().unwrap_or("missing"));
+                mark_gone(&run);
+            }
+        }
+    }
+
     // ── worker link ─────────────────────────────────────────────────────────
 
     /// A worker connected. Returns its session number, which every later call
     /// for this connection carries so a stale connection can't clobber a new
     /// one. A different `instance` than last time means a different process:
-    /// none of the previous runs can still be live.
+    /// none of the runs it had can still be live. Pending runs were never any
+    /// worker's, and stay.
     pub fn attach(&self, instance: String, control: ControlTx) -> u64 {
-        let session = self.sessions.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let session = self.sessions.fetch_add(1, Ordering::SeqCst) + 1;
         let mut inner = self.lock();
         let same_process = inner.last_instance.as_deref() == Some(instance.as_str());
         inner.last_instance = Some(instance);
         inner.link = Some(Link { control, session });
         if !same_process {
-            for run in inner.runs.values() {
-                mark_gone(run);
-            }
-            inner.runs.clear();
+            inner.runs.retain(|_, run| {
+                let keep = !run.claimed();
+                if !keep {
+                    mark_gone(run);
+                }
+                keep
+            });
         }
         session
     }
@@ -175,14 +355,16 @@ impl Registry {
         if inner.link.as_ref().is_some_and(|l| l.session == session) {
             inner.link = None;
         }
+        // Dropping the senders fails the waiting calls.
+        inner.calls.retain(|_, (s, _)| *s != session);
     }
 
     fn current(&self, inner: &Inner, session: u64) -> bool {
         inner.link.as_ref().is_some_and(|l| l.session == session)
     }
 
-    /// The full set of live runs. Runs it doesn't carry are gone; runs it
-    /// does are reconciled (`register`).
+    /// The full set of the worker's live runs. Claimed runs it doesn't carry
+    /// are gone; runs it does are reconciled (`register`).
     pub fn snapshot(&self, session: u64, runs: Vec<Reported>) {
         let ids: std::collections::HashSet<_> = runs.iter().map(|r| r.task_id.clone()).collect();
         {
@@ -191,7 +373,7 @@ impl Registry {
                 return;
             }
             inner.runs.retain(|id, run| {
-                let keep = ids.contains(id);
+                let keep = ids.contains(id) || !run.claimed();
                 if !keep {
                     mark_gone(run);
                 }
@@ -204,32 +386,65 @@ impl Registry {
     }
 
     /// A run (re)registered. If the edge already mirrors it and the reported
-    /// history extends what it has, that's the same run — extend in place so
-    /// attached subscribers keep their cursor. Otherwise it's a new run under
-    /// an old id: the old one is gone.
+    /// history extends what the worker sent before, that's the same run —
+    /// extend in place so attached subscribers keep their cursor. A pending
+    /// run is claimed: the worker's history follows the edge's events, and the
+    /// edge's metadata (what the trigger registered) stands. Otherwise it's a
+    /// new run under an old id: the old one is gone.
     pub fn register(&self, session: u64, r: Reported) {
         let mut inner = self.lock();
         if !self.current(&inner, session) {
             return;
         }
-        if let Some(existing) = inner.runs.get(&r.task_id) {
-            let extends = {
-                let st = existing.state.lock().expect("run state lock");
-                r.events.len() >= st.events.len() && r.events[..st.events.len()] == st.events[..]
-            };
-            if extends {
-                existing.update(|st| {
-                    let have = st.events.len();
-                    st.events.extend(r.events.into_iter().skip(have));
-                    st.fields = r.fields;
-                });
+        if let Some(existing) = inner.runs.get(&r.task_id).cloned() {
+            let mut reported = Some((r.events, r.fields));
+            let (kept, adopt, cancel) = existing.update(|st| {
+                let Some((events, mut fields)) = reported.take() else { unreachable!() };
+                match st.worker_base {
+                    None => {
+                        st.worker_base = Some(st.events.len());
+                        st.events.extend(events);
+                        // Stopped while pending: the job carries the stop, so
+                        // the worker normally starts it cancelled. If the stop
+                        // landed after the claim read the job, pass it on.
+                        let cancel = st.fields.cancelled && !fields.cancelled;
+                        fields.cancelled |= st.fields.cancelled;
+                        st.fields = fields;
+                        (true, std::mem::take(&mut st.queued_while_pending), cancel)
+                    }
+                    Some(base) => {
+                        let have = &st.events[base..];
+                        if events.len() >= have.len() && events[..have.len()] == *have {
+                            let skip = have.len();
+                            st.events.extend(events.into_iter().skip(skip));
+                            st.fields = fields;
+                            (true, false, false)
+                        } else {
+                            reported = Some((events, fields));
+                            (false, false, false)
+                        }
+                    }
+                }
+            });
+            if kept {
+                drop(inner);
+                if adopt {
+                    self.adopt_queued(&existing.id, &[]);
+                }
+                if cancel {
+                    self.control(&json!({"type": "cancel", "task_id": existing.id, "resume": true}));
+                }
                 return;
             }
-            mark_gone(existing);
+            mark_gone(&existing);
+            let (events, fields) = reported.expect("returned when not kept");
+            let state = RunState { events, fields, worker_base: Some(0), ..Default::default() };
+            inner.runs.insert(r.task_id.clone(), Run::new(r.task_id, r.meta, state));
+        } else {
+            let state = RunState { events: r.events, fields: r.fields, worker_base: Some(0), ..Default::default() };
+            // IndexMap::insert keeps an existing key's position, as a dict does.
+            inner.runs.insert(r.task_id.clone(), Run::new(r.task_id, r.meta, state));
         }
-        let run = Run::new(r.task_id.clone(), r.meta, r.events, r.fields);
-        // IndexMap::insert keeps an existing key's position, as a dict does.
-        inner.runs.insert(r.task_id, run);
         drop(inner);
         self.registered.send_modify(|v| *v += 1);
     }
@@ -242,6 +457,9 @@ impl Registry {
         let Some(run) = inner.runs.get(task_id).cloned() else { return };
         drop(inner);
         run.update(|st| {
+            let len = st.events.len();
+            let base = *st.worker_base.get_or_insert(len);
+            let from = base + from;
             let have = st.events.len();
             if from > have {
                 tracing::warn!("run {task_id}: events from {from} but only {have} held; gap");
@@ -272,6 +490,16 @@ impl Registry {
             mark_gone(&run);
         }
     }
+
+    /// The worker answered a `call`.
+    pub fn reply(&self, session: u64, id: u64, reply: Reply) {
+        let mut inner = self.lock();
+        if let Some((s, tx)) = inner.calls.remove(&id) {
+            if s == session {
+                let _ = tx.send(reply);
+            }
+        }
+    }
 }
 
 /// A run leaving the mirror. Finished runs need nothing: their subscribers
@@ -295,7 +523,6 @@ pub struct Reported {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     fn reported(id: &str, events: Vec<Value>) -> Reported {
         serde_json::from_value(json!({
@@ -308,8 +535,16 @@ mod tests {
         .unwrap()
     }
 
+    fn meta(label: &str) -> Meta {
+        Meta { kind: "chat".into(), label: label.into(), parent_id: Some("c".into()), started_at: "s".into() }
+    }
+
     fn ev(n: i64) -> Value {
         json!({"event": "token", "data": format!("{{\"text\": \"{n}\"}}")})
+    }
+
+    fn events(run: &Run) -> Vec<Value> {
+        run.state.lock().unwrap().events.clone()
     }
 
     #[test]
@@ -374,5 +609,70 @@ mod tests {
         reg.register(s, reported("t", vec![]));
         assert!(old.state.lock().unwrap().gone);
         assert!(!Arc::ptr_eq(&old, &reg.get("t").unwrap()));
+    }
+
+    #[test]
+    fn a_claim_appends_the_workers_history_after_the_edges() {
+        let reg = Registry::default();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let s = reg.attach("A".into(), tx);
+        let run = reg.pre_register("t", meta("edge's label"));
+        assert!(run.queue_local("q1", "also", 1));
+        reg.register(s, reported("t", vec![ev(1)]));
+        // The same run, its subscribers' cursors intact, the trigger's label kept.
+        assert!(Arc::ptr_eq(&run, &reg.get("t").unwrap()));
+        assert_eq!(run.meta.label, "edge's label");
+        assert_eq!(events(&run).len(), 2);
+        // The worker counts from its own event 0.
+        reg.events(s, "t", 1, vec![ev(2)]);
+        reg.events(s, "t", 0, vec![ev(1), ev(2)]);
+        assert_eq!(events(&run)[1..], [ev(1), ev(2)]);
+        // A claimed run is the worker's to write; the queued message is its to adopt.
+        assert!(!run.emit_local("token", &json!({})));
+        let msg: Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!(msg, json!({"type": "adopt_queued", "task_id": "t", "announce": []}));
+    }
+
+    #[test]
+    fn pending_runs_outlive_a_new_worker_process() {
+        let reg = Registry::default();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let s1 = reg.attach("A".into(), tx.clone());
+        reg.pre_register("p", meta("l"));
+        reg.snapshot(s1, vec![]);
+        assert!(reg.get("p").is_some());
+        reg.attach("B".into(), tx);
+        assert!(!reg.get("p").unwrap().state.lock().unwrap().gone);
+    }
+
+    #[test]
+    fn local_events_are_python_shaped() {
+        let reg = Registry::default();
+        let run = reg.pre_register("p", meta("l"));
+        assert!(run.emit_local("queued_withdrawn", &json!({"message_id": "é"})));
+        assert_eq!(events(&run), [json!({"event": "queued_withdrawn", "data": "{\"message_id\": \"\\u00e9\"}"})]);
+    }
+
+    #[tokio::test]
+    async fn a_call_is_answered_by_its_reply() {
+        let reg = Arc::new(Registry::default());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let s = reg.attach("A".into(), tx);
+        let call = tokio::spawn({
+            let reg = reg.clone();
+            async move { reg.call("resume_task", json!({"task_id": "t"})).await }
+        });
+        let sent: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(sent["method"], "resume_task");
+        reg.reply(s, sent["id"].as_u64().unwrap(), Err("task not found".into()));
+        assert_eq!(call.await.unwrap(), Err("task not found".into()));
+        // A dropped link fails the calls still waiting on it.
+        let call = tokio::spawn({
+            let reg = reg.clone();
+            async move { reg.call("resume_task", json!({})).await }
+        });
+        rx.recv().await.unwrap();
+        reg.detach(s);
+        assert!(call.await.unwrap().is_err());
     }
 }

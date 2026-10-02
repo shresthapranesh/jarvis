@@ -4,6 +4,7 @@
 //! GraphQL operations it has been taught, and proxies everything else to the
 //! Python server behind it. See `edge/README.md`.
 
+mod catalog;
 mod config;
 mod db;
 mod gql;
@@ -37,7 +38,11 @@ async fn main() {
     // The parity tests diff this against the Python schema's SDL.
     if std::env::args().any(|a| a == "--print-schema") {
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");
-        let data = gql::EdgeData { artifacts_dir: Default::default() };
+        let data = gql::EdgeData {
+            artifacts_dir: Default::default(),
+            documents_dir: Default::default(),
+            staging_dir: Default::default(),
+        };
         print!("{}", gql::build(pool, data, Default::default()).sdl());
         return;
     }
@@ -74,9 +79,14 @@ async fn main() {
         }
     };
 
-    let data = gql::EdgeData { artifacts_dir: config.artifacts_dir.clone() };
+    let data = gql::EdgeData {
+        artifacts_dir: config.artifacts_dir.clone(),
+        documents_dir: config.documents_dir.clone(),
+        staging_dir: config.staging_dir.clone(),
+    };
     let runs: Arc<runs::Registry> = Default::default();
-    let schema = gql::build(pool, data, runs.clone());
+    let schema = gql::build(pool.clone(), data, runs.clone());
+    tokio::spawn(sweep_pending_runs(runs.clone(), pool));
     let owned = gql::owned_root_fields(&schema);
     let http = reqwest::Client::builder()
         // A proxy hands redirects to the client; it never follows them.
@@ -116,6 +126,15 @@ async fn main() {
         .with_graceful_shutdown(shutdown())
         .await
         .expect("server");
+}
+
+/// Runs this edge started whose job ended before any worker claimed it.
+async fn sweep_pending_runs(runs: Arc<runs::Registry>, pool: sqlx::SqlitePool) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
+    loop {
+        tick.tick().await;
+        runs.sweep_pending(&pool).await;
+    }
 }
 
 async fn shutdown() {

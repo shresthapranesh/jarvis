@@ -31,6 +31,10 @@ since the edge is a strict front and nothing in Python depends on it.
 | `JARVIS_BACKEND_URL` | `http://127.0.0.1:8001` | the Python server |
 | `JARVIS_EDGE_LOG` | `info` | `error`…`trace`, the edge's own logs only |
 | `DATABASE_URL` / `WORK_DIR` | as `core/config.py` | same database file as Python |
+| `ARTIFACTS_DIR` / `DOCUMENTS_DIR` / `STAGING_DIR` | as `core/config.py` | same files as Python |
+
+The built-in model list is compiled in from `core/builtin_models.json`, so
+rebuild the edge after editing it.
 
 ## Routing
 
@@ -50,12 +54,20 @@ Splitting one operation across both servers is never attempted.
 
 ## The worker link (`/internal/worker`)
 
-Runs still execute in Python, but the edge serves everyone watching them.
-Python dials a loopback-only WebSocket on the edge (`core/edge_link.py`, when
-`JARVIS_EDGE_URL` is set) and reports its run registry: each run's
-registration, every event `emit_event` appends (raw `{"event", "data"}`
-records), state changes (done, cancelled, interrupt, token counters) and
-removal. The edge keeps a mirror (`src/runs.rs`) and sends `cancel` back.
+Runs still execute in Python, but the edge starts them and serves everyone
+watching them. Python dials a loopback-only WebSocket on the edge
+(`core/edge_link.py`, when `JARVIS_EDGE_URL` is set) and reports its run
+registry: each run's registration, every event `emit_event` appends (raw
+`{"event", "data"}` records), state changes (done, cancelled, interrupt, token
+counters) and removal. The edge keeps a mirror (`src/runs.rs`) and steers back
+over the same socket (protocol 2):
+
+| edge → worker | |
+|---|---|
+| `cancel` | the in-process half of a stop |
+| `wake` | a job was just committed; claim it now, not at the next poll |
+| `adopt_queued` | re-read the conversation's queued messages (see below) |
+| `call` → `reply` | run a function that needs the run's in-memory state — `queue_message`, `unqueue_message`, `resume_task`, `resume_workflow_run`, `resolve_workflow_approval` — and return its result or the error message Python's resolver would raise |
 
 - **Nothing is durable on the link.** Every (re)connect starts with a
   snapshot of `_tasks` including each run's full event history, which
@@ -69,12 +81,49 @@ removal. The edge keeps a mirror (`src/runs.rs`) and sends `cancel` back.
   keeping Python's `data.get` / truthiness / `str()` semantics and
   `json.dumps` byte for byte for the fields that embed JSON text
   (`src/pyjson.rs`).
-- **The registration race.** A mutation hands out a run id over HTTP while
-  the worker reports the run over the link. A subscription for an unknown run
-  whose DB row still says "in progress" waits up to 2 s for it to register.
-- **Only while linked.** The subscription socket, `runningTasks` and the stop
-  mutations are served by the edge only while a worker is linked; otherwise
-  they go to Python as before.
+- **The registration race.** A run Python starts itself (a bot, the
+  scheduler, the board dispatcher) is handed out over one channel and
+  reported over another. A subscription for an unknown run whose DB row still
+  says "in progress" waits up to 2 s for it to register.
+- **Only while linked.** The subscription socket, `runningTasks`, the stop
+  mutations and the triggers are served by the edge only while a worker is
+  linked; otherwise they go to Python as before.
+
+### Runs the edge starts
+
+`startTask`, `runWorkflow` and `triggerAutomation` (`src/gql/start.rs`) write
+what Python's `register_*` functions wrote — the conversation, the user
+message, attachments copied from staging into `documents_dir` as `Document`
+rows, the domain row the run reports into, and the `jobs` row — in one
+transaction. The run's model is resolved here too (`src/catalog.rs`), from the
+same `core/builtin_models.json` Python loads plus the `models.custom` and
+`default.model` settings rows.
+
+Python's triggers registered a `TaskState` before committing, so a subscriber
+could never miss the run. The edge does the same in its own mirror: the run is
+**pending** — the edge's, not yet any worker's — until a worker claims the job
+and registers it. Then:
+
+- **The claim continues the run.** The worker creates the run's state from
+  the job (`get_or_create_task_state(job=...)`): started at the job's
+  `created_at`, so queue wait still counts, and already cancelled if a stop
+  arrived first. Its event 0 is appended after anything the edge emitted
+  while the run was pending (`worker_base`), so a subscriber's cursor carries
+  across. The trigger's label stands.
+- **A pending run is the edge's to answer for.** A message queued onto it is
+  a `queued` row plus a `queued_message` event the edge emits; the worker's
+  chat handler adopts queued rows at claim. If the claim and the queue cross,
+  the edge sends `adopt_queued` (with the ids it couldn't announce itself), so
+  the worker reads the conversation again. A pending run has no interrupt to
+  answer.
+- **A stop on a pending run is durable**: `cancel_requested` on the still-
+  pending job, rather than Python's pending → `cancelled`, which left the
+  `TaskState` and the message row in progress forever. The worker that claims
+  it runs it already cancelled, so it finishes as stopped with its rows
+  written.
+- **A pending run survives a new worker process** — no worker had it — and
+  leaves the mirror only when its job ends unclaimed (a 5 s sweep against
+  `jobs`, for a handler that returned before registering, say).
 
 ## Contracts with the Python side
 
@@ -129,6 +178,8 @@ Mutations that only write rows and files:
 | lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `deleteSkill` (human callers) |
 | memory | `deleteMemory` |
 | runs (worker linked) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun` |
+| starting runs (worker linked) | `startTask`, `runWorkflow`, `triggerAutomation` |
+| steering runs (worker linked) | `queueMessage`, `unqueueMessage`, `resumeTask`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
 
 And while a worker is linked: every subscription (`taskEvents`,
 `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`) and
@@ -155,7 +206,7 @@ moves when the thing it reads moves.
 |---|---|---|
 | `automations`, `automation` | `nextRunAt` is APScheduler's next fire time, DST handling included | the scheduler |
 | `todos`, `agentMemory`, `checkpointStats` | LangGraph's checkpointer and store (`checkpoints.db`, serialized) | the agent loop (Phase 2) |
-| `models`, `modelSync` | the built-in catalog compiled into `core/model_catalog.py`; provider APIs | the catalog becoming data |
+| `models`, `modelSync` | `ModelSpec` rendering and provider APIs (the catalog itself is data now: `core/builtin_models.json`) | porting the catalog type |
 | `tools` | the bound-tool list, the SDK catalogue, loaded MCP tools | the agent loop |
 | `mcpServers`, `mcpTools` | the live `McpManager` | MCP (Phase 2) |
 | `settings`, `setting` | the `KNOWN_SETTINGS` registry in `core/settings_admin.py` | the registry becoming data |
@@ -164,8 +215,7 @@ moves when the thing it reads moves.
 
 | Mutations | Touch | Move with |
 |---|---|---|
-| `startTask`, `runWorkflow`, `triggerAutomation` | registration work that's still Python's: attachments → documents, model resolution, queued-message routing | the run triggers |
-| `queueMessage`, `unqueueMessage`, `resumeTask`, `resumeWorkflowRun`, `resolveWorkflowApproval`, `stopBoardTask`, `browserActivity` | a running handler's `TaskState` (pending input, the resume future) | link control messages for each |
+| `stopBoardTask`, `browserActivity` | the board row and a running handler's `TaskState`; the agent's kernel is the only caller of the latter | the board dispatcher; the agent loop |
 | `deleteConversation`, `discardConversation` | the LangGraph thread and the conversation's kernel | the agent loop |
 | `createAutomation`, `updateAutomation`, `deleteAutomation` | scheduler registration | the scheduler |
 | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `decomposeBoardTask`, `deleteBoardTask`, `stopBoardTask` | the board dispatcher, model validation, an LLM (decompose) | the job queue |

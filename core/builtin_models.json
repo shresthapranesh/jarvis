@@ -1,0 +1,71 @@
+[
+  {
+    "id": "google_genai:gemma-4-31b-it",
+    "label": "Gemma 4 31B (Google)",
+    "provider": "google_genai"
+  },
+  {
+    "id": "google_genai:gemma-4-26b-a4b-it",
+    "label": "Gemma 4 26B (Google)",
+    "provider": "google_genai"
+  },
+  {
+    "id": "google_genai:gemini-2.5-pro",
+    "label": "Gemini 2.5 Pro (Google)",
+    "provider": "google_genai",
+    "context_window": 1048576
+  },
+  {
+    "id": "google_genai:gemini-2.0-flash",
+    "label": "Gemini 2.0 Flash (Google)",
+    "provider": "google_genai",
+    "context_window": 1048576
+  },
+  {
+    "id": "google_genai:gemini-3.1-flash-lite",
+    "label": "Gemini 3.1 Flash Lite (Google)",
+    "provider": "google_genai"
+  },
+  {
+    "id": "ollama:gemma4:26b",
+    "label": "Gemma 4 26B (Ollama)",
+    "provider": "ollama"
+  },
+  {
+    "id": "ollama:llama3.3",
+    "label": "Llama 3.3 (Ollama)",
+    "provider": "ollama"
+  },
+  {
+    "id": "ollama:qwen3:32b",
+    "label": "Qwen3 32B (Ollama)",
+    "provider": "ollama"
+  },
+  {
+    "id": "bedrock:us.anthropic.claude-sonnet-4-6",
+    "label": "Claude Sonnet 4.6 (AWS Bedrock)",
+    "provider": "bedrock",
+    "context_window": 200000
+  },
+  {
+    "id": "anthropic:claude-opus-4-7",
+    "label": "Claude Opus 4.7 (Anthropic)",
+    "provider": "anthropic"
+  },
+  {
+    "id": "anthropic:claude-sonnet-4-6",
+    "label": "Claude Sonnet 4.6 (Anthropic)",
+    "provider": "anthropic"
+  },
+  {
+    "id": "anthropic:claude-haiku-4-5-20251001",
+    "label": "Claude Haiku 4.5 (Anthropic)",
+    "provider": "anthropic",
+    "context_window": 200000
+  },
+  {
+    "id": "meta:muse-spark-1.1",
+    "label": "Muse Spark 1.1 (Meta)",
+    "provider": "meta"
+  }
+]

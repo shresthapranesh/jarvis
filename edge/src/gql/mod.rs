@@ -17,6 +17,7 @@ pub mod project;
 pub mod router;
 pub mod runs;
 pub mod settings_lists;
+pub mod start;
 pub mod workflow;
 pub mod write;
 
@@ -52,6 +53,7 @@ pub struct Mutation(
     settings_lists::ListsMutation,
     memory::MemoryMutation,
     runs::RunMutation,
+    start::StartMutation,
 );
 
 pub type EdgeSchema = Schema<Query, Mutation, runs::RunSubscription>;
@@ -59,6 +61,8 @@ pub type EdgeSchema = Schema<Query, Mutation, runs::RunSubscription>;
 /// Process-level facts resolvers need besides the pool.
 pub struct EdgeData {
     pub artifacts_dir: PathBuf,
+    pub documents_dir: PathBuf,
+    pub staging_dir: PathBuf,
 }
 
 pub fn build(pool: SqlitePool, data: EdgeData, runs: Arc<crate::runs::Registry>) -> EdgeSchema {

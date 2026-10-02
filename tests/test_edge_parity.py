@@ -430,7 +430,11 @@ class Twin:
         # under test, on both sides, milliseconds apart.
         self.since = datetime.now(timezone.utc).replace(microsecond=0)
 
-    async def run(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def run(
+        self, query: str, variables: dict[str, Any] | None = None, *, edge_variables: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run on both sides and diff. `edge_variables` is for ids each side
+        minted for itself (a run's, a queued message's)."""
         from db import async_session
         from server.graphql.extensions import SESSION_LOCK_KEY
         from server.graphql.schema import schema
@@ -445,7 +449,8 @@ class Twin:
         if res.errors:
             python["errors"] = [{"message": e.message, "path": e.path} for e in res.errors]
 
-        resp = await self.edge.post("/graphql", json={"query": query, "variables": variables or {}})
+        edge_vars = variables if edge_variables is None else edge_variables
+        resp = await self.edge.post("/graphql", json={"query": query, "variables": edge_vars or {}})
         assert resp.status_code == 200, f"edge proxied instead of answering ({resp.status_code})"
         body = resp.json()
         edge = {"data": body.get("data")}

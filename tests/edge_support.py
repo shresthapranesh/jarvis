@@ -77,3 +77,33 @@ def _gid(type_name: str, raw: str) -> str:
     from strawberry.relay.utils import to_base64
 
     return to_base64(type_name, raw)
+
+
+@contextlib.asynccontextmanager
+async def fake_worker(client: httpx.AsyncClient):
+    """Link a worker that runs nothing, so the edge serves the fields it only
+    serves while linked — for diffing them against Python on a twin database,
+    where this process's own runs must not be mirrored into the edge."""
+    import json
+
+    import websockets
+
+    from core.edge_link import PROTOCOL
+
+    async with websockets.connect(f"ws://127.0.0.1:{client.base_url.port}/internal/worker") as ws:
+        await ws.send(json.dumps({"type": "hello", "protocol": PROTOCOL, "instance": "fake", "pid": 0}))
+        await ws.send(json.dumps({"type": "snapshot", "tasks": []}))
+
+        async def drain() -> None:
+            async for _ in ws:  # wake, adopt_queued: nobody here to do them
+                pass
+
+        reader = asyncio.create_task(drain())
+        deadline = time.monotonic() + 10
+        while (await client.post("/graphql", json={"query": "{ runningTasks { id } }"})).status_code != 200:
+            assert time.monotonic() < deadline, "the edge never saw the fake worker"
+            await asyncio.sleep(0.05)
+        try:
+            yield
+        finally:
+            reader.cancel()

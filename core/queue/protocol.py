@@ -32,6 +32,14 @@ class Job:
     payload: dict
     attempts: int
     locked_until: datetime
+    # When the job was enqueued, which is when the user asked for the run. A
+    # handler that has to create the run's TaskState itself (the job was
+    # enqueued by another process — the Rust edge — or outlived a restart)
+    # starts it from here, so queue wait still counts toward the turn.
+    created_at: datetime | None = None
+    # A stop requested before any worker claimed the job. The run starts
+    # already cancelled, so it finishes as stopped instead of running.
+    cancel_requested: bool = False
 
 
 class JobQueue(abc.ABC):
@@ -115,6 +123,10 @@ class JobQueue(abc.ABC):
     async def cancel(self, job_id: str) -> None:
         """If pending → cancelled (will not be claimed). If running → set
         cancel_requested=True for the worker to observe and exit cleanly."""
+
+    def wake(self) -> None:
+        """A job was enqueued by another process: look now, not at the next
+        poll. Default no-op — `stream()` still finds it by polling."""
 
     @abc.abstractmethod
     async def is_cancel_requested(self, job_id: str) -> bool:

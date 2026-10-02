@@ -4,7 +4,8 @@
 //!
 //! All of it reads the run mirror (`runs.rs`), which is only current while a
 //! worker is linked, so the router hands these to the edge only then
-//! (`router.rs`); with no worker linked they go to Python as before.
+//! (`router.rs`); with no worker linked they go to Python as before. Starting
+//! runs is `start.rs`.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -299,14 +300,35 @@ impl RunQuery {
 /// The checks every stop shares, then the in-process half: tell the worker,
 /// and mirror the flag at once so `runningTasks` doesn't show it un-cancelled
 /// until the worker's state report comes back.
-fn stop(registry: &Registry, id: &str, missing: &'static str, finished: &'static str, resume: bool) -> Result<Arc<Run>> {
+///
+/// A run no worker has claimed yet has no in-process half. Its stop is made
+/// durable instead, on the pending job: the worker that claims it starts the
+/// run already cancelled, so it finishes as stopped — its rows written, its
+/// subscribers told — rather than never running and never finishing.
+async fn stop(
+    registry: &Registry,
+    pool: &SqlitePool,
+    id: &str,
+    missing: &'static str,
+    finished: &'static str,
+    resume: bool,
+) -> Result<(Arc<Run>, bool)> {
     let run = registry.get(id).ok_or(missing)?;
     if run.fields().done {
         return Err(finished.into());
     }
-    registry.control(&json!({"type": "cancel", "task_id": id, "resume": resume}));
+    let claimed = run.claimed();
+    if claimed {
+        registry.control(&json!({"type": "cancel", "task_id": id, "resume": resume}));
+    } else {
+        sqlx::query("UPDATE jobs SET cancel_requested = 1, updated_at = ? WHERE id = ? AND status IN ('pending', 'running')")
+            .bind(now_stored())
+            .bind(id)
+            .execute(pool)
+            .await?;
+    }
     run.update(|st| st.fields.cancelled = true);
-    Ok(run)
+    Ok((run, claimed))
 }
 
 /// `SqliteJobQueue.cancel`: a pending job won't be claimed; a running one is
@@ -334,27 +356,40 @@ pub struct RunMutation;
 #[Object]
 impl RunMutation {
     async fn stop_running_task(&self, ctx: &Context<'_>, task_id: String) -> Result<StopRunningTaskPayload> {
-        let run = stop(ctx.data::<Arc<Registry>>()?, &task_id, "task not found or already finished", "task already finished", true)?;
-        cancel_job(ctx.data()?, &task_id).await?;
+        let pool = ctx.data()?;
+        let (run, claimed) =
+            stop(ctx.data::<Arc<Registry>>()?, pool, &task_id, "task not found or already finished", "task already finished", true).await?;
+        if claimed {
+            cancel_job(pool, &task_id).await?;
+        }
         Ok(StopRunningTaskPayload { ok: true, kind: run.meta.kind.clone(), task_id })
     }
 
     // The chat stop is in-process only in Python — no queue cancel — and so
-    // is this one.
+    // is this one, once a worker has the run.
     async fn stop_task(&self, ctx: &Context<'_>, task_id: String) -> Result<bool> {
-        stop(ctx.data::<Arc<Registry>>()?, &task_id, "task not found or already finished", "task already finished", true)?;
+        stop(ctx.data::<Arc<Registry>>()?, ctx.data()?, &task_id, "task not found or already finished", "task already finished", true)
+            .await?;
         Ok(true)
     }
 
     async fn stop_automation_run(&self, ctx: &Context<'_>, run_id: String) -> Result<bool> {
-        stop(ctx.data::<Arc<Registry>>()?, &run_id, "run not found or already finished", "run already finished", false)?;
-        cancel_job(ctx.data()?, &run_id).await?;
+        let pool = ctx.data()?;
+        let (_, claimed) =
+            stop(ctx.data::<Arc<Registry>>()?, pool, &run_id, "run not found or already finished", "run already finished", false).await?;
+        if claimed {
+            cancel_job(pool, &run_id).await?;
+        }
         Ok(true)
     }
 
     async fn stop_workflow_run(&self, ctx: &Context<'_>, run_id: String) -> Result<bool> {
-        stop(ctx.data::<Arc<Registry>>()?, &run_id, "run not found or already finished", "run already finished", false)?;
-        cancel_job(ctx.data()?, &run_id).await?;
+        let pool = ctx.data()?;
+        let (_, claimed) =
+            stop(ctx.data::<Arc<Registry>>()?, pool, &run_id, "run not found or already finished", "run already finished", false).await?;
+        if claimed {
+            cancel_job(pool, &run_id).await?;
+        }
         Ok(true)
     }
 }

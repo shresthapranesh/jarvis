@@ -4,8 +4,15 @@ The edge (`edge/`) serves every subscription and the run registry
 (`runningTasks`, the stop mutations), but runs still execute here. So this
 process reports to it over one loopback WebSocket, `/internal/worker`:
 
-    worker → edge   hello, snapshot, register, events, state, unregister
-    edge → worker   cancel
+    worker → edge   hello, snapshot, register, events, state, unregister, reply
+    edge → worker   cancel, wake, adopt_queued, call
+
+The edge also *starts* runs (`startTask`, `runWorkflow`, `triggerAutomation`):
+it writes the job row itself and mirrors the run as pending until this
+process's worker claims it, then sends `wake` so the claim doesn't wait for
+the next poll. Operations that act on a run's in-memory state — answering an
+interrupt, queueing a message onto it — arrive as a `call`, which runs the same
+function the GraphQL resolver here would and answers with a `reply`.
 
 Every message is one JSON object with a `type`. The protocol is versioned
 (`PROTOCOL`); the edge refuses a version it doesn't speak, so a mismatched pair
@@ -42,7 +49,7 @@ from core.state import (
 
 logger = logging.getLogger("jarvis.edge_link")
 
-PROTOCOL = 1
+PROTOCOL = 2
 _BACKOFF_SECONDS = (0.2, 0.5, 1.0, 2.0, 5.0)
 # Counters (tokens, LLM calls) are written by callbacks that don't always
 # notify, so state is also re-checked on a timer.
@@ -100,6 +107,8 @@ class EdgeLink(RegistryObserver):
         self._ids: dict[int, str] = {}
         self._outbox: asyncio.Queue[str] = asyncio.Queue()
         self._task: asyncio.Task | None = None
+        # Calls in flight; held so they aren't garbage-collected mid-await.
+        self._pending: set[asyncio.Task] = set()
         self.connected = asyncio.Event()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
@@ -112,6 +121,8 @@ class EdgeLink(RegistryObserver):
 
     async def stop(self) -> None:
         set_registry_observer(None)
+        for task in list(self._pending):
+            task.cancel()
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -172,13 +183,56 @@ class EdgeLink(RegistryObserver):
     # ── edge → worker ────────────────────────────────────────────────────────
 
     def _handle(self, msg: dict[str, Any]) -> None:
-        if msg.get("type") == "cancel":
+        kind = msg.get("type")
+        if kind == "cancel":
             state = _tasks.get(msg.get("task_id", ""))
             if state is not None:
                 cancel_in_process(state, resume=bool(msg.get("resume")))
                 self.task_changed(state)
+        elif kind == "wake":
+            from core.state import get_queue
+
+            with contextlib.suppress(Exception):  # no queue yet: the poll finds it
+                get_queue().wake()
+        elif kind == "adopt_queued":
+            self._spawn(self._adopt_queued(msg.get("task_id", ""), set(msg.get("announce") or ())))
+        elif kind == "call":
+            self._spawn(self._call(msg))
         else:
-            logger.warning("edge link: unknown message %r", msg.get("type"))
+            logger.warning("edge link: unknown message %r", kind)
+
+    def _spawn(self, coro: Any) -> None:
+        task = asyncio.create_task(coro)
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    async def _adopt_queued(self, task_id: str, announce: set[str]) -> None:
+        """The edge queued a message onto this run while it was still pending,
+        and this process claimed it around the same time — so the claim-time
+        adoption may have read the conversation before that row existed. Adopt
+        again (it skips what it already holds). `announce` names messages the
+        edge could not announce itself because the run was no longer its own."""
+        from core.state import emit_event
+        from server.chat_runtime import _adopt_queued_messages
+
+        state = _tasks.get(task_id)
+        if state is None or state.kind != "chat" or not state.parent_id or state.done:
+            return
+        await _adopt_queued_messages(state.parent_id, state)
+        for position, queued in enumerate(state.pending_input, start=1):
+            if queued.id in announce:
+                emit_event(state, "queued_message", message_id=queued.id, text=queued.text, position=position)
+
+    async def _call(self, msg: dict[str, Any]) -> None:
+        reply: dict[str, Any] = {"type": "reply", "id": msg.get("id")}
+        try:
+            reply["value"] = await _dispatch(msg.get("method", ""), msg.get("params") or {})
+            reply["ok"] = True
+        except Exception as exc:
+            # The message the GraphQL resolver here would have raised.
+            reply["ok"] = False
+            reply["error"] = str(exc)
+        self._send(reply)
 
     # ── worker → edge ────────────────────────────────────────────────────────
 
@@ -228,6 +282,33 @@ class EdgeLink(RegistryObserver):
         # the `done` event it is about to look for.
         self._flush_events(task_id, state)
         self._flush_state(task_id, state)
+
+
+async def _dispatch(method: str, params: dict[str, Any]) -> Any:
+    """A `call` from the edge: the run-control operations that need this
+    process's in-memory run state, by the functions the resolvers here use."""
+    from db import async_session
+    from server.chat_runtime import queue_chat_message, resume_chat_task, unqueue_chat_message
+    from server.workflow_runtime import resolve_workflow_approval, resume_workflow_run
+
+    async with async_session() as session:
+        if method == "queue_message":
+            message_id, position = await queue_chat_message(session, params["task_id"], params["query"])
+            return {"message_id": message_id, "position": position}
+        if method == "unqueue_message":
+            return await unqueue_chat_message(session, params["task_id"], params["message_id"])
+        if method == "resume_task":
+            await resume_chat_task(session, params["task_id"], params["answer"])
+            return True
+        if method == "resume_workflow_run":
+            await resume_workflow_run(session, params["run_id"], params["answer"])
+            return True
+        if method == "resolve_workflow_approval":
+            await resolve_workflow_approval(
+                session, params["run_id"], bool(params["approved"]), params.get("answer"),
+            )
+            return True
+    raise ValueError(f"unknown link method {method!r}")
 
 
 _link: EdgeLink | None = None

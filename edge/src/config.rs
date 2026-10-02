@@ -14,6 +14,10 @@ pub struct Config {
     pub db_path: PathBuf,
     /// Where artifact files live (`AppConfig.artifacts_dir`).
     pub artifacts_dir: PathBuf,
+    /// Where a chat's attachments are kept (`AppConfig.documents_dir`).
+    pub documents_dir: PathBuf,
+    /// Where `POST /uploads` stages files (`AppConfig.staging_dir`).
+    pub staging_dir: PathBuf,
 }
 
 impl Config {
@@ -35,13 +39,39 @@ impl Config {
             Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
             _ => work_dir()?.join("artifacts"),
         };
-        Ok(Self { bind, backend, db_path: db_path()?, artifacts_dir })
+        // Resolved, as Python's are: a document's stored path is this one.
+        let documents_dir = resolve(env_path("DOCUMENTS_DIR").unwrap_or(resolve(work_dir()?).join("documents")));
+        let staging_dir = resolve(env_path("STAGING_DIR").unwrap_or(resolve(work_dir()?).join("staging")));
+        Ok(Self { bind, backend, db_path: db_path()?, artifacts_dir, documents_dir, staging_dir })
     }
 
     /// `ws://` twin of `backend`, for proxying WebSocket upgrades.
     pub fn backend_ws(&self) -> String {
         format!("ws://{}", &self.backend["http://".len()..])
     }
+}
+
+fn env_path(key: &str) -> Option<PathBuf> {
+    std::env::var(key).ok().filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// `Path.resolve()`: absolute, symlinks followed for whatever part exists.
+fn resolve(path: PathBuf) -> PathBuf {
+    let path = std::path::absolute(&path).unwrap_or(path);
+    let mut existing = path.as_path();
+    let mut rest = Vec::new();
+    while !existing.exists() {
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path,
+        }
+    }
+    let mut out = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    out.extend(rest.iter().rev());
+    out
 }
 
 fn env_or(key: &str, default: &str) -> String {

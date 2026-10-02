@@ -532,7 +532,7 @@ async def board_task_job_handler(job: Job) -> None:
 
     state = get_or_create_task_state(
         run_id, kind="board_task", label=task.title, parent_id=task.id,
-        model=task.model,
+        model=task.model, job=job,
     )
 
     async with queue_cancel_watch(run_id, state):

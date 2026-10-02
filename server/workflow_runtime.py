@@ -149,7 +149,7 @@ async def workflow_job_handler(job: Job) -> None:
     )
 
     state = get_or_create_task_state(
-        run_id, kind="workflow", label=wf.name, parent_id=workflow_id,
+        run_id, kind="workflow", label=wf.name, parent_id=workflow_id, job=job,
     )
 
     async with queue_cancel_watch(run_id, state):
@@ -205,3 +205,54 @@ async def register_workflow_run(
 
     await session.commit()
     return run_id
+
+
+# ── Human-in-the-loop resume (GraphQL + the edge link) ───────────────────────
+
+async def _close_run_approvals(
+    session: AsyncSession, run_id: str, *, status: str = "answered",
+) -> None:
+    """Clear the run's durable approval row after resuming it in-process.
+
+    Resuming and recording are separate steps on purpose: the in-process
+    handoff is what actually unblocks the node, and it must not be held up (or
+    undone) by a bookkeeping failure.
+    """
+    from db.ops import close_open_approvals
+
+    await close_open_approvals(
+        session, task_id=run_id, status=status, result="Delivered to the run.",
+    )
+
+
+def _paused_run(run_id: str, nothing_pending: str) -> TaskState:
+    state = _tasks.get(run_id)
+    if state is None:
+        raise ValueError("run not found or not running")
+    if state.resume_future is None or state.resume_future.done():
+        raise ValueError(nothing_pending)
+    return state
+
+
+async def resume_workflow_run(session: AsyncSession, run_id: str, answer: str) -> None:
+    """Answer a run paused at an approval/human_input node (`resumeWorkflowRun`)."""
+    state = _paused_run(run_id, "no pending human input for this run")
+    pending_id = state.pending_interrupt_id
+    state.resume_future.set_result(answer)  # type: ignore[union-attr]
+    emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
+    await _close_run_approvals(session, run_id)
+    state.clear_interrupt()
+
+
+async def resolve_workflow_approval(
+    session: AsyncSession, run_id: str, approved: bool, answer: str | None,
+) -> None:
+    """Resolve a paused approval node with an explicit verdict."""
+    state = _paused_run(run_id, "no pending approval for this run")
+    pending_id = state.pending_interrupt_id
+    # Delivered as a dict so ApprovalNode can tell this from a free-text answer.
+    payload = {"approved": approved, "answer": answer or ("approved" if approved else "denied")}
+    state.resume_future.set_result(payload)  # type: ignore[union-attr]
+    emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
+    await _close_run_approvals(session, run_id, status="approved" if approved else "denied")
+    state.clear_interrupt()
