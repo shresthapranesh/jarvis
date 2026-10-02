@@ -2,10 +2,11 @@
 
 The Rust front of the jarvis server. Phase 1 of moving off Python: the edge owns
 the public port, answers the GraphQL operations that have been ported, and
-reverse-proxies everything else to the Python server behind it. The end state
-is Rust owning the database, GraphQL, the job queue and the event stream, with
-Python reduced to a worker that runs agent jobs. Then an idle box runs no
-Python at all.
+reverse-proxies everything else to the Python server behind it. Rust owns
+the database reads, GraphQL, the job queue's triggers, the event stream and
+every timer; Python is reduced to a worker that runs agent jobs, and with
+`JARVIS_WORKER_CMD` set the edge starts it when there is work and stops it when
+idle — so an idle box runs no Python at all (see "The worker").
 
 ```
 browser / SDK ──▶ edge :8000 ──(ported operation)──▶ SQLite
@@ -16,14 +17,18 @@ browser / SDK ──▶ edge :8000 ──(ported operation)──▶ SQLite
 ## Running it
 
 ```bash
-# terminal 1 — Python, moved off :8000, reporting its runs to the edge
+# The edge on :8000 (what vite and the jarvis SDK already target), starting
+# Python on :8001 when it's needed and stopping it after 5 idle minutes:
+cd edge && JARVIS_APP_DIR=.. JARVIS_WORKER_CMD='exec .venv/bin/uvicorn server.entrypoint:app --port $JARVIS_BACKEND_PORT' cargo run
+
+# …or run Python yourself (always on, with --reload), and the edge in front:
 JARVIS_EDGE_URL=http://127.0.0.1:8000 uv run uvicorn server.entrypoint:app --reload --port 8001
-# terminal 2 — the edge, on :8000 (what vite and the jarvis SDK already target)
 cd edge && cargo run
 ```
 
-Docker runs both via `edge/serve.sh`. Python on its own on :8000 still works,
-since the edge is a strict front and nothing in Python depends on it.
+Docker runs the first way via `edge/serve.sh`. Python on its own on :8000
+still works, since the edge is a strict front and nothing in Python depends on
+it.
 
 | env | default | |
 |---|---|---|
@@ -31,7 +36,10 @@ since the edge is a strict front and nothing in Python depends on it.
 | `JARVIS_BACKEND_URL` | `http://127.0.0.1:8001` | the Python server |
 | `JARVIS_EDGE_LOG` | `info` | `error`…`trace`, the edge's own logs only |
 | `DATABASE_URL` / `WORK_DIR` | as `core/config.py` | same database file as Python |
-| `ARTIFACTS_DIR` / `DOCUMENTS_DIR` / `STAGING_DIR` | as `core/config.py` | same files as Python |
+| `ARTIFACTS_DIR` / `DOCUMENTS_DIR` / `STAGING_DIR` / `CHECKPOINTS_DB` | as `core/config.py` | same files as Python |
+| `JARVIS_WORKER_CMD` | unset | the command that runs Python (via `sh -c`, in `JARVIS_APP_DIR`); set, the edge owns the worker |
+| `JARVIS_WORKER_IDLE` | `300` | seconds idle before the worker is stopped; `0` keeps it up (restarted if it dies) |
+| `JARVIS_APP_DIR` | the current directory | the jarvis checkout: where the worker runs, and `static/dist`, the SPA the edge serves |
 
 The built-in model list is compiled in from `core/builtin_models.json`, so
 rebuild the edge after editing it.
@@ -59,15 +67,16 @@ watching them. Python dials a loopback-only WebSocket on the edge
 (`core/edge_link.py`, when `JARVIS_EDGE_URL` is set) and reports its run
 registry: each run's registration, every event `emit_event` appends (raw
 `{"event", "data"}` records), state changes (done, cancelled, interrupt, token
-counters) and removal. The edge keeps a mirror (`src/runs.rs`) and steers back
-over the same socket (protocol 2):
+counters) and removal, plus `holds` — why it mustn't be stopped for being
+idle (see "The worker"). The edge keeps a mirror (`src/runs.rs`) and steers
+back over the same socket (protocol 4):
 
 | edge → worker | |
 |---|---|
 | `cancel` | the in-process half of a stop |
 | `wake` | a job was just committed; claim it now, not at the next poll |
 | `adopt_queued` | re-read the conversation's queued messages (see below) |
-| `call` → `reply` | run a function that needs the run's in-memory state — `queue_message`, `unqueue_message`, `resume_task`, `resume_workflow_run`, `resolve_workflow_approval` — and return its result or the error message Python's resolver would raise |
+| `call` → `reply` | run a function that needs the run's in-memory state — `queue_message`, `unqueue_message`, `resume_task`, `resume_workflow_run`, `resolve_workflow_approval` — and return its result or the error message Python's resolver would raise; and `drain` / `undrain`, which stop and restart job claims before an idle stop |
 
 - **Nothing is durable on the link.** Every (re)connect starts with a
   snapshot of `_tasks` including each run's full event history, which
@@ -85,9 +94,11 @@ over the same socket (protocol 2):
   scheduler, the board dispatcher) is handed out over one channel and
   reported over another. A subscription for an unknown run whose DB row still
   says "in progress" waits up to 2 s for it to register.
-- **Only while linked.** The subscription socket, `runningTasks`, the stop
-  mutations and the triggers are served by the edge only while a worker is
-  linked; otherwise they go to Python as before.
+- **Only while linked — or owned.** The subscription socket, `runningTasks`,
+  the stop mutations and the triggers are served by the edge while a worker
+  is linked, or always when the edge owns the worker (no worker up then means
+  no run in flight, and a trigger's job starts one). Otherwise they go to
+  Python as before.
 
 ### Runs the edge starts
 
@@ -134,9 +145,9 @@ has nothing to do:
 |---|---|---|
 | each enabled automation | its cron schedule | enqueues an `automation` job |
 | board dispatch | every 15 s, and when Python sends `dispatch` | `dispatch_board_tasks`, in the edge |
-| memory consolidation | `0 */6 * * *` | enqueues a `maintenance` job |
-| project memory | every 30 min | enqueues a `maintenance` job |
-| checkpoint prune | `20 * * * *` | enqueues a `maintenance` job |
+| memory consolidation | `0 */6 * * *` | enqueues a `maintenance` job, if due |
+| project memory | every 30 min | enqueues a `maintenance` job, if due |
+| checkpoint prune | `20 * * * *` | enqueues a `maintenance` job, if due |
 | staging cleanup | `0 * * * *` | deletes abandoned uploads, in the edge |
 | memory-activity prune | `0 4 * * *` | deletes old access-log rows, in the edge |
 
@@ -167,6 +178,63 @@ link state, so a reconnecting link can't leave both sides firing.
 - **Maintenance jobs coalesce**: none is enqueued while one for the same
   sweep is pending or running, so a machine that was off doesn't come back to
   a backlog.
+- **…and wait for work** (`Scheduler::maintenance_due`), because a job starts
+  Python. Each sweep's own first checks, read from the same rows: a message
+  past the memory watermark whose first isn't a reply still being written; a
+  project with new messages that has been quiet 15 minutes (or waited a day)
+  and holds 600+ characters; a checkpoint the prune's age and keep-3 rules
+  would delete. The watermarks are LangGraph store items in `checkpoints.db`
+  (`src/checkpoints.rs`, read-only). Where unsure (an unreadable watermark, a
+  failed read) the answer is yes, and Python decides as before.
+  `tests/test_edge_supervisor.py` diffs every gate against the sweep it
+  guards, through `jarvis-edge --maintenance-due`. One thing waits longer: the
+  first-run seeding of discrete memory from the old blob now happens with the
+  first pass that has a message to read.
+
+## The worker (`src/supervisor.rs`)
+
+With `JARVIS_WORKER_CMD` set the edge owns the Python process: it runs the
+command (in its own process group, with `JARVIS_EDGE_URL` and
+`JARVIS_BACKEND_PORT` set) when there is work, and stops it when there has
+been none for `JARVIS_WORKER_IDLE` seconds. Idle, jarvis is the edge alone.
+
+**What starts it**: a request the edge proxies (REST, the other WebSockets,
+GraphQL it hasn't ported) — which waits for it, 2–3 s on a laptop; a job a
+worker could claim now, or one a dead worker left `running`; a worker that
+reported it must stay up dying (see holds); and the edge's own start, so the
+startup sweeps run and a broken command shows up at once. A run the edge
+starts itself needs nothing more: its job kicks the supervisor, and the run is
+pending in the mirror until the new worker claims it.
+
+**What keeps it up**: a proxied request or socket in progress (a log stream
+holds it while someone watches), a run in the mirror, a claimable or running
+job, and the worker's `holds` — `telegram` / `discord` (a bot is connected:
+always on, restarted if it dies) and `kernels` (a conversation's notebook
+still has its variables; held until the kernel's 30-minute idle reap, as
+before). Ready means `/health` answers and the link has said hello.
+
+**How it stops**: `call drain` — the worker stops claiming and waits out a
+claim in flight — then one last look at the job table and the mirror. Work
+that slipped in means `undrain`; otherwise SIGTERM to the group (uvicorn's
+graceful shutdown: kernels, MCP servers, the link) and SIGKILL after 30 s. The
+next worker is started with `JARVIS_EDGE_RESPAWN=1`, which tells its startup
+that nothing crashed: it skips the incognito sweep, which would otherwise
+delete an incognito chat open in a tab between turns. The zombie sweep needs
+no flag — a row whose job is still pending was never claimed, and is skipped
+(`cleanup_zombie_running_rows`).
+
+**When it fails**: a command that won't start, isn't ready in 120 s, or dies
+within a minute of starting backs off exponentially to a minute; requests meanwhile
+get a 503 naming the reason.
+
+**What a page load needs without it** is served here: the SPA from
+`$JARVIS_APP_DIR/static/dist` (every GET that isn't one of Python's routes —
+`proxy.rs:python_get_route`, checked against the app's route table by the
+tests), `/health`, and the queries the chat page makes — `models`, `todos`
+and `browserAvailable`. A resolver that meets data only Python reads
+faithfully (a checkpoint in another encoding, an https CDP endpoint, a
+`models.custom` row Python itself would fail on) returns an `edgeDefer` error,
+and `graphql.rs` answers the whole operation in Python instead.
 
 ## Contracts with the Python side
 
@@ -208,6 +276,7 @@ Every query that reads only the database and files:
 | workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
 | lists | `notificationChannels`, `skills`, `pendingApprovals` |
 | memory | `memories`, `memoryActivities`, `memoryUsage` |
+| chat page | `models`, `todos` (from `checkpoints.db`), `browserAvailable` (an http CDP endpoint) |
 | Relay | `node` for every Node type |
 
 Mutations that only write rows and files:
@@ -220,13 +289,13 @@ Mutations that only write rows and files:
 | workflows | `createWorkflow`, `updateWorkflow`, `deleteWorkflow` (human callers) |
 | lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `deleteSkill` (human callers) |
 | memory | `deleteMemory` |
-| runs (worker linked) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun` |
-| starting runs (worker linked) | `startTask`, `runWorkflow`, `triggerAutomation` |
-| steering runs (worker linked) | `queueMessage`, `unqueueMessage`, `resumeTask`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
+| runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun` |
+| starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
+| steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeTask`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
 
-And while a worker is linked: every subscription (`taskEvents`,
-`automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`) and
-`runningTasks`, from the run mirror.
+And while a worker is linked, or the edge owns it: every subscription
+(`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`)
+and `runningTasks`, from the run mirror.
 
 Three are owned per call (`router.rs:Walk::field_rule`):
 `updateConversation` goes to Python when it sets `model` (validated against the
@@ -247,13 +316,12 @@ moves when the thing it reads moves.
 
 | Root field | Reads | Moves with |
 |---|---|---|
-| `todos`, `agentMemory`, `checkpointStats` | LangGraph's checkpointer and store (`checkpoints.db`, serialized) | the agent loop (Phase 2) |
-| `models`, `modelSync` | `ModelSpec` rendering and provider APIs (the catalog itself is data now: `core/builtin_models.json`) | porting the catalog type |
+| `agentMemory`, `checkpointStats` | LangGraph's store, and the prune's live-thread guard | the agent loop (Phase 2) |
+| `modelSync` | provider APIs | the catalog tooling |
 | `tools` | the bound-tool list, the SDK catalogue, loaded MCP tools | the agent loop |
 | `mcpServers`, `mcpTools` | the live `McpManager` | MCP (Phase 2) |
 | `settings`, `setting` | the `KNOWN_SETTINGS` registry in `core/settings_admin.py` | the registry becoming data |
 | `voiceStatus` | Piper voice file layout in `core/voice.py` | audio |
-| `browserAvailable` | a CDP probe that may be `https://` (the edge has no TLS yet) | the edge gaining TLS |
 
 | Mutations | Touch | Move with |
 |---|---|---|

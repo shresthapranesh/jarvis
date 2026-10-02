@@ -20,8 +20,9 @@ use tokio::sync::mpsc;
 use crate::AppState;
 use crate::runs::{Fields, Registry, Reported};
 use crate::schedule::Scheduler;
+use crate::supervisor::Supervisor;
 
-pub const PROTOCOL: u64 = 3;
+pub const PROTOCOL: u64 = 4;
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -51,6 +52,10 @@ enum FromWorker {
     Dispatch,
     /// An automation's schedule changed; re-read them.
     Schedules,
+    /// Why the worker must not be stopped for being idle (`supervisor.rs`).
+    Holds {
+        holds: Vec<String>,
+    },
     /// The answer to a `call` (`Registry::call`).
     Reply {
         id: u64,
@@ -72,10 +77,15 @@ pub async fn upgrade(
     }
     ws.max_message_size(usize::MAX)
         .max_frame_size(usize::MAX)
-        .on_upgrade(move |socket| serve(socket, state.runs.clone(), state.scheduler.clone()))
+        .on_upgrade(move |socket| serve(socket, state.runs.clone(), state.scheduler.clone(), state.supervisor.clone()))
 }
 
-async fn serve(socket: WebSocket, registry: std::sync::Arc<Registry>, scheduler: std::sync::Arc<Scheduler>) {
+async fn serve(
+    socket: WebSocket,
+    registry: std::sync::Arc<Registry>,
+    scheduler: std::sync::Arc<Scheduler>,
+    supervisor: std::sync::Arc<Supervisor>,
+) {
     let (mut tx, mut rx) = socket.split();
 
     // The first message must be a hello in a protocol this edge speaks.
@@ -127,6 +137,7 @@ async fn serve(socket: WebSocket, registry: std::sync::Arc<Registry>, scheduler:
                 });
             }
             Ok(FromWorker::Schedules) => scheduler.schedules_changed(),
+            Ok(FromWorker::Holds { holds }) => supervisor.set_holds(holds),
             Ok(FromWorker::Hello { .. }) => tracing::warn!("worker link: repeated hello ignored"),
             Err(e) => tracing::warn!("worker link: bad message: {e}"),
         }

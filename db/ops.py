@@ -1947,7 +1947,8 @@ async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
 
     Called once at lifespan startup. The in-memory _tasks registry is empty on
     a fresh boot, so any 'running' Message/AutomationRun/WorkflowRun in the DB
-    is a zombie from a previous instance that crashed or was killed. For Jobs,
+    is a zombie from a previous instance that crashed or was killed — unless
+    its job is still pending, i.e. no instance ever claimed it. For Jobs,
     a 'running' row means the worker that claimed it is gone — flip back to
     'pending' (and clear the lock) so a fresh worker can re-claim immediately
     instead of waiting for the reaper to notice the locked_until expiry.
@@ -1956,22 +1957,31 @@ async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
     """
     now = datetime.now(timezone.utc)
     counts: dict[str, int] = {}
+    # A row whose job is still *pending* was never claimed by anyone, so it is
+    # not a zombie: it is waiting for this process. That is the normal case
+    # behind the Rust edge, which writes a run's row and its job and only then
+    # starts Python to claim it (`edge/src/supervisor.rs`). The row id is the
+    # job id for all three kinds (a scheduled automation's row is created at
+    # claim time, so it has none yet).
+    unclaimed = select(Job.id).where(Job.status == "pending")
 
     msg_res = await session.execute(
-        update(Message).where(Message.status == "running").values(status="error")
+        update(Message)
+        .where(Message.status == "running", Message.id.not_in(unclaimed))
+        .values(status="error")
     )
     counts["messages"] = msg_res.rowcount or 0  # type: ignore[attr-defined]
 
     auto_res = await session.execute(
         update(AutomationRun)
-        .where(AutomationRun.status == "running")
+        .where(AutomationRun.status == "running", AutomationRun.id.not_in(unclaimed))
         .values(status="error", error="interrupted by server restart", finished_at=now)
     )
     counts["automation_runs"] = auto_res.rowcount or 0  # type: ignore[attr-defined]
 
     wf_res = await session.execute(
         update(WorkflowRun)
-        .where(WorkflowRun.status == "running")
+        .where(WorkflowRun.status == "running", WorkflowRun.id.not_in(unclaimed))
         .values(status="error", error="interrupted by server restart", finished_at=now)
     )
     counts["workflow_runs"] = wf_res.rowcount or 0  # type: ignore[attr-defined]

@@ -36,7 +36,8 @@ pub struct Owned {
 /// Fields that read or steer the live-run mirror (`runs.rs`), or start a run
 /// for a worker to claim. The mirror is only current while a worker is
 /// linked, and only a linked worker is woken for a new job, so without one
-/// they're Python's.
+/// they're Python's — unless the edge owns the worker (`supervisor.rs`): then
+/// no worker means no live run, and a new job starts one.
 const LINKED_FIELDS: &[&str] = &[
     "runningTasks",
     "stopRunningTask",

@@ -8,10 +8,12 @@
 pub mod artifact;
 pub mod automation;
 pub mod board;
+pub mod browser;
 pub mod codec;
 pub mod conversation;
 pub mod events;
 pub mod memory;
+pub mod models;
 pub mod node;
 pub mod project;
 pub mod router;
@@ -41,6 +43,8 @@ pub struct Query(
     settings_lists::ListsQuery,
     memory::MemoryQuery,
     runs::RunQuery,
+    models::ModelsQuery,
+    browser::BrowserQuery,
     node::NodeQuery,
 );
 
@@ -65,6 +69,21 @@ pub struct EdgeData {
     pub staging_dir: PathBuf,
     /// The scheduler's zone, for `Automation.nextRunAt`.
     pub tz: chrono_tz::Tz,
+    /// LangGraph's database, for `todos`.
+    pub checkpoints: crate::checkpoints::Checkpoints,
+    /// For `browserAvailable`'s probe.
+    pub http: reqwest::Client,
+}
+
+/// The error extension that sends an operation to Python after all.
+pub const DEFER: &str = "edgeDefer";
+
+/// An error that makes `graphql::post` answer the operation in Python: the
+/// data is there, but in a shape only Python reads (or rejects) faithfully.
+/// For read-only resolvers only — the operation runs again in Python.
+pub fn defer(why: String) -> async_graphql::Error {
+    use async_graphql::ErrorExtensions;
+    async_graphql::Error::new(why).extend_with(|_, e| e.set(DEFER, true))
 }
 
 pub fn build(pool: SqlitePool, data: EdgeData, runs: Arc<crate::runs::Registry>) -> EdgeSchema {

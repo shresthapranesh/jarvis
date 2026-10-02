@@ -29,8 +29,14 @@ serde = { version = "1", features = ["derive"] }
 # and Python keeps dict insertion order.
 serde_json = { version = "1", features = ["preserve_order"] }
 indexmap = "2"
+# Signalling the worker's process group (`supervisor.rs`).
+libc = "0.2"
+# The SPA's file paths, as Python decoded them.
+percent-encoding = "2"
+# LangGraph checkpoints are msgpack (`gql/checkpoints.rs`).
+rmpv = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs"] }
 tokio-tungstenite = "0.29"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }

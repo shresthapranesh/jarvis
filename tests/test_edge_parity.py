@@ -58,6 +58,11 @@ PARITY_OPERATIONS = {
     "MemoriesQuery",
     # Diffed against live runs in test_edge_runs.py.
     "RunningTasksQuery",
+    # tests/test_edge_supervisor.py
+    "ModelCatalogQuery",
+    "useModelsQuery",
+    "TodoListQuery",
+    "BrowserAvailableQuery",
 }
 
 
@@ -645,9 +650,9 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     "query",
     [
         # A root field the edge doesn't implement.
-        '{ todos(conversationId: "c-old") { text } }',
+        "{ settings { key } }",
         # One owned root field and one not: the whole operation goes to Python.
-        '{ conversations { id } todos(conversationId: "c-old") { text } }',
+        "{ conversations { id } settings { key } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
         # Mutations always go to Python in this phase.

@@ -5,7 +5,7 @@ The edge (`edge/`) serves every subscription and the run registry
 process reports to it over one loopback WebSocket, `/internal/worker`:
 
     worker → edge   hello, snapshot, register, events, state, unregister, reply,
-                    dispatch, schedules
+                    dispatch, schedules, holds
     edge → worker   cancel, wake, adopt_queued, call
 
 The edge also *starts* runs (`startTask`, `runWorkflow`, `triggerAutomation`):
@@ -29,6 +29,13 @@ whatever happened meanwhile is in the next snapshot.
 Events are raw `{"event", "data"}` records, exactly as `emit_event` appended
 them. Turning them into typed GraphQL events is the edge's job now, so this
 side never has to know which subscription is watching.
+
+**The edge may also own this process** (`JARVIS_WORKER_CMD`, see
+`edge/src/supervisor.rs`): it starts Python when there is work and stops it
+once idle. Idle is the edge's call, from what it can see — no live run, no job,
+no request in flight — plus `holds`, the reasons only this process knows of to
+stay up (a chat bot connected, a kernel still holding someone's variables). It
+stops by `call`ing `drain` first, so that no job is claimed while it looks.
 """
 
 from __future__ import annotations
@@ -50,7 +57,7 @@ from core.state import (
 
 logger = logging.getLogger("jarvis.edge_link")
 
-PROTOCOL = 3
+PROTOCOL = 4
 _BACKOFF_SECONDS = (0.2, 0.5, 1.0, 2.0, 5.0)
 # Counters (tokens, LLM calls) are written by callbacks that don't always
 # notify, so state is also re-checked on a timer.
@@ -85,6 +92,27 @@ def _meta(state: TaskState) -> dict[str, Any]:
     }
 
 
+def current_holds() -> list[str]:
+    """Why this process must not be stopped for being idle, beyond what the
+    edge sees itself: a bot holds a connection open to its chat service, and a
+    kernel holds a conversation's variables until the reaper retires it."""
+    import time
+
+    from core import state as core_state
+    from core.kernels import IDLE_TIMEOUT_SECONDS, get_kernel_registry
+
+    holds = []
+    if core_state._telegram_bot is not None:
+        holds.append("telegram")
+    if core_state._discord_client is not None:
+        holds.append("discord")
+    now = time.monotonic()
+    sessions = list(get_kernel_registry()._sessions.values())
+    if any(now - s.last_used <= IDLE_TIMEOUT_SECONDS for s in sessions):
+        holds.append("kernels")
+    return holds
+
+
 def cancel_in_process(state: TaskState, *, resume: bool) -> None:
     """The in-process half of a stop, as the stop mutations do it here."""
     state.cancelled = True
@@ -111,6 +139,7 @@ class EdgeLink(RegistryObserver):
         # Calls in flight; held so they aren't garbage-collected mid-await.
         self._pending: set[asyncio.Task] = set()
         self.connected = asyncio.Event()
+        self._sent_holds: list[str] | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -155,6 +184,8 @@ class EdgeLink(RegistryObserver):
         self._outbox = asyncio.Queue()
         self._send({"type": "hello", "protocol": PROTOCOL, "instance": self.instance, "pid": os.getpid()})
         self._send({"type": "snapshot", "tasks": [self._full(tid, st) for tid, st in _tasks.items()]})
+        self._sent_holds = None
+        self._flush_holds()
         self._ws = ws
         self.connected.set()
         logger.info("edge link up: %s (%d live runs)", self.url, len(_tasks))
@@ -180,6 +211,7 @@ class EdgeLink(RegistryObserver):
             await asyncio.sleep(_STATE_SWEEP_SECONDS)
             for task_id, state in list(_tasks.items()):
                 self._flush_state(task_id, state)
+            self._flush_holds()
 
     # ── edge → worker ────────────────────────────────────────────────────────
 
@@ -254,6 +286,16 @@ class EdgeLink(RegistryObserver):
             self._send({"type": "events", "task_id": task_id, "from": start, "events": state.events[start:]})
             self._cursor[task_id] = len(state.events)
 
+    def _flush_holds(self) -> None:
+        try:
+            holds = current_holds()
+        except Exception:  # never let a probe take the link down
+            logger.debug("holds probe failed", exc_info=True)
+            return
+        if holds != self._sent_holds:
+            self._sent_holds = holds
+            self._send({"type": "holds", "holds": holds})
+
     def _flush_state(self, task_id: str, state: TaskState) -> None:
         fields = _state_fields(state)
         if fields != self._sent_state.get(task_id):
@@ -288,9 +330,19 @@ class EdgeLink(RegistryObserver):
 async def _dispatch(method: str, params: dict[str, Any]) -> Any:
     """A `call` from the edge: the run-control operations that need this
     process's in-memory run state, by the functions the resolvers here use."""
+    from core.state import get_queue
     from db import async_session
     from server.chat_runtime import queue_chat_message, resume_chat_task, unqueue_chat_message
     from server.workflow_runtime import resolve_workflow_approval, resume_workflow_run
+
+    # The edge is about to stop this process for being idle: claim nothing
+    # while it checks the job table one last time (`edge/src/supervisor.rs`).
+    if method == "drain":
+        await get_queue().drain()
+        return {"tasks": len(_tasks)}
+    if method == "undrain":
+        get_queue().undrain()
+        return True
 
     async with async_session() as session:
         if method == "queue_message":
@@ -325,6 +377,14 @@ def behind_edge() -> bool:
     neither). `core/scheduler.py` and `server/task_board_runtime.py` ask.
     """
     return bool(os.environ.get("JARVIS_EDGE_URL", "").strip())
+
+
+def respawned_by_edge() -> bool:
+    """Whether the edge started this process to replace one it stopped for
+    being idle (`JARVIS_EDGE_RESPAWN=1`). Then the previous process exited
+    cleanly with nothing running, and the startup sweeps that assume a crash
+    must not treat what it left as abandoned."""
+    return os.environ.get("JARVIS_EDGE_RESPAWN", "") == "1"
 
 
 def notify_edge(kind: str) -> None:

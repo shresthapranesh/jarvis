@@ -128,6 +128,15 @@ class JobQueue(abc.ABC):
         """A job was enqueued by another process: look now, not at the next
         poll. Default no-op — `stream()` still finds it by polling."""
 
+    async def drain(self) -> None:
+        """Stop claiming, and return once no claim is mid-flight — so the job
+        table then says everything this process will run. The Rust edge does
+        this before stopping an idle worker (`core/edge_link.py`). Default
+        no-op."""
+
+    def undrain(self) -> None:
+        """Claim again after `drain()`. Default no-op."""
+
     @abc.abstractmethod
     async def is_cancel_requested(self, job_id: str) -> bool:
         """Workers poll this between steps to support /stop-style cancellation."""
