@@ -161,7 +161,13 @@ _scheduler = BackgroundScheduler(timezone=get_scheduler_timezone())
 
 
 def _register_scheduler_job(auto) -> None:
-    """Register (or replace) a cron job for the given automation."""
+    """Register (or replace) a cron job for the given automation. Behind the
+    Rust edge the edge fires schedules, so it is told to re-read them instead."""
+    from core.edge_link import behind_edge, notify_edge  # noqa: PLC0415
+
+    if behind_edge():
+        notify_edge("schedules")
+        return
     try:
         _scheduler.add_job(
             func=_run_scheduled_automation,
@@ -179,6 +185,11 @@ def _register_scheduler_job(auto) -> None:
 
 
 def _remove_scheduler_job(automation_id: str) -> None:
+    from core.edge_link import behind_edge, notify_edge  # noqa: PLC0415
+
+    if behind_edge():
+        notify_edge("schedules")
+        return
     job_id = f"auto_{automation_id}"
     if _scheduler.get_job(job_id):
         _scheduler.remove_job(job_id)
@@ -440,3 +451,52 @@ def register_checkpoint_prune_job(cron_expr: str = "20 * * * *") -> None:
         misfire_grace_time=300,
     )
     logger.info("checkpoint prune scheduled: %s", cron_expr)
+
+
+# ── Maintenance jobs ─────────────────────────────────────────────────────────
+# Behind the Rust edge, the sweeps that need this process (an LLM, the
+# LangGraph store, checkpoints.db) are not timers here: the edge's scheduler
+# enqueues them as `maintenance` jobs on the same timetable, and the worker
+# runs them like any other job. That is what lets this process be absent
+# between jobs. The edge does the sweeps that are only rows and files itself.
+
+async def _memory_consolidation() -> None:
+    from core.memory_consolidation import consolidate_memory  # noqa: PLC0415
+
+    store = state.get_store()
+    logger.info("memory consolidation: %s", await consolidate_memory(store))
+
+
+async def _project_memory_consolidation() -> None:
+    from core.project_memory_consolidation import consolidate_project_memories  # noqa: PLC0415
+
+    store = state.get_store()
+    logger.info("project memory consolidation: %s", await consolidate_project_memories(store))
+
+
+async def _checkpoint_prune() -> None:
+    from core.checkpoint_retention import prune_checkpoints  # noqa: PLC0415
+
+    stats = await prune_checkpoints()
+    pruned = stats["root_pruned"] + stats["subgraph_pruned"]
+    if pruned:
+        logger.info(
+            "checkpoint prune: removed %d checkpoints, freed %.1f MB, skipped %d active thread(s)",
+            pruned, stats["bytes_freed"] / 1e6, stats["threads_skipped_active"],
+        )
+
+
+MAINTENANCE_TASKS = {
+    "memory_consolidation": _memory_consolidation,
+    "project_memory": _project_memory_consolidation,
+    "checkpoint_prune": _checkpoint_prune,
+}
+
+
+async def maintenance_job_handler(job) -> None:
+    """Queue handler for `maintenance` jobs: `{"task": <MAINTENANCE_TASKS key>}`."""
+    task = job.payload.get("task")
+    run = MAINTENANCE_TASKS.get(task)
+    if run is None:
+        raise ValueError(f"unknown maintenance task {task!r}")
+    await run()

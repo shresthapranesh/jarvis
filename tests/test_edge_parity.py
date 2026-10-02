@@ -45,6 +45,7 @@ PARITY_OPERATIONS = {
     "ArtifactDetailQuery",
     "ArtifactListQuery",
     "DocumentListQuery",
+    "AutomationListQuery",
     "AutomationRunsQuery",
     "BoardTasksQuery",
     "WorkflowListQuery",
@@ -64,7 +65,10 @@ PARITY_OPERATIONS = {
 
 
 @pytest.fixture
-async def edge(database, work_dir: Path, edge_binary: Path):
+async def edge(database, work_dir: Path, edge_binary: Path, monkeypatch):
+    # One scheduler zone for both sides (`Automation.nextRunAt`), with DST.
+    monkeypatch.setenv("JARVIS_TIMEZONE", "America/New_York")
+    monkeypatch.setattr("core.scheduler._timezone", None)
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
         yield client
 
@@ -330,6 +334,21 @@ async def test_automation_runs(domains, edge):
         await _assert_same(edge, _relay_text("AutomationRunsQuery"), {"automationId": _gid("Automation", automation)})
 
 
+async def test_automations(domains, edge):
+    """Including `nextRunAt`, which is the edge's scheduler's answer now:
+    day-of-month AND day-of-week, Unix weekdays, a disabled schedule, and one
+    that doesn't parse."""
+    data = await _assert_same(edge, _relay_text("AutomationListQuery"))
+    by_id = {a["name"]: a for a in data["data"]["automations"]}
+    assert by_id["weekdays"]["nextRunAt"] and by_id["disabled"]["nextRunAt"] is None
+    assert by_id["hook"]["nextRunAt"] is None
+    fields = "id name inputType schedule enabled stateful conversationId nextRunAt lastRunStatus totalCount7d createdAt"
+    for raw in ("au-and", "au-weekdays", "au-off", "au-hook", "missing"):
+        await _assert_same(edge, f"query($id: ID!) {{ automation(id: $id) {{ {fields} }} }}", {"id": _gid("Automation", raw)})
+    await _assert_same(edge, f"query($id: ID!) {{ node(id: $id) {{ ... on Automation {{ {fields} }} }} }}",
+                       {"id": _gid("Automation", "au-weekdays")})
+
+
 async def test_board(domains, edge):
     for include in (False, True):
         await _assert_same(edge, _relay_text("BoardTasksQuery"), {"includeArchived": include})
@@ -362,7 +381,7 @@ async def test_memories(domains, edge):
 
 
 @pytest.mark.parametrize("type_name, raw", [
-    ("Artifact", "a-crlf"), ("Document", "d1"), ("AutomationRun", "r-err"),
+    ("Artifact", "a-crlf"), ("Document", "d1"), ("Automation", "au-and"), ("AutomationRun", "r-err"),
     ("Workflow", "w2"), ("WorkflowRun", "wr1"), ("NotificationChannel", "n1"), ("Skill", "s2"),
 ])
 async def test_node_resolves_every_type(domains, edge, type_name, raw):
@@ -631,9 +650,6 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
         '{ conversations { id } todos(conversationId: "c-old") { text } }',
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
-        # Automation stays with the scheduler: nextRunAt is APScheduler's answer.
-        "{ automations { id nextRunAt } }",
-        '{ node(id: "QXV0b21hdGlvbjphdS1hbmQ=") { id } }',
         # Mutations always go to Python in this phase.
         'mutation { deleteConversation(id: "x") }',
         # A node id of a type the edge can't resolve.

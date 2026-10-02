@@ -37,6 +37,7 @@ from .routes_live import router as live_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
 from .routes_uploads import router as uploads_router
+from core.edge_link import behind_edge
 from core.scheduler import (
     _register_scheduler_job,
     _scheduler,
@@ -111,9 +112,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         load_custom_models(await get_custom_models(session))
         # Before start() — APScheduler won't reconfigure a running scheduler.
         set_scheduler_timezone(await get_setting(session, "scheduler.timezone"))
-        automations = await list_enabled_scheduled_automations(session)
-        for auto in automations:
-            _register_scheduler_job(auto)
+        # Behind the Rust edge the edge fires the schedules (behind_edge).
+        if not behind_edge():
+            for auto in await list_enabled_scheduled_automations(session):
+                _register_scheduler_job(auto)
     logger.info("scheduler timezone: %s", get_scheduler_timezone())
     _scheduler.start()
     async with (
@@ -201,13 +203,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _workflow_worker_task = asyncio.create_task(_build_workflow_worker(state._queue).run())
         _chat_worker_task = asyncio.create_task(_build_chat_worker(state._queue).run())
         _board_worker_task = asyncio.create_task(_build_board_worker(state._queue).run())
-        register_memory_consolidation_job()
-        register_project_memory_job()
-        register_staging_cleanup_job()
+        _maintenance_worker_task = asyncio.create_task(_build_maintenance_worker(state._queue).run())
+        # Kernels are this process's children, so reaping them stays here.
         register_kernel_reaper_job()
-        register_board_dispatch_job()
-        register_memory_activity_prune_job()
-        register_checkpoint_prune_job()
+        if not behind_edge():
+            register_memory_consolidation_job()
+            register_project_memory_job()
+            register_staging_cleanup_job()
+            register_board_dispatch_job()
+            register_memory_activity_prune_job()
+            register_checkpoint_prune_job()
 
         _tg_app = None
         _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -250,7 +255,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Stop workers BEFORE the queue/checkpointer/etc. tear down so any
         # in-flight handler can still update its run via async_session.
-        _workers = (_automation_worker_task, _workflow_worker_task, _chat_worker_task, _board_worker_task)
+        _workers = (
+            _automation_worker_task, _workflow_worker_task, _chat_worker_task, _board_worker_task,
+            _maintenance_worker_task,
+        )
         for _t in _workers:
             _t.cancel()
         for _t in _workers:
@@ -379,6 +387,22 @@ def _build_board_worker(queue) -> Worker:
         worker_id=f"board-{os.getpid()}",
         ttl_seconds=600,
         max_concurrent=_BOARD_CONCURRENCY,
+    )
+
+
+def _build_maintenance_worker(queue) -> Worker:
+    """Worker for 'maintenance' jobs — the sweeps the Rust edge schedules but
+    can't run (`core/scheduler.py:MAINTENANCE_TASKS`). One at a time: they
+    are background housekeeping, and two consolidation passes would only
+    skip each other."""
+    from core.scheduler import maintenance_job_handler  # noqa: PLC0415
+    return Worker(
+        queue,
+        kinds=["maintenance"],
+        handler=maintenance_job_handler,
+        worker_id=f"maintenance-{os.getpid()}",
+        ttl_seconds=600,
+        max_concurrent=1,
     )
 
 

@@ -18,6 +18,9 @@ async-stream = "0.3"
 base64 = "0.22"
 # Timestamps for rows the edge writes, in SQLAlchemy's stored format.
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+# Cron schedules run in the user's zone, DST included (`cron.rs`).
+chrono-tz = "0.10"
+iana-time-zone = "0.1"
 dotenvy = "0.15"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 reqwest = { version = "0.12", default-features = false, features = ["stream"] }

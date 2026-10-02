@@ -63,6 +63,8 @@ pub struct EdgeData {
     pub artifacts_dir: PathBuf,
     pub documents_dir: PathBuf,
     pub staging_dir: PathBuf,
+    /// The scheduler's zone, for `Automation.nextRunAt`.
+    pub tz: chrono_tz::Tz,
 }
 
 pub fn build(pool: SqlitePool, data: EdgeData, runs: Arc<crate::runs::Registry>) -> EdgeSchema {

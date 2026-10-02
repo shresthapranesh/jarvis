@@ -19,8 +19,9 @@ use tokio::sync::mpsc;
 
 use crate::AppState;
 use crate::runs::{Fields, Registry, Reported};
+use crate::schedule::Scheduler;
 
-pub const PROTOCOL: u64 = 2;
+pub const PROTOCOL: u64 = 3;
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -46,6 +47,10 @@ enum FromWorker {
     Unregister {
         task_id: String,
     },
+    /// Run a board dispatch pass now (a card became ready).
+    Dispatch,
+    /// An automation's schedule changed; re-read them.
+    Schedules,
     /// The answer to a `call` (`Registry::call`).
     Reply {
         id: u64,
@@ -67,10 +72,10 @@ pub async fn upgrade(
     }
     ws.max_message_size(usize::MAX)
         .max_frame_size(usize::MAX)
-        .on_upgrade(move |socket| serve(socket, state.runs.clone()))
+        .on_upgrade(move |socket| serve(socket, state.runs.clone(), state.scheduler.clone()))
 }
 
-async fn serve(socket: WebSocket, registry: std::sync::Arc<Registry>) {
+async fn serve(socket: WebSocket, registry: std::sync::Arc<Registry>, scheduler: std::sync::Arc<Scheduler>) {
     let (mut tx, mut rx) = socket.split();
 
     // The first message must be a hello in a protocol this edge speaks.
@@ -113,6 +118,15 @@ async fn serve(socket: WebSocket, registry: std::sync::Arc<Registry>) {
                 let reply = if ok { Ok(value) } else { Err(error.unwrap_or_else(|| "the worker call failed".into())) };
                 registry.reply(session, id, reply)
             }
+            Ok(FromWorker::Dispatch) => {
+                let scheduler = scheduler.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = scheduler.dispatch().await {
+                        tracing::error!("board dispatch failed: {e}");
+                    }
+                });
+            }
+            Ok(FromWorker::Schedules) => scheduler.schedules_changed(),
             Ok(FromWorker::Hello { .. }) => tracing::warn!("worker link: repeated hello ignored"),
             Err(e) => tracing::warn!("worker link: bad message: {e}"),
         }
