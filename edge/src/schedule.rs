@@ -32,6 +32,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::sync::{Mutex, Notify};
 
+use crate::checkpoints::Checkpoints;
 use crate::cron::{Trigger, Wall};
 use crate::gql::codec::{iso_from_db, new_id, now_stored};
 use crate::runs::{Meta, Registry};
@@ -148,6 +149,8 @@ pub struct Scheduler {
     runs: Arc<Registry>,
     tz: Tz,
     staging_dir: PathBuf,
+    /// The memory jobs' watermarks, and the checkpoints the prune would take.
+    checkpoints: Checkpoints,
     /// Python changed an automation's schedule.
     changed: Notify,
     /// One dispatch pass at a time: a tick and a requested pass must not
@@ -156,8 +159,16 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(pool: SqlitePool, runs: Arc<Registry>, tz: Tz, staging_dir: PathBuf) -> Arc<Self> {
-        Arc::new(Self { pool, runs, tz, staging_dir, changed: Notify::new(), dispatching: Mutex::new(()) })
+    pub fn new(pool: SqlitePool, runs: Arc<Registry>, tz: Tz, staging_dir: PathBuf, checkpoints: Checkpoints) -> Arc<Self> {
+        Arc::new(Self {
+            pool,
+            runs,
+            tz,
+            staging_dir,
+            checkpoints,
+            changed: Notify::new(),
+            dispatching: Mutex::new(()),
+        })
     }
 
     /// Re-read the automations' schedules soon.
@@ -264,7 +275,7 @@ impl Scheduler {
         let result = match &action {
             Action::Automation { id, schedule } => self.fire_automation(id, schedule).await,
             Action::Dispatch => self.dispatch().await.map(|_| ()),
-            Action::Maintenance(task) => self.enqueue_maintenance(task).await,
+            Action::Maintenance(task) => self.fire_maintenance(task).await,
             Action::StagingCleanup => {
                 self.cleanup_staging();
                 Ok(())
@@ -294,6 +305,22 @@ impl Scheduler {
         Ok(())
     }
 
+    /// A maintenance tick: enqueue the sweep only with something for it to
+    /// do (`maintenance_due`). A job starts Python, and on an idle box most
+    /// ticks would start it just to find nothing new.
+    async fn fire_maintenance(&self, task: &str) -> sqlx::Result<()> {
+        match self.maintenance_due(task).await {
+            Ok(false) => {
+                tracing::debug!("maintenance {task}: nothing to do");
+                return Ok(());
+            }
+            Ok(true) => {}
+            // Python's own checks decide, as they did before this one.
+            Err(e) => tracing::warn!("maintenance {task}: could not tell whether it is due ({e}); enqueuing"),
+        }
+        self.enqueue_maintenance(task).await
+    }
+
     /// One at a time per task: a box that was off for a day shouldn't come
     /// back to four queued consolidation passes.
     async fn enqueue_maintenance(&self, task: &str) -> sqlx::Result<()> {
@@ -311,6 +338,93 @@ impl Scheduler {
         crate::jobs::insert(&self.pool, &new_id(), "maintenance", &payload).await?;
         self.runs.wake();
         Ok(())
+    }
+
+    /// Whether a maintenance sweep would find work — the checks each one
+    /// makes before doing any, read from the same rows. A wrong "yes" costs a
+    /// pointless start of Python; a wrong "no" would stall the sweep, so where
+    /// in doubt this says yes and lets Python decide.
+    pub async fn maintenance_due(&self, task: &str) -> sqlx::Result<bool> {
+        match task {
+            "memory_consolidation" => self.memory_due().await,
+            "project_memory" => self.project_memory_due().await,
+            // `checkpoint_retention`: KEEP_PER_THREAD, MIN_AGE_SECONDS.
+            "checkpoint_prune" => self.checkpoints.prunable(3, Duration::from_secs(3600)).await,
+            _ => Ok(true),
+        }
+    }
+
+    /// `consolidate_memory`: a message past the watermark, and the first of
+    /// them not a reply still being written (`_transcript_block` stops there).
+    async fn memory_due(&self) -> sqlx::Result<bool> {
+        let meta = self.checkpoints.store_get("memory_consolidation", "state").await?;
+        let raw = meta.as_ref().and_then(|m| {
+            [m.get("messages_through"), m.get("last_run_at")].into_iter().flatten().find(|v| py_truthy(v)).cloned()
+        });
+        let since = match raw {
+            None => None,
+            Some(serde_json::Value::String(iso)) => match stored_from_iso(&iso) {
+                Some(s) => Some(s),
+                None => return Ok(true), // unreadable: Python's to judge
+            },
+            Some(_) => return Ok(true),
+        };
+        let first: Option<Option<String>> = sqlx::query_scalar(&format!(
+            "SELECT m.status FROM messages m JOIN conversations c ON m.conversation_id = c.id \
+             WHERE m.role IN ('user', 'assistant') AND c.ephemeral = 0{} ORDER BY m.created_at ASC LIMIT 1",
+            if since.is_some() { " AND m.created_at > ?" } else { "" }
+        ))
+        .bind(since)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(first.is_some_and(|status| status.as_deref() != Some("running")))
+    }
+
+    /// `consolidate_project_memories`: a project with new messages that has
+    /// gone quiet (or waited a day), with enough of them to be worth a call —
+    /// `consolidate_project_memory`'s gates.
+    async fn project_memory_due(&self) -> sqlx::Result<bool> {
+        let projects: Vec<String> = sqlx::query_scalar("SELECT id FROM projects").fetch_all(&self.pool).await?;
+        let now = Utc::now().naive_utc();
+        for project_id in projects {
+            let meta = self.checkpoints.store_get("project_memory_consolidation", &project_id).await?;
+            // `_load_meta`: a value that won't parse counts as none.
+            let since = meta
+                .as_ref()
+                .and_then(|m| m.get("messages_through"))
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .and_then(stored_from_iso);
+            let (count, oldest, newest, chars): (i64, Option<String>, Option<String>, i64) =
+                sqlx::query_as(&format!(
+                    "SELECT COUNT(m.id), MIN(m.created_at), MAX(m.created_at), COALESCE(SUM(LENGTH(m.content)), 0) \
+                     FROM messages m JOIN conversations c ON m.conversation_id = c.id \
+                     WHERE c.project_id = ? AND m.role IN ('user', 'assistant') AND c.ephemeral = 0{}",
+                    if since.is_some() { " AND m.created_at > ?" } else { "" }
+                ))
+                .bind(&project_id)
+                .bind(since)
+                .fetch_one(&self.pool)
+                .await?;
+            let (Some(oldest), Some(newest)) = (oldest.as_deref().and_then(naive), newest.as_deref().and_then(naive))
+            else {
+                continue;
+            };
+            if count == 0 {
+                continue;
+            }
+            let quiet_minutes = (now - newest).num_microseconds().unwrap_or(i64::MAX) as f64 / 60e6;
+            let waiting_hours = (now - oldest).num_microseconds().unwrap_or(i64::MAX) as f64 / 3600e6;
+            // _QUIET_MINUTES, _MAX_STALENESS_HOURS, _MIN_NEW_CHARS.
+            if quiet_minutes < 15.0 && waiting_hours < 24.0 {
+                continue;
+            }
+            if chars < 600 {
+                continue;
+            }
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// `_cleanup_staged_uploads`: uploads staged over an hour ago and never
@@ -422,6 +536,29 @@ impl Scheduler {
     }
 }
 
+/// An `isoformat()` watermark → the text SQLAlchemy binds for it: the wall
+/// clock as written (an aware value isn't converted), six fractional digits.
+fn stored_from_iso(iso: &str) -> Option<String> {
+    let iso = iso.trim();
+    let wall = match iso.len().checked_sub(6).map(|i| iso.split_at(i)) {
+        Some((wall, offset)) if offset.starts_with(['+', '-']) && offset.as_bytes()[3] == b':' => wall,
+        _ => iso.strip_suffix('Z').unwrap_or(iso),
+    };
+    crate::gql::codec::db_from_iso(wall)
+}
+
+fn naive(stored: &str) -> Option<chrono::NaiveDateTime> {
+    chrono::NaiveDateTime::parse_from_str(stored, "%Y-%m-%d %H:%M:%S%.f")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(stored, "%Y-%m-%dT%H:%M:%S%.f"))
+        .ok()
+}
+
+fn py_truthy(v: &serde_json::Value) -> bool {
+    !matches!(v, serde_json::Value::Null | serde_json::Value::Bool(false))
+        && v.as_str() != Some("")
+        && v.as_f64() != Some(0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,7 +595,7 @@ mod tests {
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
-        Scheduler::new(pool, Arc::default(), Tz::UTC, PathBuf::new())
+        Scheduler::new(pool, Arc::default(), Tz::UTC, PathBuf::new(), Checkpoints::open("".as_ref()))
     }
 
     async fn jobs(s: &Scheduler) -> Vec<(String, String)> {

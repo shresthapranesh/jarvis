@@ -7,7 +7,7 @@ Multi-agent AI research platform. Users submit queries via web UI or CLI; specia
 
 The API is **GraphQL-first** (Strawberry + FastAPI). Queries/mutations go over HTTP POST `/graphql`; live event streams go over `graphql-ws` WebSocket subscriptions on the same path. A handful of REST endpoints remain only for things that don't fit GraphQL (raw binary download, file upload, audio TTS/transcription, the live-audio WebSocket, log tailing, health). The frontend uses **Relay** against that schema.
 
-**A Rust edge (`edge/`) is being put in front of it** — Phase 1 of moving everything to Rust so jarvis runs on old, low-RAM hardware. The edge owns port 8000, answers the GraphQL operations ported so far straight from SQLite (every database-backed query, the row-only mutations, and — while a Python worker is linked — the subscriptions, `runningTasks`, the stops and the run triggers), and reverse-proxies everything else (REST, other WebSockets, the SPA, the rest of GraphQL) to Python on 8001. Python still owns the schema (`_migrate`); a type is ported to Rust whole or not at all, and every ported operation is diffed against Python by `tests/test_edge_parity.py` / `test_edge_runs.py` / `test_edge_start.py`. See `edge/README.md` for routing, the worker link, the wire-format contracts and the porting checklist.
+**A Rust edge (`edge/`) is being put in front of it** — Phase 1 of moving everything to Rust so jarvis runs on old, low-RAM hardware. The edge owns port 8000, answers the GraphQL operations ported so far straight from SQLite (every database-backed query, the row-only mutations, and — while a Python worker is linked — the subscriptions, `runningTasks`, the stops and the run triggers), and reverse-proxies everything else (REST, other WebSockets, the SPA, the rest of GraphQL) to Python on 8001. Python still owns the schema (`_migrate`); a type is ported to Rust whole or not at all, and every ported operation is diffed against Python by `tests/test_edge_parity.py` / `test_edge_runs.py` / `test_edge_start.py` / `test_edge_supervisor.py`. With `JARVIS_WORKER_CMD` set (as `edge/serve.sh` and Docker do) **the edge owns the Python process**: it starts it when a job or a proxied request needs it and stops it after `JARVIS_WORKER_IDLE` seconds (default 300) with nothing running, nothing queued and no `holds` (a Telegram/Discord bot keeps it up for good; a live kernel until its idle reap). It also serves the SPA and the chat page's queries (`models`, `todos`, `browserAvailable`) so loading the UI doesn't start Python. **Consequences for Python code:** a process start is no longer a crash recovery — the zombie sweep skips rows whose job is still pending, and the incognito sweep is skipped on `JARVIS_EDGE_RESPAWN=1`; anything new that runs at startup must be just as safe to run every few minutes. See `edge/README.md` for routing, the worker link, the supervisor, the wire-format contracts and the porting checklist.
 
 Long-running work (chat / automation / workflow runs) is dispatched through a **durable SQLite-backed job queue** rather than bare `asyncio.create_task`: a mutation enqueues a `Job` row and pre-registers an in-memory `TaskState`; a background `Worker` claims the job and runs its handler. This survives restarts and gives a single cancellation path (`job.id == task_id`).
 
@@ -164,9 +164,12 @@ jarvis/
 
 **Backend:**
 ```bash
+cd edge && JARVIS_APP_DIR=.. \
+  JARVIS_WORKER_CMD='exec .venv/bin/uvicorn server.entrypoint:app --port $JARVIS_BACKEND_PORT' \
+  cargo run                                     # Rust edge on :8000, starting/stopping Python on :8001 on demand
 JARVIS_EDGE_URL=http://127.0.0.1:8000 \
-  uv run uvicorn server.entrypoint:app --reload --port 8001   # Python, behind the edge, linked
-cd edge && cargo run                                       # Rust edge on :8000 (GraphQL at /graphql)
+  uv run uvicorn server.entrypoint:app --reload --port 8001   # …or Python always on (with --reload), linked
+cd edge && cargo run                                       #    and the edge in front of it
 uv run uvicorn server.entrypoint:app --reload   # …or Python alone on :8000 — still fully works
 uv run python main.py run "<query>"             # CLI one-shot query
 uv add <package>                                # add dependency (updates pyproject.toml + uv.lock)

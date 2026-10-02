@@ -37,7 +37,7 @@ from .routes_live import router as live_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
 from .routes_uploads import router as uploads_router
-from core.edge_link import behind_edge
+from core.edge_link import behind_edge, respawned_by_edge
 from core.scheduler import (
     _register_scheduler_job,
     _scheduler,
@@ -132,15 +132,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Reap incognito conversations left behind by a crash / a client that
         # never fired discardConversation. Runs here (not in the earlier session
         # block) so the checkpointer is live and each thread is deleted too.
-        try:
-            from db.ops import sweep_ephemeral_conversations
+        # Not when the Rust edge restarted this process after stopping the last
+        # one for being idle (`edge/src/supervisor.rs`): nothing crashed, and
+        # an incognito chat open in a tab between turns would be deleted.
+        if respawned_by_edge():
+            logger.info("restarted by the edge after an idle stop; incognito sweep skipped")
+        else:
+            try:
+                from db.ops import sweep_ephemeral_conversations
 
-            async with async_session() as _sess:
-                reaped = await sweep_ephemeral_conversations(_sess)
-            if reaped:
-                logger.info("startup incognito sweep: reaped %d conversation(s)", reaped)
-        except Exception as exc:
-            logger.warning("incognito sweep failed: %s", exc)
+                async with async_session() as _sess:
+                    reaped = await sweep_ephemeral_conversations(_sess)
+                if reaped:
+                    logger.info("startup incognito sweep: reaped %d conversation(s)", reaped)
+            except Exception as exc:
+                logger.warning("incognito sweep failed: %s", exc)
 
         # ── MCP (MCP toolset) ─────────────────────────────────
         # Warm up MCP client so tools are cached before first agent build.

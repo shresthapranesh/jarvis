@@ -5,6 +5,7 @@
 //! Python server behind it. See `edge/README.md`.
 
 mod catalog;
+mod checkpoints;
 mod config;
 mod cron;
 mod db;
@@ -16,6 +17,7 @@ mod proxy;
 mod pyjson;
 mod runs;
 mod schedule;
+mod supervisor;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,6 +38,17 @@ pub struct AppState {
     pub runs: Arc<runs::Registry>,
     /// Every timer, and the board dispatcher (`schedule.rs`).
     pub scheduler: Arc<schedule::Scheduler>,
+    /// The Python worker's process, when the edge owns it (`supervisor.rs`).
+    pub supervisor: Arc<supervisor::Supervisor>,
+}
+
+impl AppState {
+    /// Whether the run mirror is the truth, so the edge answers what reads,
+    /// steers or starts a run: a worker is linked, or the edge owns the worker
+    /// (and none being up means none is running anything).
+    pub fn runs_here(&self) -> bool {
+        self.supervisor.supervised() || self.runs.link_up()
+    }
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -48,6 +61,8 @@ async fn main() {
             documents_dir: Default::default(),
             staging_dir: Default::default(),
             tz: chrono_tz::Tz::UTC,
+            checkpoints: checkpoints::Checkpoints::open("".as_ref()),
+            http: reqwest::Client::new(),
         };
         print!("{}", gql::build(pool, data, Default::default()).sdl());
         return;
@@ -78,7 +93,7 @@ async fn main() {
         )
         .init();
 
-    let config = match Config::from_env() {
+    let mut config = match Config::from_env() {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("{e}");
@@ -94,23 +109,50 @@ async fn main() {
     };
 
     let tz = schedule::resolve_tz(&pool).await;
-    let data = gql::EdgeData {
-        artifacts_dir: config.artifacts_dir.clone(),
-        documents_dir: config.documents_dir.clone(),
-        staging_dir: config.staging_dir.clone(),
-        tz,
-    };
-    let runs: Arc<runs::Registry> = Default::default();
-    let schema = gql::build(pool.clone(), data, runs.clone());
-    let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
-    tokio::spawn(scheduler.clone().run());
-    tokio::spawn(sweep_pending_runs(runs.clone(), pool));
-    let owned = gql::owned_root_fields(&schema);
+
+    // The maintenance tests diff this against the Python sweeps' own checks:
+    // whether each would find work in this database, as one JSON line.
+    if std::env::args().any(|a| a == "--maintenance-due") {
+        let checkpoints = checkpoints::Checkpoints::open(&config.checkpoints_db);
+        let s = schedule::Scheduler::new(pool, Default::default(), tz, config.staging_dir.clone(), checkpoints);
+        let mut out = serde_json::Map::new();
+        for task in ["memory_consolidation", "project_memory", "checkpoint_prune"] {
+            let due = s.maintenance_due(task).await.map_or_else(|e| e.to_string().into(), serde_json::Value::from);
+            out.insert(task.into(), due);
+        }
+        println!("{}", serde_json::Value::Object(out));
+        return;
+    }
     let http = reqwest::Client::builder()
         // A proxy hands redirects to the client; it never follows them.
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("http client");
+    let checkpoints = checkpoints::Checkpoints::open(&config.checkpoints_db);
+    let data = gql::EdgeData {
+        artifacts_dir: config.artifacts_dir.clone(),
+        documents_dir: config.documents_dir.clone(),
+        staging_dir: config.staging_dir.clone(),
+        tz,
+        checkpoints: checkpoints.clone(),
+        http: http.clone(),
+    };
+    let runs: Arc<runs::Registry> = Default::default();
+    let schema = gql::build(pool.clone(), data, runs.clone());
+    let scheduler =
+        schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone(), checkpoints);
+    tokio::spawn(scheduler.clone().run());
+    tokio::spawn(sweep_pending_runs(runs.clone(), pool.clone()));
+    let supervisor = supervisor::Supervisor::new(
+        config.worker.take(),
+        config.backend.clone(),
+        config.backend_port().to_string(),
+        pool,
+        runs.clone(),
+        http.clone(),
+    );
+    tokio::spawn(supervisor.clone().run());
+    let owned = gql::owned_root_fields(&schema);
 
     let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
     fields.sort();
@@ -123,7 +165,18 @@ async fn main() {
     );
 
     let bind = config.bind;
-    let state = AppState { config: Arc::new(config), schema, owned: Arc::new(owned), http, runs, scheduler };
+    if let Some(dir) = &config.static_dir {
+        tracing::info!("serving the SPA from {}", dir.display());
+    }
+    let state = AppState {
+        config: Arc::new(config),
+        schema,
+        owned: Arc::new(owned),
+        http,
+        runs,
+        scheduler,
+        supervisor: supervisor.clone(),
+    };
     let app = Router::new()
         // GET /graphql (the subscription WebSocket) falls through to the proxy.
         .route("/graphql", post(graphql::post).get(graphql::websocket).fallback(proxy::any))
@@ -144,6 +197,8 @@ async fn main() {
         .with_graceful_shutdown(shutdown())
         .await
         .expect("server");
+    // Python doesn't outlive the edge that started it.
+    supervisor.shutdown().await;
 }
 
 /// Runs this edge started whose job ended before any worker claimed it.

@@ -49,7 +49,7 @@ pub async fn post(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<
 
     if let Some(op) = parsed {
         let variables = op.variables.unwrap_or(serde_json::Value::Null);
-        match decide(&state.owned, &op.query, op.operation_name.as_deref(), &variables, caller, state.runs.link_up()) {
+        match decide(&state.owned, &op.query, op.operation_name.as_deref(), &variables, caller, state.runs_here()) {
             Decision::Edge => {
                 let mut request = async_graphql::Request::new(op.query)
                     .variables(async_graphql::Variables::from_json(variables));
@@ -57,20 +57,33 @@ pub async fn post(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<
                     request = request.operation_name(name);
                 }
                 let resp = state.schema.execute(request).await;
-                if !failed_before_execution(&resp) {
+                if let Some(why) = deferred(&resp) {
+                    tracing::debug!("{:?} deferred to the backend: {why}", op.operation_name);
+                } else if !failed_before_execution(&resp) {
                     return Json(resp).into_response();
+                } else {
+                    // The root fields are ours but something under them isn't
+                    // — a field or argument this slice hasn't ported. Python
+                    // can answer it; this log is the to-do list.
+                    let why: Vec<_> = resp.errors.iter().map(|e| e.message.as_str()).collect();
+                    tracing::warn!("edge could not validate {:?}, proxying: {}", op.operation_name, why.join("; "));
                 }
-                // The root fields are ours but something under them isn't — a
-                // field or argument this slice hasn't ported. Python can answer
-                // it; this log is the to-do list.
-                let why: Vec<_> = resp.errors.iter().map(|e| e.message.as_str()).collect();
-                tracing::warn!("edge could not validate {:?}, proxying: {}", op.operation_name, why.join("; "));
             }
             Decision::Backend(why) => tracing::debug!("proxying {:?}: {why}", op.operation_name),
         }
     }
 
     proxy::http(&state, peer, Request::from_parts(parts, Body::from(bytes))).await
+}
+
+/// A resolver met data it can read only in Python (`gql::defer`): answer
+/// the whole operation there instead. Only read-only resolvers defer, so
+/// running the operation twice is harmless.
+fn deferred(resp: &async_graphql::Response) -> Option<&str> {
+    resp.errors
+        .iter()
+        .find(|e| e.extensions.as_ref().is_some_and(|x| x.get(crate::gql::DEFER).is_some()))
+        .map(|e| e.message.as_str())
 }
 
 /// Parse or validation failed: nothing executed, so nothing has a `path`.
@@ -82,7 +95,8 @@ fn failed_before_execution(resp: &async_graphql::Response) -> bool {
 }
 
 /// `GET /graphql`: the subscription WebSocket. Served here while a worker is
-/// linked — the run mirror is then current — and proxied to Python otherwise,
+/// linked or the edge owns the worker — the run mirror is then current — and
+/// proxied to Python otherwise,
 /// for the whole connection: graphql-ws multiplexes every subscription a
 /// client has over one socket, so the choice is per connection, not per
 /// operation.
@@ -96,7 +110,7 @@ pub async fn websocket(
         .get(header::UPGRADE)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
-    if !is_upgrade || !state.runs.link_up() {
+    if !is_upgrade || !state.runs_here() {
         return proxy::any(State(state), ConnectInfo(peer), req).await;
     }
     let (mut parts, _) = req.into_parts();

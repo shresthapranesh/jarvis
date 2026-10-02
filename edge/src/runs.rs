@@ -166,6 +166,9 @@ struct Link {
 
 pub struct Registry {
     inner: Mutex<Inner>,
+    /// Signalled by `wake`: a job was written. The supervisor listens, to
+    /// start a worker when none is up to be woken.
+    pub work: tokio::sync::Notify,
     /// Bumped on every registration, so a subscriber waiting for a run that
     /// hasn't been reported yet can wake when it is.
     registered: watch::Sender<u64>,
@@ -177,6 +180,7 @@ impl Default for Registry {
     fn default() -> Self {
         Self {
             inner: Mutex::default(),
+            work: tokio::sync::Notify::new(),
             registered: watch::channel(0).0,
             sessions: AtomicU64::new(0),
             call_ids: AtomicU64::new(0),
@@ -217,6 +221,7 @@ impl Registry {
     /// A job was just committed: have the worker claim it now rather than at
     /// its next poll.
     pub fn wake(&self) {
+        self.work.notify_one();
         self.control(&json!({"type": "wake"}));
     }
 

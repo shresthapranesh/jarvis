@@ -4,13 +4,19 @@
 //!
 //! Bodies are streamed both ways, never buffered: uploads are up to 100 MiB
 //! and `/server-logs/stream` is a response that never ends.
+//!
+//! When the edge owns the worker (`supervisor.rs`), a proxied request first
+//! makes sure Python is up, and holds it up until the response — or the
+//! socket — is finished. What a page load needs without Python is answered
+//! here: the SPA's files, and `/health`.
 
 use std::net::SocketAddr;
+use std::path::Path;
 
 use axum::body::Body;
 use axum::extract::ws::{self, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::{self as tung, client::IntoClientRequest};
@@ -53,10 +59,92 @@ pub async fn any(
     if is_websocket_upgrade(req.headers()) {
         return websocket(state, req).await;
     }
+    if matches!(*req.method(), Method::GET | Method::HEAD) {
+        let path = req.uri().path();
+        let head = *req.method() == Method::HEAD;
+        if path == "/health" && state.supervisor.supervised() {
+            // `routes_media.py:health`. A health check mustn't start Python.
+            return ([(header::CONTENT_TYPE, "application/json")], r#"{"status":"ok"}"#).into_response();
+        }
+        if let Some(dir) = &state.config.static_dir {
+            if !python_get_route(path) {
+                return spa_file(dir, path, head).await;
+            }
+        }
+    }
     http(&state, peer, req).await
 }
 
+/// The GET routes Python serves, which the SPA fallback must not shadow —
+/// everything else a GET reaches is `entrypoint.py:spa_fallback`.
+/// `tests/test_edge_supervisor.py` checks this against the Python app.
+fn python_get_route(path: &str) -> bool {
+    let raw = |prefix: &str| {
+        path.strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix("/raw"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+    };
+    matches!(
+        path,
+        "/health" | "/server-logs" | "/server-logs/stream" | "/graphql" | "/openapi.json" | "/docs"
+            | "/docs/oauth2-redirect" | "/redoc"
+    ) || raw("/artifacts/")
+        || raw("/documents/")
+}
+
+/// `spa_fallback`: the file under the build if there is one, else
+/// `index.html` for the client-side router.
+async fn spa_file(dir: &Path, path: &str, head: bool) -> Response {
+    let decoded = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+    let rel = decoded.trim_start_matches('/');
+    let contained = !rel.split('/').any(|seg| seg == "..") && !rel.contains(['\\', '\0']);
+    let mut file = dir.join(if contained { rel } else { "" });
+    if !tokio::fs::metadata(&file).await.is_ok_and(|m| m.is_file()) {
+        file = dir.join("index.html");
+    }
+    let (Ok(meta), Ok(bytes)) = (tokio::fs::metadata(&file).await, tokio::fs::read(&file).await) else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let mut out = Response::builder()
+        .header(header::CONTENT_TYPE, content_type(&file))
+        .header(header::CONTENT_LENGTH, bytes.len());
+    if let Ok(modified) = meta.modified() {
+        let at: chrono::DateTime<chrono::Utc> = modified.into();
+        out = out.header(header::LAST_MODIFIED, at.format("%a, %d %b %Y %H:%M:%S GMT").to_string());
+    }
+    out.body(if head { Body::empty() } else { Body::from(bytes) })
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// What `mimetypes.guess_type` says for what a Vite build contains.
+fn content_type(file: &Path) -> &'static str {
+    let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" | "map" => "application/json",
+        "webmanifest" => "application/manifest+json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/vnd.microsoft.icon",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "txt" => "text/plain; charset=utf-8",
+        "wasm" => "application/wasm",
+        _ => "application/octet-stream",
+    }
+}
+
 pub async fn http(state: &AppState, peer: SocketAddr, req: Request) -> Response {
+    let activity = match state.supervisor.ensure_up().await {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
+    };
     let path = req.uri().path_and_query().map_or("/", |p| p.as_str()).to_string();
     let url = format!("{}{}", state.config.backend, path);
     let (parts, body) = req.into_parts();
@@ -89,7 +177,13 @@ pub async fn http(state: &AppState, peer: SocketAddr, req: Request) -> Response 
                     }
                 }
             }
-            out.body(Body::from_stream(resp.bytes_stream()))
+            // The worker stays up until the body is done: a log stream holds
+            // it for as long as someone watches.
+            let body = resp.bytes_stream().map(move |chunk| {
+                let _held = &activity;
+                chunk
+            });
+            out.body(Body::from_stream(body))
                 .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
         }
         Err(e) => {
@@ -134,6 +228,10 @@ async fn websocket(state: AppState, req: Request) -> Response {
         }
     }
 
+    let activity = match state.supervisor.ensure_up().await {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, e).into_response(),
+    };
     // Handshake with the backend first, so the client is offered exactly the
     // subprotocol the backend picked — or refused if the backend refused.
     let (backend, resp) = match tokio_tungstenite::connect_async(backend_req).await {
@@ -152,7 +250,10 @@ async fn websocket(state: AppState, req: Request) -> Response {
         Some(p) => upgrade.protocols([p]),
         None => upgrade,
     };
-    upgrade.on_upgrade(move |client| pump(client, backend))
+    upgrade.on_upgrade(move |client| async move {
+        pump(client, backend).await;
+        drop(activity);
+    })
 }
 
 type BackendSocket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;

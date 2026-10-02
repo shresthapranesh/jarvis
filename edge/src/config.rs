@@ -18,6 +18,25 @@ pub struct Config {
     pub documents_dir: PathBuf,
     /// Where `POST /uploads` stages files (`AppConfig.staging_dir`).
     pub staging_dir: PathBuf,
+    /// LangGraph's database (`AppConfig.checkpoints_db`): todos, and the
+    /// memory jobs' watermarks, are read from it.
+    pub checkpoints_db: PathBuf,
+    /// The built SPA (`static/dist` under the app), served here rather than
+    /// by Python when it exists — loading the UI must not start Python.
+    pub static_dir: Option<PathBuf>,
+    /// How to start Python, when the edge is to own it (`supervisor.rs`).
+    pub worker: Option<WorkerConfig>,
+}
+
+pub struct WorkerConfig {
+    /// A shell command; it must serve `backend` and link to this edge.
+    pub command: String,
+    /// The directory it runs in: the jarvis checkout.
+    pub dir: PathBuf,
+    /// Stop Python after this long with nothing to do. `None`: never.
+    pub idle: Option<std::time::Duration>,
+    /// What the worker links back to (`JARVIS_EDGE_URL`).
+    pub edge_url: String,
 }
 
 impl Config {
@@ -26,7 +45,7 @@ impl Config {
         // there apply to both processes.
         let _ = dotenvy::dotenv();
 
-        let bind = env_or("JARVIS_EDGE_BIND", "127.0.0.1:8000")
+        let bind: SocketAddr = env_or("JARVIS_EDGE_BIND", "127.0.0.1:8000")
             .parse()
             .map_err(|e| format!("JARVIS_EDGE_BIND: {e}"))?;
         let backend = env_or("JARVIS_BACKEND_URL", "http://127.0.0.1:8001")
@@ -42,7 +61,42 @@ impl Config {
         // Resolved, as Python's are: a document's stored path is this one.
         let documents_dir = resolve(env_path("DOCUMENTS_DIR").unwrap_or(resolve(work_dir()?).join("documents")));
         let staging_dir = resolve(env_path("STAGING_DIR").unwrap_or(resolve(work_dir()?).join("staging")));
-        Ok(Self { bind, backend, db_path: db_path()?, artifacts_dir, documents_dir, staging_dir })
+        let checkpoints_db = env_path("CHECKPOINTS_DB").unwrap_or(work_dir()?.join("checkpoints.db"));
+        // The jarvis checkout: where Python runs, and where the SPA was built.
+        let app_dir = env_path("JARVIS_APP_DIR").unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let static_dir = Some(app_dir.join("static").join("dist")).filter(|d| d.join("index.html").is_file());
+        let worker = match std::env::var("JARVIS_WORKER_CMD") {
+            Ok(command) if !command.trim().is_empty() => {
+                let idle = match std::env::var("JARVIS_WORKER_IDLE") {
+                    Ok(v) if !v.trim().is_empty() => {
+                        v.trim().parse::<u64>().map_err(|e| format!("JARVIS_WORKER_IDLE (seconds): {e}"))?
+                    }
+                    _ => 300,
+                };
+                let idle = (idle > 0).then(|| std::time::Duration::from_secs(idle));
+                // Loopback, whatever address the edge binds for the public.
+                let edge_url = format!("http://127.0.0.1:{}", bind.port());
+                Some(WorkerConfig { command, dir: app_dir, idle, edge_url })
+            }
+            _ => None,
+        };
+        Ok(Self {
+            bind,
+            backend,
+            db_path: db_path()?,
+            artifacts_dir,
+            documents_dir,
+            staging_dir,
+            checkpoints_db,
+            static_dir,
+            worker,
+        })
+    }
+
+    /// The port Python listens on, from `backend`.
+    pub fn backend_port(&self) -> &str {
+        let host = self.backend["http://".len()..].split('/').next().unwrap_or("");
+        host.rsplit_once(':').map_or("80", |(_, port)| port)
     }
 
     /// `ws://` twin of `backend`, for proxying WebSocket upgrades.

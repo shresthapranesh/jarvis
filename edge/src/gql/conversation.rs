@@ -7,6 +7,7 @@ use async_graphql::{ComplexObject, Context, ID, Object, Result, SimpleObject};
 use sqlx::SqlitePool;
 
 use super::codec::{DateTime, decode_cursor, decode_global_id, encode_cursor, global_id};
+use super::events::TodoItem;
 use super::project::Project;
 
 #[derive(SimpleObject, sqlx::FromRow, Clone)]
@@ -216,6 +217,17 @@ pub struct ConversationQuery;
 
 #[Object]
 impl ConversationQuery {
+    /// Todos live in the LangGraph checkpointer, not the SQL DB.
+    async fn todos(&self, ctx: &Context<'_>, conversation_id: String) -> Result<Vec<TodoItem>> {
+        let todos = ctx
+            .data::<super::EdgeData>()?
+            .checkpoints
+            .todos(&conversation_id)
+            .await
+            .map_err(|e| super::defer(format!("todos: {}", e.0)))?;
+        Ok(todos.into_iter().map(|t| TodoItem { text: t.text, status: t.status.into() }).collect())
+    }
+
     /// List conversations for one surface (default "web", so bot/automation
     /// threads stay out of the sidebar). Pass surface: null to list all.
     async fn conversations(

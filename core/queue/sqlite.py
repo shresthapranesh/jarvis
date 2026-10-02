@@ -26,6 +26,11 @@ def _now() -> datetime:
 class SqliteJobQueue(JobQueue):
     def __init__(self) -> None:
         self._wake_event = asyncio.Event()
+        # `drain()`: claims refused, and how many are mid-flight.
+        self._draining = False
+        self._claims = 0
+        self._no_claims = asyncio.Event()
+        self._no_claims.set()
 
     # ── Internal helpers ───────────────────────────────────────────────────
 
@@ -33,6 +38,14 @@ class SqliteJobQueue(JobQueue):
         self._wake_event.set()
 
     def wake(self) -> None:
+        self._signal_wake()
+
+    async def drain(self) -> None:
+        self._draining = True
+        await self._no_claims.wait()
+
+    def undrain(self) -> None:
+        self._draining = False
         self._signal_wake()
 
     async def _wait_for_signal(self, timeout: float) -> None:
@@ -90,6 +103,20 @@ class SqliteJobQueue(JobQueue):
         worker_id: str,
         ttl_seconds: int = 300,
     ) -> Job | None:
+        # No await between the check and the count, so a drain either sees
+        # this claim in flight or this claim sees the drain.
+        if self._draining:
+            return None
+        self._claims += 1
+        self._no_claims.clear()
+        try:
+            return await self._claim(kinds, worker_id=worker_id, ttl_seconds=ttl_seconds)
+        finally:
+            self._claims -= 1
+            if not self._claims:
+                self._no_claims.set()
+
+    async def _claim(self, kinds: list[str], *, worker_id: str, ttl_seconds: int) -> Job | None:
         now = _now()
         async with async_session() as sess:
             stmt = (
