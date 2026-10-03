@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import tempfile
+from contextlib import aclosing
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ async def _execute_prompt_type(
     if auto.input_type == "monitor":
         user_content = _MONITOR_WRAPPER.format(target=user_content)
 
-    async for raw_chunk in agent.astream(
+    async with aclosing(agent.astream(
         {"messages": [{"role": "user", "content": user_content}]},
         config={
             "configurable": {"thread_id": thread_id},
@@ -99,15 +100,12 @@ async def _execute_prompt_type(
         },
         stream_mode=STREAM_MODES,
         subgraphs=True,
-    ):
-        chunk: StreamChunk = raw_chunk  # type: ignore[assignment]
-        if state.cancelled:
-            break
-        interrupted = await _process_chunk(
-            chunk, state, coalescer, accumulated, persist_steps=False,
-        )
-        if interrupted:
-            break
+    )) as stream:
+        async for raw_chunk in stream:
+            chunk: StreamChunk = raw_chunk
+            if state.cancelled:
+                break
+            await _process_chunk(chunk, state, coalescer, accumulated, persist_steps=False)
 
     coalescer.flush_all()
     return "".join(accumulated)

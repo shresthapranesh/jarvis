@@ -1,9 +1,16 @@
 # core/ — agent runtime notes
 
-## Agent loop (`agents.py`, `messages.py`, `compaction.py`)
-- `build_agent(model, board=False)` compiles a LangGraph agent; compiled graphs are cached per model id + flags. Anything that changes what's bound (tool policy, MCP load mode, catalog edits) must call `invalidate_agent_cache()`.
-- `model_request_node` is the only chokepoint every main-graph LLM call goes through. Mid-run queued user messages are drained there (`_drain_queued_input`), never in the `tools` node — a HumanMessage between a tool call and its result is an orphan pairing Anthropic/Bedrock reject.
-- Project context is re-read every iteration and must never be captured inside `_build_agent` (graphs are shared across conversations).
+## Agent loop (`agent_loop.py`, `agents.py`, `messages.py`, `compaction.py`)
+- `agent_loop.Agent` is the loop (no LangGraph): model step → tool batch → repeat. `build_agent(model, board=False)` builds the main agent (and its worker roles) once per model id + flags; anything that changes what's bound (tool policy, MCP load mode, catalog edits) must call `invalidate_agent_cache()`.
+- History is a `Thread`: `DbThread` (transcript tables, keyed by `configurable.thread_id`; a LangGraph-only thread is converted on first load) or an in-memory `Thread()` for one-shot runs (workers, workflow nodes, CLI, `/ws/live`) — pass `thread=`.
+- Writes are per message and ordered: the model's reply (with its tool calls) before any tool runs, each tool result once it and the calls before it finish. A re-claimed chat job continues from the rows; its prompt id is derived from the task id (`chat_runtime.user_message_id`) so it replaces itself.
+- `recursion_limit` counts steps (model calls + tool batches), LangGraph's meaning: 100 ≈ 50 model calls, then `RecursionLimitReached` (chat finishes `done`).
+- `astream(..., subgraphs=True)` yields LangGraph's `(ns, mode, data)` chunks (`ns` always `()`), so `streaming._process_chunk` reads them. After each step the loop waits until the reader has handled everything so far (`Run.step_done`) — events written straight onto `TaskState` (approval requests) must not overtake the step. Close the stream with `aclosing` when breaking out early; closing cancels the run.
+- Tools reach the run through `tools/context.current_ctx()` (a contextvar, `agent_loop.current_run()`). A tool that raises fails the run (ToolNode's behaviour); bad arguments and unknown tools come back as error results.
+- A nested run (a worker inside `spawn_workers`) merges the enclosing config, so the parent's budget/perf callbacks count its model calls. The token handler is attached to the model call only — never to tools — so nothing leaks between runs.
+- The main model step (`model_request_node`) is the only chokepoint every main-agent LLM call goes through. Mid-run queued user messages are drained there (`_drain_queued_input`), never in the tool batch — a HumanMessage between a tool call and its result is an orphan pairing Anthropic/Bedrock reject.
+- Project context is re-read every iteration and must never be captured inside `_build_agent` (agents are shared across conversations).
+- `tests/test_agent_golden.py` replays scripted runs (`tests/agent_harness.py`) and compares events, steps, model requests and the thread with `tests/golden/agent/`. Re-record (`JARVIS_UPDATE_GOLDEN=1`) only for an intended change, and read the diff.
 
 ### Prompt layout and caching (`context_cache.py`, `build_llm_messages`)
 A prefix cache is invalidated from the first changed byte, so **each call's payload must start with the previous call's payload**. With `cache=True`, requests are laid out most-stable-first:
@@ -27,7 +34,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - `summarization.py` is deprecated — use `compaction.maybe_compact`.
 
 ### Transcript format (`transcript.py`, `transcript_format.md`)
-- The v1 record of a message — what the agent loop will store per message in place of LangGraph checkpoints, and what the Rust loop will read. Versioned and lossless: a LangChain message encodes and decodes back equal; anything not mapped to a field rides in `extras`.
+- The v1 record of a message — what the agent loop stores per message (in place of LangGraph checkpoints), and what the Rust loop will read. Versioned and lossless: a LangChain message encodes and decodes back equal; anything not mapped to a field rides in `extras`.
 - A change to the format is a new version, made in `transcript_format.md` first. `main.py maintenance check-transcript` round-trips a real `checkpoints.db`.
 
 ## Model catalog (`model_catalog.py`, `builtin_models.json`, `model_discovery.py`)
@@ -58,9 +65,9 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - Rows are closed at chokepoints: `db.ops.update_board_task`, `streaming._finalize_message`, the resume mutations, `answer_board_task` (closes as `answered` *before* updating the task).
 - `reconcile_startup()` runs after the zombie sweep: chat rows survive only if their Job is still pending/running; workflow/automation rows expire.
 - Deferred gating of agent writes (`gate_action`) is off unless `approval.required_actions` is set. Only `caller == "agent"` (the `X-Jarvis-Caller` header) is gated. Gate before any side effect.
-- **Tool policy** (`tools.policy` setting, non-default entries only): disabled tools are unbound (filtered in `_build_agent` and hidden from `jarvis.help()`). Approval-required tools gate at the graph node (`tool_gate_node.py` replaces `ToolNode`) — never by wrapping tools, which breaks injected args. All tool calls stay in history; only the copy handed to `ToolNode` is narrowed.
+- **Tool policy** (`tools.policy` setting, non-default entries only): disabled tools are unbound (filtered in `_build_agent` and hidden from `jarvis.help()`). Approval-required tools gate in the loop (`tool_gate_node.make_tool_gate`, run before each tool batch) — never by wrapping tools. All tool calls stay in history; a denied one gets its denial as its result.
 - The tool gate uses the Approval row as the rendezvous (event + DB poll in-process, polling from the kernel). `run_cell`'s 60s timeout is suspended while a gate is open (`kernels.py:_hold_for_approval`).
-- `request_tool_approval` (LangGraph interrupt) is currently called only from unbound tools.
+- `request_tool_approval` (the old LangGraph interrupt) is reached only from unbound tools; with no interrupt left, a non-headless caller is denied. Slated for deletion.
 
 ## Budget and throughput (`budget.py`, `perf.py`)
 - Each runtime creates a `BudgetTracker` + `BudgetCallbackHandler` per run; limits from `JARVIS_BUDGET_MAX_*` / `RunnerConfig`.

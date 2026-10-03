@@ -1,14 +1,14 @@
 # tools/ — agent tools and the `jarvis` SDK
 
 ## Bound vs SDK
-Tool schemas are re-sent on every LLM call, so only tools coupled to the agent **graph** are bound (`core/agents.py:_build_agent`):
+Tool schemas are re-sent on every LLM call, so only tools coupled to the agent **loop** are bound (`core/agents.py:_build_agent`):
 
 | Tool | Why it stays bound |
 |---|---|
 | `run_cell` (`code.py`) | the door into the per-conversation kernel |
-| `write_todos` / `set_todo_status` | return `Command(update=...)` state deltas |
+| `write_todos` / `set_todo_status` | write the run's thread state (`ToolContext.thread`) |
 | `complete_task` / `block_task` (`board.py`) | act on the current board run; bound only with `build_agent(board=True)` |
-| `spawn_workers` / `run_workflow` | instantiate subgraphs on this agent's LLM |
+| `spawn_workers` / `run_workflow` | run agents on this agent's LLM |
 | `write_artifact` | its live event goes through this run's stream writer |
 | `remember` (only with an embedder) | there is no `createMemory` mutation to route to |
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from contextlib import aclosing
 import json
 import logging
 from datetime import datetime, timezone
@@ -221,20 +222,17 @@ async def _run_agent(
         "recursion_limit": 100,
         "callbacks": callbacks,
     }
-    async for raw_chunk in agent.astream(
+    async with aclosing(agent.astream(
         {"messages": [{"role": "user", "content": prompt}]},
         config=run_config,
         stream_mode=STREAM_MODES,
         subgraphs=True,
-    ):
-        chunk: StreamChunk = raw_chunk  # type: ignore[assignment]
-        if state.cancelled:
-            break
-        interrupted = await _process_chunk(
-            chunk, state, coalescer, accumulated, persist_steps=False,
-        )
-        if interrupted:
-            break
+    )) as stream:
+        async for raw_chunk in stream:
+            chunk: StreamChunk = raw_chunk
+            if state.cancelled:
+                break
+            await _process_chunk(chunk, state, coalescer, accumulated, persist_steps=False)
     coalescer.flush_all()
     return "".join(accumulated)
 

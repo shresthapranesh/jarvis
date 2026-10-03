@@ -123,7 +123,7 @@
     [
      "step",
      {
-      "data": "{\"raw\": \"{}\"}",
+      "data": "[{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}, {\"tool\": \"no_such_tool\", \"output\": \"Error: no_such_tool is not a valid tool, try one of [run_cell, write_artifact, write_todos, set_todo_status, spawn_workers, run_workflow, remember].\"}, {\"tool\": \"set_todo_status\", \"output\": \"Error invoking tool 'set_todo_status' with kwargs {'index': 'first', 'status': 'done'} with error:\\n index: Input should be a valid integer, unable to parse string as an integer\\n Please fix the error and try again.\"}]",
       "node": "tools",
       "source": "main",
       "subagent": null
@@ -274,7 +274,7 @@
      "subagent": null
     },
     {
-     "data": "{\"raw\": \"{}\"}",
+     "data": "[{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}, {\"tool\": \"no_such_tool\", \"output\": \"Error: no_such_tool is not a valid tool, try one of [run_cell, write_artifact, write_todos, set_todo_status, spawn_workers, run_workflow, remember].\"}, {\"tool\": \"set_todo_status\", \"output\": \"Error invoking tool 'set_todo_status' with kwargs {'index': 'first', 'status': 'done'} with error:\\n index: Input should be a valid integer, unable to parse string as an integer\\n Please fix the error and try again.\"}]",
      "node": "tools",
      "source": "main",
      "subagent": null

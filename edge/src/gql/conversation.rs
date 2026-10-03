@@ -217,14 +217,24 @@ pub struct ConversationQuery;
 
 #[Object]
 impl ConversationQuery {
-    /// Todos live in the LangGraph checkpointer, not the SQL DB.
+    /// The thread's todo list (`thread_state`). A thread no run has touched
+    /// since the move off LangGraph still has it in its checkpoint.
     async fn todos(&self, ctx: &Context<'_>, conversation_id: String) -> Result<Vec<TodoItem>> {
-        let todos = ctx
-            .data::<super::EdgeData>()?
-            .checkpoints
-            .todos(&conversation_id)
-            .await
-            .map_err(|e| super::defer(format!("todos: {}", e.0)))?;
+        let pool: &SqlitePool = ctx.data()?;
+        let row: Option<Option<String>> =
+            match sqlx::query_scalar("SELECT todos FROM thread_state WHERE thread_id = ?")
+                .bind(&conversation_id)
+                .fetch_optional(pool)
+                .await
+            {
+                Err(sqlx::Error::Database(e)) if e.message().contains("no such table") => None,
+                other => other?,
+            };
+        let todos = match row {
+            Some(raw) => crate::checkpoints::todos_from_json(raw.as_deref().unwrap_or("[]")),
+            None => ctx.data::<super::EdgeData>()?.checkpoints.todos(&conversation_id).await,
+        }
+        .map_err(|e| super::defer(format!("todos: {}", e.0)))?;
         Ok(todos.into_iter().map(|t| TodoItem { text: t.text, status: t.status.into() }).collect())
     }
 

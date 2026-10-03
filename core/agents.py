@@ -5,27 +5,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3 as _sqlite3
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Annotated, NotRequired, TypedDict
+from typing import Any
 
-from langchain_core.messages import AnyMessage, HumanMessage
+from langchain_core.messages import AnyMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import END, START, StateGraph
-from langgraph.graph.message import add_messages
-from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import tools_condition
-from langgraph.store.sqlite.aio import AsyncSqliteStore
 
+from .agent_loop import Agent, Run
 from .config import get_config
 from .compaction import apply_per_call_compaction, compact_threshold, maybe_compact
 from .context_cache import CacheSegment, resolve_cache_ttl
 from .mcp import get_mcp_server_summaries, get_mcp_tools_sync
-from .tool_gate_node import make_gated_tool_node, tool_key_for
+from .tool_gate_node import make_tool_gate, tool_key_for
 from .tool_policy import is_enabled
 from .messages import (
     build_llm_messages,
@@ -46,7 +40,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
 # RunnerConfig.cache_enabled_providers; honors_cache_control() narrows
 # openrouter to the upstreams that actually honor cache_control blocks.
 _DEFAULT_CACHE_PROVIDERS = frozenset({"bedrock", "anthropic", "openrouter"})
-from .schemas import TodoItem, _normalise_todos, reduce_todos
+from .schemas import _normalise_todos
 from core.doc_index import embeddings_available
 from core.memory_store import load_core, search_memory
 from core.skill_store import skill_catalog
@@ -163,13 +157,6 @@ def _with_llm_retry(runnable):
     )
 
 
-# ── State schema ─────────────────────────────────────────────────────────────
-
-class AgentState(TypedDict):
-    messages: Annotated[list[AnyMessage], add_messages]
-    todos: NotRequired[Annotated[list[TodoItem], reduce_todos]]
-
-
 # ── System prompt ────────────────────────────────────────────────────────────
 # The prompt body lives in core/system_prompt.md (kept out of code so it can be
 # edited without touching Python). Loaded once at import.
@@ -177,9 +164,7 @@ class AgentState(TypedDict):
 _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8").strip()
 
 # ── Worker-role prompts ───────────────────────────────────────────────────────
-# Each role gets a tuned prompt and (inside _build_agent) a tool subset. The
-# worker subgraph compiles with `name=role`, so LangGraph's namespace surfaces
-# the role to the streaming layer (which already labels by subagent name).
+# Each role gets a tuned prompt and (inside _build_agent) a tool subset.
 
 _ROLE_PROMPTS = {
     "general": (
@@ -656,16 +641,16 @@ async def _retrieved_volatile_parts(
 async def _drain_queued_input(config: RunnableConfig) -> list[HumanMessage]:
     """Messages the user queued while this run was in flight, taken now.
 
-    This node is the only chokepoint every main-graph LLM call passes, which
-    makes it the one safe injection point. The tools node sits *between* an
-    AIMessage's tool_calls and their results, and a HumanMessage spliced in
-    there is the orphan pairing Anthropic/Bedrock reject outright; arriving
-    here instead, the queued text lands after the current tool batch's results
-    and before the next model call.
+    The main model step is the only chokepoint every main-agent LLM call
+    passes, which makes it the one safe injection point. A tool batch sits
+    *between* an AIMessage's tool_calls and their results, and a HumanMessage
+    spliced in there is the orphan pairing Anthropic/Bedrock reject outright;
+    arriving here instead, the queued text lands after the current tool batch's
+    results and before the next model call.
 
     The delivered HumanMessage keeps the durable row's id, so it is both the
     retrieval-cache key the queueMessage resolver already warmed and idempotent
-    under `add_messages` if the node is ever replayed.
+    (a replacement in place) if it is ever written twice.
     """
     task_id = (config.get("configurable") or {}).get("message_id")
     if not task_id:
@@ -698,42 +683,14 @@ async def _drain_queued_input(config: RunnableConfig) -> list[HumanMessage]:
     return [HumanMessage(content=m.text, id=m.id) for m in drained]
 
 
-# ── Checkpointer ─────────────────────────────────────────────────────────────
-
-_sync_checkpointer: SqliteSaver | None = None
-
-
-def _get_sync_checkpointer() -> SqliteSaver:
-    global _sync_checkpointer
-    if _sync_checkpointer is None:
-        conn = _sqlite3.connect(get_config().checkpoints_db, check_same_thread=False)
-        _sync_checkpointer = SqliteSaver(conn=conn)
-    return _sync_checkpointer
-
-
-def close_sync_checkpointer() -> None:
-    """Close the lazy sync checkpointer connection, if one was ever opened.
-
-    Only the no-runner path (CLI, tests) builds it; the server uses the async
-    saver from the lifespan. Safe to call unconditionally.
-    """
-    global _sync_checkpointer
-    saver, _sync_checkpointer = _sync_checkpointer, None
-    if saver is not None:
-        try:
-            saver.conn.close()
-        except Exception:  # already closed / mid-teardown
-            pass
-
-
 # ── Agent builder ─────────────────────────────────────────────────────────────
 
 def _allowed(tools: list) -> list:
     """Drop tools a human has switched off in Settings → Tools.
 
     Applied at build time rather than per call: the toolset is baked into the
-    graph by `bind_tools`, so a disabled tool must not reach the model's schema
-    list at all. `core/tool_policy.set_tool_policy` drops the compiled-graph
+    agent by `bind_tools`, so a disabled tool must not reach the model's schema
+    list at all. `core/tool_policy.set_tool_policy` drops the built-agent
     cache on every write, which is what makes a toggle take effect on the next
     run instead of the next restart.
     """
@@ -762,9 +719,7 @@ def _schema_tokens(tools: list) -> int:
     return total // 4
 
 
-def _build_agent(
-    model: str, checkpointer, store: AsyncSqliteStore | None, board: bool = False
-) -> CompiledStateGraph:
+def _build_agent(model: str, checkpointer: Any, store: Any, board: bool = False) -> Agent:
     # Degrade rather than raise on a stale id: this is the chokepoint every run
     # kind reaches, and a conversation/automation/board row can outlive the
     # model it names. Callers with a session resolve through db.ops.resolve_model
@@ -809,40 +764,31 @@ def _build_agent(
         tools = _allowed(_ROLE_TOOLS[role])
         role_llm = _with_llm_retry(llm.bind_tools(tools))
 
-        def factory():
-            async def role_model(state: AgentState, config: RunnableConfig) -> dict:
-                # Strip historical thinking blocks (signatures don't survive
-                # checkpoint round-trips → Bedrock rejects with "thinking.
-                # signature: Field required"), and route through
-                # build_llm_messages so any embedded SystemMessages are
-                # collapsed into the single system prompt.
-                # Use new per-call compaction (elide + collapse old tool groups)
-                history = apply_per_call_compaction(list(state.get("messages", [])))
-                history = strip_historical_thinking(history)
-                history = repair_orphan_tool_calls(history)
-                response = await role_llm.ainvoke(
-                    build_llm_messages(
-                        prompt, use_cache, history, cache_provider=spec.provider
-                    ),
-                    config=config,
-                )
-                return {"messages": [response]}
+        async def role_model(run: Run) -> list[BaseMessage]:
+            # Strip historical thinking blocks (signatures don't survive
+            # round-trips → Bedrock rejects with "thinking.signature: Field
+            # required"), and route through build_llm_messages so any embedded
+            # SystemMessages are collapsed into the single system prompt.
+            # Use new per-call compaction (elide + collapse old tool groups)
+            history = apply_per_call_compaction(list(run.thread.messages))
+            history = strip_historical_thinking(history)
+            history = repair_orphan_tool_calls(history)
+            response = await role_llm.ainvoke(
+                build_llm_messages(
+                    prompt, use_cache, history, cache_provider=spec.provider
+                ),
+                config=run.model_config(),
+            )
+            return [response]
 
-            g = StateGraph(AgentState)  # type: ignore[type-var]
-            g.add_node("agent", role_model)
-            g.add_node("tools", make_gated_tool_node(tools))
-            g.add_edge(START, "agent")
-            g.add_conditional_edges("agent", tools_condition)
-            g.add_edge("tools", "agent")
-            return g.compile(name=role)
-
-        return factory
+        worker = Agent(role, role_model, tools, gate=make_tool_gate(tools))
+        return lambda: worker
 
     spawn_workers = make_spawn_workers(
         {role: _make_role_factory(role) for role in _ROLE_PROMPTS}
     )
 
-    # Only tools coupled to the agent GRAPH stay bound. Everything else lives
+    # Only tools coupled to the agent LOOP stay bound. Everything else lives
     # in the kernel-preloaded `jarvis` SDK (tools/sdk.py), discovered on demand
     # via jarvis.help() — reads hit the DB directly, writes go through the
     # server's own GraphQL API so in-process side effects (scheduler
@@ -850,10 +796,10 @@ def _build_agent(
     #
     # What must stay here and why:
     #   run_cell                  the door into the kernel
-    #   write_todos/set_todo_*    return Command(update=...) state deltas; a
-    #                             separate process cannot write the reducer
+    #   write_todos/set_todo_*    write the run's thread state; a separate
+    #                             process cannot reach it
     #   complete_task/block_task  act on the CURRENT run's lifecycle (board runs only)
-    #   spawn_workers/run_workflow  instantiate subgraphs on this LLM binding
+    #   spawn_workers/run_workflow  run agents on this LLM binding
     #   write_artifact            its live side-panel event is tied to this
     #                             run's stream writer
     #   remember                  no createMemory mutation exists to route to
@@ -898,10 +844,10 @@ def _build_agent(
 
     # Sized from this model's context window, not a flat number shared by a
     # catalog whose windows span two orders of magnitude. Resolved once here
-    # rather than per iteration: the graph is built per model, so this cannot
-    # change over the compiled agent's lifetime.
+    # rather than per iteration: the agent is built per model, so this cannot
+    # change over its lifetime.
     compaction_threshold = compact_threshold(model)
-    # Same reasoning: provider is fixed for this compiled graph, and the env read
+    # Same reasoning: provider is fixed for this agent, and the env read
     # + validation shouldn't repeat on every model iteration.
     cache_ttl = resolve_cache_ttl(spec.provider)
     logger.info(
@@ -914,18 +860,18 @@ def _build_agent(
         logger.info("agent %s: cache_control ttl=%s", model, cache_ttl)
     # Compaction counts history from the previous call's reported usage, minus
     # this estimate of everything else in the request (see
-    # history_tokens_from_usage). The bound schemas are fixed per compiled
-    # graph, so they're measured once. None opts out: Ollama's
+    # history_tokens_from_usage). The bound schemas are fixed per agent, so
+    # they're measured once. None opts out: Ollama's
     # prompt_eval_count leaves out a KV-cached prefix, so it would undercount.
     tool_schema_tokens = _schema_tokens(main_tools) if spec.provider != "ollama" else None
 
-    # ── Graph nodes (closures capture llm, store, use_cache) ─────────────────
+    # ── The model step (closure captures llm, store, use_cache) ──────────────
 
-    async def model_request_node(state: AgentState, config: RunnableConfig) -> dict:
+    async def model_request_node(run: Run) -> list[BaseMessage]:
         """Call the LLM with the current system message (memory + todos injected fresh).
 
-        Summarization is folded in here (was its own node) so each LLM round-trip
-        costs 2 graph steps (model + tools) instead of 3. With recursion_limit=100
+        Summarization is folded in here (was its own step) so each LLM round-trip
+        costs 2 loop steps (model + tools) instead of 3. With recursion_limit=100
         the agent gets ~50 useful round-trips, which is plenty for code-first work.
 
         Caching: memory+skills+project instructions are cached system blocks
@@ -934,7 +880,8 @@ def _build_agent(
         an uncached tail after it. See build_llm_messages.
         """
         _phase = _PhaseTimer()
-        raw_messages = list(state.get("messages", []))
+        config = run.config
+        raw_messages = list(run.thread.messages)
         # Mid-run queue: delivered before retrieval runs, so the queued text is
         # what the memory/skill lookup keys off — the user's newest intent, not
         # the one the turn started with.
@@ -969,7 +916,7 @@ def _build_agent(
             s.content for s in segments if not s.cacheable and s.content.strip()
         ]
 
-        todos = _normalise_todos(state.get("todos"))
+        todos = _normalise_todos(run.thread.todos)
         if todos:
             glyph = {"pending": "[ ]", "in_progress": "[~]", "done": "[x]"}
             todo_lines = "\n".join(f"{glyph[t['status']]} {t['text']}" for t in todos)
@@ -1065,7 +1012,7 @@ def _build_agent(
         except Exception:
             pass
 
-        response = await llm_with_tools.ainvoke(llm_messages, config=config)
+        response = await llm_with_tools.ainvoke(llm_messages, config=run.model_config())
         t_llm = _phase.lap()
 
         # Phase attribution — the split between these is what tells you whether
@@ -1084,39 +1031,30 @@ def _build_agent(
                 len(messages_for_llm),
                 compaction.compacted,
             )
-        return {"messages": state_update_msgs + queued + [response]}
+        return [*state_update_msgs, *queued, response]
 
-    # ── Build graph ───────────────────────────────────────────────────────────
-
-    graph = StateGraph(AgentState)  # type: ignore[type-var]
-    graph.add_node("model_request", model_request_node)
-    graph.add_node("tools", make_gated_tool_node(main_tools))
-
-    graph.add_edge(START, "model_request")
-    graph.add_conditional_edges("model_request", tools_condition)
-    graph.add_edge("tools", "model_request")
-
-    compiled = graph.compile(checkpointer=checkpointer, store=store, name="main")
-
-    return compiled
+    return Agent(
+        "main", model_request_node, main_tools,
+        gate=make_tool_gate(main_tools), checkpointer=checkpointer, store=store,
+    )
 
 
-_cache: dict[tuple, CompiledStateGraph] = {}
+_cache: dict[tuple, Agent] = {}
 
 
 def invalidate_agent_cache() -> None:
-    """Drop all compiled agents so the next build_agent rebuilds them.
+    """Drop all built agents so the next build_agent rebuilds them.
 
     Needed when the bound toolset changes at runtime (MCP server reload) —
-    tools are baked in via bind_tools, so cached graphs keep the old set.
-    In-flight runs keep their already-built graph; only new runs rebuild.
+    tools are baked in via bind_tools, so cached agents keep the old set.
+    In-flight runs keep their already-built agent; only new runs rebuild.
     """
     _cache.clear()
 
 
-def _build_cached(model: str, checkpointer, store, board: bool = False) -> CompiledStateGraph:
+def _build_cached(model: str, checkpointer: Any, store: Any, board: bool = False) -> Agent:
     # `board` is part of the key because the bound toolset differs: a board run
-    # gets complete_task/block_task, nothing else does. Two graphs per model at
+    # gets complete_task/block_task, nothing else does. Two agents per model at
     # most, and only on installs that actually use the board.
     key = (model, id(checkpointer), id(store), board)
     if key not in _cache:
@@ -1124,12 +1062,16 @@ def _build_cached(model: str, checkpointer, store, board: bool = False) -> Compi
     return _cache[key]
 
 
-def build_agent(model: str = DEFAULT_MODEL, checkpointer=None, store: AsyncSqliteStore | None = None, invocation_context=None, board: bool = False) -> CompiledStateGraph:
-    """Build the agent. Defaults to sync SqliteSaver for CLI; server passes async variants.
+def build_agent(
+    model: str = DEFAULT_MODEL, checkpointer: Any = None, store: Any = None,
+    invocation_context: Any = None, board: bool = False,
+) -> Agent:
+    """The agent for `model`, built once and shared by every run on it.
 
-    Set ``board=True`` for a task-board run so the board lifecycle tools
-    (complete_task/block_task) are bound; they are inert anywhere else.
+    ``checkpointer`` is LangGraph's saver, read only to convert a thread that
+    has no transcript rows yet (see ``DbThread.load``). ``store`` reaches the
+    tools as ``ToolContext.store``. Set ``board=True`` for a task-board run so
+    the board lifecycle tools (complete_task/block_task) are bound; they are
+    inert anywhere else.
     """
-    if checkpointer is None:
-        checkpointer = _get_sync_checkpointer()
     return _build_cached(model, checkpointer, store, board=board)

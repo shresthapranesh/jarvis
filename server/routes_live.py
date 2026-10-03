@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from core.agent_loop import Thread
 from core.agents import build_agent
 from core.log_callback import AgentLogger
 from core.state import TaskState, get_async_checkpointer, get_store
@@ -37,9 +38,10 @@ async def live_ws(websocket: WebSocket) -> None:
     # (logged), so what comes back is always callable.
     model = await resolve_model(websocket.query_params.get("model"))
 
-    # One thread_id per socket lets the checkpointer chain turns together so
-    # the in-graph summarization persists its trim across turns.
+    # One in-memory thread per socket chains its turns together (so compaction
+    # carries across them) and ends with the socket — nothing is stored.
     thread_id = f"live-{uuid4()}"
+    thread = Thread()
     agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
 
     try:
@@ -69,6 +71,7 @@ async def live_ws(websocket: WebSocket) -> None:
                     },
                     stream_mode=STREAM_MODES,
                     subgraphs=True,
+                    thread=thread,
                 ):
                     chunk: StreamChunk = raw_chunk  # type: ignore[assignment]
                     await _process_chunk(chunk, state, coalescer, accumulated)

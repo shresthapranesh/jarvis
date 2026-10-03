@@ -94,13 +94,12 @@ def run(
     if no_save:
         full_query += " Do not save the report to disk."
 
-    from langgraph.checkpoint.memory import MemorySaver
-
-    agent = build_agent(model, checkpointer=MemorySaver())
+    agent = build_agent(model)
     result: dict = {}
     error: list[Exception] = []
     cli_thread_id = f"cli-{uuid4()}"
 
+    from core.agent_loop import Thread
     from core.log_callback import AgentLogger
 
     async def _run() -> None:
@@ -112,6 +111,7 @@ def run(
                     "recursion_limit": 100,
                     "callbacks": [AgentLogger()],
                 },
+                thread=Thread(),  # one-shot: nothing to keep
             ))
         except Exception as exc:
             error.append(exc)

@@ -302,12 +302,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _scheduler.shutdown(wait=False)
     state._main_loop = None
 
-    # Release the DB pool (and its aiosqlite threads) plus the lazy sync
-    # checkpointer. Last, so anything above can still reach the database.
-    from core.agents import close_sync_checkpointer
-
-    with contextlib.suppress(Exception):
-        close_sync_checkpointer()
+    # Release the DB pool (and its aiosqlite threads). Last, so anything above
+    # can still reach the database.
     with contextlib.suppress(Exception):
         await close_db()
 
@@ -366,9 +362,9 @@ def _build_workflow_worker(queue) -> Worker:
 
 def _build_chat_worker(queue) -> Worker:
     """Worker that consumes 'chat' jobs. Same TTL as automations — long
-    agent loops with tool calls. On restart, the LangGraph checkpointer
-    (thread_id == conv_id) lets the agent resume from the last node
-    boundary rather than restarting from the user's original prompt."""
+    agent loops with tool calls. On restart the thread (thread_id ==
+    conv_id) holds every message the run wrote, so the agent continues from
+    there rather than restarting from the user's original prompt."""
     from server.chat_runtime import chat_job_handler  # noqa: PLC0415
     return Worker(
         queue,

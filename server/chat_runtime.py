@@ -7,19 +7,19 @@ import base64
 import json
 import logging
 import os
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from langchain_core.messages import HumanMessage
-from langgraph.errors import GraphRecursionError
-from langgraph.types import Command
 
+from core.agent_loop import RecursionLimitReached
 from core.agents import build_agent, prefetch_retrieval
 from core.config import get_config
 from core.invocation_context import InvocationContext
@@ -33,7 +33,6 @@ from core.run_scaffold import (
 )
 from core.schemas import AttachmentIn
 from core.state import (
-    InterruptRequest,
     QueuedMessage,
     TaskState,
     _tasks,
@@ -60,28 +59,14 @@ from db.ops import (
 
 # ── Agent task runner ────────────────────────────────────────────────────────
 
-async def _pending_approval_for(task_id: str) -> InterruptRequest | None:
-    """The durable pause this run left behind, if it is picking one up.
+def user_message_id(task_id: str) -> str:
+    """The thread id of the prompt that starts turn `task_id`.
 
-    Returns None on the overwhelmingly common path (a fresh run), so this costs
-    one indexed lookup per turn. Restored as an `InterruptRequest` rather than
-    re-deriving the question from the graph: LangGraph keeps the interrupt, but
-    not the human-readable prompt that was streamed alongside it.
+    Derived, not random: a job re-claimed after a crash sends its prompt again,
+    and the same id makes that a replacement in place rather than a second copy
+    of the prompt in the thread.
     """
-    from db.ops import find_open_approval_for_task
-
-    async with async_session() as session:
-        row = await find_open_approval_for_task(session, task_id)
-    if row is None:
-        return None
-    return InterruptRequest(
-        id=row.interrupt_id or row.id,
-        question=row.question,
-        kind=row.kind,  # type: ignore[arg-type]
-        tool=row.tool,
-        args_json=row.args_json,
-        approval_id=row.id,
-    )
+    return str(uuid5(NAMESPACE_URL, f"jarvis-turn:{task_id}"))
 
 
 async def _run_agent_task(
@@ -123,7 +108,7 @@ async def _run_agent_task(
         # the project lookup, and the turn's memory+skill retrieval are
         # independent of each other, so they run concurrently instead of
         # stacking their latencies.
-        user_msg_id = str(uuid4())
+        user_msg_id = user_message_id(task_id)
         # Jarvis-style: prefer InvocationContext infra refs over globals
         if ctx is not None and ctx.store is not None:
             store = ctx.store
@@ -162,76 +147,29 @@ async def _run_agent_task(
             "callbacks": callbacks,
         }
         # Reset the per-conversation plan at the start of each new turn. Todos
-        # live in the checkpointer keyed by thread_id, so without this a plan
+        # live in the thread's state, so without this a plan
         # written on an earlier turn lingers — often frozen at 0/N when that run
         # errored before advancing it — and renders on every later message and
-        # in the activity sidebar. Passing todos=[] overwrites the LastValue
-        # channel (correctness on reload); the explicit event clears live
-        # subscribers immediately, since a channel write alone dispatches none.
-        # The explicit id matches the prefetch_retrieval key above — add_messages
-        # preserves provided ids, so the graph's retrieval-cache lookup hits the
-        # task started before the gate resolved.
+        # in the activity sidebar. Passing todos=[] clears the stored list
+        # (correctness on reload); the explicit event clears live subscribers
+        # immediately, since the write alone dispatches none.
+        # The explicit id matches the prefetch_retrieval key above, so the
+        # loop's retrieval-cache lookup hits the task already in flight.
         stream_input: Any = {"messages": [HumanMessage(content=content, id=user_msg_id)], "todos": []}
         emit_event(state, "todos_updated", todos=[], source="main")
 
-        # Restart-resume. A job re-claimed after the server died may belong to a
-        # run that was suspended on an interrupt. Re-sending the prompt would
-        # discard the checkpointed pause and replay the whole turn; the durable
-        # approval row is what lets us tell the difference, and it still holds
-        # the question the in-memory copy lost. Re-await the answer instead,
-        # then continue with Command(resume=...) exactly as the live path does.
-        pending = await _pending_approval_for(task_id)
-        if pending is not None:
-            state.set_interrupt(pending)
-            emit_event(
-                state, "interrupt",
-                interrupt_id=pending.id, question=pending.question,
-            )
-            state.resume_future = asyncio.get_running_loop().create_future()
-            try:
-                stream_input = Command(resume=await state.resume_future)
-            except asyncio.CancelledError:
-                state.cancelled = True
-                stream_input = None
-            finally:
-                state.resume_future = None
-                state.clear_interrupt()
-
-        while True:
-            if stream_input is None:
-                break
-            interrupted = False
-            async for raw_chunk in agent.astream(  # type: ignore[call-overload]
-                stream_input,
-                config=config,
-                stream_mode=STREAM_MODES,
-                subgraphs=True,
-            ):
-                chunk: StreamChunk = raw_chunk  # type: ignore[assignment]
+        async with aclosing(agent.astream(
+            stream_input, config=config, stream_mode=STREAM_MODES, subgraphs=True,
+        )) as stream:
+            async for raw_chunk in stream:
+                chunk: StreamChunk = raw_chunk
                 if state.cancelled:
                     break
-                interrupted = await _process_chunk(
+                await _process_chunk(
                     chunk, state, coalescer, accumulated,
                     task_id=task_id, conv_id=conv_id,
                     step_seq_ref=step_seq_ref, persist_steps=True,
                 )
-                if interrupted:
-                    break
-
-            if not interrupted or state.cancelled:
-                break
-
-            state.resume_future = asyncio.get_running_loop().create_future()
-            try:
-                answer = await state.resume_future
-            except asyncio.CancelledError:
-                state.cancelled = True
-                break
-            finally:
-                state.resume_future = None
-                state.clear_interrupt()
-
-            stream_input = Command(resume=answer)
 
         coalescer.flush_all()
         final_message = "".join(accumulated)
@@ -274,7 +212,7 @@ async def _run_agent_task(
         status = "stopped"
         emit_event(state, "stopped", message=final_message, conversation_id=conv_id)
 
-    except GraphRecursionError:
+    except RecursionLimitReached:
         coalescer.flush_all()
         final_message = "".join(accumulated) or "(agent reached iteration limit)"
         status = "done"
@@ -310,8 +248,8 @@ async def _run_agent_task(
 # ── Mid-run message queue ────────────────────────────────────────────────────
 #
 # A message typed while a run is in flight is not a second run: two runs on one
-# `thread_id` race the checkpointer. It is queued instead, and the agent's
-# model_request node drains it just before its next LLM call
+# `thread_id` would interleave their writes to one thread. It is queued instead,
+# and the agent's model step drains it just before its next LLM call
 # (core/agents.py:_drain_queued_input).
 #
 # Two carriers, on purpose. `TaskState.pending_input` is the fast path the
@@ -412,7 +350,7 @@ async def route_to_live_run(
     the conversation is idle and the caller should start a turn as usual. This
     is the single rule every surface goes through, because starting a second
     turn here is not a heavier version of the same thing — both runs share the
-    conversation's LangGraph `thread_id` and race the checkpointer.
+    conversation's thread and would interleave their writes to it.
 
     Raises when a run is up but this message cannot join it: attachments (a
     queued row has to be replayable from the DB alone, and it stores attachment
@@ -505,10 +443,9 @@ async def chat_job_handler(job: Job) -> None:
     Payload: ``{"query": str, "model": str, "conv_id": str,
                 "attachments": list[dict] | None}``.
 
-    On restart the LangGraph checkpointer (keyed by ``conv_id`` thread_id)
-    resumes the agent from the last persisted node boundary, so a job that
-    crashed mid-run picks up roughly where it left off rather than restarting
-    from the user's original prompt.
+    On restart the thread (``conv_id``) holds every message the crashed run
+    wrote, so the re-claimed job continues from there: its prompt replaces
+    itself in place (``user_message_id``) and the model sees the work so far.
     """
     payload = job.payload
     task_id = job.id
