@@ -105,11 +105,15 @@ class DbThread(Thread):
                 try:
                     converted = await import_checkpoint(session, checkpointer, thread_id)
                 except Exception as exc:
-                    # A checkpoint that won't convert must not take the thread
-                    # down with it: the run starts it fresh, and says so.
-                    logger.warning("could not convert checkpoint thread %s: %s", thread_id, exc)
+                    # Either the batch conversion wrote it first (the unique
+                    # keys refused this copy), or the checkpoint won't convert
+                    # — which must not take the thread down with it: the run
+                    # starts it fresh, and says so.
                     await session.rollback()
-                    converted = False
+                    converted = True
+                    if not (await load_thread(session, thread_id)).exists:
+                        logger.warning("could not convert checkpoint thread %s: %s", thread_id, exc)
+                        converted = False
                 if converted:
                     thread = await load_thread(session, thread_id)
         return cls(thread_id, thread.messages, thread.todos)

@@ -148,6 +148,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except Exception as exc:
                 logger.warning("incognito sweep failed: %s", exc)
 
+        # Move what is left of LangGraph's threads into the transcript tables,
+        # as a job: the maintenance worker runs it once the server is up.
+        try:
+            from core.scheduler import enqueue_checkpoint_conversion
+
+            await enqueue_checkpoint_conversion()
+        except Exception as exc:
+            logger.warning("could not queue the checkpoint conversion: %s", exc)
+
         # ── MCP (MCP toolset) ─────────────────────────────────
         # Warm up MCP client so tools are cached before first agent build.
         # Merge env + file + DB (DB wins) so runtime-added servers are active on boot.
