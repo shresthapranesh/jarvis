@@ -4,6 +4,7 @@
 //! GraphQL operations it has been taught, and proxies everything else to the
 //! Python server behind it. See `edge/README.md`.
 
+mod bots;
 mod catalog;
 mod checkpoints;
 mod config;
@@ -147,11 +148,18 @@ async fn main() {
         config.worker.take(),
         config.backend.clone(),
         config.backend_port().to_string(),
-        pool,
+        pool.clone(),
         runs.clone(),
         http.clone(),
     );
     tokio::spawn(supervisor.clone().run());
+    bots::spawn(
+        pool.clone(),
+        runs.clone(),
+        supervisor.clone(),
+        config.documents_dir.clone(),
+        config.backend.clone(),
+    );
     let owned = gql::owned_root_fields(&schema);
 
     let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
