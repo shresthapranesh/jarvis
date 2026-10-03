@@ -14,7 +14,13 @@ Artifacts (row + `.md` under `artifacts_dir`, plus `ArtifactVersion` files) and 
 - On-disk bytes: add a `*_dir` field to `core/config.py:AppConfig` and write `{dir}/{id}{ext}`.
 - Extend `ops.delete_conversation`: collect file paths **before** the cascade, unlink after commit. It also calls `adelete_thread` on the checkpointer.
 
-Todos live in the LangGraph checkpointer, not here.
+Todos live in the LangGraph checkpointer, not here — until runs move onto the transcript tables below.
+
+## Transcript tables (`core/transcript_store.py`)
+`thread_messages` (one v1 transcript record per message, `seq`-ordered; `evicted_at` = compacted away, kept), `thread_state` (todos), `transcript_blobs` (media bytes, once per sha256), `kv_store` (what the LangGraph store held). They replace `checkpoints.db`; the agent loop doesn't use them yet.
+- Write through `apply_messages` — it merges like LangGraph's `add_messages` (same id replaces in place, `RemoveMessage` evicts), checked against it in `tests/test_transcript_store.py`.
+- `thread_id` has no FK (automation threads aren't conversations); `delete_conversation` calls `delete_thread`, which also drops blobs no other thread uses.
+- `import_checkpoint` / `import_store` convert LangGraph's data once per thread.
 
 ## Two SQLite files (`~/.jarvis/`)
 - `database.db` — app state; PRAGMAs set per connection in `engine.py:_set_sqlite_pragmas`. `DATABASE_URL` overrides the path.
