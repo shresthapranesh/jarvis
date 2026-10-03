@@ -14,6 +14,7 @@ mod gql;
 mod graphql;
 mod jobs;
 mod link;
+mod llm;
 mod proxy;
 mod pyjson;
 mod runs;
@@ -75,6 +76,15 @@ async fn main() {
     if std::env::args().any(|a| a == "--cron-next") {
         cron_next();
         return;
+    }
+
+    // The LLM parity tests drive the model layer through these: one request
+    // as JSON on stdin (`llm::cli`).
+    for (flag, call) in [("--llm-shape", false), ("--llm-call", true)] {
+        if std::env::args().any(|a| a == flag) {
+            llm::cli(call).await;
+            return;
+        }
     }
 
     let level = std::env::var("JARVIS_EDGE_LOG")

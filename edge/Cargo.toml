@@ -16,6 +16,8 @@ async-graphql-axum = "7"
 axum = { version = "0.8", features = ["ws"] }
 async-stream = "0.3"
 base64 = "0.22"
+# The chunks of a streamed model reply (`llm/lines.rs`).
+bytes = "1"
 # Timestamps for rows the edge writes, in SQLAlchemy's stored format.
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 # Cron schedules run in the user's zone, DST included (`cron.rs`).
