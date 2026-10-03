@@ -33,6 +33,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import message_chunk_to_message
 
+from core.compaction import apply_per_call_compaction
 from core.context_cache import CacheSegment
 from core.model_catalog import ModelSpec, honors_cache_control
 from core.runner import RunnerConfig
@@ -171,8 +172,26 @@ def _responses_thread() -> list:
     return [decode(r) for r in records]
 
 
+def _long_loop() -> list:
+    """Enough turns for per-call compaction to bite: eight tool rounds, then
+    four plain exchanges. The oldest four groups collapse to stubs; the long
+    results of the other four are clipped."""
+    out: list = [HumanMessage("Crunch the numbers.", id="u1")]
+    for i in range(8):
+        cid = f"r{i}"
+        out.append(_gemini_ai("", [(cid, "run_cell", {"code": f"step({i})"}, f"c2lnLXI{i}")]))
+        # Non-ASCII, so a byte count and a character count disagree.
+        output = "ok" if i == 5 else f"{i}: " + "é…x" * 1000
+        out.append(ToolMessage(content=output, tool_call_id=cid, name="run_cell"))
+    for i in range(4):
+        out.append(_gemini_ai(f"Summary {i}.", []))
+        out.append(HumanMessage(f"More {i}?", id=f"m{i}"))
+    return out
+
+
 HISTORIES = {
     "chat": _chat, "tool_loop": _tool_loop, "foreign_calls": _foreign_calls, "responses_thread": _responses_thread,
+    "long_loop": _long_loop,
 }
 
 
@@ -378,7 +397,7 @@ def _edge(edge_binary: Path, flag: str, tmp_path: Path, payload: dict, provider:
 
 
 def _python_prompt(history: list, *, cache: bool, provider: str, segments=SEGMENTS) -> list:
-    shaped = repair_orphan_tool_calls(strip_historical_thinking(history))
+    shaped = repair_orphan_tool_calls(strip_historical_thinking(apply_per_call_compaction(history)))
     cacheable = [s for s in segments if s.cacheable]
     volatile = "\n\n".join([s.content for s in segments if not s.cacheable] + [VOLATILE])
     return build_llm_messages(
@@ -508,6 +527,32 @@ def test_shaping_without_segments(edge_binary, tmp_path):
                                               segments=[]))
     [got] = _edge(edge_binary, "--llm-shape", tmp_path,
                   _edge_input("ollama:m", records, blobs, cache=False, segments=[]))
+    assert got == expected
+
+
+def test_long_loop_is_compacted(edge_binary, tmp_path):
+    """The parity above is only worth something if compaction fired."""
+    records, blobs = _records(_long_loop())
+    [got] = _edge(edge_binary, "--llm-shape", tmp_path, _edge_input("ollama:m", records, blobs, cache=False))
+    texts = [m["content"] for m in got["messages"] if isinstance(m["content"], str)]
+    assert sum(t.startswith("[Previous tool activity: run_cell => run_cell: 0: é…x") for t in texts[:2]) == 1
+    assert sum("chars of stale tool output elided" in t for t in texts) == 3
+
+
+def test_stub_leaves_a_result_without_text_unquoted(edge_binary, tmp_path):
+    """Intended: a collapsed result with no text isn't quoted. Python quotes
+    the repr of its content — a truncated data URL the model pays for."""
+    image = [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}}]
+    history: list = [HumanMessage("Look.", id="u1")]
+    for i in range(8):
+        history.append(_gemini_ai("", [(f"i{i}", "run_cell", {"code": "show()"}, None)]))
+        history.append(ToolMessage(content=image, tool_call_id=f"i{i}", name="run_cell"))
+    records, blobs = _records(history)
+    expected = _neutral_python(_python_prompt(_python_history(records, blobs), cache=False, provider="ollama"))
+    [got] = _edge(edge_binary, "--llm-shape", tmp_path, _edge_input("ollama:m", records, blobs, cache=False))
+    for m in expected["messages"][1:5]:
+        assert m["content"].startswith("[Previous tool activity: run_cell => run_cell: [{'type': 'image_url'")
+        m["content"] = "[Previous tool activity: run_cell => run_cell]"
     assert got == expected
 
 
