@@ -157,6 +157,12 @@ pub fn checkpoint_timestamp(id: &str) -> Option<f64> {
     Some((ticks as f64 - UUID_EPOCH_100NS as f64) / 1e7)
 }
 
+/// A `thread_state.todos` value (JSON), normalised the same way.
+pub fn todos_from_json(raw: &str) -> Result<Vec<Todo>, Unreadable> {
+    let value: Value = serde_json::from_str(raw).map_err(|e| Unreadable(e.to_string()))?;
+    normalise_todos(Some(&json_to_mp(&value)))
+}
+
 fn get<'a>(map: &'a Mp, key: &str) -> Option<&'a Mp> {
     map.as_map()?.iter().find(|(k, _)| k.as_str() == Some(key)).map(|(_, v)| v)
 }

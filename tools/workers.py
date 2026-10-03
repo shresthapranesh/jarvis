@@ -84,8 +84,8 @@ class _TokenTail:
 def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
     """Build a `spawn_workers` tool bound to one agent's worker factories.
 
-    `role_factories` maps role name → zero-arg callable returning a fresh
-    compiled worker graph (closing over that agent's LLM and tool subset).
+    `role_factories` maps role name → zero-arg callable returning the worker
+    `Agent` for that role (closing over that agent's LLM and tool subset).
     """
 
     @tool
@@ -123,9 +123,10 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
                 prompt = spec["task"]
                 if ctx := spec.get("context"):
                     prompt = f"Context: {ctx}\n\nTask: {prompt}"
+                from core.agent_loop import Thread
                 from core.log_callback import AgentLogger
-                # Workers need a generous recursion budget — the langgraph default
-                # of 25 is half a dozen tool round-trips, often not enough for a
+                # Workers need a generous step budget — the default of 25 is
+                # half a dozen tool round-trips, often not enough for a
                 # multi-step subtask. Keep it lower than the main agent (100) so a
                 # runaway worker doesn't dominate.
                 configurable: dict[str, Any] = {"kernel_key": worker_key}
@@ -141,7 +142,8 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
                 # `messages` gives LLM tokens (→ coalesced worker_token), and
                 # `custom` catches events the worker's own tools emit (e.g.
                 # write_artifact) — re-dispatched upward through the parent's
-                # sink, which they'd otherwise never reach.
+                # sink, which they'd otherwise never reach. The worker's history
+                # is its own and in memory: it ends with the call.
                 from core.streaming import _extract_step_data
                 tail = _TokenTail(tctx.emit, idx)
                 final_msg: Any = None
@@ -149,6 +151,7 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
                     {"messages": [{"role": "user", "content": prompt}]},
                     config=worker_config,
                     stream_mode=["updates", "messages", "custom"],
+                    thread=Thread(),
                 ):
                     if mode == "messages":
                         token, _meta = chunk
@@ -163,18 +166,13 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
                             if not node_name or node_name.startswith("__"):
                                 continue
                             tail.flush()
-                            # Worker graphs name their model node "agent"; normalise
-                            # to "model_request" so the step extractor and the
-                            # frontend's describeStep() treat worker steps exactly
-                            # like main-agent ones.
-                            step_node = "model_request" if node_name == "agent" else node_name
                             data_dict = node_data if isinstance(node_data, dict) else {}
                             tctx.emit(
                                 "worker_step",
-                                idx=idx, role=role, node=step_node,
-                                data=_extract_step_data(step_node, data_dict),
+                                idx=idx, role=role, node=node_name,
+                                data=_extract_step_data(node_name, data_dict),
                             )
-                            if node_name == "agent" and (msgs := data_dict.get("messages")):
+                            if node_name == "model_request" and (msgs := data_dict.get("messages")):
                                 final_msg = msgs[-1]
                 tail.flush()
                 raw_content = getattr(final_msg, "content", "") if final_msg is not None else ""

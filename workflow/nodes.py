@@ -140,10 +140,11 @@ async def _run_agent_text(
     """Run the full agent loop on ``prompt``, streaming main-agent tokens as
     ``node_token`` events, and return the accumulated final text.
 
-    Shared by AgentNode and RefineNode. Each call uses a fresh checkpointer
-    thread so independent invocations never share history; history hygiene is
-    handled inside ``build_agent``'s model node.
+    Shared by AgentNode and RefineNode. Each call has its own in-memory thread,
+    so independent invocations never share history (and leave no rows);
+    history hygiene is handled inside ``build_agent``'s model step.
     """
+    from core.agent_loop import Thread
     from core.runner import build_callbacks
     from core.state import get_async_checkpointer, get_store
     from langchain_core.runnables import RunnableConfig
@@ -169,6 +170,7 @@ async def _run_agent_text(
         config=run_config,
         stream_mode=STREAM_MODES,
         subgraphs=True,
+        thread=Thread(),
     ):
         ns, mode, data = raw_chunk
         if mode != "messages":

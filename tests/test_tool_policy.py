@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from langgraph.graph import MessagesState
 
 
 @pytest.fixture(autouse=True)
@@ -211,20 +210,29 @@ async def test_open_gate_holds_the_kernel_cell(database):
     assert await has_open_gate("conv-1") is False
 
 
-# ── The gated tool node ──────────────────────────────────────────────────────
+# ── The gate in the agent loop ───────────────────────────────────────────────
 
-async def _ai_message(calls):
+def _one_call_agent(tool, call):
+    """An agent whose model asks for `call` once, then stops."""
     from langchain_core.messages import AIMessage
 
-    return AIMessage(content="", tool_calls=calls)
+    from core.agent_loop import Agent
+    from core.tool_gate_node import make_tool_gate
+
+    async def step(run):
+        if any(isinstance(m, AIMessage) for m in run.thread.messages):
+            return [AIMessage(content="ok")]
+        return [AIMessage(content="", tool_calls=[call])]
+
+    return Agent("test", step, [tool], gate=make_tool_gate([tool]))
 
 
 async def test_denied_call_is_answered_and_never_executed(database):
     from langchain_core.messages import ToolMessage
     from langchain_core.tools import tool
 
+    from core.agent_loop import Thread
     from core.approvals import resolve
-    from core.tool_gate_node import make_gated_tool_node
     from core.tool_policy import set_tool_policy
     from db import async_session
 
@@ -239,12 +247,11 @@ async def test_denied_call_is_answered_and_never_executed(database):
     async with async_session() as session:
         await set_tool_policy(session, "bound:dangerous", approval=True)
 
-    node = make_gated_tool_node([dangerous])
     call = {"name": "dangerous", "args": {"target": "prod"}, "id": "call-1", "type": "tool_call"}
-    state = {"messages": [await _ai_message([call])]}
-
-    task = asyncio.create_task(node(state))
-    # The row appears once the node blocks; answer it the way a human would.
+    agent = _one_call_agent(dangerous, call)
+    thread = Thread()
+    task = asyncio.create_task(agent.ainvoke({"messages": [("user", "go")]}, thread=thread))
+    # The row appears once the loop blocks; answer it the way a human would.
     row = None
     for _ in range(50):
         await asyncio.sleep(0.05)
@@ -259,26 +266,23 @@ async def test_denied_call_is_answered_and_never_executed(database):
     async with async_session() as session:
         await resolve(session, row.id, "deny")
 
-    result = await asyncio.wait_for(task, timeout=10)
+    await asyncio.wait_for(task, timeout=10)
     assert ran == [], "a denied tool must not run"
-    messages = result["messages"] if isinstance(result, dict) else []
-    assert len(messages) == 1
-    answer = messages[0]
-    assert isinstance(answer, ToolMessage)
+    answers = [m for m in thread.messages if isinstance(m, ToolMessage)]
+    assert len(answers) == 1
+    answer = answers[0]
     # The pairing matters more than the text: an unanswered tool_use is what
     # breaks the *next* provider call.
     assert answer.tool_call_id == "call-1"
+    assert answer.status == "error"
     assert "Denied by a human" in answer.content
 
 
 async def test_ungated_calls_pass_straight_through(database):
-    """Driven through a compiled graph, not by calling the node directly:
-    `ToolNode` resolves injected arguments from the LangGraph runtime, so a
-    bare call would test a harness that does not exist in production."""
+    from langchain_core.messages import ToolMessage
     from langchain_core.tools import tool
-    from langgraph.graph import END, START, StateGraph
 
-    from core.tool_gate_node import make_gated_tool_node
+    from core.agent_loop import Thread
 
     @tool
     async def harmless(value: str) -> str:
@@ -286,21 +290,9 @@ async def test_ungated_calls_pass_straight_through(database):
         return f"got {value}"
 
     call = {"name": "harmless", "args": {"value": "x"}, "id": "call-2", "type": "tool_call"}
-
-    async def model(_state: MessagesState) -> dict:
-        return {"messages": [await _ai_message([call])]}
-
-    # Same suppressions core/agents.py carries: pyrefly does not model
-    # langgraph's StateT bound or its node-callable union.
-    graph = StateGraph(MessagesState)  # type: ignore[type-var]
-    graph.add_node("model", model)  # type: ignore[bad-argument-type]
-    graph.add_node("tools", make_gated_tool_node([harmless]))  # type: ignore[bad-argument-type]
-    graph.add_edge(START, "model")
-    graph.add_edge("model", "tools")
-    graph.add_edge("tools", END)
-
-    out = await graph.compile().ainvoke({"messages": []})
-    assert out["messages"][-1].content == "got x"
+    out = await _one_call_agent(harmless, call).ainvoke({"messages": [("user", "go")]}, thread=Thread())
+    results = [m for m in out["messages"] if isinstance(m, ToolMessage)]
+    assert [r.content for r in results] == ["got x"]
 
 
 # ── Reaching the conversation, not just the inbox ────────────────────────────

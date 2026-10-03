@@ -1,33 +1,28 @@
-"""The agent-graph half of per-tool approval.
+"""The agent-loop half of per-tool approval.
 
-Gating happens at the **graph node**, not by wrapping each tool, because the
-bound tools are not uniform: `write_todos`/`set_todo_status` take
-`InjectedToolCallId`/`InjectedState` and return `Command` state deltas, so a
-wrapper that re-declares their schema would either drop the injection or break
-the reducer write. The tool objects stay exactly as they are; what changes is
-who is allowed to reach `ToolNode`.
+Gating happens in the loop, between the model's reply and the tool batch, not
+by wrapping each tool: a wrapper would have to re-declare every tool's schema,
+and the tool objects stay exactly as they are this way. What changes is which
+calls are allowed to reach them.
 
-The node replaces `ToolNode` in the graph and, per tool call:
+Per tool call:
 
-* not gated → forwarded to the real `ToolNode` untouched;
+* not gated → runs;
 * gated → blocks on `core/tool_gate.await_tool_approval` until a human answers;
 * denied → answered with a `ToolMessage` saying so, and never executed.
 
-The AI message in history keeps **all** of its tool calls; only the copy handed
-to `ToolNode` is narrowed to the approved ones. That asymmetry is deliberate —
-every `tool_use` still gets exactly one `tool_result`, so a denial cannot leave
-the orphan pairing that Anthropic and Bedrock reject on the next call.
+The AI message in history keeps **all** of its tool calls; a denied call gets
+its denial as its result. Every `tool_use` still gets exactly one
+`tool_result`, so a denial cannot leave the orphan pairing that Anthropic and
+Bedrock reject on the next call.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
-from langgraph.prebuilt import ToolNode
-from langgraph.types import Command
+from langchain_core.messages import ToolMessage
 
 from core.tool_gate import await_tool_approval, denial_message, live_task_id
 from core.tool_policy import bound_key, mcp_key, needs_approval
@@ -61,38 +56,30 @@ def tool_key_for(name: str, owners: dict[str, str] | None = None) -> str:
     return mcp_key(server, name) if server else bound_key(name)
 
 
-def make_gated_tool_node(tools: list[Any]):
-    """A drop-in replacement for `ToolNode(tools)` that honors tool policy."""
-    inner = ToolNode(tools)
-    gated_names = {getattr(t, "name", "") for t in tools}
+def make_tool_gate(tools: list[Any]):
+    """The gate for an agent bound to `tools` (`core/agent_loop.ToolGate`)."""
+    bound = {getattr(t, "name", "") for t in tools}
 
-    async def gated_tools(state: dict, config: Optional[RunnableConfig] = None) -> Any:
-        messages = list(state.get("messages") or [])
-        last = messages[-1] if messages else None
-        calls = list(getattr(last, "tool_calls", None) or [])
-        if not isinstance(last, AIMessage) or not calls:
-            return await inner.ainvoke(state, config)
-
+    async def gate(run: Any, calls: list[dict[str, Any]]) -> dict[str, ToolMessage]:
         owners = _mcp_owner_map()
         # Resolved once per batch: a policy flip mid-batch would otherwise let
         # two calls in the same AI message disagree about the rules.
-        wanted = [
-            (call, tool_key_for(call.get("name", ""), owners))
+        gated = [
+            (call, key)
             for call in calls
-            if call.get("name") in gated_names
+            if call.get("name") in bound
+            and needs_approval(key := tool_key_for(call.get("name", ""), owners))
         ]
-        gate_list = [(call, key) for call, key in wanted if needs_approval(key)]
-        if not gate_list:
-            return await inner.ainvoke(state, config)
+        if not gated:
+            return {}
 
         from tools.context import current_ctx
 
         ctx = current_ctx()
         task_id = live_task_id(ctx.conversation_id)
 
-        denied: list[ToolMessage] = []
-        approved_ids: set[Any] = {call.get("id") for call in calls}
-        for call, key in gate_list:
+        denied: dict[str, ToolMessage] = {}
+        for call, key in gated:
             name = call.get("name", "")
             ok, answer = await await_tool_approval(
                 tool_key=key,
@@ -102,46 +89,12 @@ def make_gated_tool_node(tools: list[Any]):
                 task_id=task_id,
             )
             if not ok:
-                approved_ids.discard(call.get("id"))
-                denied.append(
-                    ToolMessage(
-                        denial_message(name, answer),
-                        tool_call_id=call.get("id") or "",
-                        name=name,
-                        status="error",
-                    )
+                denied[call.get("id") or ""] = ToolMessage(
+                    denial_message(name, answer),
+                    tool_call_id=call.get("id") or "",
+                    name=name,
+                    status="error",
                 )
+        return denied
 
-        remaining = [c for c in calls if c.get("id") in approved_ids]
-        if not remaining:
-            # Nothing survived: skip ToolNode entirely rather than handing it an
-            # AI message with no tool calls, which it rejects.
-            return {"messages": denied}
-
-        narrowed = last.model_copy(update={"tool_calls": remaining})
-        result = await inner.ainvoke(
-            {**state, "messages": [*messages[:-1], narrowed]}, config
-        )
-        return _merge(result, denied)
-
-    return gated_tools
-
-
-def _merge(result: Any, denied: list[ToolMessage]) -> Any:
-    """Fold denial messages into whatever `ToolNode` returned.
-
-    `ToolNode` returns a state dict normally, but a *list of `Command`s* when
-    any tool returned one (`write_todos` does), so there is no single shape to
-    append to.
-    """
-    if not denied:
-        return result
-    if isinstance(result, list):
-        return [*result, Command(update={"messages": denied})]
-    if isinstance(result, Command):
-        return [result, Command(update={"messages": denied})]
-    if isinstance(result, dict):
-        merged = dict(result)
-        merged["messages"] = [*(merged.get("messages") or []), *denied]
-        return merged
-    return result
+    return gate

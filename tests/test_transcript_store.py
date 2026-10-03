@@ -25,6 +25,7 @@ from core.transcript_store import (
     import_checkpoint,
     import_store,
     load_thread,
+    merge_messages,
     set_todos,
 )
 
@@ -91,9 +92,11 @@ async def test_removing_an_unknown_message_writes_nothing(database):
 
 
 async def test_matches_add_messages(database):
-    """Random batches of appends, replacements and removals, folded by both."""
+    """Random batches of appends, replacements and removals, folded by all
+    three: LangGraph, the rows, and the in-memory merge."""
     rng = random.Random(7)
     expected: list[Any] = []
+    in_memory: list[Any] = []
     ids = [f"id{i}" for i in range(12)]
     for step in range(40):
         live = [m.id for m in expected]
@@ -111,10 +114,14 @@ async def test_matches_add_messages(database):
         except ValueError:
             with pytest.raises(ValueError):
                 await _apply("t", batch)
+            with pytest.raises(ValueError):
+                merge_messages(in_memory, batch)
             continue
         expected = folded
         await _apply("t", batch)
+        in_memory = merge_messages(in_memory, batch)
         assert await _history("t") == expected, f"step {step}: {batch}"
+        assert in_memory == expected, f"step {step}: {batch}"
 
 
 async def test_blobs_are_shared_and_cleaned_up(database, work_dir):

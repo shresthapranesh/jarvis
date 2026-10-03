@@ -1,15 +1,10 @@
 """Framework-agnostic tool execution context — the PORT.
 
-Tools call into this instead of reaching for LangGraph runtime primitives
-(``get_config``, ``get_stream_writer``, ``adispatch_custom_event``,
-``InjectedStore``/``InjectedState``, …) directly. A single adapter —
-``current_ctx()`` — reads the ambient LangGraph runtime and builds the
-context; it is the *only* place in the tools layer that imports LangGraph.
-
-To move the tools onto a different agent library, rewrite ``current_ctx()``
-(and add ports here for any new capability); the tool functions themselves
-stay framework-free. The module has no top-level LangGraph import on purpose
-— the dependency lives inside the one adapter function.
+Tools call into this for what they need from the run they're part of — its
+ids, the live event stream, the todo list — instead of reaching into the agent
+loop. ``current_ctx()`` builds the context from ``core.agent_loop.current_run()``
+and is the only place in the tools layer that knows how runs work; the tool
+functions themselves stay loop-free.
 """
 
 from __future__ import annotations
@@ -43,7 +38,7 @@ class MemoryStore(Protocol):
 
 
 def _no_input(_payload: Any) -> Any:
-    raise RuntimeError("request_input is unavailable outside an agent run.")
+    raise RuntimeError("a run cannot be suspended for input.")
 
 
 @dataclass(frozen=True)
@@ -53,8 +48,8 @@ class ToolContext:
     Attributes:
         conversation_id: DB conversation for this run, or None outside one
             (CLI / automation / workflow). Tools scope their work to it.
-        thread_id: LangGraph thread for this run (present even when there is
-            no conversation row).
+        thread_id: the run's thread (present even when there is no
+            conversation row).
         event_sink: where ``emit`` routes events; injected by ``current_ctx``.
     """
 
@@ -77,6 +72,9 @@ class ToolContext:
     ephemeral: bool = False
     event_sink: EventSink = field(default=_noop_sink, repr=False)
     store: MemoryStore | None = None
+    # The run's thread, for the todo tools (`todos` / `set_todos`); None
+    # outside a run.
+    thread: Any = field(default=None, repr=False)
     _request_input: Callable[[Any], Any] = field(default=_no_input, repr=False)
 
     @property
@@ -96,9 +94,8 @@ class ToolContext:
     def emit(self, event_type: str, **fields: Any) -> None:
         """Push a custom stream event to the live UI. No-op off-run.
 
-        Mirrors the old ``get_stream_writer()({"type": ..., ...})`` /
-        ``adispatch_custom_event`` calls — both land in the same ``custom``
-        stream handler keyed on ``type`` (see ``core/streaming.py``).
+        Lands in the run's ``custom`` stream, keyed on ``type`` (see
+        ``core/streaming.py``).
         """
         try:
             self.event_sink({"type": event_type, **fields})
@@ -106,67 +103,40 @@ class ToolContext:
             logger.debug("tool event emit failed (%s): %s", event_type, exc)
 
     def request_input(self, payload: Any) -> Any:
-        """Suspend for human input (HITL), returning the answer on resume.
-
-        Framework-agnostic wrapper over LangGraph's ``interrupt`` (wired by
-        ``current_ctx``): first call raises to pause the run; on resume it
-        returns the value the caller supplied. Used by the browser tool.
-        """
+        """Suspend for human input. No run can be suspended mid-tool (the
+        LangGraph interrupt is gone), so this raises — `request_tool_approval`
+        reads that as a denial. A gated tool asks through `core/tool_gate`."""
         return self._request_input(payload)
 
 
 def current_ctx() -> ToolContext:
-    """Build a ToolContext from the ambient LangGraph runtime.
+    """The ToolContext of the run this code is executing in.
 
-    THE adapter seam: the only function in the tools layer that touches
-    LangGraph runtime APIs. Reads conversation_id / thread_id from the run
-    config and wires the event sink to the stream writer. Safe to call
-    anywhere — degrades to an empty context (no ids, no-op sink) when no run
-    is active, so tools work in tests and non-streaming contexts too.
+    THE adapter seam: reads the ids from the run's config and wires the event
+    sink to the run's stream. Safe to call anywhere — degrades to an empty
+    context (no ids, no-op sink) outside a run, so tools work in tests and
+    non-streaming contexts too.
     """
-    from langgraph.config import get_config, get_store, get_stream_writer
-    from langgraph.types import interrupt
+    from core.agent_loop import current_run
 
-    conversation_id: Any = None
-    thread_id: Any = None
-    kernel_key: Any = None
-    message_id: Any = None
-    board_task_id: Any = None
-    project_id: Any = None
-    ephemeral: Any = False
-    try:
-        configurable = get_config().get("configurable") or {}
-        conversation_id = configurable.get("conversation_id")
-        thread_id = configurable.get("thread_id")
-        kernel_key = configurable.get("kernel_key")
-        message_id = configurable.get("message_id")
-        board_task_id = configurable.get("board_task_id")
-        project_id = configurable.get("project_id")
-        ephemeral = configurable.get("ephemeral", False)
-    except Exception:
-        pass
+    run = current_run()
+    if run is None:
+        return ToolContext()
+    configurable = run.configurable
 
-    sink: EventSink = _noop_sink
-    try:
-        sink = get_stream_writer()  # writer(payload) writes to the custom stream
-    except Exception:
-        pass
-
-    store: MemoryStore | None = None
-    try:
-        store = get_store()
-    except Exception:
-        pass
+    def _s(key: str) -> str | None:
+        value = configurable.get(key)
+        return str(value) if value else None
 
     return ToolContext(
-        conversation_id=str(conversation_id) if conversation_id else None,
-        thread_id=str(thread_id) if thread_id else None,
-        kernel_key=str(kernel_key) if kernel_key else None,
-        message_id=str(message_id) if message_id else None,
-        board_task_id=str(board_task_id) if board_task_id else None,
-        project_id=str(project_id) if project_id else None,
-        ephemeral=bool(ephemeral),
-        event_sink=sink,
-        store=store,
-        _request_input=interrupt,
+        conversation_id=_s("conversation_id"),
+        thread_id=_s("thread_id"),
+        kernel_key=_s("kernel_key"),
+        message_id=_s("message_id"),
+        board_task_id=_s("board_task_id"),
+        project_id=_s("project_id"),
+        ephemeral=bool(configurable.get("ephemeral", False)),
+        event_sink=run.custom,
+        store=run.store,
+        thread=run.thread,
     )

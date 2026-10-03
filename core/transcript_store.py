@@ -74,6 +74,45 @@ async def load_thread(session: AsyncSession, thread_id: str) -> Thread:
     )
 
 
+def prepare_messages(updates: Sequence[Any]) -> list[BaseMessage]:
+    """`updates` as messages — dicts converted, chunks completed — each with an id."""
+    incoming = [message_chunk_to_message(m) for m in convert_to_messages(list(updates))]
+    for m in incoming:
+        if m.id is None:
+            m.id = str(uuid.uuid4())
+    return incoming
+
+
+def merge_messages(current: Sequence[BaseMessage], updates: Sequence[Any]) -> list[BaseMessage]:
+    """`apply_messages` in memory: the live messages after `updates`.
+
+    The in-memory thread (a one-shot run) uses this as its whole store, and a
+    database thread uses it to keep its loaded copy equal to its rows.
+    """
+    incoming = prepare_messages(updates)
+    remove_all = max((i for i, m in enumerate(incoming)
+                      if isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES), default=None)
+    merged = list(current)
+    if remove_all is not None:
+        merged, incoming = [], incoming[remove_all + 1:]
+    by_id = {m.id: i for i, m in enumerate(merged)}
+    removed: set[str] = set()
+    for m in incoming:
+        assert m.id is not None
+        if m.id in by_id:
+            if isinstance(m, RemoveMessage):
+                removed.add(m.id)
+            else:
+                removed.discard(m.id)
+                merged[by_id[m.id]] = m
+        elif isinstance(m, RemoveMessage):
+            raise ValueError(f"Attempting to delete a message with an ID that doesn't exist ('{m.id}')")
+        else:
+            by_id[m.id] = len(merged)
+            merged.append(m)
+    return [m for m in merged if m.id not in removed]
+
+
 async def apply_messages(session: AsyncSession, thread_id: str, updates: Sequence[Any]) -> list[BaseMessage]:
     """Merge `updates` into the thread as `add_messages` would, and commit.
 
@@ -81,19 +120,8 @@ async def apply_messages(session: AsyncSession, thread_id: str, updates: Sequenc
     `ValueError` for a `RemoveMessage` naming no live message, as
     `add_messages` did — before writing anything.
     """
-    incoming = [message_chunk_to_message(m) for m in convert_to_messages(list(updates))]
-    for m in incoming:
-        if m.id is None:
-            m.id = str(uuid.uuid4())
+    incoming = prepare_messages(updates)
 
-    live = {
-        row.message_id: row
-        for row in (await session.execute(
-            select(ThreadMessage)
-            .where(ThreadMessage.thread_id == thread_id, ThreadMessage.evicted_at.is_(None))
-        )).scalars()
-        if row.message_id is not None
-    }
     remove_all = max((i for i, m in enumerate(incoming)
                       if isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES), default=None)
     now = _now()
@@ -103,8 +131,21 @@ async def apply_messages(session: AsyncSession, thread_id: str, updates: Sequenc
             .where(ThreadMessage.thread_id == thread_id, ThreadMessage.evicted_at.is_(None))
             .values(evicted_at=now)
         )
-        live = {}
+        live: dict[str, ThreadMessage] = {}
         incoming = incoming[remove_all + 1:]
+    else:
+        # Only the rows this update names: the agent loop writes a message at
+        # a time, and most writes are appends to a long thread.
+        named = {m.id for m in incoming}
+        live = {
+            row.message_id: row
+            for row in (await session.execute(
+                select(ThreadMessage)
+                .where(ThreadMessage.thread_id == thread_id, ThreadMessage.evicted_at.is_(None),
+                       ThreadMessage.message_id.in_(named))
+            )).scalars()
+            if row.message_id is not None
+        }
 
     pending: dict[str, BaseMessage] = {}  # id -> latest message for it in this batch (None-free)
     order: list[str] = []

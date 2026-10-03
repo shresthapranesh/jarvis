@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import strawberry
@@ -9,6 +10,7 @@ from strawberry import relay
 
 from core.schemas import _normalise_todos
 from core.state import get_async_checkpointer
+from db.models import ThreadState
 from db.ops import get_conversation_meta, list_conversations
 
 from ..types.conversation import Conversation
@@ -59,14 +61,19 @@ class ConversationQuery:
         return Conversation.from_db(row)
 
     @strawberry.field
-    async def todos(self, conversation_id: str) -> list[TodoItem]:
-        """Todos live in the LangGraph checkpointer, not the SQL DB."""
-        try:
-            cp = get_async_checkpointer()
-        except RuntimeError:
-            return []
-        snapshot = await cp.aget_tuple({"configurable": {"thread_id": conversation_id}})
-        if snapshot is None:
-            return []
-        raw = (snapshot.checkpoint or {}).get("channel_values", {}).get("todos", [])
+    async def todos(self, info: strawberry.Info, conversation_id: str) -> list[TodoItem]:
+        """The thread's todo list (`thread_state`). A thread no run has
+        touched since the move off LangGraph still has it in its checkpoint."""
+        state = await info.context["session"].get(ThreadState, conversation_id)
+        if state is not None:
+            raw = json.loads(state.todos) if state.todos else []
+        else:
+            try:
+                cp = get_async_checkpointer()
+            except RuntimeError:
+                return []
+            snapshot = await cp.aget_tuple({"configurable": {"thread_id": conversation_id}})
+            if snapshot is None:
+                return []
+            raw = (snapshot.checkpoint or {}).get("channel_values", {}).get("todos", [])
         return [TodoItem(text=t["text"], status=t["status"]) for t in _normalise_todos(raw)]

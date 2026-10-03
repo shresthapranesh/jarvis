@@ -116,6 +116,20 @@ async def test_todos(edge):
     data = await _assert_same(edge, query, {"conversationId": "c1"})
     assert [t["status"] for t in data["data"]["todos"]] == ["pending", "in_progress", "done", "pending"]
 
+    # Once a run has touched a thread its list is in `thread_state`, which
+    # wins over the checkpoint — an empty or cleared list included.
+    from core.transcript_store import set_todos
+    from db import async_session
+
+    async with async_session() as s:
+        await set_todos(s, "c1", [{"text": "new", "status": "done"}, "plain", {"text": 3}])
+        await set_todos(s, "c2", [])
+        await set_todos(s, "c3", None)
+    for thread in ("c1", "c2", "c3"):
+        data = await _assert_same(edge, query, {"conversationId": thread})
+    data = await _assert_same(edge, query, {"conversationId": "c1"})
+    assert [t["text"] for t in data["data"]["todos"]] == ["new", "plain", "3"]
+
 
 @contextlib.contextmanager
 def _fake_cdp():

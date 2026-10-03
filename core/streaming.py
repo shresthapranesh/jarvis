@@ -13,8 +13,6 @@ from typing import Any, TypeAlias
 from db import async_session
 from db.ops import add_step, add_steps, close_open_approvals, update_message_content, update_message_status, update_message_usage
 
-from langgraph.types import StreamMode
-
 from .doc_index import INLINE_THRESHOLD, embeddings_available, start_indexing
 from .document_extractor import MAX_CHARS, extract_raw_text, format_inline, is_tabular, is_text_tabular
 from .schemas import AttachmentIn
@@ -23,14 +21,11 @@ from .state import InterruptRequest, TaskState, emit_event
 
 logger = logging.getLogger(__name__)
 
-# LangGraph's astream(subgraphs=True) yields (namespace, mode, data) tuples,
-# but the type stubs don't expose this shape. We define it here so callers
-# can cast and downstream functions can accept a properly typed parameter.
+# What `Agent.astream(subgraphs=True)` yields (core/agent_loop.py) — the
+# shape LangGraph's astream had, so this module reads either.
 StreamChunk: TypeAlias = tuple[tuple[str, ...] | None, str, Any]
 
-# Typed constant for the stream_mode parameter — avoids pyrefly inferring
-# list[str] which doesn't match the Literal-based overload signatures.
-STREAM_MODES: Sequence[StreamMode] = ["updates", "messages", "custom"]
+STREAM_MODES: Sequence[str] = ["updates", "messages", "custom"]
 
 # Cap on the worker result text stored in a worker_done Step row. The live
 # event keeps the full result; only the persisted transcript copy is clipped.

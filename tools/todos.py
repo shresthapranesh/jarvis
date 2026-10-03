@@ -1,79 +1,44 @@
 """Todo list tools — let the agent track its own task list with per-item status.
 
-Event emission goes through the framework-agnostic ``ToolContext`` (``ctx.emit``).
-The remaining LangGraph types here — ``Command`` / ``InjectedState`` /
-``InjectedToolCallId`` — are the genuine state-mutation mechanism (a tool
-writing the shared ``todos`` reducer); they are the residual coupling a future
-framework swap must re-map (see ``tools/context.py``).
+The list belongs to the run's thread (`ToolContext.thread`, persisted as
+`thread_state.todos`); each change is also emitted live as `todos_updated`.
 """
 
-from typing import Annotated, Any, Literal
+from typing import Literal
 
-from langchain_core.messages import ToolMessage
-from langchain_core.tools import InjectedToolCallId, tool
-from langgraph.prebuilt import InjectedState
-from langgraph.types import Command
+from langchain_core.tools import tool
 
+from core.schemas import _normalise_todos
 from tools.context import current_ctx
 
 
-def _normalise(raw: Any) -> list[dict]:
-    if not raw or not isinstance(raw, list):
-        return []
-    out: list[dict] = []
-    for item in raw:
-        if isinstance(item, str):
-            out.append({"text": item, "status": "pending"})
-        elif isinstance(item, dict) and "text" in item:
-            status = item.get("status", "pending")
-            if status not in ("pending", "in_progress", "done"):
-                status = "pending"
-            out.append({"text": str(item["text"]), "status": status})
-    return out
-
-
 @tool
-async def write_todos(
-    todos: list[str],
-    tool_call_id: Annotated[str, InjectedToolCallId],
-) -> Command:
+async def write_todos(todos: list[str]) -> str:
     """Replace your entire task list. Plan multi-step work, then update as you go.
 
     Shown in your context every turn, and live to the user. New items start
     "pending" — use set_todo_status to advance. Empty list clears.
     """
-    items: list[dict] = [{"text": t, "status": "pending"} for t in todos]
-    current_ctx().emit("todos_updated", todos=items)
-    ack = f"Updated todo list ({len(items)} item{'s' if len(items) != 1 else ''})."
-    return Command(update={
-        "todos": items,
-        "messages": [ToolMessage(ack, tool_call_id=tool_call_id)],
-    })
+    ctx = current_ctx()
+    items = [{"text": t, "status": "pending"} for t in todos]
+    ctx.emit("todos_updated", todos=items)
+    if ctx.thread is not None:
+        await ctx.thread.set_todos(items)
+    return f"Updated todo list ({len(items)} item{'s' if len(items) != 1 else ''})."
 
 
 @tool
-async def set_todo_status(
-    index: int,
-    status: Literal["pending", "in_progress", "done"],
-    tool_call_id: Annotated[str, InjectedToolCallId],
-    state: Annotated[dict, InjectedState],
-) -> Command:
+async def set_todo_status(index: int, status: Literal["pending", "in_progress", "done"]) -> str:
     """Mark one todo pending/in_progress/done by its 0-based index.
 
     Indices come from the list shown in your context each turn.
     """
-    todos = _normalise(state.get("todos"))
+    ctx = current_ctx()
+    todos = _normalise_todos(ctx.thread.todos if ctx.thread is not None else [])
     if index < 0 or index >= len(todos):
-        return Command(update={
-            "messages": [ToolMessage(
-                f"Error: index {index} out of range (have {len(todos)} todos).",
-                tool_call_id=tool_call_id,
-            )],
-        })
+        return f"Error: index {index} out of range (have {len(todos)} todos)."
     todos[index] = {"text": todos[index]["text"], "status": status}
-    current_ctx().emit("todos_updated", todos=todos)
-    ack = f"Set todo {index} to {status!r}."
-    return Command(update={
-        "todos": todos,
-        "messages": [ToolMessage(ack, tool_call_id=tool_call_id)],
-    })
+    ctx.emit("todos_updated", todos=todos)
+    if ctx.thread is not None:
+        await ctx.thread.set_todos(todos)
+    return f"Set todo {index} to {status!r}."

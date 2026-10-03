@@ -3,12 +3,12 @@
   "messages": [
    {
     "content": "delegate",
-    "id": "<id2>",
+    "id": "<id1>",
     "type": "human"
    },
    {
     "content": "",
-    "id": "<run4>",
+    "id": "<run3>",
     "tool_calls": [
      {
       "args": {
@@ -31,7 +31,7 @@
    },
    {
     "content": "Task (writer): Summarise the thing\nThe worker's answer.",
-    "id": "<id5>",
+    "id": "<id4>",
     "name": "spawn_workers",
     "status": "success",
     "tool_call_id": "c1",
@@ -39,7 +39,7 @@
    },
    {
     "content": "Workers finished.",
-    "id": "<run6>",
+    "id": "<run5>",
     "type": "ai",
     "usage": {
      "input_tokens": 102,
@@ -74,22 +74,6 @@
       "idx": 1,
       "role": "writer",
       "task": "Summarise the thing"
-     }
-    ],
-    [
-     "token",
-     {
-      "source": "subagent",
-      "text": "The worker's answer."
-     }
-    ],
-    [
-     "step",
-     {
-      "data": "{\"raw\": \"{'messages': [AIMessage(content=\\\"The worker's answer.\\\", additional_kwargs={}, response_metadata={'finish_reason': 'STOP', 'model_name': 'scripted'}, id='<run1>', tool_calls=[], invalid_tool_calls=[], usage_metadata={'input_tokens': 101, 'output_tokens': 10, 'total_tokens': 111})]}\"}",
-      "node": "agent",
-      "source": "subagent",
-      "subagent": "tools"
      }
     ],
     [
@@ -160,7 +144,7 @@
       },
       {
        "content": "delegate",
-       "id": "<id2>",
+       "id": "<id1>",
        "type": "human"
       }
      ],
@@ -184,7 +168,7 @@
       },
       {
        "content": "Summarise the thing",
-       "id": "<id3>",
+       "id": "<id2>",
        "type": "human"
       }
      ],
@@ -208,12 +192,12 @@
       },
       {
        "content": "delegate",
-       "id": "<id2>",
+       "id": "<id1>",
        "type": "human"
       },
       {
        "content": "",
-       "id": "<run4>",
+       "id": "<run3>",
        "tool_calls": [
         {
          "args": {
@@ -236,7 +220,7 @@
       },
       {
        "content": "Task (writer): Summarise the thing\nThe worker's answer.",
-       "id": "<id5>",
+       "id": "<id4>",
        "name": "spawn_workers",
        "status": "success",
        "tool_call_id": "c1",
@@ -272,12 +256,6 @@
      "node": "worker_start",
      "source": "subagent",
      "subagent": "writer:1"
-    },
-    {
-     "data": "{\"raw\": \"{'messages': [AIMessage(content=\\\"The worker's answer.\\\", additional_kwargs={}, response_metadata={'finish_reason': 'STOP', 'model_name': 'scripted'}, id='<run1>', tool_calls=[], invalid_tool_calls=[], usage_metadata={'input_tokens': 101, 'output_tokens': 10, 'total_tokens': 111})]}\"}",
-     "node": "agent",
-     "source": "subagent",
-     "subagent": "tools"
     },
     {
      "data": "{\"text\": \"The worker's answer.\"}",

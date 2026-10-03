@@ -23,7 +23,7 @@ All run kinds (chat, automation, workflow, board, maintenance) share one pattern
 `running_tasks` lists `_tasks`; finished tasks linger ~5s.
 
 ### Mid-run message queue (`chat_runtime.py`)
-A message sent while a conversation has a run in flight is queued, not started (two runs on one thread race the checkpointer). Every surface goes through `route_to_live_run`; `startTask` returns the running task id with `queued: true`.
+A message sent while a conversation has a run in flight is queued, not started (two runs on one thread would interleave their writes to it). Every surface goes through `route_to_live_run`; `startTask` returns the running task id with `queued: true`.
 - Two carriers: `TaskState.pending_input` (fast path, drained synchronously in `model_request_node`) and a `messages` row with status `queued` (renders, survives restart).
 - Delivered messages get status `delivered` (not `done`) so the UI can lift them above the reply they landed in.
 - Clean finish with leftovers → `_redispatch_queued` starts the next turn. Stop/error/restart → rows stay `queued`; `_adopt_queued_messages` picks them up on the next run.
