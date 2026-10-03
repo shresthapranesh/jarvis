@@ -147,15 +147,7 @@ async def read_thread(thread_id: str) -> dict[str, Any]:
 
     async with async_session() as s:
         thread = await load_thread(s, thread_id)
-    if thread.exists:
-        return {"messages": thread.messages, "todos": thread.todos}
-    from core.state import get_async_checkpointer
-
-    tup = await get_async_checkpointer().aget_tuple(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-    )
-    values = (tup.checkpoint.get("channel_values") or {}) if tup else {}
-    return {"messages": list(values.get("messages") or []), "todos": values.get("todos")}
+    return {"messages": thread.messages, "todos": thread.todos}
 
 
 async def record(turns: list[Turn], *, full_calls: bool = True) -> dict[str, Any]:

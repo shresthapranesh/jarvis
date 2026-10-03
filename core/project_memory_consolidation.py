@@ -19,7 +19,7 @@ self-healing: if the agent appends at 10:59 and a merge pass clobbers it at
 compare-and-set on `Project.updated_at` is therefore a courtesy, not a
 correctness requirement.
 
-Watermarks live in the LangGraph store (mirroring memory_consolidation's
+Watermarks live in `kv_store` (mirroring memory_consolidation's
 `last_run_at`), so none of this needs a schema migration.
 """
 
@@ -29,7 +29,7 @@ import logging
 from datetime import datetime, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.store.sqlite.aio import AsyncSqliteStore
+from core.transcript_store import KvStore
 
 from core.text_dedupe import dedupe_against
 from db.engine import async_session
@@ -149,7 +149,7 @@ def _render_material(messages: list[dict]) -> tuple[str, datetime | None]:
     return "\n".join(lines), consumed_through
 
 
-async def _load_meta(store: AsyncSqliteStore, project_id: str) -> tuple[datetime | None, datetime | None]:
+async def _load_meta(store: KvStore, project_id: str) -> tuple[datetime | None, datetime | None]:
     """(messages_through, last_rewrite_at) — the project's two watermarks."""
     item = await store.aget(_META_NS, project_id)
     if item is None:
@@ -168,7 +168,7 @@ async def _load_meta(store: AsyncSqliteStore, project_id: str) -> tuple[datetime
 
 
 async def _save_meta(
-    store: AsyncSqliteStore,
+    store: KvStore,
     project_id: str,
     messages_through: datetime | None,
     last_rewrite_at: datetime | None,
@@ -218,7 +218,7 @@ async def _commit_memory(project_id: str, new_memory: str, seen_updated_at: date
 # ── one project ───────────────────────────────────────────────────────────────
 
 async def consolidate_project_memory(
-    store: AsyncSqliteStore,
+    store: KvStore,
     project_id: str,
     model_id: str | None = None,
     force: bool = False,
@@ -337,7 +337,7 @@ async def consolidate_project_memory(
 # ── the sweep ─────────────────────────────────────────────────────────────────
 
 async def consolidate_project_memories(
-    store: AsyncSqliteStore, model_id: str | None = None
+    store: KvStore, model_id: str | None = None
 ) -> str:
     """Consolidate every project that has gone quiet with new material.
 

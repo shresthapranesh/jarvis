@@ -25,7 +25,6 @@ def _reset_globals() -> None:
     set_runner(None)
     set_database(None)
     _process_default_config.cache_clear()
-    state._async_checkpointer = None
     state._store = None
     state._http_client = None
     state._queue = None
@@ -67,28 +66,22 @@ async def boot_jarvis() -> AsyncIterator[object]:
     tests drive job handlers directly so a run is synchronous and observable.
     """
     import httpx
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    from langgraph.store.sqlite.aio import AsyncSqliteStore
 
     from core import state
     from core.config import get_config
     from core.queue import SqliteJobQueue
     from core.runner import JarvisRunner, set_runner
+    from core.transcript_store import KvStore
     from db import close_db, get_database, init_db
 
     cfg = get_config()
     state._main_loop = asyncio.get_running_loop()  # _notify marshals onto this
     await init_db()
 
-    async with (
-        AsyncSqliteSaver.from_conn_string(cfg.checkpoints_db) as cp,
-        AsyncSqliteStore.from_conn_string(cfg.checkpoints_db) as store,
-        httpx.AsyncClient(timeout=30.0) as http,
-    ):
+    async with httpx.AsyncClient(timeout=30.0) as http:
         runner = JarvisRunner(
             config=cfg,
-            checkpointer=cp,
-            store=store,
+            store=KvStore(),
             queue=SqliteJobQueue(),
             http_client=http,
             db=get_database(),

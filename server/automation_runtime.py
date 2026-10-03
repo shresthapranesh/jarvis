@@ -42,7 +42,6 @@ from core.state import (
     TaskState,
     _tasks,
     emit_event,
-    get_async_checkpointer,
     get_http_client,
     get_store,
     log_task_created,
@@ -76,7 +75,7 @@ def _compute_next_run_at(auto: Automation) -> str | None:
 # ── Execution engines ───────────────────────────────────────────────────────
 
 async def _execute_prompt_type(
-    auto: Automation, state: TaskState, checkpointer, thread_id: str,
+    auto: Automation, state: TaskState, thread_id: str,
     invocation_context: InvocationContext | None = None,
     model_id: str | None = None,
 ) -> str:
@@ -85,7 +84,7 @@ async def _execute_prompt_type(
     callbacks = start_run_callbacks(state, "automation").handlers
     _store = invocation_context.store if invocation_context and invocation_context.store else get_store()
     model = model_id or await _resolve_model(auto)
-    agent = build_agent(model, checkpointer=checkpointer, store=_store, invocation_context=invocation_context)
+    agent = build_agent(model, store=_store, invocation_context=invocation_context)
 
     user_content = auto.prompt_text or ""
     if auto.input_type == "monitor":
@@ -336,7 +335,7 @@ async def _run_automation_inner(
 
         if auto.input_type in ("prompt", "monitor"):
             thread_id = conv_id or f"automation_{run_id}"
-            output = await _execute_prompt_type(auto, state, get_async_checkpointer(), thread_id, invocation_context=invocation_context, model_id=model_id)
+            output = await _execute_prompt_type(auto, state, thread_id, invocation_context=invocation_context, model_id=model_id)
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":

@@ -9,7 +9,7 @@ import strawberry
 from strawberry import relay
 
 from core.schemas import _normalise_todos
-from core.state import get_async_checkpointer
+from core.transcript_store import legacy_checkpointer
 from db.models import ThreadState
 from db.ops import get_conversation_meta, list_conversations
 
@@ -68,11 +68,10 @@ class ConversationQuery:
         if state is not None:
             raw = json.loads(state.todos) if state.todos else []
         else:
-            try:
-                cp = get_async_checkpointer()
-            except RuntimeError:
-                return []
-            snapshot = await cp.aget_tuple({"configurable": {"thread_id": conversation_id}})
+            async with legacy_checkpointer() as cp:
+                snapshot = None if cp is None else await cp.aget_tuple(
+                    {"configurable": {"thread_id": conversation_id}},
+                )
             if snapshot is None:
                 return []
             raw = (snapshot.checkpoint or {}).get("channel_values", {}).get("todos", [])

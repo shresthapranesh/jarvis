@@ -12,10 +12,9 @@ from datetime import datetime, timezone
 from typing import Literal
 
 import httpx
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.queue import JobQueue
+from core.transcript_store import KvStore
 
 
 TaskKind = Literal["chat", "automation", "workflow", "board_task"]
@@ -25,8 +24,7 @@ _task_log = logging.getLogger("jarvis.tasks")
 
 # ── Infrastructure globals (set by lifespan, read everywhere) ────────────────
 
-_async_checkpointer: AsyncSqliteSaver | None = None
-_store: AsyncSqliteStore | None = None
+_store: KvStore | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 _http_client: httpx.AsyncClient | None = None
 _queue: JobQueue | None = None
@@ -44,19 +42,13 @@ def _runner_resource(name: str):
     return None if runner is None else getattr(runner, name, None)
 
 
-def get_async_checkpointer() -> AsyncSqliteSaver:
-    """The active AsyncSqliteSaver — the runner's if installed, else the global."""
-    cp = _runner_resource("checkpointer") or _async_checkpointer
-    if cp is None:
-        raise RuntimeError("async checkpointer not initialized — server lifespan has not started")
-    return cp
-
-
-def get_store() -> AsyncSqliteStore:
-    """The active AsyncSqliteStore — the runner's if installed, else the global."""
+def get_store() -> KvStore:
+    """The key-value store (`kv_store`) — the runner's if installed, else the
+    global, else one over the default database."""
+    global _store
     store = _runner_resource("store") or _store
     if store is None:
-        raise RuntimeError("store not initialized — server lifespan has not started")
+        store = _store = KvStore()
     return store
 
 

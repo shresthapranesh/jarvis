@@ -358,7 +358,7 @@ export const tools = stylex.create({
   toggleInput: {cursor: {default: 'pointer', ':disabled': 'not-allowed'}},
 });
 
-/** Settings → Maintenance: the checkpoint stats block. */
+/** Settings → Maintenance: the stats block. */
 export const maint = stylex.create({
   stats: {display: 'flex', flexWrap: 'wrap', gap: 22, marginBlock: '10px 4px'},
   stat: {display: 'flex', flexDirection: 'column', gap: 2},
@@ -369,16 +369,6 @@ export const maint = stylex.create({
     color: colors.textDim,
   },
   dd: {margin: 0, fontSize: type.tBody, fontWeight: 600, color: colors.text},
-  sub: {display: 'block', fontSize: type.tMicro, fontWeight: 400, color: colors.textDim},
-  result: {
-    marginBlock: '10px 0',
-    paddingBlock: 8,
-    paddingInline: 10,
-    borderRadius: 2,
-    backgroundColor: colors.surface,
-    fontSize: type.tSmall,
-    color: colors.textDim,
-  },
 });
 
 /** The config-key row's dashed "add a new key" strip. */

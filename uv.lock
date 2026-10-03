@@ -1347,7 +1347,6 @@ dependencies = [
     { name = "httpx" },
     { name = "ipykernel" },
     { name = "jupyter-client" },
-    { name = "langchain" },
     { name = "langchain-anthropic" },
     { name = "langchain-aws" },
     { name = "langchain-google-genai" },
@@ -1355,9 +1354,7 @@ dependencies = [
     { name = "langchain-meta" },
     { name = "langchain-ollama" },
     { name = "langchain-openai" },
-    { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
-    { name = "langgraph-prebuilt" },
     { name = "mlx-whisper" },
     { name = "openpyxl" },
     { name = "piper-tts" },
@@ -1381,6 +1378,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "debugpy" },
+    { name = "langgraph" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -1397,7 +1395,6 @@ requires-dist = [
     { name = "httpx", specifier = "~=0.28" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "jupyter-client", specifier = ">=8.9.1" },
-    { name = "langchain", specifier = ">=1.3.14" },
     { name = "langchain-anthropic", specifier = ">=1.4.2" },
     { name = "langchain-aws", specifier = "~=1.4" },
     { name = "langchain-google-genai", specifier = "~=4.2" },
@@ -1405,9 +1402,7 @@ requires-dist = [
     { name = "langchain-meta", specifier = ">=0.5.0" },
     { name = "langchain-ollama", specifier = "~=1.1" },
     { name = "langchain-openai", specifier = "~=1.1" },
-    { name = "langgraph", specifier = ">=1.2.10" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.1" },
-    { name = "langgraph-prebuilt", specifier = ">=1.1.0" },
     { name = "mlx-whisper", specifier = "~=0.4" },
     { name = "openpyxl", specifier = "~=3.1" },
     { name = "piper-tts", specifier = "~=1.4" },
@@ -1431,6 +1426,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "debugpy", specifier = ">=1.8.20" },
+    { name = "langgraph", specifier = ">=1.2.10" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = "~=0.15" },
@@ -1610,20 +1606,6 @@ wheels = [
 ]
 
 [[package]]
-name = "langchain"
-version = "1.3.14"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "langchain-core" },
-    { name = "langgraph" },
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/29/68/a6dbad9c22df4087a0f9e79ddd46226c442b30128bfeee538d5889492a73/langchain-1.3.14.tar.gz", hash = "sha256:1b6696c72ba3bbbce54d745e0180742c9f6ece8bbc59ed5a46c3e20b9a435929", size = 645181, upload-time = "2026-07-16T13:28:18.29Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/ec/0f942e78a621f8e3162ff1ed24284f469aaf51fb4607ee5831c626f2b2bc/langchain-1.3.14-py3-none-any.whl", hash = "sha256:4d10dbe91005952cddd56d0dc77aa108964da6bae90ab20063653957e901f782", size = 139560, upload-time = "2026-07-16T13:28:16.498Z" },
-]
-
-[[package]]
 name = "langchain-anthropic"
 version = "1.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1759,7 +1741,7 @@ wheels = [
 
 [[package]]
 name = "langgraph"
-version = "1.2.10"
+version = "1.2.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
@@ -1769,9 +1751,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/1d/a32f3caf4b3d60651656c0d64976b48d168653e81c71bb7512e9a31541aa/langgraph-1.2.10.tar.gz", hash = "sha256:05a183a746ed570a06c7c1b879920163509a75df9e44e92dd2238218d677fd37", size = 723404, upload-time = "2026-07-28T18:33:51.441Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/7e/c9e4431adb5eb78d15f0035aae162a113c80d037ceb433ddd78835217848/langgraph-1.2.12.tar.gz", hash = "sha256:5fae9fa4ce771e90f10ff19ce0d5aaef4b41d7632c713d769e89cbce1241a4b9", size = 734541, upload-time = "2026-09-21T14:43:29.684Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/4d/3fc3e2535ee2c731130d71371848ebc6d4a9d2e8ae6060b11987ba134951/langgraph-1.2.10-py3-none-any.whl", hash = "sha256:52c48bd42fa31a1de0e1c0f0ebfe342e11ca2957b8b3563f83dbd60d8e30f921", size = 247753, upload-time = "2026-07-28T18:33:50.028Z" },
+    { url = "https://files.pythonhosted.org/packages/52/27/5a02054c535ed6fcfb2ab1e5c33c51c810cf1e773194ad28c928f0473509/langgraph-1.2.12-py3-none-any.whl", hash = "sha256:95403af7b510de8d79164742f71daaf866c69ca804a8cb72bef2cc1fa1ab9813", size = 250206, upload-time = "2026-09-21T14:43:28.196Z" },
 ]
 
 [[package]]
@@ -1816,7 +1798,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-sdk"
-version = "0.4.2"
+version = "0.4.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1825,9 +1807,9 @@ dependencies = [
     { name = "orjson" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/2b/bd8ac26d4e97f6df88ef05ce5b6a38945a3903e1025d926f4752aa88aa97/langgraph_sdk-0.4.2.tar.gz", hash = "sha256:b88f0f5f6328ac0680d6790614a905b2bcfa257f2276dba4e38f0e86db0aa738", size = 348327, upload-time = "2026-06-01T17:51:19.856Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/9c/7ff305b366ce986052a27dc5946839bef2823b3567664cbad22e294dff5a/langgraph_sdk-0.4.5.tar.gz", hash = "sha256:d49a98a2ee8e0c494b101a7caf8061c8b4b94d3ee5ada0ea2dbe50903a5487b1", size = 349783, upload-time = "2026-09-21T14:42:55.732Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/05/aac507337cceae773c2cc9ab91eb6301963af7aeeb55b4217a00e15aff17/langgraph_sdk-0.4.2-py3-none-any.whl", hash = "sha256:75fa5096c1177ce39c847096a8fe3745ffd480ddb412995f836e9f5f884c43dd", size = 160521, upload-time = "2026-06-01T17:51:18.849Z" },
+    { url = "https://files.pythonhosted.org/packages/49/a9/71a6499f3481bc00bf4f42a17cb81caf19a02fce762db356626d7214e2c2/langgraph_sdk-0.4.5-py3-none-any.whl", hash = "sha256:e03ef033a20d21288af496e9b6c08ae3afcc1b58dc5abcd37575bfd1a93045de", size = 162304, upload-time = "2026-09-21T14:42:54.623Z" },
 ]
 
 [[package]]

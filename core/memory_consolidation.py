@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.store.sqlite.aio import AsyncSqliteStore
+from core.transcript_store import KvStore
 
 from core.doc_index import embeddings_available
 from core.memory_store import upsert_memory
@@ -40,7 +40,7 @@ _FETCH_LIMIT = 200
 _run_lock = asyncio.Lock()
 
 
-async def _migrate_legacy_key(store: AsyncSqliteStore) -> None:
+async def _migrate_legacy_key(store: KvStore) -> None:
     """Copy any data at the pre-fix `/AGENTS.md` key onto the canonical key.
 
     The agent's runtime reader and write_file tool always used "AGENTS.md";
@@ -207,7 +207,7 @@ def _transcript_block(
     return "\n".join(lines), consumed_through, len(lines)
 
 
-async def _load_watermark(store: AsyncSqliteStore) -> datetime | None:
+async def _load_watermark(store: KvStore) -> datetime | None:
     """The created_at of the last message consolidated.
 
     Falls back to `last_run_at`, which is what installs before the watermark
@@ -222,7 +222,7 @@ async def _load_watermark(store: AsyncSqliteStore) -> datetime | None:
     return _aware(datetime.fromisoformat(raw)) if raw else None
 
 
-async def _save_watermark(store: AsyncSqliteStore, messages_through: datetime) -> None:
+async def _save_watermark(store: KvStore, messages_through: datetime) -> None:
     await store.aput(
         _META_NS,
         _META_KEY,
@@ -233,7 +233,7 @@ async def _save_watermark(store: AsyncSqliteStore, messages_through: datetime) -
     )
 
 
-async def _seed_from_blob(store: AsyncSqliteStore, model_id: str) -> int:
+async def _seed_from_blob(store: KvStore, model_id: str) -> int:
     """One-time: split the legacy AGENTS.md blob into items. Returns count written.
 
     The blob is left in place as a backup (same spirit as _migrate_legacy_key).
@@ -260,7 +260,7 @@ async def _seed_from_blob(store: AsyncSqliteStore, model_id: str) -> int:
     return written
 
 
-async def _consolidate_items(store: AsyncSqliteStore, model_id: str | None) -> str:
+async def _consolidate_items(store: KvStore, model_id: str | None) -> str:
     """Extract, update, and delete atomic items based on recent conversations.
 
     The LLM now emits explicit ops: add / update / delete.
@@ -419,7 +419,7 @@ Rules:
 """
 
 
-async def _consolidate_blob(store: AsyncSqliteStore, model_id: str | None) -> str:
+async def _consolidate_blob(store: KvStore, model_id: str | None) -> str:
     """Read unconsolidated DB messages + current AGENTS.md, call LLM to update memory, write back.
 
     Same batching and watermark as _consolidate_items: one budgeted batch per
@@ -491,7 +491,7 @@ async def _consolidate_blob(store: AsyncSqliteStore, model_id: str | None) -> st
     )
 
 
-async def consolidate_memory(store: AsyncSqliteStore, model_id: str | None = None) -> str:
+async def consolidate_memory(store: KvStore, model_id: str | None = None) -> str:
     """Update persistent memory from recent conversations.
 
     Dispatches to the discrete-item path when an embedder is configured, else

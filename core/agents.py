@@ -205,7 +205,7 @@ _ROLE_PROMPTS = {
 # ── Memory loading ────────────────────────────────────────────────────────────
 
 async def _load_memory_from_store(store) -> str | None:
-    """Read AGENTS.md from the AsyncSqliteStore."""
+    """Read AGENTS.md from the key-value store."""
     try:
         item = await store.aget(("memory",), "AGENTS.md")
         if item is not None:
@@ -719,7 +719,7 @@ def _schema_tokens(tools: list) -> int:
     return total // 4
 
 
-def _build_agent(model: str, checkpointer: Any, store: Any, board: bool = False) -> Agent:
+def _build_agent(model: str, store: Any, board: bool = False) -> Agent:
     # Degrade rather than raise on a stale id: this is the chokepoint every run
     # kind reaches, and a conversation/automation/board row can outlive the
     # model it names. Callers with a session resolve through db.ops.resolve_model
@@ -1035,7 +1035,7 @@ def _build_agent(model: str, checkpointer: Any, store: Any, board: bool = False)
 
     return Agent(
         "main", model_request_node, main_tools,
-        gate=make_tool_gate(main_tools), checkpointer=checkpointer, store=store,
+        gate=make_tool_gate(main_tools), store=store,
     )
 
 
@@ -1052,26 +1052,24 @@ def invalidate_agent_cache() -> None:
     _cache.clear()
 
 
-def _build_cached(model: str, checkpointer: Any, store: Any, board: bool = False) -> Agent:
+def _build_cached(model: str, store: Any, board: bool = False) -> Agent:
     # `board` is part of the key because the bound toolset differs: a board run
     # gets complete_task/block_task, nothing else does. Two agents per model at
     # most, and only on installs that actually use the board.
-    key = (model, id(checkpointer), id(store), board)
+    key = (model, id(store), board)
     if key not in _cache:
-        _cache[key] = _build_agent(model, checkpointer, store, board=board)
+        _cache[key] = _build_agent(model, store, board=board)
     return _cache[key]
 
 
 def build_agent(
-    model: str = DEFAULT_MODEL, checkpointer: Any = None, store: Any = None,
+    model: str = DEFAULT_MODEL, store: Any = None,
     invocation_context: Any = None, board: bool = False,
 ) -> Agent:
     """The agent for `model`, built once and shared by every run on it.
 
-    ``checkpointer`` is LangGraph's saver, read only to convert a thread that
-    has no transcript rows yet (see ``DbThread.load``). ``store`` reaches the
-    tools as ``ToolContext.store``. Set ``board=True`` for a task-board run so
+    ``store`` reaches the tools as ``ToolContext.store``. Set ``board=True`` for a task-board run so
     the board lifecycle tools (complete_task/block_task) are bound; they are
     inert anywhere else.
     """
-    return _build_cached(model, checkpointer, store, board=board)
+    return _build_cached(model, store, board=board)

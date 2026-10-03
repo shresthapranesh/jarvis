@@ -26,7 +26,6 @@ _NOISY_LOGGERS: dict[str, int] = {
     "sqlalchemy.pool":             logging.WARNING,
     "aiosqlite":                   logging.WARNING,
     "langgraph.checkpoint.sqlite": logging.WARNING,
-    "langgraph.store.sqlite":      logging.WARNING,
     "httpx":                       logging.WARNING,
     "httpcore":                    logging.WARNING,
     "urllib3":                     logging.WARNING,

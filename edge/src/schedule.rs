@@ -7,7 +7,6 @@
 //! | board dispatch | every 15 s, and on request | `dispatch_board_tasks`, here |
 //! | memory consolidation | `0 */6 * * *` | enqueues a `maintenance` job |
 //! | project memory | every 30 min | enqueues a `maintenance` job |
-//! | checkpoint prune | `20 * * * *` | enqueues a `maintenance` job |
 //! | staging cleanup | `0 * * * *` | deletes abandoned uploads, here |
 //! | memory-activity prune | `0 4 * * *` | deletes old access-log rows, here |
 //!
@@ -32,7 +31,6 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::sync::{Mutex, Notify};
 
-use crate::checkpoints::Checkpoints;
 use crate::cron::{Trigger, Wall};
 use crate::gql::codec::{iso_from_db, new_id, now_stored};
 use crate::runs::{Meta, Registry};
@@ -149,8 +147,6 @@ pub struct Scheduler {
     runs: Arc<Registry>,
     tz: Tz,
     staging_dir: PathBuf,
-    /// The memory jobs' watermarks, and the checkpoints the prune would take.
-    checkpoints: Checkpoints,
     /// Python changed an automation's schedule.
     changed: Notify,
     /// One dispatch pass at a time: a tick and a requested pass must not
@@ -159,13 +155,12 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(pool: SqlitePool, runs: Arc<Registry>, tz: Tz, staging_dir: PathBuf, checkpoints: Checkpoints) -> Arc<Self> {
+    pub fn new(pool: SqlitePool, runs: Arc<Registry>, tz: Tz, staging_dir: PathBuf) -> Arc<Self> {
         Arc::new(Self {
             pool,
             runs,
             tz,
             staging_dir,
-            checkpoints,
             changed: Notify::new(),
             dispatching: Mutex::new(()),
         })
@@ -183,7 +178,6 @@ impl Scheduler {
             Entry::new(Action::Dispatch, When::Every(chrono::Duration::seconds(15)), 30, self.tz, now),
             Entry::new(Action::Maintenance("memory_consolidation"), cron("0 */6 * * *"), 300, self.tz, now),
             Entry::new(Action::Maintenance("project_memory"), minutes(30), 300, self.tz, now),
-            Entry::new(Action::Maintenance("checkpoint_prune"), cron("20 * * * *"), 300, self.tz, now),
             Entry::new(Action::StagingCleanup, cron("0 * * * *"), 300, self.tz, now),
             Entry::new(Action::ActivityPrune, cron("0 4 * * *"), 300, self.tz, now),
         ]
@@ -348,16 +342,25 @@ impl Scheduler {
         match task {
             "memory_consolidation" => self.memory_due().await,
             "project_memory" => self.project_memory_due().await,
-            // `checkpoint_retention`: KEEP_PER_THREAD, MIN_AGE_SECONDS.
-            "checkpoint_prune" => self.checkpoints.prunable(3, Duration::from_secs(3600)).await,
             _ => Ok(true),
         }
+    }
+
+    /// A `kv_store` value (`KvStore.aget(namespace, key)`), where the memory
+    /// jobs keep their watermarks.
+    async fn kv_get(&self, namespace: &str, key: &str) -> sqlx::Result<Option<serde_json::Value>> {
+        let raw: Option<String> = sqlx::query_scalar("SELECT value FROM kv_store WHERE namespace = ? AND key = ?")
+            .bind(namespace)
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(raw.and_then(|r| serde_json::from_str(&r).ok()))
     }
 
     /// `consolidate_memory`: a message past the watermark, and the first of
     /// them not a reply still being written (`_transcript_block` stops there).
     async fn memory_due(&self) -> sqlx::Result<bool> {
-        let meta = self.checkpoints.store_get("memory_consolidation", "state").await?;
+        let meta = self.kv_get("memory_consolidation", "state").await?;
         let raw = meta.as_ref().and_then(|m| {
             [m.get("messages_through"), m.get("last_run_at")].into_iter().flatten().find(|v| py_truthy(v)).cloned()
         });
@@ -387,7 +390,7 @@ impl Scheduler {
         let projects: Vec<String> = sqlx::query_scalar("SELECT id FROM projects").fetch_all(&self.pool).await?;
         let now = Utc::now().naive_utc();
         for project_id in projects {
-            let meta = self.checkpoints.store_get("project_memory_consolidation", &project_id).await?;
+            let meta = self.kv_get("project_memory_consolidation", &project_id).await?;
             // `_load_meta`: a value that won't parse counts as none.
             let since = meta
                 .as_ref()
@@ -597,7 +600,7 @@ mod tests {
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
-        Scheduler::new(pool, Arc::default(), Tz::UTC, PathBuf::new(), Checkpoints::open("".as_ref()))
+        Scheduler::new(pool, Arc::default(), Tz::UTC, PathBuf::new())
     }
 
     async fn jobs(s: &Scheduler) -> Vec<(String, String)> {
@@ -633,13 +636,13 @@ mod tests {
     #[tokio::test]
     async fn maintenance_waits_for_the_one_already_queued() {
         let s = scheduler().await;
-        s.enqueue_maintenance("checkpoint_prune").await.unwrap();
-        s.enqueue_maintenance("checkpoint_prune").await.unwrap();
+        s.enqueue_maintenance("memory_consolidation").await.unwrap();
+        s.enqueue_maintenance("memory_consolidation").await.unwrap();
         s.enqueue_maintenance("project_memory").await.unwrap();
         assert_eq!(jobs(&s).await.len(), 2);
         sqlx::query("UPDATE jobs SET status = 'done'").execute(&s.pool).await.unwrap();
-        s.enqueue_maintenance("checkpoint_prune").await.unwrap();
-        assert_eq!(jobs(&s).await[2], ("maintenance".into(), r#"{"task": "checkpoint_prune"}"#.into()));
+        s.enqueue_maintenance("memory_consolidation").await.unwrap();
+        assert_eq!(jobs(&s).await[2], ("maintenance".into(), r#"{"task": "memory_consolidation"}"#.into()));
     }
 
     #[test]

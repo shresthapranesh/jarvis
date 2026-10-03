@@ -114,10 +114,9 @@ async fn main() {
     // The maintenance tests diff this against the Python sweeps' own checks:
     // whether each would find work in this database, as one JSON line.
     if std::env::args().any(|a| a == "--maintenance-due") {
-        let checkpoints = checkpoints::Checkpoints::open(&config.checkpoints_db);
-        let s = schedule::Scheduler::new(pool, Default::default(), tz, config.staging_dir.clone(), checkpoints);
+        let s = schedule::Scheduler::new(pool, Default::default(), tz, config.staging_dir.clone());
         let mut out = serde_json::Map::new();
-        for task in ["memory_consolidation", "project_memory", "checkpoint_prune"] {
+        for task in ["memory_consolidation", "project_memory"] {
             let due = s.maintenance_due(task).await.map_or_else(|e| e.to_string().into(), serde_json::Value::from);
             out.insert(task.into(), due);
         }
@@ -140,8 +139,7 @@ async fn main() {
     };
     let runs: Arc<runs::Registry> = Default::default();
     let schema = gql::build(pool.clone(), data, runs.clone());
-    let scheduler =
-        schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone(), checkpoints);
+    let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
     tokio::spawn(scheduler.clone().run());
     tokio::spawn(sweep_pending_runs(runs.clone(), pool.clone()));
     let supervisor = supervisor::Supervisor::new(

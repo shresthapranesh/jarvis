@@ -113,7 +113,6 @@ class InvocationContext:
     run_config: RunConfig = field(default_factory=RunConfig)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    checkpointer: Any | None = field(default=None, repr=False)
     store: Any | None = field(default=None, repr=False)
     queue: Any | None = field(default=None, repr=False)
     http_client: Any | None = field(default=None, repr=False)
@@ -122,7 +121,7 @@ class InvocationContext:
         return InvocationActions(state_delta=self.state.delta)
 
     async def load_persisted_state(self) -> None:
-        """Load app: and user: state from LangGraph store (session service behavior).
+        """Load app: and user: state from the key-value store (session service behavior).
 
         Called automatically by runner factory if store present, or manually.
         """

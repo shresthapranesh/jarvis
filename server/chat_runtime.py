@@ -37,7 +37,6 @@ from core.state import (
     TaskState,
     _tasks,
     emit_event,
-    get_async_checkpointer,
     get_store,
     log_task_created,
     log_task_received,
@@ -110,12 +109,7 @@ async def _run_agent_task(
         # stacking their latencies.
         user_msg_id = user_message_id(task_id)
         # Jarvis-style: prefer InvocationContext infra refs over globals
-        if ctx is not None and ctx.store is not None:
-            store = ctx.store
-            checkpointer = ctx.checkpointer
-        else:
-            store = get_store()
-            checkpointer = get_async_checkpointer()
+        store = ctx.store if ctx is not None and ctx.store is not None else get_store()
         # record session_id into ctx for state scoping
         if ctx is not None:
             if not ctx.session_id:
@@ -127,7 +121,7 @@ async def _run_agent_task(
 
         content = await content_task
 
-        agent = build_agent(model, checkpointer=checkpointer, store=store, invocation_context=ctx)
+        agent = build_agent(model, store=store, invocation_context=ctx)
         project_id, ephemeral = await scope_task
         # message_id == task_id: the assistant Message row this turn writes.
         # Artifacts stamp it so the UI can render each one under the message

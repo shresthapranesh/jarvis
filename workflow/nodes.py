@@ -146,7 +146,7 @@ async def _run_agent_text(
     """
     from core.agent_loop import Thread
     from core.runner import build_callbacks
-    from core.state import get_async_checkpointer, get_store
+    from core.state import get_store
     from langchain_core.runnables import RunnableConfig
 
     # Budget tracking — if the workflow run has a tracker (set by workflow_runtime),
@@ -156,7 +156,6 @@ async def _run_agent_text(
 
     agent = build_agent(
         model=model_id,
-        checkpointer=get_async_checkpointer(),
         store=get_store(),
     )
     run_config: RunnableConfig = {

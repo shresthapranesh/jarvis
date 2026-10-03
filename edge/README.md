@@ -146,7 +146,6 @@ has nothing to do:
 | board dispatch | every 15 s, and when Python sends `dispatch` | `dispatch_board_tasks`, in the edge |
 | memory consolidation | `0 */6 * * *` | enqueues a `maintenance` job, if due |
 | project memory | every 30 min | enqueues a `maintenance` job, if due |
-| checkpoint prune | `20 * * * *` | enqueues a `maintenance` job, if due |
 | staging cleanup | `0 * * * *` | deletes abandoned uploads, in the edge |
 | memory-activity prune | `0 4 * * *` | deletes old access-log rows, in the edge |
 
@@ -154,7 +153,7 @@ Python behind the edge (`JARVIS_EDGE_URL` set — `core/edge_link.py:behind_edge
 registers none of these but the idle-kernel reaper (kernels are its own
 children). Its `dispatch_board_tasks()` sends `dispatch` instead of claiming
 cards itself, `_register_scheduler_job` / `_remove_scheduler_job` send
-`schedules`, and a `maintenance` worker runs the three sweeps that need it
+`schedules`, and a `maintenance` worker runs the sweeps that need it
 (`core/scheduler.py:MAINTENANCE_TASKS`). The decision is configuration, not
 link state, so a reconnecting link can't leave both sides firing.
 
@@ -181,9 +180,8 @@ link state, so a reconnecting link can't leave both sides firing.
   Python. Each sweep's own first checks, read from the same rows: a message
   past the memory watermark whose first isn't a reply still being written; a
   project with new messages that has been quiet 15 minutes (or waited a day)
-  and holds 600+ characters; a checkpoint the prune's age and keep-3 rules
-  would delete. The watermarks are LangGraph store items in `checkpoints.db`
-  (`src/checkpoints.rs`, read-only). Where unsure (an unreadable watermark, a
+  and holds 600+ characters. The watermarks are `kv_store` rows in
+  `database.db`. Where unsure (an unreadable watermark, a
   failed read) the answer is yes, and Python decides as before.
   `tests/test_edge_supervisor.py` diffs every gate against the sweep it
   guards, through `jarvis-edge --maintenance-due`. One thing waits longer: the
@@ -306,7 +304,7 @@ Every query that reads only the database and files:
 | workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
 | lists | `notificationChannels`, `skills`, `pendingApprovals` |
 | memory | `memories`, `memoryActivities`, `memoryUsage` |
-| chat page | `models`, `todos` (from `checkpoints.db`), `browserAvailable` (an http CDP endpoint) |
+| chat page | `models`, `todos` (`thread_state`; a thread not yet converted from `checkpoints.db`, read-only, `src/checkpoints.rs`), `browserAvailable` (an http CDP endpoint) |
 | Relay | `node` for every Node type |
 
 Mutations that only write rows and files:
@@ -346,7 +344,7 @@ moves when the thing it reads moves.
 
 | Root field | Reads | Moves with |
 |---|---|---|
-| `agentMemory`, `checkpointStats` | LangGraph's store, and the prune's live-thread guard | the agent loop (Phase 2) |
+| `agentMemory` | `kv_store`, which Python fills from LangGraph's store on its first start | the agent loop (Phase 2) |
 | `modelSync` | provider APIs | the catalog tooling |
 | `tools` | the bound-tool list, the SDK catalogue, loaded MCP tools | the agent loop |
 | `mcpServers`, `mcpTools` | the live `McpManager` | MCP (Phase 2) |
@@ -356,13 +354,13 @@ moves when the thing it reads moves.
 | Mutations | Touch | Move with |
 |---|---|---|
 | `stopBoardTask`, `browserActivity` | the board row and a running handler's `TaskState`; the agent's kernel is the only caller of the latter | the board dispatcher; the agent loop |
-| `deleteConversation`, `discardConversation` | the LangGraph thread and the conversation's kernel | the agent loop |
-| `createAutomation`, `updateAutomation`, `deleteAutomation` | cron validation with APScheduler's messages; deleting the backing conversation's LangGraph thread and kernel | the agent loop (Python reports each change to the edge's scheduler: `schedules`) |
+| `deleteConversation`, `discardConversation` | the transcript thread and the conversation's kernel | the agent loop |
+| `createAutomation`, `updateAutomation`, `deleteAutomation` | cron validation with APScheduler's messages; deleting the backing conversation's thread and kernel | the agent loop (Python reports each change to the edge's scheduler: `schedules`) |
 | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `decomposeBoardTask`, `deleteBoardTask`, `stopBoardTask` | the board dispatcher, model validation, an LLM (decompose) | the job queue |
 | `addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill` | embeddings (Gemini) on write | embeddings |
-| `updateMemory`, `deleteAgentMemory`, `consolidateMemory`, `consolidateProjectMemory` | the LangGraph store; an LLM | the agent loop |
+| `updateMemory`, `deleteAgentMemory`, `consolidateMemory`, `consolidateProjectMemory` | `kv_store` through `KvStore`; an LLM | the agent loop |
 | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `setToolPolicy` | the catalog cache and compiled agent graphs | the catalog becoming data |
 | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` | the live `McpManager` | MCP |
 | `resolveApproval`, `requestToolApproval` | waiters parked inside running tools | the job queue |
 | `setSetting`, `deleteSetting` | `apply_setting`'s in-process caches | the registry becoming data |
-| `pruneCheckpoints`, `downloadVoice` | `checkpoints.db` guarded by `_tasks`; the Piper download | the agent loop; audio |
+| `downloadVoice` | the Piper download | audio |

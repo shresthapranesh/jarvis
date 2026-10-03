@@ -134,9 +134,8 @@ async def test_build_agent_degrades_instead_of_raising_on_a_stale_id():
     """The last line of defence: a queued job carries its model id in its payload,
     so an id can go stale between enqueue and claim, after resolve_model ran."""
     from core.agents import build_agent
-    from langgraph.checkpoint.memory import MemorySaver
 
-    assert build_agent(STALE, checkpointer=MemorySaver()) is not None
+    assert build_agent(STALE) is not None
 
 
 async def test_automation_with_a_removed_model_runs_on_the_default():
