@@ -1,0 +1,12 @@
+# edge/ — Rust edge in front of Python
+
+Read `README.md` here before changing routing, the worker link, the supervisor, or porting an operation — it has the wire-format contracts and the porting checklist.
+
+- Goal: move jarvis to Rust incrementally so it runs on old, low-RAM hardware. Order work by RAM saved; the kernel stays Python.
+- The edge owns :8000: it serves ported GraphQL operations from SQLite, the SPA, the chat page's startup queries (`models`, `todos`, `browserAvailable`), and — while a Python worker is linked — subscriptions, `runningTasks`, stops and run triggers. Everything else is proxied to Python on :8001.
+- **Python owns the schema** (`db/engine.py:_migrate`). A GraphQL type is ported whole or not at all.
+- Every ported operation is diffed against Python by `tests/test_edge_parity.py`, `test_edge_runs.py`, `test_edge_start.py`, `test_edge_supervisor.py`, `test_edge_schedule.py`. Keep them passing; add to them when porting.
+- **Supervisor**: with `JARVIS_WORKER_CMD` set the edge starts Python when a job or proxied request needs it and stops it after `JARVIS_WORKER_IDLE` seconds (default 300) with nothing running, queued, or held (bots hold it up; a live kernel holds it until reaped).
+- **Scheduler**: the edge fires every schedule. `src/cron.rs` ports APScheduler's `CronTrigger` (DST quirks included) — a change to `core/scheduler.py:_cron` must be made in both. `src/schedule.rs:dispatch` must stay a port of `dispatch_board_tasks`.
+- `src/catalog.rs` compiles in `core/builtin_models.json` — rebuild after editing it.
+- Run starts (`src/gql/start.rs`) write the rows + `Job` and send `wake`; Python creates the `TaskState` from the job.
