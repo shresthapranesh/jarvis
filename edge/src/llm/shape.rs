@@ -130,7 +130,7 @@ fn opaque_str(p: &Part, key: &str) -> Option<String> {
 }
 
 /// A tool message, or a user message carrying Anthropic `tool_result` parts.
-fn carries_results(m: &Message) -> bool {
+pub(super) fn carries_results(m: &Message) -> bool {
     match m.role {
         Role::Tool => true,
         Role::User => parts(m).iter().any(|p| p.opaque_type() == Some("tool_result")),

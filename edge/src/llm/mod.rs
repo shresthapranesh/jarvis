@@ -4,6 +4,7 @@
 //! system prompt), so no library sits above our request builder.
 //!
 //! - `transcript` — the v1 record Python and Rust both read and write.
+//! - `compact` — clip stale tool output, collapse old tool-call groups.
 //! - `shape` — strip thinking, repair orphaned calls, lay the prompt out.
 //! - `google`, `ollama`, `openai_chat` (OpenRouter), `openai_responses`
 //!   (Meta) — one module per wire format: render a [`Prompt`], stream the
@@ -11,6 +12,7 @@
 //!
 //! [`complete`] is the one entry point.
 
+mod compact;
 pub mod google;
 mod lines;
 pub mod ollama;
@@ -269,7 +271,9 @@ pub async fn cli(call: bool) {
         cache: input.cache,
         provider,
     };
-    let history = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(input.history));
+    // The agent step's order: compact, then strip and repair.
+    let history = compact::per_call(input.history);
+    let history = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(history));
     let prompt = shape::build(&layout, history);
     if !call {
         println!("{}", serde_json::to_string(&prompt).expect("serializes"));
