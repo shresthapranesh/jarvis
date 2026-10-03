@@ -181,9 +181,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _chat_worker_task = asyncio.create_task(_build_chat_worker(state._queue).run())
         _board_worker_task = asyncio.create_task(_build_board_worker(state._queue).run())
         _maintenance_worker_task = asyncio.create_task(_build_maintenance_worker(state._queue).run())
-        # Kernels are this process's children, so reaping them stays here.
-        register_kernel_reaper_job()
         if not behind_edge():
+            # Behind the edge the kernels are the edge's, and so is the reaper.
+            register_kernel_reaper_job()
             register_memory_consolidation_job()
             register_project_memory_job()
             register_staging_cleanup_job()

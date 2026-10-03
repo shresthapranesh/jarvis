@@ -26,6 +26,11 @@ pub struct Config {
     pub static_dir: Option<PathBuf>,
     /// How to start Python, when the edge is to own it (`supervisor.rs`).
     pub worker: Option<WorkerConfig>,
+    /// The jarvis checkout: kernels run there, with it on `sys.path`.
+    pub app_dir: PathBuf,
+    /// The interpreter kernels run on: `JARVIS_KERNEL_PYTHON`, else the
+    /// checkout's `.venv`, else `python3` on the PATH.
+    pub kernel_python: PathBuf,
 }
 
 pub struct WorkerConfig {
@@ -76,7 +81,7 @@ impl Config {
                 let idle = (idle > 0).then(|| std::time::Duration::from_secs(idle));
                 // Loopback, whatever address the edge binds for the public.
                 let edge_url = format!("http://127.0.0.1:{}", bind.port());
-                Some(WorkerConfig { command, dir: app_dir, idle, edge_url })
+                Some(WorkerConfig { command, dir: app_dir.clone(), idle, edge_url })
             }
             _ => None,
         };
@@ -90,6 +95,12 @@ impl Config {
             checkpoints_db,
             static_dir,
             worker,
+            kernel_python: env_path("JARVIS_KERNEL_PYTHON").unwrap_or_else(|| {
+                Some(app_dir.join(".venv").join("bin").join("python"))
+                    .filter(|p| p.is_file())
+                    .unwrap_or_else(|| PathBuf::from("python3"))
+            }),
+            app_dir: resolve(app_dir),
         })
     }
 

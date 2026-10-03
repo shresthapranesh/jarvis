@@ -46,6 +46,13 @@ tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi"] }
+# The Jupyter wire protocol to the agent's kernels (`kernels/`): pure Rust, so no
+# libzmq to build on the old machines this runs on. ipc only — unix sockets.
+zeromq = { version = "0.6", default-features = false, features = ["tokio-runtime", "ipc-transport"] }
+# Signing kernel messages (HMAC-SHA256 over each part).
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4.3"
 
 [profile.release]
 opt-level = "s"

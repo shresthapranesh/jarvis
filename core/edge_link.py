@@ -94,18 +94,12 @@ def _meta(state: TaskState) -> dict[str, Any]:
 
 def current_holds() -> list[str]:
     """Why this process must not be stopped for being idle, beyond what the
-    edge sees itself: a kernel holds a conversation's variables until the
-    reaper retires it. (The chat bots run in the edge, not here.)"""
-    import time
+    edge sees itself: a kernel here holds a conversation's variables until the
+    reaper retires it. Behind the edge the kernels are the edge's, so this is
+    only a process that runs its own. (The chat bots run in the edge too.)"""
+    from core.kernels import get_kernel_registry
 
-    from core.kernels import IDLE_TIMEOUT_SECONDS, get_kernel_registry
-
-    holds = []
-    now = time.monotonic()
-    sessions = list(get_kernel_registry()._sessions.values())
-    if any(now - s.last_used <= IDLE_TIMEOUT_SECONDS for s in sessions):
-        holds.append("kernels")
-    return holds
+    return ["kernels"] if get_kernel_registry().in_use() else []
 
 
 def cancel_in_process(state: TaskState, *, resume: bool) -> None:

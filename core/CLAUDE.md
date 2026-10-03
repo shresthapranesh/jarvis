@@ -77,6 +77,6 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 ## Other modules
 - `runner.py` — `JarvisRunner` owns store/queue/config; `should_use_cache()` true only for anthropic/bedrock.
 - `planning.py` — `JARVIS_PLANNING_MODE` (auto/always/off); injects a `## Planning Required` tail segment for complex queries.
-- `kernels.py` — per-conversation IPython kernels (cap 12, reaped at 30 min idle); injects SDK scope (`conversation_id`, `project_id`).
+- `kernels.py` — per-conversation IPython kernels (cap 12, reaped at 30 min idle); injects SDK scope (`conversation_id`, `project_id`). Behind the edge `get_kernel_registry()` is `EdgeKernels`: the kernels are the edge's (`edge/src/kernels/`, a port — change both).
 - `scheduler.py` — cron is local time (`scheduler.timezone` → `JARVIS_TIMEZONE` → machine zone), Unix day-of-week numbering via `normalize_crontab()`. Timezone is set before `_scheduler.start()`.
 - `settings_admin.py` — `KNOWN_SETTINGS` registry + `apply_setting()` for in-process side effects of config writes. Keys with `managedBy` are owned by another settings tab.

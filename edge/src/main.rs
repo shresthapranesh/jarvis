@@ -14,6 +14,7 @@ mod db;
 mod gql;
 mod graphql;
 mod jobs;
+mod kernels;
 mod link;
 mod llm;
 mod proxy;
@@ -43,6 +44,8 @@ pub struct AppState {
     pub scheduler: Arc<schedule::Scheduler>,
     /// The Python worker's process, when the edge owns it (`supervisor.rs`).
     pub supervisor: Arc<supervisor::Supervisor>,
+    /// The agent's notebooks (`kernels/`).
+    pub kernels: Arc<kernels::Kernels>,
 }
 
 impl AppState {
@@ -170,6 +173,20 @@ async fn main() {
         config.backend.clone(),
     );
     let owned = gql::owned_root_fields(&schema);
+    let kernels = kernels::Kernels::new(
+        kernels::Launch {
+            python: config.kernel_python.clone(),
+            dir: config.app_dir.clone(),
+            // The SDK in a kernel talks to this edge, wherever it listens.
+            env: match std::env::var("JARVIS_API_URL") {
+                Ok(v) if !v.is_empty() => vec![],
+                _ => vec![("JARVIS_API_URL".into(), format!("http://127.0.0.1:{}/graphql", config.bind.port()))],
+            },
+        },
+        &config.app_dir,
+        pool.clone(),
+    );
+    tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
 
     let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
     fields.sort();
@@ -193,11 +210,14 @@ async fn main() {
         runs,
         scheduler,
         supervisor: supervisor.clone(),
+        kernels: kernels.clone(),
     };
     let app = Router::new()
         // GET /graphql (the subscription WebSocket) falls through to the proxy.
         .route("/graphql", post(graphql::post).get(graphql::websocket).fallback(proxy::any))
         .route("/internal/worker", get(link::upgrade))
+        .route("/internal/kernels/run", post(kernels::http_run))
+        .route("/internal/kernels/shutdown", post(kernels::http_shutdown))
         .fallback(proxy::any)
         // Python sets no request-size limit on /graphql; neither does the edge.
         .layer(DefaultBodyLimit::disable())
@@ -214,8 +234,9 @@ async fn main() {
         .with_graceful_shutdown(shutdown())
         .await
         .expect("server");
-    // Python doesn't outlive the edge that started it.
+    // Python doesn't outlive the edge that started it, nor do the kernels.
     supervisor.shutdown().await;
+    kernels.shutdown_all().await;
 }
 
 /// Runs this edge started whose job ended before any worker claimed it.
