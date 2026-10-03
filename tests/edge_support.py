@@ -40,8 +40,9 @@ def _free_port() -> int:
 
 
 @contextlib.asynccontextmanager
-async def _run_edge(edge_binary: Path, work_dir: Path, db: Path):
-    """An edge over `db`, its artifacts under `work_dir`, with a dead backend."""
+async def _run_edge(edge_binary: Path, work_dir: Path, db: Path, extra_env: dict[str, str] | None = None):
+    """An edge over `db`, its artifacts under `work_dir`, with a dead backend
+    unless `extra_env` names another."""
     port, dead = _free_port(), _free_port()
     env = {
         **os.environ,
@@ -51,8 +52,12 @@ async def _run_edge(edge_binary: Path, work_dir: Path, db: Path):
         # Nothing listens here: a proxied operation fails loudly.
         "JARVIS_BACKEND_URL": f"http://127.0.0.1:{dead}",
         "JARVIS_EDGE_LOG": "warn",
+        **(extra_env or {}),
     }
     env.pop("ARTIFACTS_DIR", None)
+    for bot in ("TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN"):
+        if bot not in (extra_env or {}):
+            env.pop(bot, None)
     # cwd = work_dir so the edge's .env lookup can't find the repo's .env.
     proc = subprocess.Popen([str(edge_binary)], env=env, cwd=work_dir)
     deadline = time.monotonic() + 10

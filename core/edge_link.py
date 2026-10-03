@@ -94,18 +94,13 @@ def _meta(state: TaskState) -> dict[str, Any]:
 
 def current_holds() -> list[str]:
     """Why this process must not be stopped for being idle, beyond what the
-    edge sees itself: a bot holds a connection open to its chat service, and a
-    kernel holds a conversation's variables until the reaper retires it."""
+    edge sees itself: a kernel holds a conversation's variables until the
+    reaper retires it. (The chat bots run in the edge, not here.)"""
     import time
 
-    from core import state as core_state
     from core.kernels import IDLE_TIMEOUT_SECONDS, get_kernel_registry
 
     holds = []
-    if core_state._telegram_bot is not None:
-        holds.append("telegram")
-    if core_state._discord_client is not None:
-        holds.append("discord")
     now = time.monotonic()
     sessions = list(get_kernel_registry()._sessions.values())
     if any(now - s.last_used <= IDLE_TIMEOUT_SECONDS for s in sessions):

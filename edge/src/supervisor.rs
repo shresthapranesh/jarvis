@@ -6,18 +6,18 @@
 //! everything here is a no-op.
 //!
 //! **What starts Python**: a request the edge has to proxy (REST, the
-//! GraphQL it hasn't ported, the other WebSockets); a job it can claim, or one
-//! left `running` by a worker that died; a reason it reported for staying up
-//! that only it can serve (a chat bot); and the edge's own start, so the
-//! startup sweeps run and a broken command shows up at once. Runs the edge
+//! GraphQL it hasn't ported, the other WebSockets); a voice note a chat bot
+//! needs transcribed (`bots/`); a job it can claim, or one left `running` by a
+//! worker that died; and the edge's own start, so the startup sweeps run and a
+//! broken command shows up at once. Runs the edge
 //! starts itself (`startTask` and the other triggers) need nothing more: they
 //! write a job, `Registry::wake` kicks this loop, and the run stays pending in
 //! the mirror until the new worker claims it.
 //!
 //! **What stops it**: `JARVIS_WORKER_IDLE` seconds (default 300) with no
 //! proxied request or socket open, no run in the mirror, no claimable or
-//! running job, and no `holds` — the reasons the worker reports itself (a bot's
-//! connection, a kernel still holding a conversation's variables). Before it
+//! running job, and no `holds` — the reasons the worker reports itself (a
+//! kernel still holding a conversation's variables). Before it
 //! signals, the edge `call`s `drain`, so the worker claims nothing while the
 //! job table is checked one last time; work that slipped in means `undrain`
 //! instead. The process then gets SIGTERM — uvicorn's graceful shutdown, which
@@ -46,8 +46,6 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_secs(5);
 /// A worker that dies sooner than this after starting counts as a failed start.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
-/// Holds that mean "always on", so a crash is restarted with nobody asking.
-const PINNING_HOLDS: &[&str] = &["telegram", "discord"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -71,8 +69,6 @@ struct Inner {
     /// The last moment the worker was seen doing anything.
     last_active: Instant,
     holds: Vec<String>,
-    /// The last worker reported a pinning hold: restart it if it dies.
-    pinned: bool,
     /// Consecutive failed starts, and when the next may be tried.
     failures: u32,
     retry_at: Option<Instant>,
@@ -138,7 +134,6 @@ impl Supervisor {
                 waiting: 0,
                 last_active: now,
                 holds: vec![],
-                pinned: false,
                 failures: 0,
                 retry_at: None,
                 failed_starts: 0,
@@ -186,7 +181,6 @@ impl Supervisor {
         if holds != inner.holds {
             tracing::info!("worker holds: {}", if holds.is_empty() { "none".into() } else { holds.join(", ") });
         }
-        inner.pinned = holds.iter().any(|h| PINNING_HOLDS.contains(&h.as_str()));
         inner.holds = holds;
         inner.last_active = Instant::now();
     }
@@ -294,7 +288,7 @@ impl Supervisor {
             inner.retry_at = None;
             let boot = !inner.booted;
             inner.booted = true;
-            if boot || inner.waiting > 0 || inner.pinned || self.config.as_ref().is_some_and(|c| c.idle.is_none()) {
+            if boot || inner.waiting > 0 || self.config.as_ref().is_some_and(|c| c.idle.is_none()) {
                 return true;
             }
         }

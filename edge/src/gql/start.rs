@@ -59,20 +59,40 @@ pub struct QueueMessagePayload {
     position: i64,
 }
 
-/// A staged upload, read back — `_resolve_staged_uploads`.
-struct Attachment {
+/// An attachment on a chat turn — `AttachmentIn`. From a staged upload
+/// (`_resolve_staged_uploads`), or built in memory by a bot.
+pub struct Attachment {
     kind: &'static str,
     name: String,
     mime_type: String,
     bytes: Vec<u8>,
     size: Value,
-    staged: (PathBuf, PathBuf),
+    /// The staged upload's bytes and meta files, removed once the run holds
+    /// the bytes.
+    staged: Option<(PathBuf, PathBuf)>,
     document_id: Option<String>,
     document_path: Option<String>,
     persist_error: Option<String>,
 }
 
 impl Attachment {
+    /// An image a bot received — the bots' `AttachmentIn(type="image", ...)`.
+    /// Never persisted as a document: it rides in the job payload.
+    pub fn image(name: String, mime_type: String, bytes: Vec<u8>) -> Self {
+        let size = Value::from(bytes.len());
+        Self {
+            kind: "image",
+            name,
+            mime_type,
+            bytes,
+            size,
+            staged: None,
+            document_id: None,
+            document_path: None,
+            persist_error: None,
+        }
+    }
+
     /// `AttachmentIn.model_dump()`, field order and all.
     fn dump(&self) -> Value {
         json!({
@@ -119,7 +139,7 @@ fn read_staged(staging_dir: &Path, uploads: &[UploadReferenceInput]) -> Result<V
                 mime_type,
                 bytes: std::fs::read(&bytes_path)?,
                 size: field("size")?,
-                staged: (bytes_path, meta_path),
+                staged: Some((bytes_path, meta_path)),
                 document_id: None,
                 document_path: None,
                 persist_error: None,
@@ -139,7 +159,7 @@ fn extension(name: &str) -> &str {
 }
 
 /// Python's `s[:60]`.
-fn first_chars(s: &str, n: usize) -> String {
+pub fn first_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
@@ -151,6 +171,7 @@ async fn conversation_for(
     requested: Option<&str>,
     model: &str,
     title: Option<String>,
+    surface: &str,
     project_id: Option<&str>,
     ephemeral: bool,
 ) -> Result<String> {
@@ -167,12 +188,13 @@ async fn conversation_for(
     let id = requested.map_or_else(new_id, str::to_string);
     sqlx::query(
         "INSERT INTO conversations (id, title, model, created_at, surface, pinned, project_id, ephemeral) \
-         VALUES (?, ?, ?, ?, 'web', 0, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
     )
     .bind(&id)
     .bind(title)
     .bind(model)
     .bind(now_stored())
+    .bind(surface)
     .bind(project_id)
     .bind(ephemeral)
     .execute(&mut **tx)
@@ -274,6 +296,149 @@ async fn queue_onto(registry: &Registry, pool: &SqlitePool, run: &Arc<Run>, quer
     Ok((message_id, position))
 }
 
+/// A chat turn to start: what `register_chat_task` takes from `startTask`,
+/// and what the bots' `_dispatch` takes from a chat message.
+pub struct ChatTurn {
+    pub query: String,
+    /// Already resolved (`catalog::resolve_model`).
+    pub model: String,
+    pub conversation_id: Option<String>,
+    /// The title a conversation created here gets.
+    pub title: Option<String>,
+    pub surface: &'static str,
+    /// The user message as stored. `None` stores what `startTask` does: the
+    /// query, or its parts with the attachments' when there are any.
+    pub display: Option<String>,
+    pub attachments: Vec<Attachment>,
+    pub project_id: Option<String>,
+    pub ephemeral: bool,
+}
+
+/// What a chat turn turned into.
+pub enum Dispatched {
+    Started { task_id: String, conversation_id: String },
+    /// The conversation had a run going; the message joined it.
+    Queued { task_id: String, conversation_id: String, message_id: String },
+    /// The conversation had a run going and the message couldn't join it —
+    /// `route_to_live_run`'s `ValueError`, which the bots send back as is.
+    Refused(String),
+}
+
+/// Start a chat turn, or queue it onto the run already going on its
+/// conversation — `register_chat_task`, and the bots' `_dispatch`.
+pub async fn start_chat(
+    pool: &SqlitePool,
+    documents_dir: &Path,
+    registry: &Registry,
+    turn: ChatTurn,
+) -> Result<Dispatched> {
+    let ChatTurn { query, model, conversation_id, title, surface, display, mut attachments, project_id, ephemeral } =
+        turn;
+    let mut tx = pool.begin().await?;
+    let conversation_id = conversation_for(
+        &mut tx,
+        conversation_id.as_deref().filter(|c| !c.is_empty()),
+        &model,
+        title,
+        surface,
+        project_id.as_deref(),
+        ephemeral,
+    )
+    .await?;
+
+    // A conversation runs one turn at a time: two runs on one LangGraph
+    // thread race its checkpointer. So a message for a busy conversation
+    // joins the run already going — `route_to_live_run`.
+    if let Some(run) = registry.in_flight_chat(&conversation_id) {
+        tx.commit().await?;
+        if !attachments.is_empty() {
+            return Ok(Dispatched::Refused(
+                "a run is already in flight on this conversation and attachments cannot be queued onto it \
+                 — wait for it to finish, or stop it first"
+                    .into(),
+            ));
+        }
+        return Ok(match queue_onto(registry, pool, &run, &query).await {
+            Ok((message_id, _)) => Dispatched::Queued { task_id: run.id.clone(), conversation_id, message_id },
+            Err(e) => Dispatched::Refused(e.message),
+        });
+    }
+
+    let display = display.unwrap_or_else(|| {
+        if attachments.is_empty() {
+            return query.clone();
+        }
+        let mut parts = vec![json!({"type": "text", "text": query})];
+        parts.extend(
+            attachments.iter().map(|a| json!({"type": a.kind, "name": a.name, "size": a.size, "mimeType": a.mime_type})),
+        );
+        pyjson::dumps(&Value::Array(parts))
+    });
+    let user_message = insert_message(&mut *tx, &conversation_id, "user", &display, None, "done").await?;
+
+    if attachments.iter().any(|a| a.kind == "document") {
+        std::fs::create_dir_all(documents_dir)?;
+    }
+    for att in attachments.iter_mut().filter(|a| a.kind == "document") {
+        let doc_id = new_id();
+        let ext = match extension(&att.name) {
+            "" => ".bin",
+            ext => ext,
+        };
+        let path = documents_dir.join(format!("{doc_id}{ext}"));
+        if let Err(e) = std::fs::write(&path, &att.bytes) {
+            // Carried into the message, so the agent says the file failed
+            // rather than concluding it doesn't exist.
+            tracing::error!("failed to persist document {} to {}: {e}", att.name, documents_dir.display());
+            att.persist_error = Some(format!("OSError: {e}"));
+            continue;
+        }
+        let path = path.to_string_lossy().into_owned();
+        sqlx::query(
+            "INSERT INTO documents (id, conversation_id, message_id, filename, mime_type, size, path, created_at, \
+             index_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        )
+        .bind(&doc_id)
+        .bind(&conversation_id)
+        .bind(&user_message)
+        .bind(&att.name)
+        .bind(&att.mime_type)
+        .bind(att.size.as_i64().unwrap_or_default())
+        .bind(&path)
+        .bind(now_stored())
+        .execute(&mut *tx)
+        .await?;
+        att.document_id = Some(doc_id);
+        att.document_path = Some(path);
+    }
+
+    // The assistant row the run writes into; its id is the task id.
+    let task_id = new_id();
+    sqlx::query(
+        "INSERT INTO messages (id, conversation_id, role, content, model, created_at, status) \
+         VALUES (?, ?, 'assistant', '', ?, ?, 'running')",
+    )
+    .bind(&task_id)
+    .bind(&conversation_id)
+    .bind(&model)
+    .bind(now_stored())
+    .execute(&mut *tx)
+    .await?;
+    let mut payload = json!({"query": query, "model": model, "conv_id": conversation_id});
+    if !attachments.is_empty() {
+        payload["attachments"] = attachments.iter().map(Attachment::dump).collect();
+    }
+    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload).await?;
+    commit_run(registry, tx, &task_id, "chat", first_chars(&query, 60), &conversation_id, &enqueued_at).await?;
+
+    // The bytes now live in documents_dir or the job payload.
+    for (bytes, meta) in attachments.iter().filter_map(|a| a.staged.as_ref()) {
+        let _ = std::fs::remove_file(bytes);
+        let _ = std::fs::remove_file(meta);
+    }
+    Ok(Dispatched::Started { task_id, conversation_id })
+}
+
 #[derive(Default)]
 pub struct StartMutation;
 
@@ -285,7 +450,7 @@ impl StartMutation {
         let registry: &Arc<Registry> = ctx.data()?;
 
         let model = catalog::resolve_model(pool, input.model.as_deref()).await?;
-        let mut attachments = match input.attachment_uploads.as_deref() {
+        let attachments = match input.attachment_uploads.as_deref() {
             Some(uploads) if !uploads.is_empty() => read_staged(&data.staging_dir, uploads)?,
             _ => vec![],
         };
@@ -299,104 +464,27 @@ impl StartMutation {
                 return Err(format!("project not found: {project_id}").into());
             }
         }
-        let requested = input.conversation_id.as_deref().filter(|c| !c.is_empty());
-        let title = requested.is_none().then(|| first_chars(&input.query, 60));
-
-        let mut tx = pool.begin().await?;
-        let conversation_id =
-            conversation_for(&mut tx, requested, &model, title, project_id.as_deref(), input.ephemeral).await?;
-
-        // A conversation runs one turn at a time: two runs on one LangGraph
-        // thread race its checkpointer. So a message for a busy conversation
-        // joins the run already going — `route_to_live_run`.
-        if let Some(run) = registry.in_flight_chat(&conversation_id) {
-            tx.commit().await?;
-            if !attachments.is_empty() {
-                return Err("a run is already in flight on this conversation and attachments cannot be queued onto it \
-                            — wait for it to finish, or stop it first"
-                    .into());
-            }
-            let (message_id, _) = queue_onto(registry, pool, &run, &input.query).await?;
-            return Ok(StartTaskPayload {
-                task_id: run.id.clone(),
-                conversation_id,
-                queued: true,
-                queued_message_id: Some(message_id),
-            });
-        }
-
-        let display = if attachments.is_empty() {
-            input.query.clone()
-        } else {
-            let mut parts = vec![json!({"type": "text", "text": input.query})];
-            parts.extend(attachments.iter().map(
-                |a| json!({"type": a.kind, "name": a.name, "size": a.size, "mimeType": a.mime_type}),
-            ));
-            pyjson::dumps(&Value::Array(parts))
+        let new_conversation = input.conversation_id.as_deref().is_none_or(str::is_empty);
+        let turn = ChatTurn {
+            title: new_conversation.then(|| first_chars(&input.query, 60)),
+            query: input.query,
+            model,
+            conversation_id: input.conversation_id,
+            surface: "web",
+            display: None,
+            attachments,
+            project_id,
+            ephemeral: input.ephemeral,
         };
-        let user_message = insert_message(&mut *tx, &conversation_id, "user", &display, None, "done").await?;
-
-        if !attachments.is_empty() {
-            std::fs::create_dir_all(&data.documents_dir)?;
-        }
-        for att in attachments.iter_mut().filter(|a| a.kind == "document") {
-            let doc_id = new_id();
-            let ext = match extension(&att.name) {
-                "" => ".bin",
-                ext => ext,
-            };
-            let path = data.documents_dir.join(format!("{doc_id}{ext}"));
-            if let Err(e) = std::fs::write(&path, &att.bytes) {
-                // Carried into the message, so the agent says the file failed
-                // rather than concluding it doesn't exist.
-                tracing::error!("failed to persist document {} to {}: {e}", att.name, data.documents_dir.display());
-                att.persist_error = Some(format!("OSError: {e}"));
-                continue;
+        Ok(match start_chat(pool, &data.documents_dir, registry, turn).await? {
+            Dispatched::Started { task_id, conversation_id } => {
+                StartTaskPayload { task_id, conversation_id, queued: false, queued_message_id: None }
             }
-            let path = path.to_string_lossy().into_owned();
-            sqlx::query(
-                "INSERT INTO documents (id, conversation_id, message_id, filename, mime_type, size, path, created_at, \
-                 index_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
-            )
-            .bind(&doc_id)
-            .bind(&conversation_id)
-            .bind(&user_message)
-            .bind(&att.name)
-            .bind(&att.mime_type)
-            .bind(att.size.as_i64().unwrap_or_default())
-            .bind(&path)
-            .bind(now_stored())
-            .execute(&mut *tx)
-            .await?;
-            att.document_id = Some(doc_id);
-            att.document_path = Some(path);
-        }
-
-        // The assistant row the run writes into; its id is the task id.
-        let task_id = new_id();
-        sqlx::query(
-            "INSERT INTO messages (id, conversation_id, role, content, model, created_at, status) \
-             VALUES (?, ?, 'assistant', '', ?, ?, 'running')",
-        )
-        .bind(&task_id)
-        .bind(&conversation_id)
-        .bind(&model)
-        .bind(now_stored())
-        .execute(&mut *tx)
-        .await?;
-        let mut payload = json!({"query": input.query, "model": model, "conv_id": conversation_id});
-        if !attachments.is_empty() {
-            payload["attachments"] = attachments.iter().map(Attachment::dump).collect();
-        }
-        let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload).await?;
-        commit_run(registry, tx, &task_id, "chat", first_chars(&input.query, 60), &conversation_id, &enqueued_at).await?;
-
-        // The bytes now live in documents_dir or the job payload.
-        for att in &attachments {
-            let _ = std::fs::remove_file(&att.staged.0);
-            let _ = std::fs::remove_file(&att.staged.1);
-        }
-        Ok(StartTaskPayload { task_id, conversation_id, queued: false, queued_message_id: None })
+            Dispatched::Queued { task_id, conversation_id, message_id } => {
+                StartTaskPayload { task_id, conversation_id, queued: true, queued_message_id: Some(message_id) }
+            }
+            Dispatched::Refused(reason) => return Err(reason.into()),
+        })
     }
 
     /// Queue a message for a run that is already in flight; delivered just

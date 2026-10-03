@@ -90,9 +90,8 @@ back over the same socket (protocol 4):
   keeping Python's `data.get` / truthiness / `str()` semantics and
   `json.dumps` byte for byte for the fields that embed JSON text
   (`src/pyjson.rs`).
-- **The registration race.** A run Python starts itself (a bot, the
-  scheduler, the board dispatcher) is handed out over one channel and
-  reported over another. A subscription for an unknown run whose DB row still
+- **The registration race.** A run Python starts itself is handed out over
+  one channel and reported over another. A subscription for an unknown run whose DB row still
   says "in progress" waits up to 2 s for it to register.
 - **Only while linked — or owned.** The subscription socket, `runningTasks`,
   the stop mutations and the triggers are served by the edge while a worker
@@ -191,6 +190,38 @@ link state, so a reconnecting link can't leave both sides firing.
   first-run seeding of discrete memory from the old blob now happens with the
   first pass that has a message to read.
 
+## The bots (`src/bots/`)
+
+The Telegram and Discord bots (`server/telegram_bot.py`,
+`server/discord_bot.py`) run here, so an idle box with a bot connected runs
+no Python. Each starts when its token is set (`TELEGRAM_BOT_TOKEN`,
+`DISCORD_BOT_TOKEN`); Python behind the edge starts neither, by
+configuration, as with the timers.
+
+- **A message is a `startTask`.** It goes through the same `start_chat`
+  (`src/gql/start.rs`), with the bot's surface and its conversation id
+  (`telegram_<chat>`, `discord_<channel>`): a run already going on that chat
+  takes it as a queued message (and the bot says so), otherwise a new run is
+  mirrored as pending and its job wakes the worker. The rows are diffed
+  against Python's own handlers (`tests/test_edge_bots.py`).
+- **The reply follows the mirror**: `token` events from the main agent,
+  edited into the chat at most once a second, created on the first text —
+  never a placeholder — and finished when the run is done (or leaves the
+  mirror).
+- **Telegram** is the Bot API, long-polled; pending updates are dropped at
+  start. `TELEGRAM_PROXY_URL` (or `HTTPS_PROXY` / `ALL_PROXY`) proxies it.
+- **Discord** is the v10 gateway (heartbeat, zombie detection, resume, and a
+  stop on a close no retry fixes, such as 4014 — Message Content Intent off)
+  plus REST, retried on 429. Replies never ping anyone.
+- **A voice note** is transcribed by Python's `/transcribe`, which starts the
+  worker; Telegram shows "⏳ Transcribing…" meanwhile, Discord its typing
+  indicator.
+- **Notifications** (automation and workflow results) still go out from
+  Python, now as plain Bot API / REST calls with the same tokens — no
+  connected bot needed.
+- `TELEGRAM_API_URL`, `DISCORD_API_URL` and `DISCORD_GATEWAY_URL` point the
+  bots at another server; the tests' fake uses them.
+
 ## The worker (`src/supervisor.rs`)
 
 With `JARVIS_WORKER_CMD` set the edge owns the Python process: it runs the
@@ -200,18 +231,17 @@ been none for `JARVIS_WORKER_IDLE` seconds. Idle, jarvis is the edge alone.
 
 **What starts it**: a request the edge proxies (REST, the other WebSockets,
 GraphQL it hasn't ported) — which waits for it, 2–3 s on a laptop; a job a
-worker could claim now, or one a dead worker left `running`; a worker that
-reported it must stay up dying (see holds); and the edge's own start, so the
+worker could claim now, or one a dead worker left `running`; a voice note a
+bot needs transcribed (Whisper is Python's); and the edge's own start, so the
 startup sweeps run and a broken command shows up at once. A run the edge
 starts itself needs nothing more: its job kicks the supervisor, and the run is
 pending in the mirror until the new worker claims it.
 
 **What keeps it up**: a proxied request or socket in progress (a log stream
 holds it while someone watches), a run in the mirror, a claimable or running
-job, and the worker's `holds` — `telegram` / `discord` (a bot is connected:
-always on, restarted if it dies) and `kernels` (a conversation's notebook
-still has its variables; held until the kernel's 30-minute idle reap, as
-before). Ready means `/health` answers and the link has said hello.
+job, and the worker's `holds` — `kernels` (a conversation's notebook still
+has its variables; held until the kernel's 30-minute idle reap, as before).
+A connected chat bot holds nothing: the bots are the edge's (see "The bots"). Ready means `/health` answers and the link has said hello.
 
 **How it stops**: `call drain` — the worker stops claiming and waits out a
 claim in flight — then one last look at the job table and the mirror. Work

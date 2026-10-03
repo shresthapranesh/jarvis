@@ -220,8 +220,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             register_memory_activity_prune_job()
             register_checkpoint_prune_job()
 
+        # The chat bots. Behind the edge they run there (edge/src/bots/), so
+        # that a bot doesn't keep this process up; started here only when this
+        # server stands alone. Configuration, not link state, decides — as for
+        # the timers — so the two never both poll one bot.
         _tg_app = None
-        _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        _tg_token = None if behind_edge() else os.environ.get("TELEGRAM_BOT_TOKEN")
         if _tg_token:
             from server.telegram_bot import build_application
             _tg_app = build_application(_tg_token)
@@ -232,16 +236,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 allowed_updates=["message"],
             )
             await _tg_app.start()
-            state._telegram_bot = _tg_app.bot
 
         _dc_client = None
         _dc_task: asyncio.Task | None = None
-        _dc_token = os.environ.get("DISCORD_BOT_TOKEN")
+        _dc_token = None if behind_edge() else os.environ.get("DISCORD_BOT_TOKEN")
         if _dc_token:
             from server.discord_bot import build_client
             _dc_client = build_client()
             _dc_task = asyncio.create_task(_dc_client.start(_dc_token))
-            state._discord_client = _dc_client
 
         yield
 
@@ -250,14 +252,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await _tg_app.updater.stop()
             await _tg_app.stop()
             await _tg_app.shutdown()
-            state._telegram_bot = None
 
         if _dc_client is not None:
             await _dc_client.close()
             if _dc_task is not None:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await _dc_task
-            state._discord_client = None
 
         # Stop workers BEFORE the queue/checkpointer/etc. tear down so any
         # in-flight handler can still update its run via async_session.

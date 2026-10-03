@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, cast
+import os
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core import state
 from db.ops import get_notification_channels_by_ids
-
-if TYPE_CHECKING:
-    import discord
-    from telegram import Bot
 
 logger = logging.getLogger(__name__)
 
@@ -85,37 +81,36 @@ async def send_notifications(
 
 
 async def _send_telegram(chat_id: str, text: str) -> None:
-    bot = cast("Bot | None", state.get_telegram_bot())
-    if bot is None:
+    # Straight to the Bot API rather than through a running bot: behind the
+    # edge, the bots live in the edge process, not this one.
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token:
         logger.warning("telegram bot not configured; skipping notification to %s", chat_id)
         return
-    await bot.send_message(chat_id=int(chat_id), text=text)
+    base = (os.environ.get("TELEGRAM_API_URL") or "https://api.telegram.org").rstrip("/")
+    proxy = os.environ.get("TELEGRAM_PROXY_URL") or None
+    async with httpx.AsyncClient(proxy=proxy, timeout=30) as client:
+        resp = await client.post(f"{base}/bot{token}/sendMessage", json={"chat_id": chat_id, "text": text})
+    body = resp.json()
+    if not body.get("ok"):
+        logger.warning("telegram sendMessage to %s failed: %s", chat_id, body.get("description"))
 
 
 async def _send_discord(channel_id: str, text: str) -> None:
-    import discord  # local import — keep notifications.py importable without discord.py
-
-    client = cast("discord.Client | None", state.get_discord_client())
-    if client is None or not client.is_ready():
-        logger.warning("discord client not ready; skipping notification to %s", channel_id)
+    token = os.environ.get("DISCORD_BOT_TOKEN")
+    if not token:
+        logger.warning("discord bot not configured; skipping notification to %s", channel_id)
         return
-    try:
-        cid = int(channel_id)
-    except ValueError:
+    if not channel_id.isdigit():
         logger.warning("invalid discord channel_id: %s", channel_id)
         return
-
-    channel = client.get_channel(cid)
-    if channel is None:
-        try:
-            channel = await client.fetch_channel(cid)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
-            logger.warning("discord fetch_channel(%s) failed: %s", cid, exc)
-            return
-
-    if not isinstance(channel, discord.abc.Messageable):
-        logger.warning("discord channel %s is not messageable (%s)", cid, type(channel).__name__)
-        return
-
+    base = (os.environ.get("DISCORD_API_URL") or "https://discord.com/api/v10").rstrip("/")
     out = text if len(text) <= _MAX_DISCORD_LEN else text[: _MAX_DISCORD_LEN - 1] + "…"
-    await channel.send(out)
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{base}/channels/{channel_id}/messages",
+            headers={"Authorization": f"Bot {token}"},
+            json={"content": out, "allowed_mentions": {"parse": []}},
+        )
+    if resp.status_code >= 400:
+        logger.warning("discord message to %s failed: %s %s", channel_id, resp.status_code, resp.text[:200])

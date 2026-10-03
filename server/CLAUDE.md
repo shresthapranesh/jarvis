@@ -61,6 +61,7 @@ Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a
 - `pruneCheckpoints` runs the online sweep (no VACUUM). `downloadVoice` writes to `.part` then renames.
 
 ## Bots (`telegram_bot.py`, `discord_bot.py`)
+Behind the edge the bots run there (`edge/src/bots/`) and these modules aren't started (`behind_edge()`); they run only when this server stands alone, so change both. Notifications (`core/notifications.py`) call the Bot API / Discord REST directly and need no running bot.
 Enabled by `TELEGRAM_BOT_TOKEN` / `DISCORD_BOT_TOKEN`. Allowlists (`telegram.allowed_users`, `discord.allowed_users`) reject everyone when empty. One thread per chat/channel (`telegram_{chat_id}`, `discord_{channel_id}`).
 - Never send a placeholder message — create it on the first real token, then edit roughly every second.
 - Discord: replies in DMs, or in guilds when @mentioned / replied to; message cap `_MAX_MSG_LEN = 1900`; needs the Message Content Intent.
