@@ -124,6 +124,7 @@ async def dispatch_board_tasks() -> int:
                 log_task_created(run_id, _tasks[run_id], task.model)
                 await queue.enqueue(
                     "board_task", {"task_id": task.id}, job_id=run_id, session=session,
+                    thread_id=board_task_conversation_id(task.id),
                 )
             await session.commit()
             if ready:

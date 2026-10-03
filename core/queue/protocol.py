@@ -40,6 +40,8 @@ class Job:
     # A stop requested before any worker claimed the job. The run starts
     # already cancelled, so it finishes as stopped instead of running.
     cancel_requested: bool = False
+    # The thread whose lease this job holds while it runs (see `enqueue`).
+    thread_id: str | None = None
 
 
 class JobQueue(abc.ABC):
@@ -57,6 +59,7 @@ class JobQueue(abc.ABC):
         run_at: datetime | None = None,
         max_attempts: int = 3,
         session: AsyncSession | None = None,
+        thread_id: str | None = None,
     ) -> str:
         """Insert a new job and return its id.
 
@@ -69,6 +72,13 @@ class JobQueue(abc.ABC):
         wake signal fires only after the caller commits. If the caller rolls
         back, no wake fires (and no job exists). If `session` is None, the
         queue opens its own session, commits, and fires the wake immediately.
+
+        `thread_id` names the transcript thread the job writes, when other
+        jobs write it too. Jobs on one thread run one at a time: a claim
+        passes over a job whose thread has a job running (the thread's
+        lease), and takes it once that one stops running. The lease lives in
+        the job row, so it holds across processes and is released by the
+        same paths that release the lock — finish, fail, or the reaper.
         """
 
     @abc.abstractmethod
@@ -80,7 +90,8 @@ class JobQueue(abc.ABC):
         ttl_seconds: int = 300,
     ) -> Job | None:
         """Atomically transition one due pending job to running and return it.
-        Returns None if no job is currently due.
+        Returns None if no job is currently due. A job whose thread has
+        another job running is not due yet.
 
         The lock holds for `ttl_seconds`. If the worker hasn't `extend_lock`'d
         or finished by then, the reaper will reclaim it for another worker.
