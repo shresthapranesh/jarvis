@@ -108,6 +108,15 @@ def _migrate(conn: Connection) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_locked_until ON jobs (locked_until)"))
+    # The per-thread lease (`Job.thread_id`). Jobs enqueued before it have no
+    # thread, so nothing they hold can collide with the unique index.
+    job_cols = {c["name"] for c in inspector.get_columns("jobs")}
+    if "thread_id" not in job_cols:
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN thread_id VARCHAR"))
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_jobs_thread_lease ON jobs (thread_id) "
+        "WHERE status = 'running' AND thread_id IS NOT NULL"
+    ))
     # The inbox reads pending rows constantly (nav badge polls); the two
     # composite indexes cover both the list and the per-run reconciliation.
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_approvals_status_requested ON approvals (status, requested_at)"))

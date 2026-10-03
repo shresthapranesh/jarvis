@@ -8,7 +8,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import event, select, update
+from sqlalchemy import event, exists, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import async_session
@@ -21,6 +23,20 @@ logger = logging.getLogger(__name__)
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _thread_free():
+    """No other job is running on this job's thread — its lease is free.
+
+    The partial unique index `ux_jobs_thread_lease` enforces the same rule for
+    every writer; this keeps a claim from tripping it, and lets the claim pass
+    over a held thread to the next due job."""
+    holder = aliased(JobModel)
+    return JobModel.thread_id.is_(None) | ~exists().where(
+        holder.thread_id == JobModel.thread_id,
+        holder.status == "running",
+        holder.id != JobModel.id,
+    )
 
 
 class SqliteJobQueue(JobQueue):
@@ -66,6 +82,7 @@ class SqliteJobQueue(JobQueue):
         run_at: datetime | None = None,
         max_attempts: int = 3,
         session: AsyncSession | None = None,
+        thread_id: str | None = None,
     ) -> str:
         jid = job_id or str(uuid4())
         run_at = run_at or _now()
@@ -75,6 +92,7 @@ class SqliteJobQueue(JobQueue):
             payload=json.dumps(payload),
             run_at=run_at,
             max_attempts=max_attempts,
+            thread_id=thread_id,
         )
 
         if session is not None:
@@ -125,6 +143,7 @@ class SqliteJobQueue(JobQueue):
                     JobModel.kind.in_(kinds),
                     JobModel.status == "pending",
                     JobModel.run_at <= now,
+                    _thread_free(),
                 )
                 .order_by(JobModel.run_at.asc())
                 .limit(1)
@@ -141,17 +160,19 @@ class SqliteJobQueue(JobQueue):
             job_payload_str = candidate.payload
             job_created_at = candidate.created_at
             job_cancel_requested = bool(candidate.cancel_requested)
+            job_thread_id = candidate.thread_id
             new_attempts = candidate.attempts + 1
             new_lock_until = now + timedelta(seconds=ttl_seconds)
 
-            # Optimistic concurrency: only succeed if status is still 'pending'.
-            # SQLite serializes writers, so the rowcount==0 path is rare but
-            # not impossible across processes.
+            # Optimistic concurrency: only succeed if status is still 'pending'
+            # and the thread is still free. SQLite serializes writers, so the
+            # rowcount==0 path is rare but not impossible across processes.
             upd = (
                 update(JobModel)
                 .where(
                     JobModel.id == job_id_str,
                     JobModel.status == "pending",
+                    _thread_free(),
                 )
                 .values(
                     status="running",
@@ -160,8 +181,14 @@ class SqliteJobQueue(JobQueue):
                     attempts=new_attempts,
                 )
             )
-            result = await sess.execute(upd)
-            await sess.commit()
+            try:
+                result = await sess.execute(upd)
+                await sess.commit()
+            except IntegrityError:
+                # Another process took the thread's lease between our check
+                # and our write; the unique index refused the second holder.
+                await sess.rollback()
+                return None
             if (result.rowcount or 0) == 0:  # type: ignore[attr-defined]
                 return None
 
@@ -178,6 +205,7 @@ class SqliteJobQueue(JobQueue):
                     else job_created_at
                 ),
                 cancel_requested=job_cancel_requested,
+                thread_id=job_thread_id,
             )
 
     async def extend_lock(
@@ -216,7 +244,12 @@ class SqliteJobQueue(JobQueue):
             )
             result = await sess.execute(stmt)
             await sess.commit()
-            return (result.rowcount or 0) > 0  # type: ignore[attr-defined]
+            done = (result.rowcount or 0) > 0  # type: ignore[attr-defined]
+        if done:
+            # The job's thread lease is free: a turn queued behind it on the
+            # same thread is claimable now, not at the next poll.
+            self._signal_wake()
+        return done
 
     async def fail(
         self,
@@ -235,24 +268,23 @@ class SqliteJobQueue(JobQueue):
             if job.status != "running" or job.locked_by != worker_id:
                 return False
 
+            # Either way the job stops running, which frees its thread lease
+            # for the next job waiting on it — so wake.
             if retry_at is not None and job.attempts < job.max_attempts:
                 job.status = "pending"
                 job.run_at = retry_at
                 job.last_error = error
                 job.locked_by = None
                 job.locked_until = None
-                wake_now = retry_at <= _now()
             else:
                 job.status = "error"
                 job.last_error = error
                 job.completed_at = _now()
                 job.locked_by = None
                 job.locked_until = None
-                wake_now = False
 
             await sess.commit()
-        if wake_now:
-            self._signal_wake()
+        self._signal_wake()
         return True
 
     async def cancel(self, job_id: str) -> None:

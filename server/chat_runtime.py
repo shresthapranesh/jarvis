@@ -329,8 +329,11 @@ def in_flight_chat_task(conv_id: str) -> str | None:
     registers the state before it commits the job — so this sees a turn that
     has been accepted but not yet claimed. The one gap is a job that outlived a
     restart: nothing re-registers it until the worker claims it, so a message
-    sent inside that window starts its own turn. `_adopt_queued_messages` is
-    what keeps that from losing anything.
+    sent inside that window starts its own turn. That turn waits for the
+    first: the conversation's thread lease (`Job.thread_id`) lets only one of
+    them run. So this lookup only decides whether a message joins the live
+    run or becomes the next turn — it is not what keeps two runs off one
+    thread.
     """
     for task_id, state in _tasks.items():
         if state.kind == "chat" and state.parent_id == conv_id and not state.done:
@@ -349,8 +352,9 @@ async def route_to_live_run(
     Returns ``(task_id, message_id)`` when the text was queued, or None when
     the conversation is idle and the caller should start a turn as usual. This
     is the single rule every surface goes through, because starting a second
-    turn here is not a heavier version of the same thing — both runs share the
-    conversation's thread and would interleave their writes to it.
+    turn here is not a heavier version of the same thing: the thread lease
+    would hold it until the live run ends, and the message would reach the
+    model a turn late instead of mid-run.
 
     Raises when a run is up but this message cannot join it: attachments (a
     queued row has to be replayable from the DB alone, and it stores attachment
@@ -521,8 +525,9 @@ async def enqueue_chat_task(
     if attachments:
         payload["attachments"] = [a.model_dump() for a in attachments]
 
+    # The conversation is the thread: its turns run one at a time.
     await get_queue().enqueue(
-        "chat", payload, job_id=task_id, session=session,
+        "chat", payload, job_id=task_id, session=session, thread_id=conv_id,
     )
 
     # Register TaskState BEFORE commit so SSE subscribers see it the moment

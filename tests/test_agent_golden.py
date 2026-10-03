@@ -112,6 +112,9 @@ async def run_turn(
     try:
         async with asyncio.timeout(120):
             await chat_job_handler(job)
+        # As the Worker does — it frees the conversation's thread lease, so
+        # the next turn on it can be claimed.
+        await jarvis.queue.complete(job.id, worker_id="test")
     finally:
         if watcher is not None:
             watcher.cancel()

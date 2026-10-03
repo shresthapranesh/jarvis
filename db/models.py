@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -563,9 +563,19 @@ class Job(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # The transcript thread this job writes to, when it shares one with other
+    # jobs (a conversation's turns, a board card's runs). A running job holds
+    # its thread's lease: no second job on the thread is claimed until this one
+    # stops running, whichever process — Python or the edge — claims it.
+    thread_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     __table_args__ = (
         Index("ix_jobs_kind_status_run_at", "kind", "status", "run_at"),
         Index("ix_jobs_locked_until", "locked_until"),
+        Index(
+            "ux_jobs_thread_lease", "thread_id", unique=True,
+            sqlite_where=text("status = 'running' AND thread_id IS NOT NULL"),
+        ),
     )
 
 

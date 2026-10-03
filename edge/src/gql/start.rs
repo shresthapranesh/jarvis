@@ -346,9 +346,9 @@ pub async fn start_chat(
     )
     .await?;
 
-    // A conversation runs one turn at a time: two runs on one LangGraph
-    // thread race its checkpointer. So a message for a busy conversation
-    // joins the run already going — `route_to_live_run`.
+    // A message for a busy conversation joins the run already going —
+    // `route_to_live_run`. A second job would only wait: the conversation's
+    // thread lease (`jobs.thread_id`) runs its turns one at a time.
     if let Some(run) = registry.in_flight_chat(&conversation_id) {
         tx.commit().await?;
         if !attachments.is_empty() {
@@ -428,7 +428,8 @@ pub async fn start_chat(
     if !attachments.is_empty() {
         payload["attachments"] = attachments.iter().map(Attachment::dump).collect();
     }
-    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload).await?;
+    // The conversation is the thread: its turns run one at a time.
+    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(&conversation_id)).await?;
     commit_run(registry, tx, &task_id, "chat", first_chars(&query, 60), &conversation_id, &enqueued_at).await?;
 
     // The bytes now live in documents_dir or the job payload.
@@ -563,7 +564,7 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"workflow_id": workflow_id, "inputs": inputs});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload, None).await?;
         commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at).await?;
         Ok(run_id)
     }
@@ -618,7 +619,7 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"automation_id": automation_id, "triggered_by": "manual"});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload, None).await?;
         commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at).await?;
         Ok(run_id)
     }
