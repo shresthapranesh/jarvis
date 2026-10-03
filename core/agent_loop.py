@@ -93,17 +93,20 @@ class DbThread(Thread):
         self.thread_id = thread_id
 
     @classmethod
-    async def load(cls, thread_id: str, checkpointer: Any = None) -> "DbThread":
+    async def load(cls, thread_id: str) -> "DbThread":
         """The thread's rows — converted from LangGraph's checkpoint first, if
         that is the only place it exists yet."""
-        from core.transcript_store import import_checkpoint, load_thread
+        from core.transcript_store import import_checkpoint, legacy_checkpointer, load_thread
         from db import async_session
 
         async with async_session() as session:
             thread = await load_thread(session, thread_id)
-            if not thread.exists and checkpointer is not None:
+            if not thread.exists:
                 try:
-                    converted = await import_checkpoint(session, checkpointer, thread_id)
+                    async with legacy_checkpointer() as checkpointer:
+                        converted = checkpointer is not None and await import_checkpoint(
+                            session, checkpointer, thread_id,
+                        )
                 except Exception as exc:
                     # Either the batch conversion wrote it first (the unique
                     # keys refused this copy), or the checkpoint won't convert
@@ -324,7 +327,6 @@ class Agent:
         tools: Sequence[Any],
         *,
         gate: ToolGate | None = None,
-        checkpointer: Any = None,
         store: Any = None,
     ):
         self.name = name
@@ -332,7 +334,6 @@ class Agent:
         self.tools = list(tools)
         self.tools_by_name = {t.name: t for t in self.tools}
         self.gate = gate
-        self.checkpointer = checkpointer
         self.store = store
 
     # ── public ───────────────────────────────────────────────────────────────
@@ -360,7 +361,7 @@ class Agent:
             thread_id = (config.get("configurable") or {}).get("thread_id")
             if not thread_id:
                 raise ValueError("an agent run needs a thread, or configurable.thread_id")
-            thread = await DbThread.load(str(thread_id), self.checkpointer)
+            thread = await DbThread.load(str(thread_id))
 
         queue: asyncio.Queue[Any] = asyncio.Queue()
         done = object()
@@ -401,7 +402,7 @@ class Agent:
         With neither `thread` nor a `thread_id`, the history is in memory."""
         if thread is None:
             thread_id = _thread_id(config)
-            thread = await DbThread.load(thread_id, self.checkpointer) if thread_id else Thread()
+            thread = await DbThread.load(thread_id) if thread_id else Thread()
         async for _ in self.astream(input, config, thread=thread):
             pass
         return {"messages": thread.messages, "todos": thread.todos}

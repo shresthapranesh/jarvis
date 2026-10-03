@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgraph.store.sqlite.aio import AsyncSqliteStore
+from core.transcript_store import KvStore
 
 
 class SessionService:
-    """Typed wrapper over AsyncSqliteStore providing typed get/set for
+    """Typed wrapper over KvStore providing typed get/set for
     app, user, session, temp scopes.
 
     Usage:
@@ -17,7 +17,7 @@ class SessionService:
         await svc.get_user(user_id, "name")
     """
 
-    def __init__(self, store: AsyncSqliteStore | None) -> None:
+    def __init__(self, store: KvStore | None) -> None:
         self._store = store
 
     async def get_app(self, key: str, default: Any = None) -> Any:

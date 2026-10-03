@@ -14,7 +14,6 @@ import contextlib
 import json
 import os
 import socket
-import sqlite3
 import subprocess
 import sys
 import time
@@ -87,13 +86,14 @@ async def test_todos(edge):
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.base import empty_checkpoint
 
-    from core.state import get_async_checkpointer
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from core.config import get_config
 
     query = _relay_text("TodoListQuery")
     # No checkpoints.db rows at all yet.
     await _assert_same(edge, query, {"conversationId": "c1"})
 
-    cp = get_async_checkpointer()
     todos = [
         "a legacy string",
         {"text": "doing", "status": "in_progress"},
@@ -101,16 +101,17 @@ async def test_todos(edge):
         {"text": 42, "status": "bogus"},
         {"status": "done"},
     ]
-    for thread, values in (("c1", {"todos": todos}), ("c2", {"todos": "not a list"}), ("c3", {})):
-        config: RunnableConfig = {"configurable": {"thread_id": thread, "checkpoint_ns": ""}}
-        for step in range(2):  # the newest one wins
-            checkpoint = empty_checkpoint()
-            checkpoint["channel_values"] = {
-                # A message is an extension type the edge skips over.
-                "messages": [HumanMessage(content="hi", id=f"h{step}")],
-                **({k: (v if step else ["stale"]) for k, v in values.items()}),
-            }
-            config = await cp.aput(config, checkpoint, {}, {})
+    async with AsyncSqliteSaver.from_conn_string(get_config().checkpoints_db) as cp:
+        for thread, values in (("c1", {"todos": todos}), ("c2", {"todos": "not a list"}), ("c3", {})):
+            config: RunnableConfig = {"configurable": {"thread_id": thread, "checkpoint_ns": ""}}
+            for step in range(2):  # the newest one wins
+                checkpoint = empty_checkpoint()
+                checkpoint["channel_values"] = {
+                    # A message is an extension type the edge skips over.
+                    "messages": [HumanMessage(content="hi", id=f"h{step}")],
+                    **({k: (v if step else ["stale"]) for k, v in values.items()}),
+                }
+                config = await cp.aput(config, checkpoint, {}, {})
     for thread in ("c1", "c2", "c3", "nobody"):
         data = await _assert_same(edge, query, {"conversationId": thread})
     data = await _assert_same(edge, query, {"conversationId": "c1"})
@@ -171,16 +172,6 @@ async def test_browser_available(edge):
 # ── maintenance gates ────────────────────────────────────────────────────────
 
 
-def _uuid6_at(when: datetime) -> str:
-    from unittest import mock
-
-    import langgraph.checkpoint.base.id as ids
-
-    with mock.patch.object(ids.time, "time_ns", return_value=int(when.timestamp() * 1e9)):
-        ids._last_v6_timestamp = None
-        return str(ids.uuid6())
-
-
 def _edge_due(edge_binary: Path, work_dir: Path) -> dict[str, Any]:
     env = {**os.environ, "WORK_DIR": str(work_dir), "DATABASE_URL": f"sqlite+aiosqlite:///{work_dir}/database.db",
            "JARVIS_EDGE_LOG": "warn"}
@@ -192,7 +183,6 @@ def _edge_due(edge_binary: Path, work_dir: Path) -> dict[str, Any]:
 async def _python_due(monkeypatch) -> dict[str, bool]:
     """Each sweep's own verdict: reaching for an LLM means it found work."""
     from core import project_memory_consolidation as pmc
-    from core.checkpoint_retention import prune_checkpoints
     from core.memory_consolidation import _load_watermark, _transcript_block
     from core.state import get_store
     from db import async_session
@@ -217,21 +207,18 @@ async def _python_due(monkeypatch) -> dict[str, bool]:
             assert (await pmc.consolidate_project_memory(store, pid)).startswith("skipped")
         except Due:
             project = True
-    stats = await prune_checkpoints(dry_run=True)
     return {
         "memory_consolidation": _transcript_block(messages)[1] is not None,
         "project_memory": project,
-        "checkpoint_prune": bool(stats["root_pruned"] or stats["subgraph_pruned"]),
     }
 
 
 async def test_maintenance_gates_match_the_sweeps(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
-    from core.state import get_async_checkpointer, get_store
+    from core.state import get_store
     from db import async_session
     from db.models import Conversation, Message, Project
 
     now = datetime.now(timezone.utc)
-    await get_async_checkpointer().setup()
     store = get_store()
 
     async def check(label: str) -> None:
@@ -289,28 +276,6 @@ async def test_maintenance_gates_match_the_sweeps(jarvis, work_dir: Path, edge_b
     await store.aput(("memory_consolidation",), "state",
                      {"messages_through": (now - timedelta(minutes=30)).replace(tzinfo=None).isoformat()})
     await check("a naive watermark exactly at a message is exclusive")
-
-    db = sqlite3.connect(work_dir / "checkpoints.db")
-
-    def checkpoints(thread: str, ns: str, *ages: timedelta) -> None:
-        for age in ages:
-            db.execute("INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, type, checkpoint, metadata) "
-                       "VALUES (?, ?, ?, 'msgpack', x'80', '{}')", (thread, ns, _uuid6_at(now - age)))
-        db.commit()
-
-    hour = timedelta(hours=1)
-    checkpoints("t1", "", 2 * hour, 2 * hour, 2 * hour)
-    await check("three old roots: all kept")
-    checkpoints("t2", "", timedelta(minutes=5), timedelta(minutes=4), timedelta(minutes=3), timedelta(minutes=2))
-    await check("a fourth root, but too young")
-    checkpoints("t3", "tools:abc", timedelta(minutes=10))
-    await check("a young subgraph")
-    checkpoints("t1", "", 3 * hour)
-    await check("an old fourth root")
-    db.execute("DELETE FROM checkpoints WHERE thread_id = 't1'")
-    checkpoints("t3", "tools:def", 2 * hour)
-    await check("an old subgraph")
-    db.close()
 
 
 # ── the SPA and the routes it must not shadow ────────────────────────────────

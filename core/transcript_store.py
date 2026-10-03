@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable, Sequence, cast
+from typing import Any, Iterable, Sequence
 
 from langchain_core.messages import BaseMessage, RemoveMessage, convert_to_messages, message_chunk_to_message
 from sqlalchemy import delete, func, select, update
@@ -314,14 +316,12 @@ async def import_checkpoint(session: AsyncSession, checkpointer: Any, thread_id:
     tup = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
     if tup is None:
         return False
-    from langgraph.graph.message import add_messages  # noqa: PLC0415 — only while converting
-
     values = tup.checkpoint.get("channel_values") or {}
     messages: list[BaseMessage] = list(values.get("messages") or [])
     todos = values.get("todos")
     for _task, channel, value in tup.pending_writes or []:
         if channel == "messages":
-            messages = cast(list[BaseMessage], add_messages(cast(Any, messages), value))
+            messages = merge_messages(messages, value if isinstance(value, list) else [value])
         elif channel == "todos":
             todos = value
     # Ids for messages that had none, stable across a retried conversion.
@@ -339,6 +339,27 @@ async def import_checkpoint(session: AsyncSession, checkpointer: Any, thread_id:
                             todos=None if todos is None else json.dumps(todos, ensure_ascii=False)))
     await session.commit()
     return True
+
+
+@asynccontextmanager
+async def legacy_checkpointer(checkpoints_db: str | None = None) -> AsyncIterator[Any]:
+    """LangGraph's saver over `checkpoints.db`, opened only to convert a
+    thread still there — or None when there is no such file. Nothing else
+    opens checkpoints.db any more; it goes once every install has converted.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    if checkpoints_db is None:
+        from core.config import get_config  # noqa: PLC0415
+
+        checkpoints_db = get_config().checkpoints_db
+    if not Path(checkpoints_db).exists():
+        yield None
+        return
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # noqa: PLC0415
+
+    async with AsyncSqliteSaver.from_conn_string(checkpoints_db) as saver:
+        yield saver
 
 
 def checkpoint_thread_ids(checkpoints_db: str) -> list[str]:
@@ -412,6 +433,34 @@ async def convert_checkpoints(checkpointer: Any, checkpoints_db: str) -> Convers
     return report
 
 
+_STORE_IMPORTED = (("jarvis", "migrations"), "langgraph_store")
+
+
+def _stamp(raw: Any) -> datetime:
+    """A LangGraph store timestamp (UTC, "YYYY-MM-DD HH:MM:SS"), or now."""
+    try:
+        parsed = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return _now()
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+async def import_store_once(session: AsyncSession, checkpoints_db: str) -> int | None:
+    """`import_store`, the first time only — afterwards `kv_store` is the
+    store, and a key deleted from it must not come back from checkpoints.db.
+    Returns how many items were copied, or None when it had already run."""
+    namespace, key = _STORE_IMPORTED
+    if await session.get(KvItem, (_ns(namespace), key)) is not None:
+        return None
+    from pathlib import Path  # noqa: PLC0415
+
+    copied = await import_store(session, checkpoints_db) if Path(checkpoints_db).exists() else 0
+    session.add(KvItem(namespace=_ns(namespace), key=key,
+                       value=json.dumps({"copied": copied, "at": _now().isoformat()})))
+    await session.commit()
+    return copied
+
+
 async def import_store(session: AsyncSession, checkpoints_db: str) -> int:
     """Copy the LangGraph store's items into `kv_store`, keeping any key that
     is already there. Returns how many were copied. Commits."""
@@ -421,14 +470,17 @@ async def import_store(session: AsyncSession, checkpoints_db: str) -> int:
     conn = sqlite3.connect(f"{Path(checkpoints_db).resolve().as_uri()}?mode=ro", uri=True)
     try:
         has_store = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'store'").fetchone()
-        rows = conn.execute("SELECT prefix, key, value FROM store").fetchall() if has_store else []
+        rows = conn.execute(
+            "SELECT prefix, key, value, created_at, updated_at FROM store"
+        ).fetchall() if has_store else []
     finally:
         conn.close()
     copied = 0
-    for prefix, key, value in rows:
+    for prefix, key, value, created_at, updated_at in rows:
         result = await session.execute(
             sqlite_insert(KvItem)
-            .values(namespace=prefix, key=key, value=value, created_at=_now(), updated_at=_now())
+            .values(namespace=prefix, key=key, value=value,
+                    created_at=_stamp(created_at), updated_at=_stamp(updated_at))
             .on_conflict_do_nothing(index_elements=["namespace", "key"])
         )
         copied += result.rowcount or 0  # type: ignore[attr-defined]

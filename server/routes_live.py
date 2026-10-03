@@ -11,7 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from core.agent_loop import Thread
 from core.agents import build_agent
 from core.log_callback import AgentLogger
-from core.state import TaskState, get_async_checkpointer, get_store
+from core.state import TaskState, get_store
 from db.ops import resolve_model
 from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _process_chunk
 
@@ -42,7 +42,7 @@ async def live_ws(websocket: WebSocket) -> None:
     # carries across them) and ends with the socket — nothing is stored.
     thread_id = f"live-{uuid4()}"
     thread = Thread()
-    agent = build_agent(model, checkpointer=get_async_checkpointer(), store=get_store())
+    agent = build_agent(model, store=get_store())
 
     try:
         while True:

@@ -339,13 +339,6 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
             logger.warning("Failed to unlink document file %s: %s", raw_path, e)
 
     try:
-        from core.state import get_async_checkpointer
-        await get_async_checkpointer().adelete_thread(conv_id)
-    except RuntimeError:
-        pass
-    except Exception as e:
-        logger.warning("Failed to delete checkpoint thread %s: %s", conv_id, e)
-    try:
         from core.transcript_store import delete_thread
         await delete_thread(session, conv_id)
     except Exception as e:
@@ -361,8 +354,8 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
 async def sweep_ephemeral_conversations(session: AsyncSession) -> int:
     """Delete any incognito conversations left behind by a crash or a client
     that never fired discardConversation. Called on startup. Each is torn down
-    via delete_conversation so rows, on-disk files, and the checkpointer thread
-    all go with it. Skips any that still have a pending/running job (mirrors the
+    via delete_conversation so rows, on-disk files, and the thread all go
+    with it. Skips any that still have a pending/running job (mirrors the
     zombie-row sweep) so an in-flight incognito run isn't yanked out from under
     its worker."""
     ids = list(

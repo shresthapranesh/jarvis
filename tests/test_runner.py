@@ -1,6 +1,6 @@
 """JarvisRunner as the source of truth for resources (PR #38).
 
-The runner used to hold config/checkpointer/store/queue/http that nothing read
+The runner used to hold config/store/queue/http that nothing read
 — every consumer went to a module global instead. These pin the inversion:
 with a runner installed, the accessors must return *its* objects; without one,
 they fall back to the process default.
@@ -14,11 +14,11 @@ import httpx
 import pytest
 
 
-def _runner_with(cfg, db, *, queue, store, checkpointer, http):
+def _runner_with(cfg, db, *, queue, store, http):
     from core.runner import JarvisRunner
 
     return JarvisRunner(
-        config=cfg, checkpointer=checkpointer, store=store,
+        config=cfg, store=store,
         queue=queue, http_client=http, db=db,
     )
 
@@ -28,7 +28,7 @@ async def test_accessors_follow_the_runner(work_dir: Path):
     from core.config import AppConfig
     from core.runner import set_runner
     from core.state import (
-        get_async_checkpointer, get_http_client, get_queue, get_store,
+        get_http_client, get_queue, get_store,
     )
     from db.engine import Database, get_database
 
@@ -37,18 +37,16 @@ async def test_accessors_follow_the_runner(work_dir: Path):
         "database_url": f"sqlite+aiosqlite:///{work_dir}/runner.db",
     })
     db = Database(cfg.database_url)
-    queue, store, checkpointer = object(), object(), object()
+    queue, store = object(), object()
 
     async with httpx.AsyncClient() as http:
-        set_runner(_runner_with(cfg, db, queue=queue, store=store,
-                                checkpointer=checkpointer, http=http))
+        set_runner(_runner_with(cfg, db, queue=queue, store=store, http=http))
         from core.config import get_config
 
         assert get_config() is cfg
         assert get_database() is db
         assert get_queue() is queue
         assert get_store() is store
-        assert get_async_checkpointer() is checkpointer
         assert get_http_client() is http
         set_runner(None)
 
@@ -82,8 +80,7 @@ async def test_runner_config_redirects_the_whole_app(work_dir: Path, tmp_path: P
     db = Database(f"sqlite+aiosqlite:///{elsewhere}/database.db")
 
     async with httpx.AsyncClient() as http:
-        set_runner(_runner_with(cfg, db, queue=object(), store=object(),
-                                checkpointer=object(), http=http))
+        set_runner(_runner_with(cfg, db, queue=object(), store=object(), http=http))
         assert Path(get_config().work_dir) == elsewhere
         assert Path(get_config().artifacts_dir).is_relative_to(elsewhere)
         assert Path(get_config().documents_dir).is_relative_to(elsewhere)
@@ -98,7 +95,7 @@ async def test_booted_runner_owns_every_resource(jarvis):
     runner's own reference — no parallel copies."""
     from core.config import get_config
     from core.state import (
-        get_async_checkpointer, get_http_client, get_queue, get_store,
+        get_http_client, get_queue, get_store,
     )
     from db.engine import get_database
 
@@ -106,5 +103,4 @@ async def test_booted_runner_owns_every_resource(jarvis):
     assert get_database() is jarvis.db
     assert get_queue() is jarvis.queue
     assert get_store() is jarvis.store
-    assert get_async_checkpointer() is jarvis.checkpointer
     assert get_http_client() is jarvis.http_client

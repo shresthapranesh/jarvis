@@ -1,10 +1,7 @@
-//! LangGraph's database (`checkpoints.db`), read-only.
-//!
-//! Three things in it decide whether Python has to be woken: a conversation's
-//! todo list (the chat page loads it), the memory jobs' watermarks (whether a
-//! consolidation pass has anything to read), and checkpoints old enough for
-//! the prune to delete. The edge reads them where LangGraph wrote them, and
-//! writes nothing.
+//! LangGraph's database (`checkpoints.db`), read-only, for one thing: the todo
+//! list of a conversation not yet converted to the transcript tables (the chat
+//! page loads it). It goes with checkpoints.db, once every install has
+//! converted.
 //!
 //! A checkpoint is msgpack. Todos are plain maps and strings in it; messages
 //! are extension types the edge has no need to understand, and skips. A
@@ -18,10 +15,6 @@ use rmpv::Value as Mp;
 use serde_json::Value;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-
-/// LangGraph's uuid6 epoch (1582-10-15) to the Unix one, in 100 ns ticks —
-/// `checkpoint_retention._UUID_EPOCH_100NS`.
-const UUID_EPOCH_100NS: u64 = 0x01B2_1DD2_1381_4000;
 
 #[derive(Debug)]
 pub struct Unreadable(pub String);
@@ -91,70 +84,6 @@ impl Checkpoints {
         let todos = get(&checkpoint, "channel_values").and_then(|cv| get(cv, "todos"));
         normalise_todos(todos)
     }
-
-    /// A LangGraph store item's value (`store.aget(namespace, key)`).
-    pub async fn store_get(&self, namespace: &str, key: &str) -> sqlx::Result<Option<Value>> {
-        let raw: Option<Vec<u8>> = self
-            .read(async |pool| {
-                sqlx::query_scalar("SELECT value FROM store WHERE prefix = ? AND key = ?")
-                    .bind(namespace)
-                    .bind(key)
-                    .fetch_optional(pool)
-                    .await
-            })
-            .await?;
-        Ok(raw.and_then(|r| serde_json::from_slice(&r).ok()))
-    }
-
-    /// Whether `prune_checkpoints` would delete anything, ignoring its
-    /// live-thread guard (a live thread means Python is up anyway): a root
-    /// checkpoint beyond a thread's newest `keep`, or any subgraph one, older
-    /// than `min_age`.
-    pub async fn prunable(&self, keep: usize, min_age: Duration) -> sqlx::Result<bool> {
-        let cutoff = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64()
-            - min_age.as_secs_f64();
-        let old = |id: &str| checkpoint_timestamp(id).is_some_and(|ts| ts < cutoff);
-        self.read(async |pool| {
-            let roots: Vec<(String, String)> = sqlx::query_as(
-                "SELECT thread_id, checkpoint_id FROM checkpoints WHERE checkpoint_ns = '' \
-                 ORDER BY thread_id, checkpoint_id DESC",
-            )
-            .fetch_all(pool)
-            .await?;
-            let mut rank = 0;
-            let mut thread: Option<&str> = None;
-            for (thread_id, id) in &roots {
-                if thread != Some(thread_id.as_str()) {
-                    thread = Some(thread_id);
-                    rank = 0;
-                }
-                rank += 1;
-                if rank > keep && old(id) {
-                    return Ok(true);
-                }
-            }
-            let subgraphs: Vec<String> =
-                sqlx::query_scalar("SELECT checkpoint_id FROM checkpoints WHERE checkpoint_ns <> ''")
-                    .fetch_all(pool)
-                    .await?;
-            Ok(subgraphs.iter().any(|id| old(id)))
-        })
-        .await
-    }
-}
-
-/// Unix seconds in a uuid6 checkpoint id — `checkpoint_timestamp`.
-pub fn checkpoint_timestamp(id: &str) -> Option<f64> {
-    let u = uuid::Uuid::parse_str(id).ok()?;
-    if u.get_variant() != uuid::Variant::RFC4122 || u.get_version_num() != 6 {
-        return None;
-    }
-    let (time_low, time_mid, time_hi_version, _) = u.as_fields();
-    let ticks = ((time_low as u64) << 28) | ((time_mid as u64) << 12) | ((time_hi_version as u64) & 0x0FFF);
-    Some((ticks as f64 - UUID_EPOCH_100NS as f64) / 1e7)
 }
 
 /// A `thread_state.todos` value (JSON), normalised the same way.
@@ -219,15 +148,6 @@ fn py_str(v: &Mp) -> Result<String, Unreadable> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn uuid6_timestamps_match_python() {
-        // uuid6() at 2026-10-01T12:00:00Z, as langgraph.checkpoint.base.id mints it.
-        assert_eq!(checkpoint_timestamp("1f1bd8fa-0be6-6000-8000-000000000000"), Some(1_790_856_000.0));
-        assert_eq!(checkpoint_timestamp("not-a-uuid"), None);
-        // A v4 id has no time in it.
-        assert_eq!(checkpoint_timestamp("6f1c6d3e-5b8a-4d0e-9c1f-2a3b4c5d6e7f"), None);
-    }
 
     #[test]
     fn todos_normalise_as_python_does() {

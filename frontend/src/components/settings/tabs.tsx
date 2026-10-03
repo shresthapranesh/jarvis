@@ -87,8 +87,8 @@ export const SETTINGS_TABS = [
     label: 'Maintenance',
     subtitle: (
       <>
-        Housekeeping that used to need a terminal on the box: prune superseded LangGraph
-        checkpoints, and download the Piper voice model that <code>POST /tts</code> needs.
+        Housekeeping that used to need a terminal on the box: download the Piper voice model
+        that <code>POST /tts</code> needs.
       </>
     ),
   },

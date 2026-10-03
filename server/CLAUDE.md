@@ -47,7 +47,7 @@ Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a
 - Only `surface="web"` conversations may join (`set_conversation_project`). Deleting a project nulls the FK, keeping conversations.
 - `_run_agent_task` puts `project_id` in `config["configurable"]`; other runtimes never set it.
 - Agent writes go through `jarvis.project_memory` (dedups via `core/text_dedupe.dedupe_against`; 24k cap on the SDK path only).
-- `core/project_memory_consolidation.py` runs every 30 min: merge mode is add-only (enforced in code); only rewrite mode (~daily) may delete. Gates: new messages → quiet ≥15 min or waiting ≥24h → minimum material. Watermarks live in the LangGraph store.
+- `core/project_memory_consolidation.py` runs every 30 min: merge mode is add-only (enforced in code); only rewrite mode (~daily) may delete. Gates: new messages → quiet ≥15 min or waiting ≥24h → minimum material. Watermarks live in `kv_store`.
 - `setConversationProject` exists because `updateConversation` can't express "clear".
 
 ## Chat attachments (`chat_runtime.py`, `core/streaming.py`, `core/doc_index.py`)
@@ -58,7 +58,7 @@ Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a
 
 ## Config + Maintenance
 - Config writes go through `core/settings_admin.apply_setting` so in-process caches (tool policy, MCP, embedder) update. `scheduler.timezone` can't apply live and says so.
-- `pruneCheckpoints` runs the online sweep (no VACUUM). `downloadVoice` writes to `.part` then renames.
+- `downloadVoice` writes to `.part` then renames.
 
 ## Bots (`telegram_bot.py`, `discord_bot.py`)
 Behind the edge the bots run there (`edge/src/bots/`) and these modules aren't started (`behind_edge()`); they run only when this server stands alone, so change both. Notifications (`core/notifications.py`) call the Bot API / Discord REST directly and need no running bot.

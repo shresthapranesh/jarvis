@@ -194,29 +194,6 @@ type BudgetUpdateEvent {
 
 union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
 
-type CheckpointPruneResult {
-  rootPruned: Int!
-  subgraphPruned: Int!
-  bytesFreed: Int!
-  threadsSkippedActive: Int!
-  dryRun: Boolean!
-  note: String!
-}
-
-type CheckpointStats {
-  dbPath: String!
-  exists: Boolean!
-  sizeBytes: Int!
-  threads: Int!
-  checkpoints: Int!
-  subgraphCheckpoints: Int!
-  prunableRoot: Int!
-  prunableSubgraph: Int!
-  reclaimableBytes: Int!
-  threadsSkippedActive: Int!
-  activeThreads: Int!
-}
-
 type Conversation implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
@@ -449,7 +426,6 @@ type Mutation {
   browserActivity(url: String!, phase: String! = "start", conversationId: String = null): Boolean!
   setSetting(key: String!, value: String!, allowManaged: Boolean! = false): SettingWriteResult!
   deleteSetting(key: String!, allowManaged: Boolean! = false): SettingWriteResult!
-  pruneCheckpoints(dryRun: Boolean! = false): CheckpointPruneResult!
   downloadVoice(force: Boolean! = false): VoiceStatus!
 }
 
@@ -584,7 +560,6 @@ type Query {
   browserAvailable: Boolean!
   settings: [Setting!]!
   setting(key: String!): Setting!
-  checkpointStats: CheckpointStats!
   voiceStatus: VoiceStatus!
 }
 

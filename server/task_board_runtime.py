@@ -38,7 +38,6 @@ from core.state import (
     _notify,
     _tasks,
     emit_event,
-    get_async_checkpointer,
     get_queue,
     get_store,
     log_task_created,
@@ -199,14 +198,11 @@ async def _run_agent(
     callbacks: list[BaseCallbackHandler] = start_run_callbacks(state, "board_task").handlers
 
     if invocation_context is not None and invocation_context.store is not None:
-        cp = invocation_context.checkpointer
         st = invocation_context.store
     else:
-        cp = get_async_checkpointer()
         st = get_store()
     agent = build_agent(
         model,
-        checkpointer=cp,
         store=st,
         invocation_context=invocation_context,
         board=True,

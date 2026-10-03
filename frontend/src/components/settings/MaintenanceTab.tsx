@@ -6,8 +6,6 @@ import type {MaintenanceQuery as TMaintenanceQuery} from '../../__generated__/Ma
 import {useToast} from '../../lib/toast';
 import {commitDownloadVoice} from '../../relay/DownloadVoiceMutation';
 import {maintenanceQuery} from '../../relay/MaintenanceQuery';
-import {commitPruneCheckpoints} from '../../relay/PruneCheckpointsMutation';
-import {ConfirmDialog} from '../ConfirmDialog';
 import {useQueryRetry} from '../QueryBoundary';
 import {badge, btn, codeField, page} from '../ui';
 import {maint, tools as toolStyles} from './settings.styles';
@@ -23,8 +21,8 @@ export function MaintenanceTab() {
   const retry = useQueryRetry();
   const [refetch, setRefetch] = useState(0);
   const data = useLazyLoadQuery<TMaintenanceQuery>(
-    // Two independent maintenance surfaces in one round trip; `refetch` bumps
-    // the fetch key after an action so the numbers reflect what just happened.
+    // `refetch` bumps the fetch key after an action so the status reflects
+    // what just happened.
     maintenanceQuery,
     {},
     {fetchPolicy: 'network-only', fetchKey: `${retry}-${refetch}`},
@@ -32,119 +30,8 @@ export function MaintenanceTab() {
 
   return (
     <div {...stylex.props(page.section)}>
-      <CheckpointCard stats={data.checkpointStats} onDone={() => setRefetch((n) => n + 1)} />
       <VoiceCard status={data.voiceStatus} onDone={() => setRefetch((n) => n + 1)} />
     </div>
-  );
-}
-
-function CheckpointCard({
-  stats,
-  onDone,
-}: {
-  stats: TMaintenanceQuery['response']['checkpointStats'];
-  onDone: () => void;
-}) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  const prunable = stats.prunableRoot + stats.prunableSubgraph;
-
-  async function run(dryRun: boolean) {
-    setBusy(true);
-    try {
-      const r = await commitPruneCheckpoints({dryRun});
-      const removed = r.rootPruned + r.subgraphPruned;
-      setResult(
-        `${dryRun ? 'Would remove' : 'Removed'} ${removed} checkpoint(s) ` +
-          `(${r.rootPruned} root, ${r.subgraphPruned} subgraph), ${bytes(r.bytesFreed)}. ${r.note}`,
-      );
-      if (!dryRun) onDone();
-    } catch (e) {
-      toast.push((e as Error).message || String(e), 'error');
-    } finally {
-      setBusy(false);
-      setConfirm(false);
-    }
-  }
-
-  return (
-    <section {...stylex.props(toolStyles.kind)}>
-      <h3 {...stylex.props(toolStyles.kindTitle)}>
-        Checkpoint retention
-        <span {...stylex.props(toolStyles.kindBlurb)}>
-          LangGraph re-serializes the whole graph state on every super-step and never reclaims the
-          superseded snapshots, so <code>checkpoints.db</code> grows with run length. This is the
-          same online sweep the hourly job runs.
-        </span>
-      </h3>
-
-      {!stats.exists ? (
-        <div {...stylex.props(page.empty)}>
-          No checkpoint database at <code>{stats.dbPath}</code> yet.
-        </div>
-      ) : (
-        <>
-          <dl {...stylex.props(maint.stats)}>
-            <div>
-              <dt>Database</dt>
-              <dd>{bytes(stats.sizeBytes)}</dd>
-            </div>
-            <div>
-              <dt>Threads</dt>
-              <dd>{stats.threads}</dd>
-            </div>
-            <div>
-              <dt>Checkpoints</dt>
-              <dd>
-                {stats.checkpoints}
-                <span {...stylex.props(maint.sub)}>{stats.subgraphCheckpoints} subgraph</span>
-              </dd>
-            </div>
-            <div>
-              <dt>Prunable now</dt>
-              <dd>
-                {prunable}
-                <span {...stylex.props(maint.sub)}>
-                  {bytes(stats.reclaimableBytes)} reclaimable
-                </span>
-              </dd>
-            </div>
-          </dl>
-          <p {...stylex.props(toolStyles.rowDesc)}>
-            {/* A low prunable count against a large total is the two guards working, not a
-                bug — worth saying, or the number reads as a disappointment. */}
-            Checkpoints younger than an hour, and every thread with a run in flight (
-            {stats.activeThreads} right now), are skipped — a row that survives this sweep is picked
-            up by the next one. <code>{stats.dbPath}</code>
-          </p>
-          <div {...stylex.props(codeField.actions)}>
-            <button {...stylex.props(btn.base)} disabled={busy} onClick={() => void run(true)}>
-              Dry run
-            </button>
-            <button
-              {...stylex.props(btn.base, btn.primary)}
-              disabled={busy || prunable === 0}
-              onClick={() => setConfirm(true)}
-            >
-              Prune {prunable > 0 ? prunable : ''}
-            </button>
-          </div>
-          {result && <p {...stylex.props(maint.result)}>{result}</p>}
-        </>
-      )}
-
-      <ConfirmDialog
-        open={confirm}
-        title="Prune superseded checkpoints?"
-        message="Deletes checkpoint rows that no resume path reads. Safe to run against a live server — in-flight threads and anything under an hour old are skipped."
-        confirmLabel="Prune"
-        danger
-        onConfirm={() => void run(false)}
-        onCancel={() => setConfirm(false)}
-      />
-    </section>
   );
 }
 

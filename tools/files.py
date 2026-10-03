@@ -1,6 +1,6 @@
 """File management tools: read, write, and list files on disk.
 
-Paths under memory/ are transparently routed to the AsyncSqliteStore so
+Paths under memory/ are transparently routed to the key-value store so
 agent memory persists in the database rather than as loose files on disk.
 """
 

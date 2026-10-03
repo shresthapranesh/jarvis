@@ -22,7 +22,7 @@ config_app = typer.Typer(help="Manage persistent configuration.")
 app.add_typer(config_app, name="config")
 model_app = typer.Typer(help="Manage models.")
 app.add_typer(model_app, name="model")
-memory_app = typer.Typer(help="Manage agent memory (AGENTS.md in the LangGraph store).")
+memory_app = typer.Typer(help="Manage agent memory (AGENTS.md in the key-value store).")
 app.add_typer(memory_app, name="memory")
 maintenance_app = typer.Typer(help="Database maintenance tasks.")
 app.add_typer(maintenance_app, name="maintenance")
@@ -525,50 +525,39 @@ def model_set_default(
 
 # ── memory subcommands ──────────────────────────────────────────────────────
 #
-# AGENTS.md is stored in the LangGraph AsyncSqliteStore, which lives in the
-# checkpoints DB (NOT database.db). Path defaults to ~/.jarvis/checkpoints.db
-# but is overridable via CHECKPOINTS_DB or --work-dir. The store row uses
-# prefix='memory', key='AGENTS.md', and a JSON value with a "content" field.
+# AGENTS.md is a `kv_store` row in database.db (namespace "memory", key
+# "AGENTS.md", value {"content": ...}) — what the LangGraph store in
+# checkpoints.db held before. Each command imports that store first, once, so
+# an install that hasn't started the server since sees its memory.
 
-_MEMORY_PREFIX = "memory"
+_MEMORY_NS = ("memory",)
 _MEMORY_KEY = "AGENTS.md"
 
 
-def _memory_db_path() -> Path:
+def _checkpoints_db_path() -> Path:
     from core.config import get_config
     return Path(get_config().checkpoints_db)
 
 
-def _memory_connect():
-    import sqlite3
-    db_path = _memory_db_path()
-    if not db_path.exists():
-        rprint(f"[red]checkpoints DB not found:[/red] {db_path}\nStart the server once to initialize it.")
-        raise typer.Exit(code=1)
-    return sqlite3.connect(db_path)
+async def _memory_store(session):
+    from core.transcript_store import KvStore, import_store_once
+
+    await import_store_once(session, str(_checkpoints_db_path()))
+    return KvStore()
 
 
 @memory_app.command("show")
 def memory_show() -> None:
-    """Print the current AGENTS.md memory stored in the LangGraph store."""
-    import json
-    con = _memory_connect()
-    try:
-        row = con.execute(
-            "SELECT value, updated_at FROM store WHERE prefix=? AND key=?",
-            (_MEMORY_PREFIX, _MEMORY_KEY),
-        ).fetchone()
-    finally:
-        con.close()
-    if row is None:
+    """Print the current AGENTS.md memory."""
+    async def _read(session):
+        return await (await _memory_store(session)).aget(_MEMORY_NS, _MEMORY_KEY)
+
+    item = _run_db(_read)
+    if item is None:
         rprint("[yellow]No memory entry stored.[/yellow] The agent will use only the hardcoded system prompt.")
         return
-    value, updated_at = row
-    try:
-        content = json.loads(value).get("content", "")
-    except json.JSONDecodeError:
-        content = value
-    rprint(f"[dim]Updated: {updated_at} ({len(content)} chars)[/dim]\n")
+    content = item.value.get("content", "")
+    rprint(f"[dim]Updated: {item.updated_at} ({len(content)} chars)[/dim]\n")
     console.print(Panel(Markdown(content), title="[bold cyan]AGENTS.md[/bold cyan]", border_style="cyan"))
 
 
@@ -577,25 +566,21 @@ def memory_reset(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
     """Delete the AGENTS.md memory entry. The agent will fall back to the hardcoded system prompt."""
-    db_path = _memory_db_path()
-    if not yes:
-        confirm = typer.confirm(f"Delete agent memory in {db_path}?", default=False)
-        if not confirm:
-            rprint("[yellow]Aborted.[/yellow]")
-            raise typer.Exit(code=1)
-    con = _memory_connect()
-    try:
-        cur = con.execute(
-            "DELETE FROM store WHERE prefix=? AND key=?",
-            (_MEMORY_PREFIX, _MEMORY_KEY),
-        )
-        con.commit()
-        if cur.rowcount == 0:
-            rprint("[yellow]No memory entry to delete.[/yellow]")
-        else:
-            rprint(f"[green]✓[/green] Deleted memory entry from {db_path}")
-    finally:
-        con.close()
+    if not yes and not typer.confirm("Delete the agent memory?", default=False):
+        rprint("[yellow]Aborted.[/yellow]")
+        raise typer.Exit(code=1)
+
+    async def _delete(session):
+        store = await _memory_store(session)
+        if await store.aget(_MEMORY_NS, _MEMORY_KEY) is None:
+            return False
+        await store.adelete(_MEMORY_NS, _MEMORY_KEY)
+        return True
+
+    if _run_db(_delete):
+        rprint("[green]✓[/green] Deleted the memory entry")
+    else:
+        rprint("[yellow]No memory entry to delete.[/yellow]")
 
 
 @memory_app.command("set")
@@ -603,9 +588,6 @@ def memory_set(
     file: Annotated[Path, typer.Argument(help="Path to a markdown file whose contents replace the stored AGENTS.md.")],
 ) -> None:
     """Replace AGENTS.md memory with the contents of a local file."""
-    import json
-    from datetime import datetime, timezone
-
     if not file.exists():
         rprint(f"[red]File not found:[/red] {file}")
         raise typer.Exit(code=1)
@@ -614,39 +596,14 @@ def memory_set(
         rprint("[red]Refusing to set an empty memory entry.[/red] Use 'memory reset' instead.")
         raise typer.Exit(code=1)
 
-    value = json.dumps({"content": content})
-    now = datetime.now(timezone.utc).isoformat()
-    con = _memory_connect()
-    try:
-        con.execute(
-            "INSERT INTO store (prefix, key, value, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(prefix, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            (_MEMORY_PREFIX, _MEMORY_KEY, value, now, now),
-        )
-        con.commit()
-    finally:
-        con.close()
-    rprint(f"[green]✓[/green] Wrote {len(content)} chars from {file} to memory in {_memory_db_path()}")
+    async def _write(session):
+        await (await _memory_store(session)).aput(_MEMORY_NS, _MEMORY_KEY, {"content": content})
+
+    _run_db(_write)
+    rprint(f"[green]✓[/green] Wrote {len(content)} chars from {file} to memory")
 
 
 # ── maintenance subcommands ─────────────────────────────────────────────────
-#
-# LangGraph's SqliteSaver writes a full state snapshot at every graph
-# super-step and never prunes, so checkpoints.db grows without bound (a long
-# conversation can accumulate hundreds of snapshots, each carrying the entire
-# message history). This app only ever reads the *latest* checkpoint per thread
-# — resume, the todos query, and conversation continuity all call aget_tuple
-# without a checkpoint_id, which returns the newest — and does no replay or
-# time-travel, so older per-thread checkpoints are dead weight.
-
-_KEEP_LATEST_PER_THREAD = """
-    {verb} FROM {table}
-    WHERE checkpoint_id <> (
-      SELECT MAX(c2.checkpoint_id) FROM checkpoints c2
-      WHERE c2.thread_id = {table}.thread_id
-        AND c2.checkpoint_ns = {table}.checkpoint_ns
-    )
-"""
 
 
 @maintenance_app.command("check-transcript")
@@ -661,7 +618,7 @@ def check_transcript(
     """
     from core.transcript import check_checkpoints
 
-    db_path = path or _memory_db_path()
+    db_path = path or _checkpoints_db_path()
     if not db_path.exists():
         rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
         raise typer.Exit(code=1)
@@ -684,17 +641,15 @@ def convert_checkpoints() -> None:
     running, and again: converted threads are skipped. Threads in
     checkpoints.db are only read.
     """
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from core.transcript_store import convert_checkpoints as convert, legacy_checkpointer
 
-    from core.transcript_store import convert_checkpoints as convert
-
-    db_path = _memory_db_path()
+    db_path = _checkpoints_db_path()
     if not db_path.exists():
         rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
         raise typer.Exit(code=1)
 
     async def _convert(_session):
-        async with AsyncSqliteSaver.from_conn_string(str(db_path)) as saver:
+        async with legacy_checkpointer(str(db_path)) as saver:
             return await convert(saver, str(db_path))
 
     report = _run_db(_convert)
@@ -703,70 +658,6 @@ def convert_checkpoints() -> None:
         rprint(f"  [red]{thread_id}[/red]: {why}")
     if report.failed:
         raise typer.Exit(code=1)
-
-
-@maintenance_app.command("prune-checkpoints")
-def prune_checkpoints(
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Report what would be removed without deleting anything.")] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
-) -> None:
-    """Shrink checkpoints.db by keeping only the latest checkpoint per thread.
-
-    Stop the server first so nothing else holds the DB open. Resumable state
-    for every conversation is preserved; only superseded snapshots are dropped.
-    """
-    import sqlite3
-
-    db_path = _memory_db_path()  # checkpoints.db (shared with the memory store)
-    if not db_path.exists():
-        rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
-        raise typer.Exit(code=1)
-
-    size_before = db_path.stat().st_size
-    con = sqlite3.connect(db_path)
-    con.isolation_level = None  # explicit txn control; VACUUM can't run inside one
-    try:
-        total_cp = con.execute("SELECT count(*) FROM checkpoints").fetchone()[0]
-        threads = con.execute("SELECT count(DISTINCT thread_id) FROM checkpoints").fetchone()[0]
-        keep_cp = con.execute(
-            "SELECT count(*) FROM checkpoints WHERE checkpoint_id = ("
-            " SELECT MAX(c2.checkpoint_id) FROM checkpoints c2"
-            " WHERE c2.thread_id = checkpoints.thread_id"
-            " AND c2.checkpoint_ns = checkpoints.checkpoint_ns)"
-        ).fetchone()[0]
-        prunable = total_cp - keep_cp
-
-        rprint(f"[dim]DB:[/dim] {db_path}  [dim]({size_before / 1e6:.0f} MB)[/dim]")
-        rprint(
-            f"[dim]Threads:[/dim] {threads}   [dim]Checkpoints:[/dim] {total_cp} "
-            f"[dim](keep {keep_cp}, prune[/dim] [bold]{prunable}[/bold][dim])[/dim]"
-        )
-
-        if prunable <= 0:
-            rprint("[green]Nothing to prune.[/green]")
-            return
-        if dry_run:
-            rprint(f"[yellow]Dry run:[/yellow] would delete {prunable} checkpoints + their writes, then VACUUM.")
-            return
-        if not yes and not typer.confirm(f"Delete {prunable} superseded checkpoints from {db_path}?", default=False):
-            rprint("[yellow]Aborted.[/yellow]")
-            raise typer.Exit(code=1)
-
-        con.execute("BEGIN")
-        con.execute(_KEEP_LATEST_PER_THREAD.format(verb="DELETE", table="writes"))
-        con.execute(_KEEP_LATEST_PER_THREAD.format(verb="DELETE", table="checkpoints"))
-        con.execute("COMMIT")
-        con.execute("VACUUM")
-    finally:
-        con.close()
-
-    size_after = db_path.stat().st_size
-    saved = (1 - size_after / size_before) * 100 if size_before else 0
-    rprint(
-        f"[green]✓[/green] Pruned {prunable} checkpoints. "
-        f"{size_before / 1e6:.0f} MB → {size_after / 1e6:.0f} MB "
-        f"([bold]{saved:.0f}%[/bold] smaller)."
-    )
 
 
 if __name__ == "__main__":

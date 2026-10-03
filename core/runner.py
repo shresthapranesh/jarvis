@@ -1,4 +1,4 @@
-"""Jarvis runner — owns checkpointer, store, queue, and plugin manager."""
+"""Jarvis runner — owns store, queue, and plugin manager."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
 from httpx import AsyncClient
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import AppConfig
 from core.context_cache import ContextCacheConfig
@@ -16,6 +14,7 @@ from core.model_catalog import ModelSpec, get_model_spec
 from core.queue import JobQueue
 
 if TYPE_CHECKING:  # runtime import would cycle: db.engine resolves through us
+    from core.transcript_store import KvStore
     from db.engine import Database
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,7 @@ class RunnerConfig:
 class JarvisRunner:
     """Jarvis runner analog for Jarvis.
 
-    Owns the process-wide infrastructure (checkpointer, store, queue, http,
+    Owns the process-wide infrastructure (store, queue, http,
     config) and provides a uniform entrypoint for agent construction and
     caching decisions.
 
@@ -67,15 +66,13 @@ class JarvisRunner:
         self,
         *,
         config: AppConfig,
-        checkpointer: AsyncSqliteSaver,
-        store: AsyncSqliteStore,
+        store: KvStore,
         queue: JobQueue,
         http_client: AsyncClient,
         db: Database | None = None,
         runner_config: RunnerConfig | None = None,
     ) -> None:
         self.config = config
-        self.checkpointer = checkpointer
         self.store = store
         self.queue = queue
         self.http_client = http_client
@@ -105,7 +102,6 @@ class JarvisRunner:
             branch=branch,
             state=InvocationState(initial=initial_state),
             run_config=RunConfig(model=model),
-            checkpointer=self.checkpointer,
             store=self.store,
             queue=self.queue,
             http_client=self.http_client,
@@ -170,16 +166,14 @@ class JarvisRunner:
 
     # ── Agent factory ─────────────────────────────────────────────────────
 
-    def build_agent(self, model: str, checkpointer=None, store=None, invocation_context=None, board: bool = False):
+    def build_agent(self, model: str, store=None, invocation_context=None, board: bool = False):
         """Delegate to core.agents.build_agent with runner's defaults."""
         from core.agents import build_agent as _build_agent
 
         if invocation_context is not None:
-            checkpointer = getattr(invocation_context, 'checkpointer', None) or checkpointer
             store = getattr(invocation_context, 'store', None) or store
         return _build_agent(
             model=model,
-            checkpointer=checkpointer or self.checkpointer,
             store=store or self.store,
             board=board,
         )

@@ -251,14 +251,12 @@ async def test_maintenance_jobs_run_the_python_sweeps(jarvis):
     from core.queue import Job
     from core.scheduler import MAINTENANCE_TASKS, maintenance_job_handler
 
-    from core.state import get_async_checkpointer
-
     # The edge's timers, plus the one Python queues itself at start.
-    assert set(MAINTENANCE_TASKS) == {"memory_consolidation", "project_memory", "checkpoint_prune",
-                                      "convert_checkpoints"}
-    await get_async_checkpointer().setup()  # LangGraph creates its tables on first use
-    await maintenance_job_handler(Job(id="j", kind="maintenance", payload={"task": "checkpoint_prune"},
+    assert set(MAINTENANCE_TASKS) == {"memory_consolidation", "project_memory", "convert_checkpoints"}
+    # No checkpoints.db: nothing to convert, and no file created by looking.
+    await maintenance_job_handler(Job(id="j", kind="maintenance", payload={"task": "convert_checkpoints"},
                                       attempts=1, locked_until=datetime.now(timezone.utc)))
+    assert not Path(jarvis.config.checkpoints_db).exists()
     import pytest
 
     with pytest.raises(ValueError, match="unknown maintenance task"):

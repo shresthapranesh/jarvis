@@ -15,7 +15,7 @@ const mutation = graphql`
 /**
  * Hand a message to a run that is already in flight. The agent delivers it
  * just before its next model call, so it joins the current turn rather than
- * starting a second one — `startTask` here would race the checkpointer.
+ * starting a second one — a `startTask` here would wait for this run to end.
  */
 export function commitQueueMessage(
   taskId: string,

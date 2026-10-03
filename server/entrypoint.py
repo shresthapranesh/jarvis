@@ -15,8 +15,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.store.sqlite.aio import AsyncSqliteStore
 
 from core.config import get_config
 from core.doc_index import configure_embedding_model
@@ -26,6 +24,7 @@ from core.queue import SqliteJobQueue, Worker
 
 from core import state
 from core.runner import JarvisRunner, set_runner
+from core.transcript_store import KvStore, import_store_once
 from db import async_session, close_db, get_database, init_db
 from core.approvals import reconcile_startup
 from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
@@ -43,7 +42,6 @@ from core.scheduler import (
     _scheduler,
     get_scheduler_timezone,
     register_board_dispatch_job,
-    register_checkpoint_prune_job,
     register_kernel_reaper_job,
     register_memory_activity_prune_job,
     register_memory_consolidation_job,
@@ -58,40 +56,6 @@ logger = logging.getLogger(__name__)
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
-
-async def _tune_checkpoint_connections(*savers: object) -> None:
-    """Apply the concurrency PRAGMAs langgraph doesn't set on checkpoints.db.
-
-    Unlike the app DB — where db/engine.py sets these on every pooled connection —
-    checkpoints.db is opened by `AsyncSqliteSaver`/`AsyncSqliteStore`, which set
-    nothing at connect time. All three matter under parallel subagents, which
-    write the same file through both handles:
-
-      busy_timeout  defaults to 0, so a writer that finds the lock held raises
-                    SQLITE_BUSY immediately instead of waiting for it.
-      synchronous   defaults to FULL; NORMAL is the standard WAL pairing and is
-                    safe against process crashes (only an OS-level crash can lose
-                    the most recent commits — recoverable checkpoint state).
-      journal_mode  langgraph's own setup() does set WAL, but lazily, on the
-                    first checkpoint operation; until then the file is still in
-                    rollback-journal mode, where readers and writers block each
-                    other outright.
-
-    journal_mode is a property of the file, the other two are per-connection —
-    so this runs on every handle right after it opens.
-    """
-    for saver in savers:
-        conn = getattr(saver, "conn", None)
-        if conn is None:
-            logger.warning("no .conn on %s — skipping PRAGMA tuning", type(saver).__name__)
-            continue
-        try:
-            await conn.execute("PRAGMA journal_mode=WAL")
-            await conn.execute("PRAGMA busy_timeout=30000")
-            await conn.execute("PRAGMA synchronous=NORMAL")
-        except Exception as exc:
-            logger.warning("could not tune %s connection: %s", type(saver).__name__, exc)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -118,20 +82,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 _register_scheduler_job(auto)
     logger.info("scheduler timezone: %s", get_scheduler_timezone())
     _scheduler.start()
-    async with (
-        AsyncSqliteSaver.from_conn_string(get_config().checkpoints_db) as cp,
-        AsyncSqliteStore.from_conn_string(get_config().checkpoints_db) as store,
-        httpx.AsyncClient(timeout=30.0) as http,
-    ):
-        await _tune_checkpoint_connections(cp, store)
-        state._async_checkpointer = cp
+    # The key-value store lived in checkpoints.db (LangGraph's store); copy
+    # it into `kv_store` the first time, so memory and the watermarks carry over.
+    async with async_session() as session:
+        copied = await import_store_once(session, get_config().checkpoints_db)
+    if copied:
+        logger.info("imported %d item(s) from the LangGraph store", copied)
+    store = KvStore()
+    async with httpx.AsyncClient(timeout=30.0) as http:
         state._store = store
         state._http_client = http
         state._queue = _build_queue()
 
         # Reap incognito conversations left behind by a crash / a client that
-        # never fired discardConversation. Runs here (not in the earlier session
-        # block) so the checkpointer is live and each thread is deleted too.
+        # never fired discardConversation.
         # Not when the Rust edge restarted this process after stopping the last
         # one for being idle (`edge/src/supervisor.rs`): nothing crashed, and
         # an incognito chat open in a tab between turns would be deleted.
@@ -190,7 +154,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("MCP init failed: %s", exc, exc_info=True)
 
         # ── Runner (Jarvis analog) ───────────────────────────────────────
-        # Centralizes db/checkpointer/store/queue/config and cache config.
+        # Centralizes db/store/queue/config and cache config.
         # get_config(), get_database() and the core.state accessors all resolve
         # through this once it is installed, so it is the source of truth
         # rather than a second copy of these references.
@@ -198,7 +162,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             set_runner(
                 JarvisRunner(
                     config=get_config(),
-                    checkpointer=cp,
                     store=store,
                     queue=state._queue,
                     http_client=http,
@@ -227,7 +190,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             register_staging_cleanup_job()
             register_board_dispatch_job()
             register_memory_activity_prune_job()
-            register_checkpoint_prune_job()
 
         # The chat bots. Behind the edge they run there (edge/src/bots/), so
         # that a bot doesn't keep this process up; started here only when this
@@ -268,7 +230,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await _dc_task
 
-        # Stop workers BEFORE the queue/checkpointer/etc. tear down so any
+        # Stop workers BEFORE the queue/store/etc. tear down so any
         # in-flight handler can still update its run via async_session.
         _workers = (
             _automation_worker_task, _workflow_worker_task, _chat_worker_task, _board_worker_task,
@@ -303,7 +265,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             pass
 
-        state._async_checkpointer = None
         state._store = None
         state._http_client = None
         state._queue = None
@@ -328,8 +289,8 @@ def _build_queue():
 
 # Per-kind concurrency caps. Handlers are I/O-bound (awaiting LLM tokens),
 # so these jobs interleave on the event loop — the caps exist to bound
-# SQLite writer contention (checkpointer + queue heartbeats all share one
-# file), not CPU. Keep them modest.
+# SQLite writer contention (transcript writes + queue heartbeats all share
+# one file), not CPU. Keep them modest.
 _CHAT_CONCURRENCY = 5
 _AUTOMATION_CONCURRENCY = 3
 _WORKFLOW_CONCURRENCY = 3

@@ -7,6 +7,7 @@ the same updates, folded by both, give the same history.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import random
 import sqlite3
@@ -294,6 +295,11 @@ async def test_convert_checkpoints_without_a_checkpoints_db(database, tmp_path):
     assert (report.converted, report.skipped, report.failed) == (0, 0, [])
 
 
+@contextlib.asynccontextmanager
+async def _fake_legacy_checkpointer(_path=None):
+    yield object()
+
+
 async def test_a_run_that_loses_the_conversion_race_reads_the_winners_rows(database, monkeypatch):
     """The batch sweep and a run's first load can convert one thread at once;
     the second write is refused, and the run must start from the rows the
@@ -306,18 +312,20 @@ async def test_a_run_that_loses_the_conversion_race_reads_the_winners_rows(datab
         raise RuntimeError("UNIQUE constraint failed: thread_messages.thread_id, thread_messages.seq")
 
     monkeypatch.setattr(store, "import_checkpoint", converted_meanwhile)
-    thread = await DbThread.load("conv-1", checkpointer=object())
+    monkeypatch.setattr(store, "legacy_checkpointer", _fake_legacy_checkpointer)
+    thread = await DbThread.load("conv-1")
     assert [m.content for m in thread.messages] == ["from the sweep"]
 
 
 async def test_startup_queues_the_sweep_only_while_there_is_work(jarvis, work_dir):
     from core.config import get_config
     from core.scheduler import enqueue_checkpoint_conversion, maintenance_job_handler
-    from core.state import get_async_checkpointer
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     await _conversations("conv-1")
-    await _langgraph_threads(get_async_checkpointer(), "conv-1")
-    assert get_config().checkpoints_db
+    assert await enqueue_checkpoint_conversion() is False  # no checkpoints.db
+    async with AsyncSqliteSaver.from_conn_string(get_config().checkpoints_db) as saver:
+        await _langgraph_threads(saver, "conv-1")
 
     assert await enqueue_checkpoint_conversion() is True
     assert await enqueue_checkpoint_conversion() is False  # one is queued
@@ -328,3 +336,32 @@ async def test_startup_queues_the_sweep_only_while_there_is_work(jarvis, work_di
 
     assert [m.content for m in await _history("conv-1")] == ["hi conv-1", "hello back"]
     assert await enqueue_checkpoint_conversion() is False  # nothing left
+
+
+async def test_the_langgraph_store_is_imported_once(database, tmp_path):
+    """After the first import `kv_store` is the store: a key deleted from it
+    must not come back from checkpoints.db on the next start."""
+    from langgraph.store.sqlite.aio import AsyncSqliteStore
+
+    from core.transcript_store import import_store_once
+    from db import async_session
+
+    db = str(tmp_path / "checkpoints.db")
+    async with async_session() as s:
+        assert await import_store_once(s, str(tmp_path / "none.db")) == 0  # nothing to import, still marked
+        assert await import_store_once(s, db) is None
+    await KvStore().adelete(("jarvis", "migrations"), "langgraph_store")
+
+    async with AsyncSqliteStore.from_conn_string(db) as store:
+        await store.setup()
+        await store.aput(("memory",), "AGENTS.md", {"content": "blob"})
+    async with async_session() as s:
+        assert await import_store_once(s, db) == 1
+    item = await KvStore().aget(("memory",), "AGENTS.md")
+    assert item is not None and item.value == {"content": "blob"}
+    assert item.updated_at.year > 2000  # LangGraph's own stamp, carried over
+
+    await KvStore().adelete(("memory",), "AGENTS.md")
+    async with async_session() as s:
+        assert await import_store_once(s, db) is None
+    assert await KvStore().aget(("memory",), "AGENTS.md") is None

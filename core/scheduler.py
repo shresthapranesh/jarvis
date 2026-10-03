@@ -411,51 +411,9 @@ def register_memory_activity_prune_job(cron_expr: str = "0 4 * * *") -> None:
     logger.info("memory_activity prune scheduled: %s", cron_expr)
 
 
-def _prune_checkpoints_job() -> None:
-    """Drop superseded LangGraph checkpoints — runs on the main loop.
-
-    Every graph super-step rewrites the whole state, so checkpoints.db grows
-    quadratically with run length and nothing else reclaims it. See
-    core/checkpoint_retention.py for the retention rules and guards.
-    """
-    if state._main_loop is None:
-        return
-    from core.checkpoint_retention import prune_checkpoints  # noqa: PLC0415
-
-    future = asyncio.run_coroutine_threadsafe(prune_checkpoints(), state._main_loop)
-    try:
-        stats = future.result(timeout=300)
-        pruned = stats["root_pruned"] + stats["subgraph_pruned"]
-        if pruned:
-            logger.info(
-                "checkpoint prune: removed %d checkpoints (%d root, %d subgraph), "
-                "freed %.1f MB, skipped %d active thread(s)",
-                pruned,
-                stats["root_pruned"],
-                stats["subgraph_pruned"],
-                stats["bytes_freed"] / 1e6,
-                stats["threads_skipped_active"],
-            )
-    except Exception:
-        logger.exception("checkpoint prune failed")
-
-
-def register_checkpoint_prune_job(cron_expr: str = "20 * * * *") -> None:
-    """Register the checkpoint retention sweep. Hourly at :20 by default —
-    off the hour so it doesn't stack with the staging cleanup."""
-    _scheduler.add_job(
-        func=_prune_checkpoints_job,
-        trigger=_cron(cron_expr),
-        id="checkpoint_prune",
-        replace_existing=True,
-        misfire_grace_time=300,
-    )
-    logger.info("checkpoint prune scheduled: %s", cron_expr)
-
-
 # ── Maintenance jobs ─────────────────────────────────────────────────────────
 # Behind the Rust edge, the sweeps that need this process (an LLM, the
-# LangGraph store, checkpoints.db) are not timers here: the edge's scheduler
+# memory store) are not timers here: the edge's scheduler
 # enqueues them as `maintenance` jobs on the same timetable, and the worker
 # runs them like any other job. That is what lets this process be absent
 # between jobs. The edge does the sweeps that are only rows and files itself.
@@ -474,23 +432,14 @@ async def _project_memory_consolidation() -> None:
     logger.info("project memory consolidation: %s", await consolidate_project_memories(store))
 
 
-async def _checkpoint_prune() -> None:
-    from core.checkpoint_retention import prune_checkpoints  # noqa: PLC0415
-
-    stats = await prune_checkpoints()
-    pruned = stats["root_pruned"] + stats["subgraph_pruned"]
-    if pruned:
-        logger.info(
-            "checkpoint prune: removed %d checkpoints, freed %.1f MB, skipped %d active thread(s)",
-            pruned, stats["bytes_freed"] / 1e6, stats["threads_skipped_active"],
-        )
-
-
 async def _convert_checkpoints() -> None:
     from core.config import get_config  # noqa: PLC0415
-    from core.transcript_store import convert_checkpoints  # noqa: PLC0415
+    from core.transcript_store import convert_checkpoints, legacy_checkpointer  # noqa: PLC0415
 
-    report = await convert_checkpoints(state.get_async_checkpointer(), get_config().checkpoints_db)
+    async with legacy_checkpointer() as checkpointer:
+        if checkpointer is None:
+            return
+        report = await convert_checkpoints(checkpointer, get_config().checkpoints_db)
     logger.info(
         "checkpoint conversion: %d thread(s) converted, %d already, %d failed",
         report.converted, report.skipped, len(report.failed),
@@ -502,7 +451,6 @@ async def _convert_checkpoints() -> None:
 MAINTENANCE_TASKS = {
     "memory_consolidation": _memory_consolidation,
     "project_memory": _project_memory_consolidation,
-    "checkpoint_prune": _checkpoint_prune,
     "convert_checkpoints": _convert_checkpoints,
 }
 
