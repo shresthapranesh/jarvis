@@ -1,0 +1,239 @@
+{
+ "thread": {
+  "messages": [
+   {
+    "content": "make a plan",
+    "id": "<id2>",
+    "type": "human"
+   },
+   {
+    "content": "",
+    "id": "<run3>",
+    "tool_calls": [
+     {
+      "args": {
+       "todos": [
+        "A"
+       ]
+      },
+      "id": "c1",
+      "name": "write_todos"
+     }
+    ],
+    "type": "ai",
+    "usage": {
+     "input_tokens": 100,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "Denied by a human: `write_todos` was not run. Do not retry it — continue without it, or say what you need and why.",
+    "id": "<id4>",
+    "name": "write_todos",
+    "status": "error",
+    "tool_call_id": "c1",
+    "type": "tool"
+   },
+   {
+    "content": "Understood, skipping.",
+    "id": "<run5>",
+    "type": "ai",
+    "usage": {
+     "input_tokens": 101,
+     "output_tokens": 10
+    }
+   }
+  ],
+  "todos": []
+ },
+ "turns": [
+  {
+   "events": [
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": []
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"A\"]}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "approval_request",
+     {
+      "approval_id": "<id1>",
+      "args": {
+       "todos": "['A']"
+      },
+      "deferred": false,
+      "reason": "This tool requires human approval (Settings → Tools).",
+      "tool": "write_todos"
+     }
+    ],
+    [
+     "approval_resolved",
+     {
+      "answer": "no",
+      "approved": false,
+      "tool": "write_todos"
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool\": \"write_todos\", \"output\": \"Denied by a human: `write_todos` was not run. Do not retry it \\u2014 continue without it, or say what you need and why.\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "Understood, skipping."
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"text\": \"Understood, skipping.\"}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "done",
+     {
+      "conversation_id": "<conversation>",
+      "message": "Understood, skipping."
+     }
+    ]
+   ],
+   "llm_calls": [
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+       "type": "system"
+      },
+      {
+       "content": "make a plan",
+       "id": "<id2>",
+       "type": "human"
+      }
+     ],
+     "n_messages": 2,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+       "type": "system"
+      },
+      {
+       "content": "make a plan",
+       "id": "<id2>",
+       "type": "human"
+      },
+      {
+       "content": "",
+       "id": "<run3>",
+       "tool_calls": [
+        {
+         "args": {
+          "todos": [
+           "A"
+          ]
+         },
+         "id": "c1",
+         "name": "write_todos"
+        }
+       ],
+       "type": "ai",
+       "usage": {
+        "input_tokens": 100,
+        "output_tokens": 10
+       }
+      },
+      {
+       "content": "Denied by a human: `write_todos` was not run. Do not retry it — continue without it, or say what you need and why.",
+       "id": "<id4>",
+       "name": "write_todos",
+       "status": "error",
+       "tool_call_id": "c1",
+       "type": "tool"
+      }
+     ],
+     "n_messages": 4,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    }
+   ],
+   "message": {
+    "content": "Understood, skipping.",
+    "status": "done"
+   },
+   "steps": [
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"A\"]}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool\": \"write_todos\", \"output\": \"Denied by a human: `write_todos` was not run. Do not retry it \\u2014 continue without it, or say what you need and why.\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"text\": \"Understood, skipping.\"}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    }
+   ],
+   "usage_events": [
+    [
+     "budget_update",
+     1
+    ],
+    [
+     "perf_update",
+     1
+    ],
+    [
+     "perf_update",
+     2
+    ]
+   ]
+  }
+ ]
+}

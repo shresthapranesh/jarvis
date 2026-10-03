@@ -1,0 +1,1134 @@
+{
+ "thread": {
+  "messages": [
+   {
+    "content": "loop forever",
+    "id": "<id1>",
+    "type": "human"
+   },
+   {
+    "content": "step 0 ",
+    "id": "<run2>",
+    "tool_calls": [
+     {
+      "args": {
+       "todos": [
+        "x"
+       ]
+      },
+      "id": "c0",
+      "name": "write_todos"
+     }
+    ],
+    "type": "ai",
+    "usage": {
+     "input_tokens": 100,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "Updated todo list (1 item).",
+    "id": "<id3>",
+    "name": "write_todos",
+    "status": "success",
+    "tool_call_id": "c0",
+    "type": "tool"
+   },
+   {
+    "content": "Updated todo list (1 item).",
+    "id": "<id99>",
+    "name": "write_todos",
+    "status": "success",
+    "tool_call_id": "c48",
+    "type": "tool"
+   },
+   {
+    "content": "step 49 ",
+    "id": "<run100>",
+    "tool_calls": [
+     {
+      "args": {
+       "todos": [
+        "x"
+       ]
+      },
+      "id": "c49",
+      "name": "write_todos"
+     }
+    ],
+    "type": "ai",
+    "usage": {
+     "input_tokens": 149,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "Updated todo list (1 item).",
+    "id": "<id101>",
+    "name": "write_todos",
+    "status": "success",
+    "tool_call_id": "c49",
+    "type": "tool"
+   }
+  ],
+  "n_messages": 101,
+  "todos": [
+   {
+    "status": "pending",
+    "text": "x"
+   }
+  ]
+ },
+ "turns": [
+  {
+   "events": [
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": []
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "step 0 "
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": [
+       {
+        "status": "pending",
+        "text": "x"
+       }
+      ]
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "step 1 "
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": [
+       {
+        "status": "pending",
+        "text": "x"
+       }
+      ]
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": [
+       {
+        "status": "pending",
+        "text": "x"
+       }
+      ]
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "step 49 "
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": [
+       {
+        "status": "pending",
+        "text": "x"
+       }
+      ]
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "done",
+     {
+      "conversation_id": "<conversation>",
+      "message": "step 0 step 1 step 2 step 3 step 4 step 5 step 6 step 7 step 8 step 9 step 10 step 11 step 12 step 13 step 14 step 15 step 16 step 17 step 18 step 19 step 20 step 21 step 22 step 23 step 24 step 25 step 26 step 27 step 28 step 29 step 30 step 31 step 32 step 33 step 34 step 35 step 36 step 37 step 38 step 39 step 40 step 41 step 42 step 43 step 44 step 45 step 46 step 47 step 48 step 49 "
+     }
+    ]
+   ],
+   "llm_calls": [
+    {
+     "n_messages": 2,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 4,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 6,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 8,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 10,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 12,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 14,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 16,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 14,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 16,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 18,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 20,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 18,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 20,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 22,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 24,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 22,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 24,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 26,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 28,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 26,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 28,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 30,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 32,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 30,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 32,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 34,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 36,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 34,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 36,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 38,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 40,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 38,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 40,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 42,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 44,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 42,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 44,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 46,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 48,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 46,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 48,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 50,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 52,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 50,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 52,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 54,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 56,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 54,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "n_messages": 56,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    }
+   ],
+   "message": {
+    "content": "step 0 step 1 step 2 step 3 step 4 step 5 step 6 step 7 step 8 step 9 step 10 step 11 step 12 step 13 step 14 step 15 step 16 step 17 step 18 step 19 step 20 step 21 step 22 step 23 step 24 step 25 step 26 step 27 step 28 step 29 step 30 step 31 step 32 step 33 step 34 step 35 step 36 step 37 step 38 step 39 step 40 step 41 step 42 step 43 step 44 step 45 step 46 step 47 step 48 step 49 ",
+    "status": "done"
+   },
+   "n_events": 202,
+   "n_steps": 100,
+   "steps": [
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"x\"]}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (1 item).\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    }
+   ],
+   "usage_events": [
+    [
+     "budget_update",
+     1
+    ],
+    [
+     "budget_update",
+     6
+    ],
+    [
+     "budget_update",
+     11
+    ],
+    [
+     "budget_update",
+     16
+    ],
+    [
+     "budget_update",
+     21
+    ],
+    [
+     "budget_update",
+     26
+    ],
+    [
+     "budget_update",
+     31
+    ],
+    [
+     "budget_update",
+     36
+    ],
+    [
+     "budget_update",
+     41
+    ],
+    [
+     "budget_update",
+     46
+    ],
+    [
+     "perf_update",
+     1
+    ],
+    [
+     "perf_update",
+     2
+    ],
+    [
+     "perf_update",
+     3
+    ],
+    [
+     "perf_update",
+     4
+    ],
+    [
+     "perf_update",
+     5
+    ],
+    [
+     "perf_update",
+     6
+    ],
+    [
+     "perf_update",
+     7
+    ],
+    [
+     "perf_update",
+     8
+    ],
+    [
+     "perf_update",
+     9
+    ],
+    [
+     "perf_update",
+     10
+    ],
+    [
+     "perf_update",
+     11
+    ],
+    [
+     "perf_update",
+     12
+    ],
+    [
+     "perf_update",
+     13
+    ],
+    [
+     "perf_update",
+     14
+    ],
+    [
+     "perf_update",
+     15
+    ],
+    [
+     "perf_update",
+     16
+    ],
+    [
+     "perf_update",
+     17
+    ],
+    [
+     "perf_update",
+     18
+    ],
+    [
+     "perf_update",
+     19
+    ],
+    [
+     "perf_update",
+     20
+    ],
+    [
+     "perf_update",
+     21
+    ],
+    [
+     "perf_update",
+     22
+    ],
+    [
+     "perf_update",
+     23
+    ],
+    [
+     "perf_update",
+     24
+    ],
+    [
+     "perf_update",
+     25
+    ],
+    [
+     "perf_update",
+     26
+    ],
+    [
+     "perf_update",
+     27
+    ],
+    [
+     "perf_update",
+     28
+    ],
+    [
+     "perf_update",
+     29
+    ],
+    [
+     "perf_update",
+     30
+    ],
+    [
+     "perf_update",
+     31
+    ],
+    [
+     "perf_update",
+     32
+    ],
+    [
+     "perf_update",
+     33
+    ],
+    [
+     "perf_update",
+     34
+    ],
+    [
+     "perf_update",
+     35
+    ],
+    [
+     "perf_update",
+     36
+    ],
+    [
+     "perf_update",
+     37
+    ],
+    [
+     "perf_update",
+     38
+    ],
+    [
+     "perf_update",
+     39
+    ],
+    [
+     "perf_update",
+     40
+    ],
+    [
+     "perf_update",
+     41
+    ],
+    [
+     "perf_update",
+     42
+    ],
+    [
+     "perf_update",
+     43
+    ],
+    [
+     "perf_update",
+     44
+    ],
+    [
+     "perf_update",
+     45
+    ],
+    [
+     "perf_update",
+     46
+    ],
+    [
+     "perf_update",
+     47
+    ],
+    [
+     "perf_update",
+     48
+    ],
+    [
+     "perf_update",
+     49
+    ],
+    [
+     "perf_update",
+     50
+    ]
+   ]
+  }
+ ]
+}

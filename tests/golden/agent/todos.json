@@ -1,0 +1,403 @@
+{
+ "thread": {
+  "messages": [
+   {
+    "content": "plan then answer",
+    "id": "<id1>",
+    "type": "human"
+   },
+   {
+    "content": "",
+    "id": "<run2>",
+    "tool_calls": [
+     {
+      "args": {
+       "todos": [
+        "Look",
+        "Answer"
+       ]
+      },
+      "id": "c1",
+      "name": "write_todos"
+     }
+    ],
+    "type": "ai",
+    "usage": {
+     "input_tokens": 100,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "Updated todo list (2 items).",
+    "id": "<id3>",
+    "name": "write_todos",
+    "status": "success",
+    "tool_call_id": "c1",
+    "type": "tool"
+   },
+   {
+    "content": "",
+    "id": "<run4>",
+    "tool_calls": [
+     {
+      "args": {
+       "index": 0,
+       "status": "done"
+      },
+      "id": "c2",
+      "name": "set_todo_status"
+     }
+    ],
+    "type": "ai",
+    "usage": {
+     "input_tokens": 101,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "Set todo 0 to 'done'.",
+    "id": "<id5>",
+    "name": "set_todo_status",
+    "status": "success",
+    "tool_call_id": "c2",
+    "type": "tool"
+   },
+   {
+    "content": "All done.",
+    "id": "<run6>",
+    "type": "ai",
+    "usage": {
+     "input_tokens": 102,
+     "output_tokens": 10
+    }
+   }
+  ],
+  "todos": [
+   {
+    "status": "done",
+    "text": "Look"
+   },
+   {
+    "status": "pending",
+    "text": "Answer"
+   }
+  ]
+ },
+ "turns": [
+  {
+   "events": [
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": []
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"Look\", \"Answer\"]}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": [
+       {
+        "status": "pending",
+        "text": "Look"
+       },
+       {
+        "status": "pending",
+        "text": "Answer"
+       }
+      ]
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (2 items).\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"set_todo_status\", \"args\": {\"index\": 0, \"status\": \"done\"}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": [
+       {
+        "status": "done",
+        "text": "Look"
+       },
+       {
+        "status": "pending",
+        "text": "Answer"
+       }
+      ]
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool\": \"set_todo_status\", \"output\": \"Set todo 0 to 'done'.\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "All done."
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"text\": \"All done.\"}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "done",
+     {
+      "conversation_id": "<conversation>",
+      "message": "All done."
+     }
+    ]
+   ],
+   "llm_calls": [
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+       "type": "system"
+      },
+      {
+       "content": "plan then answer",
+       "id": "<id1>",
+       "type": "human"
+      }
+     ],
+     "n_messages": 2,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.\n\n## Current Tasks\n\n[ ] Look\n[ ] Answer",
+       "type": "system"
+      },
+      {
+       "content": "plan then answer",
+       "id": "<id1>",
+       "type": "human"
+      },
+      {
+       "content": "",
+       "id": "<run2>",
+       "tool_calls": [
+        {
+         "args": {
+          "todos": [
+           "Look",
+           "Answer"
+          ]
+         },
+         "id": "c1",
+         "name": "write_todos"
+        }
+       ],
+       "type": "ai",
+       "usage": {
+        "input_tokens": 100,
+        "output_tokens": 10
+       }
+      },
+      {
+       "content": "Updated todo list (2 items).",
+       "id": "<id3>",
+       "name": "write_todos",
+       "status": "success",
+       "tool_call_id": "c1",
+       "type": "tool"
+      }
+     ],
+     "n_messages": 4,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.\n\n## Current Tasks\n\n[x] Look\n[ ] Answer",
+       "type": "system"
+      },
+      {
+       "content": "plan then answer",
+       "id": "<id1>",
+       "type": "human"
+      },
+      {
+       "content": "",
+       "id": "<run2>",
+       "tool_calls": [
+        {
+         "args": {
+          "todos": [
+           "Look",
+           "Answer"
+          ]
+         },
+         "id": "c1",
+         "name": "write_todos"
+        }
+       ],
+       "type": "ai",
+       "usage": {
+        "input_tokens": 100,
+        "output_tokens": 10
+       }
+      },
+      {
+       "content": "Updated todo list (2 items).",
+       "id": "<id3>",
+       "name": "write_todos",
+       "status": "success",
+       "tool_call_id": "c1",
+       "type": "tool"
+      },
+      {
+       "content": "",
+       "id": "<run4>",
+       "tool_calls": [
+        {
+         "args": {
+          "index": 0,
+          "status": "done"
+         },
+         "id": "c2",
+         "name": "set_todo_status"
+        }
+       ],
+       "type": "ai",
+       "usage": {
+        "input_tokens": 101,
+        "output_tokens": 10
+       }
+      },
+      {
+       "content": "Set todo 0 to 'done'.",
+       "id": "<id5>",
+       "name": "set_todo_status",
+       "status": "success",
+       "tool_call_id": "c2",
+       "type": "tool"
+      }
+     ],
+     "n_messages": 6,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    }
+   ],
+   "message": {
+    "content": "All done.",
+    "status": "done"
+   },
+   "steps": [
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"Look\", \"Answer\"]}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool\": \"write_todos\", \"output\": \"Updated todo list (2 items).\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"set_todo_status\", \"args\": {\"index\": 0, \"status\": \"done\"}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"tool\": \"set_todo_status\", \"output\": \"Set todo 0 to 'done'.\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"text\": \"All done.\"}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    }
+   ],
+   "usage_events": [
+    [
+     "budget_update",
+     1
+    ],
+    [
+     "perf_update",
+     1
+    ],
+    [
+     "perf_update",
+     2
+    ],
+    [
+     "perf_update",
+     3
+    ]
+   ]
+  }
+ ]
+}
