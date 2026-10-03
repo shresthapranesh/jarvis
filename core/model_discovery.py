@@ -1,6 +1,7 @@
 """Provider model discovery — a lint over the catalog, not a replacement for it.
 
-Every backend in `KNOWN_PROVIDERS` can enumerate its own models, and the records
+Every built-in backend, and every OpenAI-compatible endpoint (its `/models`),
+can enumerate its own models, and the records
 carry most of what `ModelSpec` holds (notably `context_window`, which the catalog
 otherwise leaves `None` and falls back to a flat default for). What discovery
 *cannot* do is be the catalog:
@@ -33,6 +34,14 @@ DISCOVERABLE: frozenset[str] = frozenset(
 )
 
 _TIMEOUT = 30.0
+
+
+def discoverable() -> frozenset[str]:
+    """`DISCOVERABLE` and every endpoint: each lists its models at `/models`.
+    Reads the endpoint cache, so hydrate the catalog first."""
+    from core.model_catalog import endpoints
+
+    return DISCOVERABLE | {e.name for e in endpoints()}
 
 
 class DiscoveryError(RuntimeError):
@@ -245,6 +254,41 @@ def _discover_openrouter() -> list[DiscoveredModel]:
     return out
 
 
+def _discover_endpoint(name: str) -> list[DiscoveredModel]:
+    """An OpenAI-compatible endpoint's `GET /models`. The listing says little
+    beyond ids; a window is read from the fields servers commonly add
+    (vLLM's `max_model_len`, OpenRouter-style `context_length`)."""
+    import httpx
+
+    from core.model_catalog import get_endpoint
+
+    ep = get_endpoint(name)
+    if ep is None:
+        raise DiscoveryError(f"no endpoint named {name!r}")
+    headers = {"Authorization": f"Bearer {ep.api_key}"} if ep.api_key else {}
+    try:
+        r = httpx.get(f"{ep.base_url}/models", headers=headers, timeout=_TIMEOUT)
+        r.raise_for_status()
+        data = r.json().get("data", [])
+    except Exception as exc:
+        raise DiscoveryError(f"could not list {name}'s models at {ep.base_url}: {exc}") from exc
+
+    out: list[DiscoveredModel] = []
+    for m in data if isinstance(data, list) else []:
+        mid = m.get("id") if isinstance(m, dict) else None
+        if not isinstance(mid, str) or not mid:
+            continue
+        window = next(
+            (w for w in (m.get(k) for k in ("context_window", "context_length", "max_model_len"))
+             if isinstance(w, int) and not isinstance(w, bool) and w > 0),
+            None,
+        )
+        out.append(DiscoveredModel(
+            id=f"{name}:{mid}", label=mid, provider=name, context_window=window, likely_chat=looks_like_chat(mid),
+        ))
+    return out
+
+
 _ADAPTERS = {
     "google_genai": _discover_google,
     "anthropic": _discover_anthropic,
@@ -261,9 +305,13 @@ def discover(provider: str) -> list[DiscoveredModel]:
     callers must not read it as failure.
     """
     fn = _ADAPTERS.get(provider)
-    if fn is None:
-        raise DiscoveryError(f"discovery not implemented for provider {provider!r}")
-    return fn()
+    if fn is not None:
+        return fn()
+    from core.model_catalog import get_endpoint
+
+    if get_endpoint(provider) is not None:
+        return _discover_endpoint(provider)
+    raise DiscoveryError(f"discovery not implemented for provider {provider!r}")
 
 
 # ── Entitlement probe ────────────────────────────────────────────────────────

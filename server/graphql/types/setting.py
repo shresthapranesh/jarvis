@@ -13,7 +13,7 @@ from datetime import datetime
 
 import strawberry
 
-from core.settings_admin import KNOWN_SETTINGS, SettingSpec, spec_for
+from core.settings_admin import KNOWN_SETTINGS, SettingSpec, redact, spec_for
 from db.models import ConfigSetting
 
 
@@ -46,7 +46,7 @@ class Setting:
         return cls(
             id=strawberry.ID(f"setting:{key}"),
             key=key,
-            value=value,
+            value=redact(key, value),
             updated_at=updated_at,
             is_set=is_set,
             label=spec.label if spec else key,

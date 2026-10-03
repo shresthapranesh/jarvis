@@ -1050,11 +1050,11 @@ async def _model_exists(model_id: str, session: AsyncSession) -> bool:
     before declaring an id dead keeps that from silently demoting a perfectly
     good model to the default; the extra read only happens on the miss.
     """
-    from core.model_catalog import is_valid_model, load_custom_models
+    from core.model_catalog import is_valid_model
 
     if is_valid_model(model_id):
         return True
-    load_custom_models(await get_custom_models(session))
+    await hydrate_catalog(session)
     return is_valid_model(model_id)
 
 
@@ -1110,6 +1110,38 @@ async def remove_custom_model(session: AsyncSession, model_id: str) -> bool:
         return False
     await set_setting(session, _CUSTOM_MODELS_KEY, json.dumps(remaining))
     return True
+
+
+# ── OpenAI-compatible endpoints ───────────────────────────────────────────────
+#
+# A JSON list of {name, base_url, api_key?} under `models.endpoints`; see
+# core.model_catalog for what each one is.
+
+_ENDPOINTS_KEY = "models.endpoints"
+
+
+async def get_endpoint_rows(session: AsyncSession) -> list:
+    """The stored endpoint rows, unparsed — [] for anything but a JSON list."""
+    raw = await get_setting(session, _ENDPOINTS_KEY)
+    try:
+        data = json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+async def set_endpoint_rows(session: AsyncSession, rows: list[dict]) -> None:
+    await set_setting(session, _ENDPOINTS_KEY, json.dumps(rows))
+
+
+async def hydrate_catalog(session: AsyncSession) -> None:
+    """Refresh this process's caches of the runtime-edited catalog: custom
+    models and endpoints. Both are per-process, so anything another process
+    may have written is re-read through here."""
+    from core.model_catalog import load_custom_models, load_endpoints
+
+    load_custom_models(await get_custom_models(session))
+    load_endpoints(await get_endpoint_rows(session))
 
 
 # ── Notification channels CRUD ────────────────────────────────────────────────

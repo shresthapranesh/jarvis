@@ -19,7 +19,6 @@ from fastapi.responses import FileResponse
 from core.config import get_config
 from core.doc_index import configure_embedding_model
 from core.log_setup import get_broadcast_handler, setup_logging
-from core.model_catalog import load_custom_models
 from core.queue import SqliteJobQueue, Worker
 
 from core import state
@@ -27,7 +26,7 @@ from core.runner import JarvisRunner, set_runner
 from core.transcript_store import KvStore, import_store_once
 from db import async_session, close_db, get_database, init_db
 from core.approvals import reconcile_startup
-from db.ops import cleanup_zombie_running_rows, get_custom_models, get_setting, list_enabled_scheduled_automations
+from db.ops import cleanup_zombie_running_rows, get_setting, hydrate_catalog, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
 from .routes_documents import router as documents_router
@@ -73,7 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await reconcile_startup()
     async with async_session() as session:
         configure_embedding_model(await get_setting(session, "embedding.model"))
-        load_custom_models(await get_custom_models(session))
+        await hydrate_catalog(session)
         # Before start() — APScheduler won't reconfigure a running scheduler.
         set_scheduler_timezone(await get_setting(session, "scheduler.timezone"))
         # Behind the Rust edge the edge fires the schedules (behind_edge).

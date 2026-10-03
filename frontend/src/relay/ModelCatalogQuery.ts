@@ -10,6 +10,11 @@ export const modelCatalogQuery = graphql`
       default
       providers
       discoverableProviders
+      endpoints {
+        name
+        baseUrl
+        hasKey
+      }
       available {
         id
         label
@@ -29,11 +34,20 @@ export interface CatalogModel {
   contextWindow: number | null;
 }
 
+/** An OpenAI-compatible server; its name is the provider prefix of its
+ *  models. The key is write-only — only whether one is set comes back. */
+export interface ModelEndpoint {
+  name: string;
+  baseUrl: string;
+  hasKey: boolean;
+}
+
 export interface ModelCatalogData {
   default: string;
   providers: readonly string[];
   /** Providers that can enumerate their own models — drives the sync picker. */
   discoverableProviders: readonly string[];
+  endpoints: readonly ModelEndpoint[];
   available: readonly CatalogModel[];
 }
 

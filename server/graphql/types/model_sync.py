@@ -93,33 +93,33 @@ async def run_model_sync(
     provider SDKs), so each provider runs in a worker thread — a sync of five
     providers must not park the event loop and stall every live subscription.
     """
-    from core.model_catalog import KNOWN_PROVIDERS, available_models, is_builtin_model
+    from core.model_catalog import available_models, is_builtin_model, known_providers
     from core.model_discovery import (
-        DISCOVERABLE,
         DiscoveryError,
         build_report,
         discover,
+        discoverable,
         probe as probe_model,
     )
 
     from .model_catalog import load_model_catalog
 
+    # Hydrate the runtime-edited catalog first: the diff reads custom models,
+    # and an endpoint is both a provider and a discovery target.
+    await load_model_catalog(session)
+
     if provider is not None:
-        if provider not in KNOWN_PROVIDERS:
+        if provider not in known_providers():
             raise ValueError(
                 f"Unknown provider '{provider}' — must be one of: "
-                f"{', '.join(sorted(KNOWN_PROVIDERS))}"
+                f"{', '.join(sorted(known_providers()))}"
             )
-        if provider not in DISCOVERABLE:
+        if provider not in discoverable():
             raise ValueError(
                 f"No discovery adapter for '{provider}' — discoverable: "
-                f"{', '.join(sorted(DISCOVERABLE))}"
+                f"{', '.join(sorted(discoverable()))}"
             )
-    targets = [provider] if provider else sorted(DISCOVERABLE)
-
-    # Hydrate the custom-model cache so available_models() (and therefore the
-    # diff) sees models added at runtime.
-    await load_model_catalog(session)
+    targets = [provider] if provider else sorted(discoverable())
 
     out: list[ModelSyncReport] = []
     for prov in targets:

@@ -1,4 +1,5 @@
-//! OpenAI's Chat Completions format, streamed — what OpenRouter speaks.
+//! OpenAI's Chat Completions format, streamed — what OpenRouter and every
+//! OpenAI-compatible endpoint speak.
 //!
 //! What it sends follows what LangChain's `ChatOpenAI` sent for the same
 //! history, tool-call arguments in `json.dumps` spacing included (a cached
@@ -21,20 +22,19 @@ use crate::pyjson;
 pub async fn complete(
     http: &reqwest::Client,
     base: &str,
-    key: &str,
+    key: Option<&str>,
     provider: &str,
     name: &str,
     req: &Request<'_>,
     on_delta: &mut (dyn FnMut(Delta) + Send),
 ) -> Result<Message, Error> {
     let body = render(name, req)?;
-    let resp = http
-        .post(format!("{base}/chat/completions"))
-        .bearer_auth(key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(Error::connection)?;
+    let mut post = http.post(format!("{base}/chat/completions")).json(&body);
+    // A local server may take no key at all.
+    if let Some(key) = key {
+        post = post.bearer_auth(key);
+    }
+    let resp = post.send().await.map_err(Error::connection)?;
     if !resp.status().is_success() {
         return Err(Error::from_response(resp).await);
     }

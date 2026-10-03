@@ -337,6 +337,13 @@ type ModelCatalog {
   available: [ModelSpec!]!
   providers: [String!]!
   discoverableProviders: [String!]!
+  endpoints: [ModelEndpoint!]!
+}
+
+type ModelEndpoint {
+  name: String!
+  baseUrl: String!
+  hasKey: Boolean!
 }
 
 type ModelSpec {
@@ -420,6 +427,9 @@ type Mutation {
   addDiscoveredModels(models: [DiscoveredModelInput!]!): ModelCatalog!
   removeModel(id: String!): ModelCatalog!
   setDefaultModel(id: String!): ModelCatalog!
+  addEndpoint(name: String!, baseUrl: String!, apiKey: String = null): ModelCatalog!
+  updateEndpoint(name: String!, baseUrl: String!, apiKey: String = null, clearKey: Boolean! = false): ModelCatalog!
+  removeEndpoint(name: String!): ModelCatalog!
   resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!
   setToolPolicy(key: String!, enabled: Boolean = null, requiresApproval: Boolean = null): [AgentTool!]!
   requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = "{}", conversationId: String = null): ToolApprovalRequest!

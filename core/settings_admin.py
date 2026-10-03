@@ -115,6 +115,13 @@ KNOWN_SETTINGS: tuple[SettingSpec, ...] = (
         kind="json",
     ),
     SettingSpec(
+        key="models.endpoints",
+        label="Model endpoints",
+        description="OpenAI-compatible servers, as JSON. API keys are hidden here.",
+        managed_by="Models",
+        kind="json",
+    ),
+    SettingSpec(
         key="tools.policy",
         label="Tool policy",
         description="Per-tool enabled / requires-approval overrides, as JSON. Only non-default entries are stored.",
@@ -188,6 +195,24 @@ def validate(key: str, value: str) -> None:
         raise ValueError(f"{key} must be one of: {', '.join(spec.choices)}")
 
 
+def redact(key: str, value: str) -> str:
+    """`value` as it may leave the server. Endpoint API keys never do: the
+    settings listing shows only that one is set."""
+    if key != "models.endpoints" or not value:
+        return value
+    import json
+
+    try:
+        rows = json.loads(value)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return value
+    if not isinstance(rows, list):
+        return value
+    return json.dumps([
+        {**r, "api_key": "••••"} if isinstance(r, dict) and r.get("api_key") else r for r in rows
+    ])
+
+
 async def apply_setting(session, key: str) -> str:
     """Re-read `key` and push it into this process. Returns a human-readable note.
 
@@ -214,11 +239,13 @@ async def apply_setting(session, key: str) -> str:
             # the one key we cannot honestly claim to have applied.
             return "Saved. Takes effect when the server restarts."
 
-        if key in ("models.custom", "default.model"):
-            from core.model_catalog import load_custom_models
-            from db.ops import get_custom_models
+        if key in ("models.custom", "models.endpoints", "default.model"):
+            from core.agents import invalidate_agent_cache
+            from db.ops import hydrate_catalog
 
-            load_custom_models(await get_custom_models(session))
+            await hydrate_catalog(session)
+            # An agent holds the client it was built with, endpoint URL and all.
+            invalidate_agent_cache()
             return "Applied."
 
         if key == "tools.policy":
