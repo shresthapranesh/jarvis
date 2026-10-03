@@ -345,6 +345,11 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
         pass
     except Exception as e:
         logger.warning("Failed to delete checkpoint thread %s: %s", conv_id, e)
+    try:
+        from core.transcript_store import delete_thread
+        await delete_thread(session, conv_id)
+    except Exception as e:
+        logger.warning("Failed to delete transcript thread %s: %s", conv_id, e)
 
     try:
         from core.kernels import get_kernel_registry

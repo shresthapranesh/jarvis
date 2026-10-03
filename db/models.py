@@ -646,3 +646,76 @@ class Skill(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
+
+
+class ThreadMessage(Base):
+    """One message of an agent thread — what the model sees — as a v1
+    transcript record (`core/transcript_format.md`, `core/transcript.py`).
+
+    A thread is keyed by `thread_id`: a conversation id for chat and board
+    runs, `automation_<run>` and the like otherwise, so it has no foreign key.
+    `seq` orders the thread. `message_id` is the message's own id, unique among
+    a thread's live rows; a row compaction summarised away gets `evicted_at`
+    and is kept (episodes point at it) but no longer sent. Media parts live in
+    `TranscriptBlob`. Read and written through `core/transcript_store.py`.
+    """
+
+    __tablename__ = "thread_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    thread_id: Mapped[str] = mapped_column(String, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    message_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    data: Mapped[str] = mapped_column(Text, nullable=False)  # JSON, transcript v1
+    evicted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (
+        Index("ux_thread_messages_thread_seq", "thread_id", "seq", unique=True),
+        Index("ix_thread_messages_thread_message", "thread_id", "message_id"),
+    )
+
+
+class ThreadState(Base):
+    """Per-thread state beside its messages: the todo list, and where the
+    thread came from (`source="checkpoint"` when converted from LangGraph)."""
+
+    __tablename__ = "thread_state"
+
+    thread_id: Mapped[str] = mapped_column(String, primary_key=True)
+    todos: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON list
+    source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class TranscriptBlob(Base):
+    """The bytes of a transcript media part, stored once per content hash
+    (`hash` is `sha256:<hex>`, what a part's `blob` names)."""
+
+    __tablename__ = "transcript_blobs"
+
+    hash: Mapped[str] = mapped_column(String, primary_key=True)
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class KvItem(Base):
+    """A small JSON document by namespace and key — what the LangGraph store
+    held (the `AGENTS.md` memory blob, consolidation watermarks, app and user
+    state). `namespace` is the tuple joined with ".", as LangGraph's `prefix`
+    was. Read and written through `core/transcript_store.KvStore`."""
+
+    __tablename__ = "kv_store"
+
+    namespace: Mapped[str] = mapped_column(String, primary_key=True)
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)  # JSON object
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
