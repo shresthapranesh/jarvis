@@ -125,17 +125,6 @@ pub struct QueuedConsumedEvent {
 }
 
 #[derive(SimpleObject, Clone)]
-pub struct InterruptEvent {
-    pub interrupt_id: String,
-    pub question: String,
-}
-
-#[derive(SimpleObject, Clone)]
-pub struct InterruptResolvedEvent {
-    pub interrupt_id: String,
-}
-
-#[derive(SimpleObject, Clone)]
 pub struct ApprovalRequestEvent {
     pub tool: String,
     pub reason: String,
@@ -213,8 +202,6 @@ pub enum ChatEvent {
     QueuedMessageEvent(QueuedMessageEvent),
     QueuedWithdrawnEvent(QueuedWithdrawnEvent),
     QueuedConsumedEvent(QueuedConsumedEvent),
-    InterruptEvent(InterruptEvent),
-    InterruptResolvedEvent(InterruptResolvedEvent),
     ApprovalRequestEvent(ApprovalRequestEvent),
     ApprovalResolvedEvent(ApprovalResolvedEvent),
     WorkflowToolEvent(WorkflowToolEvent),
@@ -570,13 +557,6 @@ pub fn chat(raw: &Value) -> Result<Option<ChatEvent>> {
                 }
             }
             ChatEvent::TodosUpdatedEvent(TodosUpdatedEvent { todos, source: d.s("source", "")? })
-        }
-        "interrupt" => ChatEvent::InterruptEvent(InterruptEvent {
-            interrupt_id: d.s("interrupt_id", "")?,
-            question: d.s("question", "")?,
-        }),
-        "interrupt_resolved" => {
-            ChatEvent::InterruptResolvedEvent(InterruptResolvedEvent { interrupt_id: d.s("interrupt_id", "")? })
         }
         "approval_request" => ChatEvent::ApprovalRequestEvent(ApprovalRequestEvent {
             tool: d.s("tool", "")?,

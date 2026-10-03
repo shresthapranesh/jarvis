@@ -138,7 +138,7 @@ async def test_unqueue_removes_row_and_entry(jarvis):
 
 
 async def test_queue_refused_when_the_run_cannot_reach_a_drain(jarvis):
-    from core.state import InterruptRequest, _tasks
+    from core.state import _tasks
     from db import async_session
     from server.chat_runtime import queue_chat_message
 
@@ -148,13 +148,6 @@ async def test_queue_refused_when_the_run_cannot_reach_a_drain(jarvis):
     async with async_session() as s:
         with pytest.raises(ValueError, match="empty message"):
             await queue_chat_message(s, task_id, "   ")
-
-        # A paused run is waiting for *this* answer and will not reach the
-        # drain until it gets one; resumeTask is that path.
-        state.set_interrupt(InterruptRequest(id="i1", question="ok?"))
-        with pytest.raises(ValueError, match="waiting on an answer"):
-            await queue_chat_message(s, task_id, "hi")
-        state.clear_interrupt()
 
         state.done = True
         with pytest.raises(ValueError, match="already finished"):

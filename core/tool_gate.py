@@ -1,13 +1,9 @@
 """Blocking approval for a gated tool call.
 
-`core/approval.py` blocks by raising a LangGraph **interrupt**, which only works
-for a graph-bound tool in a web chat — `_is_headless` auto-approves board tasks,
-automations and bots because they have no resume loop. `core/approvals.py`'s
-deferred shape blocks nothing at all. Neither covers "no tool may run without a
-human's yes, wherever it is called from".
-
+`core/approvals.py`'s deferred shape blocks nothing at all, which does not
+cover "no tool may run without a human's yes, wherever it is called from".
 This module makes the durable `Approval` row itself the rendezvous, so the
-mechanism no longer depends on the caller's runtime:
+mechanism does not depend on the caller's runtime:
 
 * **In-process** (bound tools via the graph's gate node, `callMcpTool` in the
   server) — create the row, then `await` an `asyncio.Event` registered by
@@ -17,9 +13,8 @@ mechanism no longer depends on the caller's runtime:
   API and then *polled* over the SDK's read-only sqlite connection. Same row,
   same resolution path, no new transport. See `tools/sdk.py:_await_gate`.
 
-Because nothing here touches the interrupt machinery, a board task or a
-scheduled automation blocks and waits exactly like a chat does — which is the
-point: an approval requirement that silently auto-approves on four of five
+So a board task or a scheduled automation blocks and waits exactly like a
+chat does — which is the point: an approval requirement that silently auto-approves on four of five
 surfaces is not an approval requirement.
 
 The cost is honest and bounded: a waiting run holds its worker slot (and, for
@@ -143,9 +138,8 @@ def announce_request(row) -> None:
     """Put a pending request in front of the user in the conversation it came from.
 
     The approvals inbox is the durable list; this is the copy that appears where
-    the person is actually looking. `approval_id` on the event is what tells the
-    chat UI to answer with `resolveApproval` rather than `resumeTask` — there is
-    no interrupt to resume, the run is parked inside the call.
+    the person is actually looking. The chat UI answers it with
+    `resolveApproval(approval_id)` — the run is parked inside the call.
 
     `deferred` is derived from the row (`action is not None`) rather than passed
     in, so it cannot disagree with what the inbox says about the same row. It

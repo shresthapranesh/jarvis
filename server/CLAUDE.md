@@ -18,7 +18,7 @@ All run kinds (chat, automation, workflow, board, maintenance) share one pattern
 3. The handler emits events via `emit_event`; subscriptions (`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`) yield via `stream_task_events`. If the task is gone they fall back to the DB for a final `done`/`error`.
 4. Stop: `stopRunningTask` flips in-process flags **and** calls `get_queue().cancel(task_id)`.
 
-**Behind the edge**, steps 1 and 3–4 are the edge's: it writes the rows + Job (`edge/src/gql/start.rs`), mirrors the run, and serves subscriptions and stops. Handlers create state from the job — pass `job=job` to `get_or_create_task_state`. Operations that need a live `TaskState` (`queueMessage`, `resumeTask`, workflow resumes) reach Python as a `call` to the same function the resolver uses — keep resolvers thin wrappers over `chat_runtime.resume_chat_task`, `workflow_runtime.resume_workflow_run`, etc.
+**Behind the edge**, steps 1 and 3–4 are the edge's: it writes the rows + Job (`edge/src/gql/start.rs`), mirrors the run, and serves subscriptions and stops. Handlers create state from the job — pass `job=job` to `get_or_create_task_state`. Operations that need a live `TaskState` (`queueMessage`, `unqueueMessage`, workflow resumes) reach Python as a `call` to the same function the resolver uses — keep resolvers thin wrappers over `chat_runtime.queue_chat_message`, `workflow_runtime.resume_workflow_run`, etc.
 
 `running_tasks` lists `_tasks`; finished tasks linger ~5s.
 
@@ -27,7 +27,7 @@ A message sent while a conversation has a run in flight is queued, not started (
 - Two carriers: `TaskState.pending_input` (fast path, drained synchronously in `model_request_node`) and a `messages` row with status `queued` (renders, survives restart).
 - Delivered messages get status `delivered` (not `done`) so the UI can lift them above the reply they landed in.
 - Clean finish with leftovers → `_redispatch_queued` starts the next turn. Stop/error/restart → rows stay `queued`; `_adopt_queued_messages` picks them up on the next run.
-- Refused while the run is paused on an interrupt, or with attachments (queued rows are text-only).
+- Refused with attachments (queued rows are text-only).
 
 ## Automations (`automation_runtime.py`)
 Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a reply starting with `NO_CHANGE` finishes as `no_change` and sends no notification).

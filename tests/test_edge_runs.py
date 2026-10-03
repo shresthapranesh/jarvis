@@ -32,8 +32,7 @@ CHAT = """subscription($id: String!) { taskEvents(taskId: $id) { __typename
   ... on ArtifactEvent { artifactId title action kind preview }
   ... on TodosUpdatedEvent { todos { text status } source }
   ... on QueuedMessageEvent { messageId text position } ... on QueuedWithdrawnEvent { messageId }
-  ... on QueuedConsumedEvent { messageIds } ... on InterruptEvent { interruptId question }
-  ... on InterruptResolvedEvent { interruptId }
+  ... on QueuedConsumedEvent { messageIds }
   ... on ApprovalRequestEvent { tool reason args approvalId deferred }
   ... on ApprovalResolvedEvent { tool approved answer }
   ... on WorkflowToolEvent { parentRunId childEvent data }
@@ -88,8 +87,6 @@ CHAT_EVENTS: list[tuple[str, dict[str, Any]]] = [
     ("queued_message", {"message_id": "q1", "text": "also this", "position": 1}),
     ("queued_withdrawn", {"message_id": "q1"}),
     ("queued_consumed", {"message_ids": ["q2", 3]}),
-    ("interrupt", {"interrupt_id": "i1", "question": "Proceed?"}),
-    ("interrupt_resolved", {"interrupt_id": "i1"}),
     ("approval_request", {"tool": "rm", "reason": "deletes", "args": {"path": "/tmp/x"}}),
     ("approval_request", {"tool": "gate", "reason": "r", "args": "{}", "approval_id": "ap1", "deferred": True}),
     ("approval_resolved", {"tool": "rm", "approved": 1, "answer": "yes"}),

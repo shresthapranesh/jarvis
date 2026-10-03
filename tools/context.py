@@ -37,10 +37,6 @@ class MemoryStore(Protocol):
     async def aput(self, namespace: tuple[str, ...], key: str, value: dict[str, Any]) -> None: ...
 
 
-def _no_input(_payload: Any) -> Any:
-    raise RuntimeError("a run cannot be suspended for input.")
-
-
 @dataclass(frozen=True)
 class ToolContext:
     """Everything a tool needs from its runtime, with zero framework coupling.
@@ -75,7 +71,6 @@ class ToolContext:
     # The run's thread, for the todo tools (`todos` / `set_todos`); None
     # outside a run.
     thread: Any = field(default=None, repr=False)
-    _request_input: Callable[[Any], Any] = field(default=_no_input, repr=False)
 
     @property
     def session_key(self) -> str | None:
@@ -101,12 +96,6 @@ class ToolContext:
             self.event_sink({"type": event_type, **fields})
         except Exception as exc:  # a telemetry emit must never break a tool
             logger.debug("tool event emit failed (%s): %s", event_type, exc)
-
-    def request_input(self, payload: Any) -> Any:
-        """Suspend for human input. No run can be suspended mid-tool (the
-        LangGraph interrupt is gone), so this raises — `request_tool_approval`
-        reads that as a denial. A gated tool asks through `core/tool_gate`."""
-        return self._request_input(payload)
 
 
 def current_ctx() -> ToolContext:

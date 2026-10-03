@@ -66,10 +66,9 @@ interface StreamState {
   artifacts: ArtifactRef[];
   todos: TodoItem[] | null;
   error: string | null;
-  // `approvalId` marks a per-tool gate (core/tool_gate.py): the run is blocked
-  // inside the tool call rather than on a LangGraph interrupt, so answering it
-  // means resolving the durable row, not resuming the task.
-  pendingInterrupt: {id: string; question: string; approvalId?: string} | null;
+  // A per-tool gate (core/tool_gate.py) the run is blocked on, inside the tool
+  // call; answering it resolves the durable row `approvalId`.
+  pendingInterrupt: {question: string; approvalId: string} | null;
   budget: BudgetInfo | null;
   perf: PerfInfo | null;
 }
@@ -200,13 +199,6 @@ const taskEventsSubscription = graphql`
       }
       ... on QueuedConsumedEvent {
         messageIds
-      }
-      ... on InterruptEvent {
-        interruptId
-        question
-      }
-      ... on InterruptResolvedEvent {
-        interruptId
       }
       ... on ApprovalRequestEvent {
         tool
@@ -434,23 +426,10 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             // queued bubble into an ordinary turn.
             if (conversationId) void loadConversationPage(conversationId);
             break;
-          case 'InterruptEvent':
-            setState((s) => ({
-              ...s,
-              pendingInterrupt: {id: evt.interruptId, question: evt.question},
-            }));
-            break;
-          case 'InterruptResolvedEvent':
-            setState((s) =>
-              s.pendingInterrupt?.id === evt.interruptId ? {...s, pendingInterrupt: null} : s,
-            );
-            break;
           case 'ApprovalRequestEvent': {
-            // Three shapes arrive here. An interrupt-backed approval is resumed
-            // through the run (the InterruptEvent is the source of truth for
-            // its id), while a per-tool gate carries `approvalId` and is
+            // A per-tool gate (core/tool_gate.py) carries `approvalId` and is
             // answered by resolving that row — the run is parked inside the
-            // tool call and has no interrupt to resume.
+            // tool call.
             //
             // A `deferred` request blocks nothing: the operation was recorded
             // instead of performed and the run carried on. Rendering it as a
@@ -462,18 +441,13 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
               void refreshPendingApprovals();
               break;
             }
+            if (!evt.approvalId) break;
+            const approvalId = evt.approvalId;
             const q = `${evt.tool}: ${evt.reason}\n${evt.args ? `Args: ${evt.args}` : ''}`;
-            setState((s) => ({
-              ...s,
-              pendingInterrupt: evt.approvalId
-                ? {id: evt.approvalId, question: q, approvalId: evt.approvalId}
-                : (s.pendingInterrupt ?? {id: `approval-${evt.tool}`, question: q}),
-            }));
+            setState((s) => ({...s, pendingInterrupt: {question: q, approvalId}}));
             break;
           }
           case 'ApprovalResolvedEvent':
-            // Clear any synthetic approval prompt; interrupt_resolved will also
-            // clear the real interrupt id.
             setState((s) => ({...s, pendingInterrupt: null}));
             break;
           case 'WorkflowToolEvent':

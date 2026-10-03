@@ -76,7 +76,7 @@ back over the same socket (protocol 4):
 | `cancel` | the in-process half of a stop |
 | `wake` | a job was just committed; claim it now, not at the next poll |
 | `adopt_queued` | re-read the conversation's queued messages (see below) |
-| `call` → `reply` | run a function that needs the run's in-memory state — `queue_message`, `unqueue_message`, `resume_task`, `resume_workflow_run`, `resolve_workflow_approval` — and return its result or the error message Python's resolver would raise; and `drain` / `undrain`, which stop and restart job claims before an idle stop |
+| `call` → `reply` | run a function that needs the run's in-memory state — `queue_message`, `unqueue_message`, `resume_workflow_run`, `resolve_workflow_approval` — and return its result or the error message Python's resolver would raise; and `drain` / `undrain`, which stop and restart job claims before an idle stop |
 
 - **Nothing is durable on the link.** Every (re)connect starts with a
   snapshot of `_tasks` including each run's full event history, which
@@ -321,7 +321,7 @@ Mutations that only write rows and files:
 | memory | `deleteMemory` |
 | runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun` |
 | starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
-| steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeTask`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
+| steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
 
 And while a worker is linked, or the edge owns it: every subscription
 (`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`)

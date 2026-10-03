@@ -21,7 +21,7 @@ pnpm build      # relay + vite build → ../static/dist/
 ## Live data
 - `useTaskEvents`, `useAutomationRunEvents`, `useWorkflowRunEvents`, `useBoardTaskEvents` wrap the subscriptions. `useTaskEvents` resets on every new task id, so anything that must outlive a run (e.g. the Browser button) comes from a query, not events.
 - Queued mid-run messages: `queued_*` events trigger a refetch; the DB rows are the source of truth. `orderDeliveredAboveReply` (`routes/c.$id.tsx`) lifts `delivered` messages above their reply.
-- Approvals: blocking ones show in `InterruptPrompt` (answers with `resolveApproval` when the event carries `approvalId`, else `resumeTask`); deferred ones come from `usePendingApprovals` polling and must not set `pendingInterrupt`.
+- Approvals: blocking ones (per-tool gates, with `approvalId`) show in `InterruptPrompt`, answered with `resolveApproval`; deferred ones come from `usePendingApprovals` polling and must not set `pendingInterrupt`.
 - Per-message perf numbers are in the ⓘ popover (`DebugInfo` in `MessageBubble.tsx`); unmeasured values are omitted, never shown as 0.
 
 ## Styling (StyleX)

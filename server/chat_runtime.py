@@ -235,8 +235,6 @@ async def _run_agent_task(
             raise
 
     finally:
-        if state.resume_future and not state.resume_future.done():
-            state.resume_future.cancel()
         if ctx is not None:
             try:
                 await ctx.persist_state_deltas()
@@ -265,11 +263,6 @@ async def queue_chat_message(session: AsyncSession, task_id: str, text: str) -> 
     state = _tasks.get(task_id)
     if state is None or state.done:
         raise ValueError("task not found or already finished")
-    # A paused run is not waiting for the next turn, it is waiting for *this*
-    # answer — and it will not reach the drain until it gets one. resumeTask is
-    # the path for that, so refuse rather than park the text behind the pause.
-    if state.pending_interrupt_id:
-        raise ValueError("this run is waiting on an answer — use resumeTask")
     conv_id = state.parent_id
     if not conv_id:
         raise ValueError("task is not attached to a conversation")
@@ -299,27 +292,6 @@ async def unqueue_chat_message(session: AsyncSession, task_id: str, message_id: 
     await delete_message(session, message_id)
     emit_event(state, "queued_withdrawn", message_id=message_id)
     return True
-
-
-async def resume_chat_task(session: AsyncSession, task_id: str, answer: str) -> None:
-    """Hand `answer` to the run paused on an interrupt (`resumeTask`)."""
-    from db.ops import close_open_approvals
-
-    state = _tasks.get(task_id)
-    if state is None:
-        raise ValueError("task not found")
-    if state.resume_future is None or state.resume_future.done():
-        raise ValueError("no pending interrupt for this task")
-
-    pending_id = state.pending_interrupt_id
-    state.resume_future.set_result(answer)
-    emit_event(state, "interrupt_resolved", interrupt_id=pending_id)
-    # Answering from the conversation and answering from the inbox are two
-    # views of one question — clear it from both, whichever was used.
-    await close_open_approvals(
-        session, task_id=task_id, status="answered", result="Delivered to the run.",
-    )
-    state.clear_interrupt()
 
 
 def in_flight_chat_task(conv_id: str) -> str | None:
@@ -356,10 +328,9 @@ async def route_to_live_run(
     would hold it until the live run ends, and the message would reach the
     model a turn late instead of mid-run.
 
-    Raises when a run is up but this message cannot join it: attachments (a
-    queued row has to be replayable from the DB alone, and it stores attachment
-    metadata, not bytes) or a run paused on an interrupt, which is waiting for
-    that answer rather than for the next turn.
+    Raises when a run is up but this message cannot join it, which is when it
+    has attachments: a queued row has to be replayable from the DB alone, and
+    it stores attachment metadata, not bytes.
     """
     task_id = in_flight_chat_task(conv_id)
     if task_id is None:

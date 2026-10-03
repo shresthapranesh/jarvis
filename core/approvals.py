@@ -1,22 +1,18 @@
 """Durable human-in-the-loop approvals.
 
-`core/approval.py` (singular) is the *mechanism* for one pause: it raises a
-LangGraph interrupt and blocks the calling tool until an answer arrives. This
-module is the *record*: every request becomes an `Approval` row, so a request
-survives the run that raised it and the inbox can list requests it never saw
-happen.
+Every request becomes an `Approval` row, so a request survives the run that
+raised it and the inbox can list requests it never saw happen.
 
 Two shapes, because one mechanism cannot cover every caller:
 
-* **Blocking** — a run is suspended right now. Chat interrupts, workflow
-  approval/human_input nodes, board tasks blocked on a question. Resolving
-  hands the answer to the waiting run.
+* **Blocking** — a run is suspended right now. Per-tool gates
+  (`core/tool_gate.py`), workflow approval/human_input nodes, board tasks
+  blocked on a question. Resolving hands the answer to the waiting run.
 * **Deferred** — nobody is waiting; the operation was *recorded* instead of
   performed, and approving is what executes it. This exists because the
   `jarvis` SDK runs in a **separate kernel process** (jupyter_client spawns it),
-  where `current_ctx()` finds no LangGraph runtime and the interrupt mechanism
-  cannot reach. Its writes arrive as ordinary GraphQL requests, so the gate has
-  to live in the resolver and cannot block anything.
+  where no run can be suspended. Its writes arrive as ordinary GraphQL
+  requests, so the gate has to live in the resolver and cannot block anything.
 
 Deferred is the better shape even where blocking is possible: a human may take
 hours, and a blocked run holds a worker slot and a kernel the whole time.
@@ -114,10 +110,9 @@ ACTIONS: dict[str, ActionSpec] = {
         describe=lambda p: f"Delete skill {p.get('name') or p.get('skill_id')}? This cannot be undone.",
         execute=_exec_delete_skill,
     ),
-    # An MCP server is third-party code doing arbitrary work; a lazy call from
-    # the kernel can't route through the blocking in-process approval helper
-    # (no LangGraph runtime there), so this is the gate for it. Off unless the
-    # operator opts in, like everything else in ACTIONS.
+    # An MCP server is third-party code doing arbitrary work, and a lazy call
+    # from the kernel reaches it as a GraphQL request, so this is the gate for
+    # it. Off unless the operator opts in, like everything else in ACTIONS.
     "call_mcp_tool": ActionSpec(
         label="Call MCP tool",
         describe=_describe_mcp_call,
@@ -307,7 +302,7 @@ async def resolve(
     approved = True
     if row.kind == "approval":
         parsed = is_affirmative_answer(answer)
-        # Ambiguous denies, matching core/approval.py: a reply that matches no
+        # Ambiguous denies: a reply that matches no
         # keyword is usually a question, and running a destructive action on
         # that basis is the wrong default.
         approved = parsed is True
@@ -426,9 +421,6 @@ async def reconcile_startup() -> dict[str, int]:
     * **deferred** — nothing was waiting, so nothing was lost. Stays pending.
     * **board** — the block is a column on the task, so it survives outright.
       Rows are backfilled here for tasks blocked before this table existed.
-    * **chat** — LangGraph checkpointed the interrupt, so the run can be
-      resumed once its job is re-claimed. Kept pending only while a job row
-      still exists to re-claim it.
     * **workflow / automation** — the workflow engine holds its entire run
       state in memory (BFS frontier, asyncio futures) and checkpoints nothing,
       so a restart re-runs the graph from the start and asks again. The old
@@ -446,9 +438,6 @@ async def reconcile_startup() -> dict[str, int]:
             if row.action or row.board_task_id:
                 counts["kept"] += 1
                 continue
-            if row.source == "chat" and row.task_id and await _job_exists(session, row.task_id):
-                counts["kept"] += 1
-                continue
             await ops.resolve_approval_row(
                 session, row.id, status="expired",
                 result="The run was lost when the server restarted.",
@@ -463,11 +452,6 @@ async def reconcile_startup() -> dict[str, int]:
             counts["expired"], counts["backfilled"], counts["kept"],
         )
     return counts
-
-
-async def _job_exists(session: AsyncSession, task_id: str) -> bool:
-    job = await session.get(db_models.Job, task_id)
-    return job is not None and job.status in ("pending", "running")
 
 
 async def _backfill_board(session: AsyncSession) -> int:

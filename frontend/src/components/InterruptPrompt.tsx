@@ -2,22 +2,18 @@ import * as stylex from '@stylexjs/stylex';
 import {useRef, useState} from 'react';
 
 import {commitResolveApproval} from '../relay/ResolveApprovalMutation';
-import {commitResumeTask} from '../relay/ResumeTaskMutation';
 import {channels, colors, type} from '../theme/tokens.stylex';
 
 interface Props {
-  taskId: string;
   question: string;
   /**
-   * Set when the pause is a per-tool approval gate (core/tool_gate.py). The run
-   * is blocked inside the tool call, not on a LangGraph interrupt, so the
-   * answer goes to the durable row — `resumeTask` would find no interrupt to
-   * resume and the call would stay parked until it times out.
+   * The per-tool approval gate (core/tool_gate.py) the run is blocked on. The
+   * run is parked inside the tool call, so the answer goes to the durable row.
    */
-  approvalId?: string;
+  approvalId: string;
 }
 
-export function InterruptPrompt({taskId, question, approvalId}: Props) {
+export function InterruptPrompt({question, approvalId}: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -28,13 +24,8 @@ export function InterruptPrompt({taskId, question, approvalId}: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      if (approvalId) {
-        await commitResolveApproval(approvalId, answer);
-      } else {
-        await commitResumeTask(taskId, answer);
-      }
-      // The approval_resolved / interrupt_resolved event clears this prompt —
-      // no local state needed.
+      await commitResolveApproval(approvalId, answer);
+      // The approval_resolved event clears this prompt — no local state needed.
     } catch (e) {
       setError((e as Error).message);
       setSubmitting(false);
