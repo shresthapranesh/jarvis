@@ -1,7 +1,7 @@
 //! Starting runs, and steering live ones — `startTask`, `runWorkflow` and
 //! `triggerAutomation` (`server/*_runtime.py:register_*`), and the mutations
 //! that act on a run's in-memory state: queueing a message onto it, answering
-//! its interrupt.
+//! a workflow's interrupt.
 //!
 //! A trigger is only rows: the domain row the run reports into, a `jobs` row
 //! for a worker to claim, and the run mirrored as *pending* (`runs.rs`) so a
@@ -524,16 +524,6 @@ impl StartMutation {
                 let _ = registry.call("unqueue_message", params).await;
             });
         }
-        Ok(true)
-    }
-
-    async fn resume_task(&self, ctx: &Context<'_>, task_id: String, answer: String) -> Result<bool> {
-        let registry: &Arc<Registry> = ctx.data()?;
-        let run = registry.get(&task_id).ok_or("task not found")?;
-        if !run.claimed() {
-            return Err("no pending interrupt for this task".into());
-        }
-        registry.call("resume_task", json!({"task_id": task_id, "answer": answer})).await.map_err(worker_error)?;
         Ok(true)
     }
 

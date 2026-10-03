@@ -32,7 +32,6 @@ START = """mutation($input: StartTaskInput!) {
 QUEUE = """mutation($taskId: String!, $query: String!) {
   queueMessage(taskId: $taskId, query: $query) { messageId position } }"""
 UNQUEUE = "mutation($taskId: String!, $messageId: String!) { unqueueMessage(taskId: $taskId, messageId: $messageId) }"
-RESUME = "mutation($taskId: String!, $answer: String!) { resumeTask(taskId: $taskId, answer: $answer) }"
 RUN_WORKFLOW = "mutation($id: ID!, $inputs: JSON) { runWorkflow(id: $id, inputs: $inputs) }"
 RESUME_WORKFLOW = "mutation($runId: String!, $answer: String!) { resumeWorkflowRun(runId: $runId, answer: $answer) }"
 APPROVE = """mutation($runId: String!, $approved: Boolean!, $answer: String) {
@@ -160,13 +159,9 @@ async def test_a_busy_conversation_queues_instead(twin):
 
 async def test_runs_that_arent_claimed_yet_have_nothing_to_answer(twin):
     """A pending run has no interrupt to answer; an unknown one isn't there."""
-    chat = (await twin.run(START, {"input": {"query": "q"}}))["data"]["startTask"]["taskId"]
-    edge_chat = await _edge_run(twin, "chat")
     flow = (await twin.run(RUN_WORKFLOW, {"id": _gid("Workflow", "w1")}))["data"]["runWorkflow"]
     edge_flow = await _edge_run(twin, "workflow")
     for query, variables, ids in [
-        (RESUME, {"answer": "yes"}, {"taskId": (chat, edge_chat)}),
-        (RESUME, {"taskId": "missing", "answer": "yes"}, {}),
         (RESUME_WORKFLOW, {"answer": "a"}, {"runId": (flow, edge_flow)}),
         (RESUME_WORKFLOW, {"runId": "missing", "answer": "a"}, {}),
         (APPROVE, {"approved": True}, {"runId": (flow, edge_flow)}),
@@ -404,14 +399,7 @@ async def test_a_claimed_run_is_steered_through_the_worker(worked):
     assert (await worked.data(UNQUEUE, {"taskId": task_id, "messageId": q["messageId"]}))["unqueueMessage"] is True
     assert (await worked.data(UNQUEUE, {"taskId": task_id, "messageId": q["messageId"]}))["unqueueMessage"] is False
 
-    # An interrupt is answered in the worker, with the worker's errors.
-    refused = await worked.gql(RESUME, {"taskId": task_id, "answer": "yes"})
-    assert [e["message"] for e in refused["errors"]] == ["no pending interrupt for this task"]
-    state.resume_future = asyncio.get_running_loop().create_future()
-    state.pending_interrupt_id = "i1"
-    assert (await worked.data(RESUME, {"taskId": task_id, "answer": "yes"}))["resumeTask"] is True
-    assert state.resume_future.result() == "yes" and state.pending_interrupt_id is None
-
+    # A workflow's interrupt is answered in the worker, with the worker's errors.
     flow = (await worked.data(RUN_WORKFLOW, {"id": _gid("Workflow", "w1"), "inputs": {"k": 1}}))["runWorkflow"]
     assert (await worked.entered(flow))["inputs"] == {"k": 1}
     await _until(lambda: _true(_claimed_on_edge(worked, flow)))
@@ -429,8 +417,7 @@ async def test_a_claimed_run_is_steered_through_the_worker(worked):
         worked.script.release.set()
 
     events = await worked.subscribe(CHAT, {"id": task_id}, until=release)
-    assert _typenames(events) == ["TokenEvent", "QueuedMessageEvent", "QueuedWithdrawnEvent",
-                                  "InterruptResolvedEvent", "DoneEvent"]
+    assert _typenames(events) == ["TokenEvent", "QueuedMessageEvent", "QueuedWithdrawnEvent", "DoneEvent"]
 
 
 def _claimed_on_edge(worked: Worked, run_id: str) -> bool:

@@ -12,7 +12,7 @@ Tool schemas are re-sent on every LLM call, so only tools coupled to the agent *
 | `write_artifact` | its live event goes through this run's stream writer |
 | `remember` (only with an embedder) | there is no `createMemory` mutation to route to |
 
-Everything else lives in `sdk.py`, preloaded as `jarvis` in every kernel and discovered with `jarvis.help()` / `jarvis.help("<category>")`. `files.py` and `documents.py` are bound only to worker roles (`_ROLE_TOOLS`). `automations.py`, `skills.py`, `projects.py`, `finance.py`, `datetime.py` are unbound.
+Everything else lives in `sdk.py`, preloaded as `jarvis` in every kernel and discovered with `jarvis.help()` / `jarvis.help("<category>")`. `files.py` and `documents.py` are bound only to worker roles (`_ROLE_TOOLS`). `skills.py`, `projects.py`, `finance.py`, `datetime.py` are unbound.
 
 ## Adding to the SDK
 - Define the function in `sdk.py` and register it in `_CATEGORIES`. The docstring is the only documentation `help()` shows.

@@ -58,16 +58,15 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - `call_tool` invokes with a ToolCall payload so `ToolMessage.status` distinguishes MCP errors from success.
 - Tests: `tests/test_mcp_integration.py` spawns real stdio servers — keep it that way.
 
-## Approvals and tool gating (`approval.py`, `approvals.py`, `tool_gate.py`, `tool_gate_node.py`, `tool_policy.py`)
+## Approvals and tool gating (`approval.py` = answer parsing, `approvals.py`, `tool_gate.py`, `tool_gate_node.py`, `tool_policy.py`)
 - Every approval is a durable `Approval` row. **Blocking** (`action IS NULL`): a run is suspended now. **Deferred** (`action` set): the operation was recorded instead of performed; approving executes it (`ACTIONS`).
 - `resolveApproval` → `approvals.resolve` is the single entry point. `is_affirmative_answer` denies on anything ambiguous. Deferred actions execute before the row closes.
-- Use `set_interrupt()` / `clear_interrupt()` on `TaskState`; never set `pending_interrupt_id` alone.
+- Only workflow approval/human_input nodes pause a run on `TaskState` (`set_interrupt()` / `clear_interrupt()` + `resume_future`; never set `pending_interrupt_id` alone). A chat run never pauses that way — it blocks inside the gated call.
 - Rows are closed at chokepoints: `db.ops.update_board_task`, `streaming._finalize_message`, the resume mutations, `answer_board_task` (closes as `answered` *before* updating the task).
-- `reconcile_startup()` runs after the zombie sweep: chat rows survive only if their Job is still pending/running; workflow/automation rows expire.
+- `reconcile_startup()` runs after the zombie sweep: deferred and board rows stay; everything else (workflow, tool gate) expires.
 - Deferred gating of agent writes (`gate_action`) is off unless `approval.required_actions` is set. Only `caller == "agent"` (the `X-Jarvis-Caller` header) is gated. Gate before any side effect.
 - **Tool policy** (`tools.policy` setting, non-default entries only): disabled tools are unbound (filtered in `_build_agent` and hidden from `jarvis.help()`). Approval-required tools gate in the loop (`tool_gate_node.make_tool_gate`, run before each tool batch) — never by wrapping tools. All tool calls stay in history; a denied one gets its denial as its result.
 - The tool gate uses the Approval row as the rendezvous (event + DB poll in-process, polling from the kernel). `run_cell`'s 60s timeout is suspended while a gate is open (`kernels.py:_hold_for_approval`).
-- `request_tool_approval` (the old LangGraph interrupt) is reached only from unbound tools; with no interrupt left, a non-headless caller is denied. Slated for deletion.
 
 ## Budget and throughput (`budget.py`, `perf.py`)
 - Each runtime creates a `BudgetTracker` + `BudgetCallbackHandler` per run; limits from `JARVIS_BUDGET_MAX_*` / `RunnerConfig`.

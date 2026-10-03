@@ -110,17 +110,6 @@ class QueuedConsumedEvent:
 
 
 @strawberry.type
-class InterruptEvent:
-    interrupt_id: str
-    question: str
-
-
-@strawberry.type
-class InterruptResolvedEvent:
-    interrupt_id: str
-
-
-@strawberry.type
 class DoneEvent:
     message: str
     conversation_id: str
@@ -137,10 +126,8 @@ class ApprovalRequestEvent:
     tool: str
     reason: str
     args: str  # JSON-encoded
-    # Set when the request is a durable per-tool gate (core/tool_gate.py) — the
-    # run is blocked inside the tool call, not on a LangGraph interrupt, so the
-    # chat prompt must answer it with `resolveApproval(id)` rather than
-    # `resumeTask`. None for the older interrupt-backed approvals.
+    # The durable row (core/tool_gate.py, core/approvals.gate_action) — the
+    # chat prompt answers it with `resolveApproval(id)`.
     approval_id: str | None = None
     # True when approving is what *performs* the operation: nothing is blocked,
     # the run went on without it. The chat UI must not render this as a prompt
@@ -216,8 +203,6 @@ ChatEvent = Annotated[
         QueuedMessageEvent,
         QueuedWithdrawnEvent,
         QueuedConsumedEvent,
-        InterruptEvent,
-        InterruptResolvedEvent,
         ApprovalRequestEvent,
         ApprovalResolvedEvent,
         WorkflowToolEvent,
@@ -348,13 +333,6 @@ def coerce_chat_event(raw: dict) -> ChatEvent | None:
                     status=str(t.get("status", "pending")),
                 ))
         return TodosUpdatedEvent(todos=todos, source=data.get("source", ""))
-    if event_name == "interrupt":
-        return InterruptEvent(
-            interrupt_id=data.get("interrupt_id", ""),
-            question=data.get("question", ""),
-        )
-    if event_name == "interrupt_resolved":
-        return InterruptResolvedEvent(interrupt_id=data.get("interrupt_id", ""))
     if event_name == "approval_request":
         return ApprovalRequestEvent(
             tool=data.get("tool", ""),

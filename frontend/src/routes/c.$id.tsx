@@ -630,7 +630,6 @@ function ConversationPage() {
         <DeferredApprovals conversationId={id} />
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt
-            taskId={runningMsg.id}
             question={pendingInterrupt.question}
             approvalId={pendingInterrupt.approvalId}
           />

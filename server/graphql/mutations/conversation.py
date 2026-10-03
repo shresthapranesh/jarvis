@@ -1,4 +1,4 @@
-"""Conversation mutations — startTask, stopTask, resumeTask, update, delete."""
+"""Conversation mutations — startTask, stopTask, update, delete."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from ..types.upload import UploadReferenceInput
 from server.chat_runtime import (
     queue_chat_message,
     register_chat_task,
-    resume_chat_task,
     unqueue_chat_message,
 )
 
@@ -141,9 +140,6 @@ class ConversationMutation:
 
         state.cancelled = True
         state._stop_event.set()
-
-        if state.resume_future and not state.resume_future.done():
-            state.resume_future.cancel()
         return True
 
     @strawberry.mutation
@@ -152,8 +148,8 @@ class ConversationMutation:
     ) -> QueueMessagePayload:
         """Queue a message for a run that is already in flight.
 
-        Not a second `startTask`: two runs on one conversation share a
-        LangGraph `thread_id` and would race the checkpointer. The queued text
+        Not a second `startTask`, which would wait for this run to end (the
+        conversation's thread lease) and reach the model a turn late. The queued text
         is delivered by the agent's model_request node just before its next LLM
         call — i.e. after the tool batch currently running, without cancelling
         it.
@@ -171,11 +167,6 @@ class ConversationMutation:
         return await unqueue_chat_message(
             info.context["session"], task_id, message_id,
         )
-
-    @strawberry.mutation
-    async def resume_task(self, info: strawberry.Info, task_id: str, answer: str) -> bool:
-        await resume_chat_task(info.context["session"], task_id, answer)
-        return True
 
     @strawberry.mutation
     async def update_conversation(

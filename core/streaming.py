@@ -16,8 +16,7 @@ from db.ops import add_step, add_steps, close_open_approvals, update_message_con
 from .doc_index import INLINE_THRESHOLD, embeddings_available, start_indexing
 from .document_extractor import MAX_CHARS, extract_raw_text, format_inline, is_tabular, is_text_tabular
 from .schemas import AttachmentIn
-from .approvals import record_blocking_request
-from .state import InterruptRequest, TaskState, emit_event
+from .state import TaskState, emit_event
 
 logger = logging.getLogger(__name__)
 
@@ -33,26 +32,6 @@ WORKER_RESULT_PERSIST_CAP = 2000
 
 
 # ── Step data extraction ─────────────────────────────────────────────────────
-
-
-_APPROVAL_ARGS_CAP = 2000
-
-
-def _safe_args_json(args: Any) -> str | None:
-    """Serialize interrupt args for the approvals inbox, never raising.
-
-    Tool args are arbitrary — file bytes, model objects, anything the agent
-    passed — so this is best-effort by design: unserializable values fall back
-    to `repr`, and the whole blob is capped, because a paused run must stay
-    listable even when its arguments are not JSON.
-    """
-    if args is None:
-        return None
-    try:
-        blob = json.dumps(args, default=repr)
-    except Exception:
-        blob = repr(args)
-    return blob[:_APPROVAL_ARGS_CAP]
 
 
 def _subagent_name_from_ns(ns: tuple[str, ...] | None) -> str | None:
@@ -413,9 +392,8 @@ async def _process_chunk(
     conv_id: str | None = None,
     step_seq_ref: list[int] | None = None,
     persist_steps: bool = False,
-) -> bool:
-    """Process a single astream chunk. Returns True if an interrupt was encountered
-    (caller should stop iterating and await the resume future).
+) -> None:
+    """Process a single astream chunk.
 
     Shared between the chat path (``_run_agent_task``) and the automation prompt
     path (``_execute_prompt_type``). The chat path passes ``persist_steps=True``
@@ -435,7 +413,7 @@ async def _process_chunk(
         token, metadata = data
         is_ai = getattr(token, "type", "") in ("ai", "AIMessageChunk")
         if not is_ai or not hasattr(token, "content"):
-            return False
+            return
         content = token.content
         if isinstance(content, str):
             if content:
@@ -464,11 +442,11 @@ async def _process_chunk(
                         coalescer.add_token(text, source)
                         if not ns:
                             accumulated.append(text)
-        return False
+        return
 
     if mode == "custom":
         if not isinstance(data, dict):
-            return False
+            return
         event_type = data.get("type")
         if event_type == "browser_step":
             coalescer.flush_all()
@@ -518,62 +496,13 @@ async def _process_chunk(
         elif event_type == "todos_updated":
             coalescer.flush_all()
             emit_event(state, "todos_updated", todos=data.get("todos", []), source=source)
-        elif event_type in ("approval_request", "approval_resolved", "workflow_event", "budget_exceeded", "budget_update"):
+        elif event_type in ("workflow_event", "budget_exceeded", "budget_update"):
             coalescer.flush_all()
             payload = {k: v for k, v in data.items() if k != "type"}
             emit_event(state, event_type, **payload)
-        return False
+        return
 
     if mode == "updates":
-        if isinstance(data, dict) and "__interrupt__" in data:
-            coalescer.flush_all()
-            interrupts = data["__interrupt__"]
-            for intr in interrupts:
-                value = getattr(intr, "value", None)
-                if isinstance(value, dict):
-                    question = value.get("reason") or value.get("question") or str(value)
-                else:
-                    question = str(value)
-                interrupt_id = getattr(intr, "id", None) or getattr(intr, "interrupt_id", None) or task_id
-                interrupt_id = str(interrupt_id) if interrupt_id is not None else None
-                # Record the payload, not just the id, so the approvals inbox
-                # can render this pause without tailing the run's event stream.
-                # `request_tool_approval` interrupts with a dict tagged
-                # type="approval" carrying the tool + args; a bare
-                # `request_input` (free-text HITL) carries neither.
-                if interrupt_id is not None:
-                    is_approval = isinstance(value, dict) and value.get("type") == "approval"
-                    request = InterruptRequest(
-                        id=interrupt_id,
-                        question=question,
-                        kind="approval" if is_approval else "input",
-                        tool=value.get("tool") if isinstance(value, dict) else None,
-                        args_json=_safe_args_json(value.get("args")) if isinstance(value, dict) else None,
-                    )
-                    state.set_interrupt(request)
-                    # Persist it too: the in-memory copy dies with the process,
-                    # and the durable row is what lets the run be resumed after
-                    # a restart (see core/approvals.reconcile_startup).
-                    request.approval_id = await record_blocking_request(
-                        source=state.kind,
-                        kind=request.kind,
-                        question=request.question,
-                        label=state.label,
-                        task_id=task_id,
-                        interrupt_id=request.id,
-                        parent_id=conv_id or state.parent_id,
-                        tool=request.tool,
-                        args_json=request.args_json,
-                    )
-                else:
-                    state.pending_interrupt_id = None
-                emit_event(
-                    state, "interrupt",
-                    interrupt_id=interrupt_id,
-                    question=question,
-                )
-            return True
-
         if isinstance(data, dict):
             step_records: list[tuple[str, str, str]] = []
             for node_name, node_data in data.items():
@@ -603,9 +532,6 @@ async def _process_chunk(
                 else:
                     for node_name, src, step_data in step_records:
                         _emit_step(node_name, src, step_data)
-        return False
-
-    return False
 
 
 # ── Finalize message ─────────────────────────────────────────────────────────

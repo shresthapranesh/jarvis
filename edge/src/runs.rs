@@ -665,16 +665,16 @@ mod tests {
         let s = reg.attach("A".into(), tx);
         let call = tokio::spawn({
             let reg = reg.clone();
-            async move { reg.call("resume_task", json!({"task_id": "t"})).await }
+            async move { reg.call("queue_message", json!({"task_id": "t"})).await }
         });
         let sent: Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
-        assert_eq!(sent["method"], "resume_task");
+        assert_eq!(sent["method"], "queue_message");
         reg.reply(s, sent["id"].as_u64().unwrap(), Err("task not found".into()));
         assert_eq!(call.await.unwrap(), Err("task not found".into()));
         // A dropped link fails the calls still waiting on it.
         let call = tokio::spawn({
             let reg = reg.clone();
-            async move { reg.call("resume_task", json!({})).await }
+            async move { reg.call("queue_message", json!({})).await }
         });
         rx.recv().await.unwrap();
         reg.detach(s);

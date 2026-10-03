@@ -3,7 +3,7 @@
 A skill is a reusable, named capability: a `description` (the routing key,
 embedded for intent retrieval) plus a `body` (the procedure, loaded on demand).
 These tools let the agent author and curate its own skills, mirroring
-tools/automations.py. Description-embedding lives in core/skill_store.py.
+tools/sdk.py. Description-embedding lives in core/skill_store.py.
 """
 from __future__ import annotations
 

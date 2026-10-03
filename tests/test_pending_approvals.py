@@ -72,40 +72,6 @@ async def test_empty_when_nothing_is_waiting(database):
     assert await _pending() == []
 
 
-async def test_chat_interrupt_is_persisted_with_its_payload(database):
-    """The row, not the TaskState, is what the inbox reads — so the payload has
-    to survive the write, not just the process."""
-    from core.state import TaskState
-    from core.streaming import TokenCoalescer, _process_chunk
-
-    state = TaskState(kind="chat", label="Delete the staging DB", parent_id="conv-1")
-
-    class _Interrupt:
-        value = {
-            "type": "approval",
-            "tool": "delete_workflow",
-            "args": {"workflow_id": "wf-9"},
-            "reason": "Delete workflow wf-9?",
-        }
-        id = "int-1"
-
-    chunk = ((), "updates", {"__interrupt__": [_Interrupt()]})
-    assert await _process_chunk(chunk, state, TokenCoalescer(state), [], task_id="task-1") is True
-
-    rows = await _pending()
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["source"] == "chat"
-    assert row["kind"] == "approval"
-    assert row["question"] == "Delete workflow wf-9?"
-    assert row["tool"] == "delete_workflow"
-    assert json.loads(row["argsJson"]) == {"workflow_id": "wf-9"}
-    assert row["deferred"] is False
-    # The in-memory copy carries the row id, so the run can close its own row.
-    assert state.pending_interrupt is not None
-    assert state.pending_interrupt.approval_id == row["id"]
-
-
 async def test_finished_run_expires_its_open_approvals(database):
     """A run that ends while still waiting leaves an unanswerable request. It
     must not stay listed — that is precisely the dead button `expired` exists
@@ -408,9 +374,9 @@ async def test_workflow_pause_expires_on_restart(database):
         assert row_now is not None and row_now.status == "expired"
 
 
-async def test_chat_pause_survives_restart_while_its_job_does(database):
-    """LangGraph checkpointed the interrupt, so the run is resumable — but only
-    while a job row still exists to re-claim it."""
+async def test_a_chat_interrupt_row_expires_on_restart_even_with_its_job(database):
+    """Left by the LangGraph interrupt, which is gone: a re-claimed chat job
+    runs from its transcript and never waits on the row, so it is dead."""
     from core.approvals import reconcile_startup
     from db import async_session, ops
     from db.models import Job
@@ -418,22 +384,16 @@ async def test_chat_pause_survives_restart_while_its_job_does(database):
     async with async_session() as session:
         session.add(Job(id="task-live", kind="chat", payload="{}", status="pending"))
         await session.commit()
-        live = await ops.create_approval(
+        row = await ops.create_approval(
             session, source="chat", kind="approval", question="ok?",
             label="chat", task_id="task-live",
-        )
-        orphan = await ops.create_approval(
-            session, source="chat", kind="approval", question="ok?",
-            label="chat", task_id="task-dead",
         )
 
     await reconcile_startup()
 
     async with async_session() as session:
-        live_now = await ops.get_approval(session, live.id)
-        orphan_now = await ops.get_approval(session, orphan.id)
-        assert live_now is not None and live_now.status == "pending"
-        assert orphan_now is not None and orphan_now.status == "expired"
+        row_now = await ops.get_approval(session, row.id)
+        assert row_now is not None and row_now.status == "expired"
 
 
 async def test_deferred_requests_survive_restart_unconditionally(database):

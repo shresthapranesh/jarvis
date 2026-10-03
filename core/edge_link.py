@@ -327,7 +327,7 @@ async def _dispatch(method: str, params: dict[str, Any]) -> Any:
     process's in-memory run state, by the functions the resolvers here use."""
     from core.state import get_queue
     from db import async_session
-    from server.chat_runtime import queue_chat_message, resume_chat_task, unqueue_chat_message
+    from server.chat_runtime import queue_chat_message, unqueue_chat_message
     from server.workflow_runtime import resolve_workflow_approval, resume_workflow_run
 
     # The edge is about to stop this process for being idle: claim nothing
@@ -345,9 +345,6 @@ async def _dispatch(method: str, params: dict[str, Any]) -> Any:
             return {"message_id": message_id, "position": position}
         if method == "unqueue_message":
             return await unqueue_chat_message(session, params["task_id"], params["message_id"])
-        if method == "resume_task":
-            await resume_chat_task(session, params["task_id"], params["answer"])
-            return True
         if method == "resume_workflow_run":
             await resume_workflow_run(session, params["run_id"], params["answer"])
             return True

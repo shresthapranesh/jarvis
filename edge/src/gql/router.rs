@@ -47,7 +47,6 @@ const LINKED_FIELDS: &[&str] = &[
     "startTask",
     "queueMessage",
     "unqueueMessage",
-    "resumeTask",
     "runWorkflow",
     "resumeWorkflowRun",
     "resolveWorkflowApproval",
