@@ -264,6 +264,36 @@ faithfully (a checkpoint in another encoding, an https CDP endpoint, a
 `models.custom` row Python itself would fail on) returns an `edgeDefer` error,
 and `graphql.rs` answers the whole operation in Python instead.
 
+## The LLM layer (`src/llm/`)
+
+Phase 2b: model calls from Rust, for the agent loop that will run here. Not
+wired into serving yet. It is reached only through `--llm-shape` and
+`--llm-call`, which read one request as JSON on stdin.
+
+- `transcript.rs` — the v1 record (`core/transcript_format.md`). A row Python
+  wrote reads and writes back equal, `null`s included.
+- `shape.rs` — a port of `core/messages.py` (`strip_historical_thinking`,
+  `repair_orphan_tool_calls`, `build_llm_messages`) and the cache layout in
+  `core/context_cache.py`. **A change to either is made in both.** The
+  result is a `Prompt` with breakpoints as flags; each provider spells them.
+- `google.rs`, `ollama.rs` — one module per wire format, hand-written. No
+  client library sits above our request builder, so the request is ours
+  byte for byte. Each renders a `Prompt`, streams the reply (text and
+  thinking deltas) and builds the assistant record.
+- `complete()` retries a transient failure (429, 5xx, a dropped connection)
+  once, and only if nothing had streamed yet.
+
+Endpoints come from the environment: `GOOGLE_API_KEY` (or `GEMINI_API_KEY`),
+`JARVIS_GOOGLE_BASE_URL` (tests), `OLLAMA_HOST` (read as the `ollama` client
+reads it).
+
+`tests/test_edge_llm.py` diffs the edge against the Python path through one
+fake provider server: the shaped prompt, the request body, and the record
+built from the same reply. Where the edge differs on purpose (LangChain
+dropping an assistant's text beside its calls, its lossy tool-schema
+conversion, Ollama's thinking), the test undoes the difference by name. Add
+to it when adding a provider.
+
 ## Contracts with the Python side
 
 - **Python owns the schema** (`init_db` + `_migrate`). The edge creates no

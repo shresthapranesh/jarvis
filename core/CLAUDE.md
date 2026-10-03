@@ -26,6 +26,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - Cache TTL is 5m unless `JARVIS_CACHE_TTL=1h` (anthropic only; at 5m the `ttl` key is omitted).
 - Per-call compaction moves its boundary in steps of 4 so 3 calls in 4 keep their cached prefix.
 - `tests/test_prompt_cache_layout.py` asserts the prefix property through real integrations.
+- `edge/src/llm/shape.rs` ports `strip_historical_thinking`, `repair_orphan_tool_calls`, `build_llm_messages` and this layout for the Rust agent loop — change both; `tests/test_edge_llm.py` diffs them.
 
 ### Compaction
 - `maybe_compact()` → `CompactionResult` (`.messages` already leaned, `.state_update`, `.compacted`, `.episode`, `.evicted_ids`).
