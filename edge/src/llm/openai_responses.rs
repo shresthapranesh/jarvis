@@ -262,8 +262,12 @@ impl Reply {
                     .or_else(|| r.get("status").and_then(Value::as_str))
                     .map(str::to_string);
             }
+            "response.function_call_arguments.delta" => on_delta(Delta::ToolCall),
             "response.output_item.added" => {
                 let item = &ev["item"];
+                if item["type"] == "function_call" {
+                    on_delta(Delta::ToolCall);
+                }
                 if item["type"] == "message" {
                     let phase = item.get("phase").cloned();
                     if let (Typed::Text { extras, .. }, Some(phase)) = (self.part(&s(item, "id"), false), phase) {

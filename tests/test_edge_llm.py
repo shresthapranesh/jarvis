@@ -236,7 +236,7 @@ OLLAMA_REPLY = [
                  "tool_calls": [{"function": {"name": "run_cell", "arguments": {"code": "check()"}}}]}, "done": False},
     {"model": "gemma4:26b", "created_at": "2026-10-03T00:00:01Z", "message": {"role": "assistant", "content": ""},
      "done": True, "done_reason": "stop", "total_duration": 5, "load_duration": 1, "prompt_eval_count": 50,
-     "prompt_eval_duration": 2, "eval_count": 7, "eval_duration": 3},
+     "prompt_eval_duration": 500_000_000, "eval_count": 7, "eval_duration": 2_000_000_000},
 ]
 
 
@@ -542,7 +542,7 @@ def test_long_loop_is_compacted(edge_binary, tmp_path):
 def test_stub_leaves_a_result_without_text_unquoted(edge_binary, tmp_path):
     """Intended: a collapsed result with no text isn't quoted. Python quotes
     the repr of its content — a truncated data URL the model pays for."""
-    image = [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}}]
+    image: list[Any] = [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}}]
     history: list = [HumanMessage("Look.", id="u1")]
     for i in range(8):
         history.append(_gemini_ai("", [(f"i{i}", "run_cell", {"code": "show()"}, None)]))
@@ -731,7 +731,7 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     edge_rec = out[-1]["message"]
     edge = _semantics(edge_rec)
-    deltas = out[:-1]
+    deltas = [line for line in out[:-1] if "event" not in line]
 
     if model.startswith("ollama"):
         # LangChain dropped Ollama's thinking and left the stop reason in
@@ -753,6 +753,87 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
         assert deltas == [{"thinking": "Weighing "}, {"thinking": "it."}, {"text": "Let me"}, {"text": " check."}]
     assert edge == python
     assert all(c["id"] for c in edge_rec["tool_calls"])
+
+
+def _python_run_events(model: str, url: str, messages: list) -> tuple[list[dict], dict | None]:
+    """The events a Python run of one model call emits for its budget and
+    throughput, and the perf it stores on the Message row."""
+    from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
+    from core.perf import PerfCallbackHandler, PerfTracker
+    from core.state import TaskState
+
+    state = TaskState()
+    budget = BudgetTracker(get_budget_limits_for_task("chat"), task_state=state)
+    perf = PerfTracker(task_state=state)
+    llm = _llm(model, url).bind_tools([{"type": "function", "function": t} for t in TOOLS])
+
+    async def run() -> None:
+        config: Any = {"callbacks": [BudgetCallbackHandler(budget, state), PerfCallbackHandler(perf)]}
+        async for _ in llm.astream(messages, config=config):
+            pass
+
+    asyncio.run(run())
+    return [{"event": e["event"], "data": json.loads(e["data"])} for e in state.events], perf.message_perf()
+
+
+# Read off the wall clock, so equal only in whether they were measured.
+_WALL_CLOCK = {"ttft_ms", "llm_ms", "total_ms", "elapsed_seconds", "decode_ms"}
+# Wall-clock rates: whether one clears the 5 ms floor depends on the machine.
+_WALL_RATES = {"prefill_tps", "eval_tps"}
+# What Ollama's own durations give — the same numbers from either side.
+_SERVER_TIMED = {"decode_ms", "prefill_tps", "eval_tps"}
+
+
+def _clockless(value: Any, server_timed: bool) -> Any:
+    if isinstance(value, list):
+        return [_clockless(v, server_timed) for v in value]
+    if not isinstance(value, dict):
+        return value
+    out = {}
+    for k, v in value.items():
+        if k == "chunks":
+            # Intended: the edge counts output pieces (text, thinking, a
+            # tool-call fragment); Python counts LangChain's stream chunks,
+            # which an integration cuts its own way.
+            continue
+        if server_timed and k in _SERVER_TIMED:
+            out[k] = v
+        elif k in _WALL_RATES:
+            continue
+        elif k in _WALL_CLOCK:
+            out[k] = v is not None
+        else:
+            out[k] = _clockless(v, server_timed)
+    return out
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_run_events_match_python(edge_binary, tmp_path, provider, model):
+    """A one-call run's `budget_update` and `perf_update`, and the perf a
+    chat turn stores, as Python's callback handlers produce them."""
+    records, blobs = _records(_chat())
+    python, python_perf = _python_run_events(
+        model, provider.url, _python_prompt(_python_history(records, blobs), cache=False, provider=model.split(":")[0])
+    )
+    provider.take()
+    out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
+    edge = [line for line in out if "event" in line]
+    assert [e["event"] for e in edge] == ["budget_update", "perf_update"]
+    server_timed = model.startswith("ollama")
+    python_call = python[1]["data"]["snapshot"]["calls"][0]
+    if python_call["model"] != edge[1]["data"]["snapshot"]["calls"][0]["model"]:
+        # Intended: LangChain's serialized ChatOllama doesn't carry the
+        # model, so Python's perf names the class.
+        assert model.startswith("ollama") and python_call["model"] == "ChatOllama"
+        python_call["model"] = model.split(":", 1)[1]
+    assert _clockless(edge, server_timed) == _clockless(python, server_timed)
+    assert _clockless(out[-1]["perf"], server_timed) == _clockless(python_perf, server_timed)
+    call = edge[1]["data"]["snapshot"]["calls"][0]
+    if server_timed:
+        assert (call["source"], call["prefill_tps"], call["eval_tps"], call["decode_ms"]) == ("provider", 100.0, 3.5, 2000.0)
+    else:
+        # The fake answers at once: too fast a decode to tell from a flush.
+        assert call["source"] == "prefill_only" and call["ttft_ms"] is not None
 
 
 def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provider):

@@ -173,6 +173,7 @@ impl Reply {
                 self.text.push_str(t);
             }
             for call in msg.get("tool_calls").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default() {
+                on_delta(Delta::ToolCall);
                 let f = &call["function"];
                 self.calls.push(ToolCall {
                     id: Some(call.get("id").and_then(Value::as_str).map_or_else(new_id, str::to_string)),
@@ -192,6 +193,16 @@ impl Reply {
                 ..Default::default()
             });
             self.finish_reason = chunk.get("done_reason").and_then(Value::as_str).map(str::to_string);
+            // Nanoseconds, measured server-side; both spans or neither.
+            let (prefill, decode) = (n("prompt_eval_duration").unwrap_or(0), n("eval_duration").unwrap_or(0));
+            if prefill > 0 && decode > 0 {
+                on_delta(Delta::Timings(super::perf::ServerTimings {
+                    prefill_tokens: input.unwrap_or(0),
+                    prefill_seconds: prefill as f64 / 1e9,
+                    output_tokens: output.unwrap_or(0),
+                    decode_seconds: decode as f64 / 1e9,
+                }));
+            }
         }
     }
 
@@ -263,12 +274,13 @@ mod tests {
             json!({"model": "gemma4:26b", "message": {"role": "assistant", "content": "lo",
                    "tool_calls": [{"function": {"name": "run_cell", "arguments": {"code": "1+1"}}}]}, "done": false}),
             json!({"model": "gemma4:26b", "message": {"role": "assistant", "content": ""}, "done": true,
-                   "done_reason": "stop", "prompt_eval_count": 50, "eval_count": 7}),
+                   "done_reason": "stop", "prompt_eval_count": 50, "eval_count": 7,
+                   "prompt_eval_duration": 500_000_000, "eval_duration": 2_000_000_000}),
         ];
         let mut r = Reply::new("x");
-        let mut n = 0;
+        let mut deltas = vec![];
         for l in &lines {
-            r.absorb(l, &mut |_| n += 1);
+            r.absorb(l, &mut |d| deltas.push(format!("{d:?}")));
         }
         let mut m = serde_json::to_value(r.finish()).unwrap();
         m.as_object_mut().unwrap().remove("id");
@@ -282,6 +294,7 @@ mod tests {
                    "model": {"provider": "ollama", "name": "gemma4:26b"},
                    "finish_reason": "stop"})
         );
-        assert_eq!(n, 3);
+        let timings = "Timings(ServerTimings { prefill_tokens: 50, prefill_seconds: 0.5, output_tokens: 7, decode_seconds: 2.0 })";
+        assert_eq!(deltas, ["Thinking(\"hmm\")", "Text(\"Hel\")", "Text(\"lo\")", "ToolCall", timings]);
     }
 }

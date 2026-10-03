@@ -255,6 +255,7 @@ impl Reply {
         for p in parts {
             let sig = p.get("thoughtSignature").and_then(Value::as_str).map(str::to_string);
             if let Some(call) = p.get("functionCall") {
+                on_delta(Delta::ToolCall);
                 self.calls.push(ToolCall {
                     id: Some(call.get("id").and_then(Value::as_str).map_or_else(new_id, str::to_string)),
                     name: call.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
@@ -469,7 +470,7 @@ mod tests {
                 "model": {"provider": "google_genai", "name": "gemma-x"},
                 "finish_reason": "STOP"})
         );
-        assert_eq!(deltas, ["Thinking(\"Let me \")", "Thinking(\"think\")", "Text(\"Hel\")", "Text(\"lo\")"]);
+        assert_eq!(deltas, ["Thinking(\"Let me \")", "Thinking(\"think\")", "Text(\"Hel\")", "Text(\"lo\")", "ToolCall"]);
     }
 
     #[test]
