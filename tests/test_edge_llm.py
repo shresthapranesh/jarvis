@@ -346,9 +346,24 @@ _PROVIDER_ENV = (
 )
 
 
+def _endpoint_rows(url: str) -> list[dict]:
+    """`models.endpoints` as stored: two OpenAI-compatible endpoints at the fake."""
+    return [{"name": "local", "base_url": url, "api_key": "test-key"}, {"name": "keyless", "base_url": f"{url}/"}]
+
+
+@pytest.fixture(autouse=True)
+def _endpoint_cache():
+    from core import model_catalog
+
+    saved = model_catalog._endpoints
+    yield
+    model_catalog._endpoints = saved
+
+
 def _edge(edge_binary: Path, flag: str, tmp_path: Path, payload: dict, provider: _Provider | None = None) -> list:
     env = {k: v for k, v in os.environ.items() if k not in _PROVIDER_ENV}
     if provider:
+        payload = {**payload, "endpoints": _endpoint_rows(provider.url)}
         env.update(
             JARVIS_GOOGLE_BASE_URL=provider.url, GOOGLE_API_KEY="test-key", OLLAMA_HOST=provider.url,
             JARVIS_OPENROUTER_BASE_URL=provider.url, OPENROUTER_API_KEY="test-key",
@@ -401,9 +416,15 @@ def _llm(model: str, url: str):
         from langchain_meta import ChatMetaModel
 
         return ChatMetaModel(model=name, api_key="test-key", base_url=f"{url}/")
-    from langchain_ollama import ChatOllama
+    if provider == "ollama":
+        from langchain_ollama import ChatOllama
 
-    return ChatOllama(model=name, base_url=url)
+        return ChatOllama(model=name, base_url=url)
+    # An endpoint: the catalog's own path, as a run builds it.
+    from core.model_catalog import load_endpoints
+
+    load_endpoints(_endpoint_rows(url))
+    return ModelSpec(id=model, label=model, provider=provider).build_llm()
 
 
 def _cache(model: str) -> bool:
@@ -564,12 +585,17 @@ MODELS = [
     "openrouter:anthropic/claude-sonnet-4.5",
     "openrouter:deepseek/deepseek-r1:free",
     "meta:muse-spark-1.1",
+    # OpenAI-compatible endpoints the operator named (`models.endpoints`)
+    "local:qwen3-32b",
+    "keyless:llama-3.3-70b",
 ]
 INTENDED = {
     "google_genai": _intended_gemini,
     "ollama": _intended_ollama,
     "openrouter": _intended_openai_chat,
     "meta": _intended_openai_responses,
+    "local": _intended_openai_chat,
+    "keyless": _intended_openai_chat,
 }
 
 
@@ -615,12 +641,15 @@ def test_request_matches_python(edge_binary, tmp_path, provider, name, model):
     (MODELS[0], "x-goog-api-key", "test-key"),
     (MODELS[3], "authorization", "Bearer test-key"),
     (MODELS[5], "authorization", "Bearer test-key"),
+    (MODELS[6], "authorization", "Bearer test-key"),
+    # No key, no header — where LangChain's client sends a placeholder.
+    (MODELS[7], "authorization", None),
 ])
 def test_key_header(edge_binary, tmp_path, provider, model, header, value):
     records, blobs = _records(_chat())
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     headers = {k.lower(): v for k, v in provider.take()["headers"].items()}
-    assert headers[header] == value
+    assert headers.get(header) == value
 
 
 # ── replies ──────────────────────────────────────────────────────────────────
@@ -643,13 +672,13 @@ def _semantics(rec: dict) -> dict:
     }
 
 
-@pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[3], MODELS[5]])
+@pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[3], MODELS[5], MODELS[6]])
 def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     records, blobs = _records(_chat())
     reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False,
                                                              provider=model.split(":")[0]))
     python = _semantics(encode(reply)[0])
-    if model.startswith(("openrouter", "meta")):
+    if model.startswith(("openrouter", "meta", "local")):
         # LangChain named the provider by wire format; the edge records the
         # catalog's provider id, as the transcript format says.
         assert python["model"]["provider"] == "openai"
@@ -666,7 +695,7 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
         assert edge["finish_reason"] == encode(reply)[0]["extras"]["response_metadata"]["done_reason"]
         python["finish_reason"] = edge["finish_reason"]
         assert deltas == [{"thinking": "Hmm."}, {"text": "Let me"}, {"text": " check."}]
-    elif model.startswith(("openrouter", "meta")):
+    elif model.startswith(("openrouter", "meta", "local")):
         # LangChain dropped OpenRouter's reasoning, and kept the Responses
         # summary only inside an opaque item; the edge keeps it as thinking.
         assert edge.pop("thinking") == "Weighing it." and python.pop("thinking") == ""
@@ -706,7 +735,7 @@ def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provide
     assert edge_turn["parts"][0] == {"text": "Let me check.", "thoughtSignature": "dGV4dC1zaWc="}
 
 
-@pytest.mark.parametrize("model", [MODELS[3], MODELS[5]])
+@pytest.mark.parametrize("model", [MODELS[3], MODELS[5], MODELS[6]])
 def test_openai_record_goes_back_out_the_same(edge_binary, tmp_path, provider, model):
     """The next request after a reply the edge recorded is the same from
     either runtime — for Responses, the text item's server id and phase go

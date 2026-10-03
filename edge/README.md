@@ -348,7 +348,7 @@ Every query that reads only the database and files:
 | workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
 | lists | `notificationChannels`, `skills`, `pendingApprovals` |
 | memory | `memories`, `memoryActivities`, `memoryUsage` |
-| chat page | `models`, `todos` (`thread_state`; a thread not yet converted from `checkpoints.db`, read-only, `src/checkpoints.rs`), `browserAvailable` (an http CDP endpoint) |
+| chat page | `models` (endpoint names from `models.endpoints` as providers; keys never sent), `todos` (`thread_state`; a thread not yet converted from `checkpoints.db`, read-only, `src/checkpoints.rs`), `browserAvailable` (an http CDP endpoint) |
 | Relay | `node` for every Node type |
 
 Mutations that only write rows and files:

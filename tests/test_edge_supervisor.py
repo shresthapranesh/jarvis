@@ -74,6 +74,32 @@ async def test_models(edge):
     await _set("models.custom", '{"id": "x"}')
     await _assert_same(edge, _relay_text("ModelCatalogQuery"))
 
+    # OpenAI-compatible endpoints: providers, discoverable, and listed without
+    # their keys — every row Python's parse_endpoints skips, the edge skips.
+    endpoints = [
+        {"name": "groq", "base_url": " https://api.groq.com/openai/v1/ ", "api_key": "sk-secret"},
+        {"name": "lmstudio", "base_url": "http://localhost:1234/v1", "api_key": ""},
+        {"name": "groq", "base_url": "http://elsewhere"},
+        {"name": "ollama", "base_url": "http://x"},
+        {"name": "Bad", "base_url": "http://x"},
+        {"name": "nourl"},
+        {"name": "a" * 33, "base_url": "http://x"},
+        "junk",
+    ]
+    await _set("models.endpoints", json.dumps(endpoints))
+    await _set("models.custom", json.dumps([{"id": "groq:llama-3.3-70b", "label": "Llama"}]))
+    data = await _assert_same(edge, _relay_text("ModelCatalogQuery"))
+    models = data["data"]["models"]
+    assert models["endpoints"] == [
+        {"name": "groq", "baseUrl": "https://api.groq.com/openai/v1", "hasKey": True},
+        {"name": "lmstudio", "baseUrl": "http://localhost:1234/v1", "hasKey": False},
+    ]
+    assert {"groq", "lmstudio"} <= set(models["providers"]) & set(models["discoverableProviders"])
+    assert "sk-secret" not in json.dumps(data)
+    for raw in ("not json", '{"name": "x"}', ""):
+        await _set("models.endpoints", raw)
+        await _assert_same(edge, _relay_text("ModelCatalogQuery"))
+
 
 async def test_a_custom_model_python_would_reject_is_left_to_python(edge):
     await _set("models.custom", json.dumps([{"id": 7}]))

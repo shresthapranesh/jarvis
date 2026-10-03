@@ -14,7 +14,7 @@ use sqlx::SqlitePool;
 
 const BUILTIN_MODELS: &str = include_str!("../../core/builtin_models.json");
 
-/// `KNOWN_PROVIDERS`, sorted as the `models` query lists them.
+/// `KNOWN_PROVIDERS` — those with code of their own — sorted.
 pub const KNOWN_PROVIDERS: &[&str] = &["anthropic", "bedrock", "google_genai", "meta", "ollama", "openrouter"];
 /// `KNOWN_PROVIDERS & model_discovery.DISCOVERABLE`, sorted.
 pub const DISCOVERABLE_PROVIDERS: &[&str] = &["anthropic", "bedrock", "google_genai", "ollama", "openrouter"];
@@ -153,6 +153,53 @@ pub fn seed_model() -> &'static str {
     &builtins()[0].id
 }
 
+/// An OpenAI-compatible server the operator named (`core.model_catalog.
+/// Endpoint`); its name is the provider prefix of its models.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Endpoint {
+    pub name: String,
+    /// Without a trailing slash.
+    pub base_url: String,
+    pub api_key: Option<String>,
+}
+
+/// `ENDPOINT_NAME`: 1-32 of `a-z0-9_-`, starting with a letter or digit.
+fn endpoint_name_ok(name: &str) -> bool {
+    let ok = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+    name.len() <= 32
+        && name.chars().next().is_some_and(ok)
+        && name.chars().all(|c| ok(c) || c == '_' || c == '-')
+        && !KNOWN_PROVIDERS.contains(&name)
+}
+
+/// `parse_endpoints`: the usable rows, in order — skipping what isn't an
+/// object, a bad, built-in or repeated name, or a blank base URL.
+pub fn parse_endpoints(rows: &[Value]) -> Vec<Endpoint> {
+    let mut out: Vec<Endpoint> = vec![];
+    for row in rows.iter().filter_map(Value::as_object) {
+        let Some(name) = row.get("name").and_then(Value::as_str) else { continue };
+        if !endpoint_name_ok(name) || out.iter().any(|e| e.name == name) {
+            continue;
+        }
+        let Some(base_url) = row.get("base_url").and_then(Value::as_str).map(str::trim).filter(|u| !u.is_empty())
+        else {
+            continue;
+        };
+        let api_key = row.get("api_key").and_then(Value::as_str).filter(|k| !k.is_empty()).map(str::to_string);
+        out.push(Endpoint { name: name.to_string(), base_url: base_url.trim_end_matches('/').to_string(), api_key });
+    }
+    out
+}
+
+/// The `models.endpoints` row, parsed (`get_endpoint_rows` + `parse_endpoints`).
+pub async fn endpoints(pool: &SqlitePool) -> sqlx::Result<Vec<Endpoint>> {
+    let raw = setting(pool, "models.endpoints").await?.unwrap_or_default();
+    Ok(match serde_json::from_str::<Value>(&raw) {
+        Ok(Value::Array(rows)) => parse_endpoints(&rows),
+        _ => vec![],
+    })
+}
+
 async fn setting(pool: &SqlitePool, key: &str) -> sqlx::Result<Option<String>> {
     sqlx::query_scalar("SELECT value FROM config_settings WHERE key = ?").bind(key).fetch_optional(pool).await
 }
@@ -196,4 +243,37 @@ pub async fn resolve_model(pool: &SqlitePool, explicit: Option<&str>) -> sqlx::R
         tracing::warn!("default.model {default:?} is not in the catalog (removed?) — falling back to {}", seed_model());
     }
     Ok(seed_model().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// The rows `tests/test_model_endpoints.py::test_parse_skips_what_cannot_be_used`
+    /// gives Python, with the same answer.
+    #[test]
+    fn parse_endpoints_skips_what_python_skips() {
+        let rows = json!([
+            {"name": "groq", "base_url": " https://api.groq.com/openai/v1/ ", "api_key": "sk"},
+            {"name": "lmstudio", "base_url": "http://localhost:1234/v1", "api_key": ""},
+            {"name": "groq", "base_url": "http://elsewhere"},
+            {"name": "ollama", "base_url": "http://x"},
+            {"name": "Bad Name", "base_url": "http://x"},
+            {"name": "-dash", "base_url": "http://x"},
+            {"name": "x".repeat(33), "base_url": "http://x"},
+            {"name": "nourl"},
+            {"name": "blank", "base_url": "  "},
+            {"name": 7, "base_url": "http://x"},
+            "junk",
+            null,
+        ]);
+        assert_eq!(
+            parse_endpoints(rows.as_array().unwrap()),
+            vec![
+                Endpoint { name: "groq".into(), base_url: "https://api.groq.com/openai/v1".into(), api_key: Some("sk".into()) },
+                Endpoint { name: "lmstudio".into(), base_url: "http://localhost:1234/v1".into(), api_key: None },
+            ]
+        );
+    }
 }

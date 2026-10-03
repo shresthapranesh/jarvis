@@ -104,6 +104,9 @@ pub struct Endpoints {
     pub openrouter_key: Option<String>,
     pub meta_base: String,
     pub meta_key: Option<String>,
+    /// The operator's OpenAI-compatible servers (`models.endpoints`), each
+    /// spoken to over Chat Completions under its own name.
+    pub compatible: Vec<crate::catalog::Endpoint>,
 }
 
 impl Endpoints {
@@ -125,6 +128,7 @@ impl Endpoints {
             // `ChatMetaModel` reads MODEL_API_BASE; jarvis names the key META_API_KEY.
             meta_base: var("MODEL_API_BASE").unwrap_or_else(|| "https://api.meta.ai/v1".into()).trim_end_matches('/').to_string(),
             meta_key: var("META_API_KEY"),
+            compatible: vec![],
         }
     }
 }
@@ -167,13 +171,16 @@ async fn call(
         "ollama" => ollama::complete(http, ends, name, req, on_delta).await,
         "openrouter" => {
             let key = needs(&ends.openrouter_key, "OPENROUTER_API_KEY", req.model)?;
-            openai_chat::complete(http, &ends.openrouter_base, key, provider, name, req, on_delta).await
+            openai_chat::complete(http, &ends.openrouter_base, Some(key), provider, name, req, on_delta).await
         }
         "meta" => {
             let key = needs(&ends.meta_key, "META_API_KEY", req.model)?;
             openai_responses::complete(http, &ends.meta_base, key, provider, name, req, on_delta).await
         }
-        other => Err(Error::fatal(format!("provider {other} isn't served by the edge yet"))),
+        other => match ends.compatible.iter().find(|e| e.name == other) {
+            Some(ep) => openai_chat::complete(http, &ep.base_url, ep.api_key.as_deref(), provider, name, req, on_delta).await,
+            None => Err(Error::fatal(format!("provider {other} isn't served by the edge yet"))),
+        },
     }
 }
 
@@ -234,6 +241,9 @@ struct CliInput {
     tools: Vec<Tool>,
     #[serde(default)]
     blobs: Blobs,
+    /// `models.endpoints` rows, as stored.
+    #[serde(default)]
+    endpoints: Vec<Value>,
 }
 
 /// `--llm-shape` prints the shaped [`Prompt`]; `--llm-call` makes the call
@@ -274,7 +284,8 @@ pub async fn cli(call: bool) {
         };
         println!("{line}");
     };
-    match complete(&http, &Endpoints::from_env(), &req, &mut print).await {
+    let ends = Endpoints { compatible: crate::catalog::parse_endpoints(&input.endpoints), ..Endpoints::from_env() };
+    match complete(&http, &ends, &req, &mut print).await {
         Ok(m) => println!("{}", serde_json::json!({"message": m})),
         Err(e) => println!(
             "{}",

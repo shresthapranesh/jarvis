@@ -13,6 +13,7 @@ import {EditIcon, PlusIcon, SearchIcon, SyncIcon, TrashIcon} from '../icons';
 import {skill} from '../memory.styles';
 import {useQueryRetry} from '../QueryBoundary';
 import {badge, btn, field, iconBtn, page} from '../ui';
+import {EndpointsSection} from './EndpointsSection';
 import {ModelSyncModal} from './ModelSyncModal';
 import {models, settings} from './settings.styles';
 
@@ -100,152 +101,170 @@ export function ModelsTab() {
 
   const customCount = (data?.available ?? []).filter((m) => !m.builtin).length;
 
-  return (
-    <div {...stylex.props(page.section)}>
-      <h2 {...stylex.props(page.sectionTitle)}>
-        Model catalog <span {...stylex.props(page.count)}>{data?.available?.length ?? 0}</span>
-        <span {...stylex.props(page.sectionHint)}>{customCount} custom</span>
-        <span {...stylex.props(settings.sectionActions)}>
-          <button
-            {...stylex.props(btn.base)}
-            title="Diff the catalog against what each provider offers"
-            onClick={() => setSyncOpen(true)}
-          >
-            <SyncIcon size={14} /> Sync
-          </button>
-          <button {...stylex.props(btn.base, btn.primary)} onClick={() => setEditor({mode: 'add'})}>
-            <PlusIcon size={14} /> Add model
-          </button>
-        </span>
-      </h2>
+  const usedBy = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const m of data?.available ?? [])
+      out.set(m.provider, [...(out.get(m.provider) ?? []), m.id]);
+    return out;
+  }, [data]);
 
-      <div {...stylex.props(settings.filterRow)}>
-        <div {...stylex.props(settings.search)}>
-          <SearchIcon size={14} />
-          <input
-            {...stylex.props(settings.searchInput)}
-            placeholder="Search models…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        </div>
-        <select
-          {...stylex.props(field.select, settings.filterSelect, field.selectChrome)}
-          value={providerFilter}
-          onChange={(e) => setProviderFilter(e.target.value)}
-        >
-          <option value="all">All providers</option>
-          {providers.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-        {/* Exactly one model can be the default, so this is one control — not
-            a "Set as default" button repeated on every card in the grid. It
-            lists the whole catalog, not just the current filter, so narrowing
-            the grid can never hide the model you are trying to select. */}
-        <label {...stylex.props(models.defaultPicker)}>
-          <span {...stylex.props(page.sectionHint)}>Default</span>
+  return (
+    <>
+      <EndpointsSection
+        endpoints={data?.endpoints ?? []}
+        providers={data?.providers ?? []}
+        usedBy={usedBy}
+        onChanged={refresh}
+      />
+      <div {...stylex.props(page.section)}>
+        <h2 {...stylex.props(page.sectionTitle)}>
+          Model catalog <span {...stylex.props(page.count)}>{data?.available?.length ?? 0}</span>
+          <span {...stylex.props(page.sectionHint)}>{customCount} custom</span>
+          <span {...stylex.props(settings.sectionActions)}>
+            <button
+              {...stylex.props(btn.base)}
+              title="Diff the catalog against what each provider offers"
+              onClick={() => setSyncOpen(true)}
+            >
+              <SyncIcon size={14} /> Sync
+            </button>
+            <button
+              {...stylex.props(btn.base, btn.primary)}
+              onClick={() => setEditor({mode: 'add'})}
+            >
+              <PlusIcon size={14} /> Add model
+            </button>
+          </span>
+        </h2>
+
+        <div {...stylex.props(settings.filterRow)}>
+          <div {...stylex.props(settings.search)}>
+            <SearchIcon size={14} />
+            <input
+              {...stylex.props(settings.searchInput)}
+              placeholder="Search models…"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </div>
           <select
-            {...stylex.props(field.select, models.defaultSelect, field.selectChrome)}
-            value={data?.default ?? ''}
-            disabled={defaultMut.pending}
-            onChange={(e) => void defaultMut.run(e.target.value)}
-            title="The model used when a run does not name one"
+            {...stylex.props(field.select, settings.filterSelect, field.selectChrome)}
+            value={providerFilter}
+            onChange={(e) => setProviderFilter(e.target.value)}
           >
-            {!data?.default && <option value="">—</option>}
-            {(data?.available ?? []).map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.id}
+            <option value="all">All providers</option>
+            {providers.map((p) => (
+              <option key={p} value={p}>
+                {p}
               </option>
             ))}
           </select>
-        </label>
+          {/* Exactly one model can be the default, so this is one control — not
+            a "Set as default" button repeated on every card in the grid. It
+            lists the whole catalog, not just the current filter, so narrowing
+            the grid can never hide the model you are trying to select. */}
+          <label {...stylex.props(models.defaultPicker)}>
+            <span {...stylex.props(page.sectionHint)}>Default</span>
+            <select
+              {...stylex.props(field.select, models.defaultSelect, field.selectChrome)}
+              value={data?.default ?? ''}
+              disabled={defaultMut.pending}
+              onChange={(e) => void defaultMut.run(e.target.value)}
+              title="The model used when a run does not name one"
+            >
+              {!data?.default && <option value="">—</option>}
+              {(data?.available ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div {...stylex.props(page.empty)}>No models match the filter.</div>
+        ) : (
+          <ul {...stylex.props(models.grid)}>
+            {filtered.map((m) => {
+              const isDefault = m.id === data?.default;
+              return (
+                <li key={m.id} {...stylex.props(skill.card, models.card)}>
+                  <div {...stylex.props(skill.head)}>
+                    <span {...stylex.props(badge.base)}>{m.provider}</span>
+                    {isDefault && <span {...stylex.props(badge.base, badge.live)}>default</span>}
+                    {!m.builtin && <span {...stylex.props(badge.base)}>custom</span>}
+                    {!m.builtin && (
+                      <div {...stylex.props(skill.controls)}>
+                        <button
+                          {...stylex.props(iconBtn.base)}
+                          title="Edit model"
+                          onClick={() => setEditor({mode: 'edit', model: m})}
+                        >
+                          <EditIcon size={14} />
+                        </button>
+                        <button
+                          {...stylex.props(iconBtn.base, iconBtn.danger)}
+                          title="Remove model"
+                          onClick={() => setDeleteTarget(m)}
+                        >
+                          <TrashIcon size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <span {...stylex.props(skill.name, models.id)}>{m.id}</span>
+                  <p {...stylex.props(skill.desc)}>
+                    {m.label}
+                    {m.contextWindow ? (
+                      <span {...stylex.props(models.window)}>
+                        {' · '}
+                        {m.contextWindow.toLocaleString()} ctx
+                      </span>
+                    ) : null}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {syncOpen && (
+          <ModelSyncModal
+            providers={data?.discoverableProviders ?? []}
+            onClose={() => setSyncOpen(false)}
+            onCatalogChanged={refresh}
+          />
+        )}
+
+        {editor && (
+          <ModelModal
+            editor={editor}
+            providers={data?.providers ?? []}
+            pending={saveMut.pending}
+            onSubmit={(draft) => void saveMut.run(draft)}
+            onClose={() => setEditor(null)}
+          />
+        )}
+
+        <ConfirmDialog
+          open={deleteTarget !== null}
+          title="Remove model"
+          message={
+            <p>
+              Remove <strong>{deleteTarget?.id}</strong> from the catalog? Conversations pinned to
+              it fall back to the default model.
+              {deleteTarget?.id === data?.default &&
+                ' This is the current default — it will reset to the built-in default.'}
+            </p>
+          }
+          confirmLabel="Remove"
+          danger
+          onConfirm={() => deleteTarget && void removeMut.run(deleteTarget.id)}
+          onCancel={() => setDeleteTarget(null)}
+        />
       </div>
-
-      {filtered.length === 0 ? (
-        <div {...stylex.props(page.empty)}>No models match the filter.</div>
-      ) : (
-        <ul {...stylex.props(models.grid)}>
-          {filtered.map((m) => {
-            const isDefault = m.id === data?.default;
-            return (
-              <li key={m.id} {...stylex.props(skill.card, models.card)}>
-                <div {...stylex.props(skill.head)}>
-                  <span {...stylex.props(badge.base)}>{m.provider}</span>
-                  {isDefault && <span {...stylex.props(badge.base, badge.live)}>default</span>}
-                  {!m.builtin && <span {...stylex.props(badge.base)}>custom</span>}
-                  {!m.builtin && (
-                    <div {...stylex.props(skill.controls)}>
-                      <button
-                        {...stylex.props(iconBtn.base)}
-                        title="Edit model"
-                        onClick={() => setEditor({mode: 'edit', model: m})}
-                      >
-                        <EditIcon size={14} />
-                      </button>
-                      <button
-                        {...stylex.props(iconBtn.base, iconBtn.danger)}
-                        title="Remove model"
-                        onClick={() => setDeleteTarget(m)}
-                      >
-                        <TrashIcon size={14} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-                <span {...stylex.props(skill.name, models.id)}>{m.id}</span>
-                <p {...stylex.props(skill.desc)}>
-                  {m.label}
-                  {m.contextWindow ? (
-                    <span {...stylex.props(models.window)}>
-                      {' · '}
-                      {m.contextWindow.toLocaleString()} ctx
-                    </span>
-                  ) : null}
-                </p>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {syncOpen && (
-        <ModelSyncModal
-          providers={data?.discoverableProviders ?? []}
-          onClose={() => setSyncOpen(false)}
-          onCatalogChanged={refresh}
-        />
-      )}
-
-      {editor && (
-        <ModelModal
-          editor={editor}
-          providers={data?.providers ?? []}
-          pending={saveMut.pending}
-          onSubmit={(draft) => void saveMut.run(draft)}
-          onClose={() => setEditor(null)}
-        />
-      )}
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        title="Remove model"
-        message={
-          <p>
-            Remove <strong>{deleteTarget?.id}</strong> from the catalog? Conversations pinned to it
-            fall back to the default model.
-            {deleteTarget?.id === data?.default &&
-              ' This is the current default — it will reset to the built-in default.'}
-          </p>
-        }
-        confirmLabel="Remove"
-        danger
-        onConfirm={() => deleteTarget && void removeMut.run(deleteTarget.id)}
-        onCancel={() => setDeleteTarget(null)}
-      />
-    </div>
+    </>
   );
 }
 

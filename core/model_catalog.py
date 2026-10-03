@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,6 +71,18 @@ class ModelSpec:
                 stream_usage=True,
             )
 
+        if (endpoint := get_endpoint(self.provider)) is not None:
+            from langchain_openai import ChatOpenAI
+            # An OpenAI-compatible endpoint the operator named. A local
+            # server needs no key, but the OpenAI client refuses to start
+            # without one, so it gets a placeholder the server ignores.
+            return ChatOpenAI(
+                model=model_name,
+                base_url=endpoint.base_url,
+                api_key=endpoint.api_key or "not-needed",
+                stream_usage=True,  # see the OpenRouter branch
+            )
+
         if self.provider == "meta":
             import os
             from langchain_meta import ChatMetaModel
@@ -84,12 +97,87 @@ class ModelSpec:
         raise ValueError(f"Unknown provider '{self.provider}' for model '{self.id}'")
 
 
-# Providers `build_llm` knows how to instantiate. A custom model's id must use
-# one of these as its `provider:` prefix — there is no per-model code, only
-# per-provider, so any model from one of these backends is supported.
+# Providers `build_llm` has code for. A custom model's id must use one of
+# these — or an endpoint's name, see `known_providers()` — as its `provider:`
+# prefix; there is no per-model code, only per-provider, so any model from one
+# of these backends is supported.
 KNOWN_PROVIDERS: frozenset[str] = frozenset(
     {"ollama", "google_genai", "bedrock", "anthropic", "meta", "openrouter"}
 )
+
+
+# ── OpenAI-compatible endpoints ──────────────────────────────────────────────
+#
+# Any server that speaks OpenAI's Chat Completions — OpenAI itself, Groq,
+# Together, vLLM, LM Studio, llama.cpp — added by the operator under a name.
+# The name is the provider prefix of its models (`groq:llama-3.3-70b`).
+# Stored as a JSON list of {name, base_url, api_key?} under `models.endpoints`
+# (db/ops.py). The key is write-only: nothing sends it back to a browser.
+#
+# The Rust edge reads the same row (`edge/src/catalog.rs:endpoints`) and must
+# skip exactly what `parse_endpoints` skips.
+
+ENDPOINT_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
+
+
+@dataclass(frozen=True)
+class Endpoint:
+    name: str
+    base_url: str  # without a trailing slash
+    api_key: str | None = None
+
+
+_endpoints: tuple[Endpoint, ...] = ()
+
+
+def endpoint_name_error(name: str) -> str | None:
+    """Why `name` can't name an endpoint, or None."""
+    if not ENDPOINT_NAME.fullmatch(name):
+        return (
+            f"Invalid endpoint name '{name}' — 1-32 characters of a-z, 0-9, '-' or '_', "
+            "starting with a letter or digit"
+        )
+    if name in KNOWN_PROVIDERS:
+        return f"'{name}' is a built-in provider"
+    return None
+
+
+def parse_endpoints(rows: Iterable) -> list[Endpoint]:
+    """The usable endpoints in stored rows, in order. A row that isn't an
+    object, has a bad or taken name, or no base URL is skipped; a repeated
+    name keeps the first."""
+    out: list[Endpoint] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        name, base_url, key = r.get("name"), r.get("base_url"), r.get("api_key")
+        if not isinstance(name, str) or endpoint_name_error(name) or any(e.name == name for e in out):
+            continue
+        if not isinstance(base_url, str) or not base_url.strip():
+            continue
+        out.append(Endpoint(
+            name, base_url.strip().rstrip("/"), key if isinstance(key, str) and key else None,
+        ))
+    return out
+
+
+def load_endpoints(rows: Iterable) -> None:
+    """Hydrate the endpoint cache from stored rows."""
+    global _endpoints
+    _endpoints = tuple(parse_endpoints(rows))
+
+
+def endpoints() -> tuple[Endpoint, ...]:
+    return _endpoints
+
+
+def get_endpoint(name: str) -> Endpoint | None:
+    return next((e for e in _endpoints if e.name == name), None)
+
+
+def known_providers() -> frozenset[str]:
+    """Every provider a model id may name: the built-ins and the endpoints."""
+    return KNOWN_PROVIDERS | {e.name for e in _endpoints}
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 

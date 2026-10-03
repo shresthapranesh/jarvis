@@ -20,21 +20,34 @@ class ModelSpec:
 
 
 @strawberry.type
+class ModelEndpoint:
+    """An OpenAI-compatible server the operator named; its name is the
+    provider prefix of its models. The API key is write-only — only whether
+    one is set ever leaves the server."""
+
+    name: str
+    base_url: str
+    has_key: bool
+
+
+@strawberry.type
 class ModelCatalog:
     default: str
     available: list[ModelSpec]
-    # Providers `ModelSpec.build_llm` knows how to instantiate — a custom model's
-    # id must be prefixed with one of these. Drives the provider picker in the UI.
+    # Providers a custom model's id may be prefixed with: those
+    # `ModelSpec.build_llm` has code for, and the endpoints. Drives the
+    # provider picker in the UI.
     providers: list[str] = strawberry.field(default_factory=list)
     # The subset of `providers` that can enumerate their own models
-    # (core.model_discovery.DISCOVERABLE). Drives the sync picker; a provider
-    # missing from here has no adapter, which is not the same as offering
-    # nothing.
+    # (core.model_discovery.DISCOVERABLE, and every endpoint). Drives the
+    # sync picker; a provider missing from here has no adapter, which is not
+    # the same as offering nothing.
     discoverable_providers: list[str] = strawberry.field(default_factory=list)
+    endpoints: list[ModelEndpoint] = strawberry.field(default_factory=list)
 
 
 async def load_model_catalog(session: AsyncSession) -> ModelCatalog:
-    """The full catalog, re-hydrating the custom-model cache from the DB first.
+    """The full catalog, re-hydrating the runtime-edited parts from the DB first.
 
     Shared by the `models` query and every model mutation, so a mutation's
     return value already reflects the write it just made.
@@ -42,13 +55,15 @@ async def load_model_catalog(session: AsyncSession) -> ModelCatalog:
     from core.model_catalog import (
         KNOWN_PROVIDERS,
         available_models,
+        endpoints,
         is_builtin_model,
-        load_custom_models,
+        known_providers,
     )
     from core.model_discovery import DISCOVERABLE
-    from db.ops import get_custom_models, get_default_model
+    from db.ops import get_default_model, hydrate_catalog
 
-    load_custom_models(await get_custom_models(session))
+    await hydrate_catalog(session)
+    named = {e.name for e in endpoints()}
     return ModelCatalog(
         default=await get_default_model(session),
         available=[
@@ -61,6 +76,7 @@ async def load_model_catalog(session: AsyncSession) -> ModelCatalog:
             )
             for m in available_models()
         ],
-        providers=sorted(KNOWN_PROVIDERS),
-        discoverable_providers=sorted(KNOWN_PROVIDERS & DISCOVERABLE),
+        providers=sorted(known_providers()),
+        discoverable_providers=sorted((KNOWN_PROVIDERS & DISCOVERABLE) | named),
+        endpoints=[ModelEndpoint(name=e.name, base_url=e.base_url, has_key=e.api_key is not None) for e in endpoints()],
     )

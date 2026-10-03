@@ -259,11 +259,14 @@ def _run_db(coro):
         async with async_session() as session:
             # Hydrate the runtime-added model cache so custom models resolve
             # in CLI paths (build_agent / model list / validation).
-            from core.model_catalog import load_custom_models
-            from db.ops import get_custom_models
-            load_custom_models(await get_custom_models(session))
+            from db.ops import hydrate_catalog
+            await hydrate_catalog(session)
             return await coro(session)
     return asyncio.run(_inner())
+
+
+async def _loaded(session) -> None:
+    """Nothing — `_run_db` hydrating the catalog is the point."""
 
 
 @config_app.command("set")
@@ -360,16 +363,17 @@ def model_add(
     The ID must be 'provider:model_name' where provider is one of the supported
     backends. The model_name is passed verbatim to the provider's SDK.
     """
-    from core.model_catalog import KNOWN_PROVIDERS, provider_from_id
+    from core.model_catalog import known_providers, provider_from_id
     from db.ops import add_custom_model
+    _run_db(_loaded)  # an endpoint's name is a provider too
     prov = provider or provider_from_id(model_id)
     if not prov or ":" not in model_id:
         rprint(f"[red]Invalid model ID:[/red] {model_id}\nExpected 'provider:model_name', e.g. google_genai:gemini-3.5-flash")
         raise typer.Exit(code=1)
-    if prov not in KNOWN_PROVIDERS:
+    if prov not in known_providers():
         rprint(
             f"[red]Unsupported provider:[/red] {prov}\n"
-            f"Must be one of: {', '.join(sorted(KNOWN_PROVIDERS))}"
+            f"Must be one of: {', '.join(sorted(known_providers()))}"
         )
         raise typer.Exit(code=1)
     _run_db(lambda s: add_custom_model(s, model_id, label, prov, context_window))
@@ -421,24 +425,25 @@ def model_sync(
     the catalog *says* stays with BUILTIN_MODELS + the custom layer. See
     core/model_discovery.py for why it can't simply be the source of truth.
     """
-    from core.model_catalog import KNOWN_PROVIDERS
+    from core.model_catalog import known_providers
     from core.model_discovery import (
-        DISCOVERABLE, DiscoveryError, build_report, discover, probe as probe_model,
+        DiscoveryError, build_report, discover, discoverable, probe as probe_model,
     )
-    from db.ops import add_custom_model, get_default_model
+    from db.ops import add_custom_model
 
-    if provider is not None and provider not in KNOWN_PROVIDERS:
+    # Hydrates the runtime-edited catalog: custom models for the diff, and
+    # endpoints, which are providers and discovery targets.
+    _run_db(_loaded)
+    if provider is not None and provider not in known_providers():
         rprint(f"[red]Unknown provider:[/red] {provider}\n"
-               f"Must be one of: {', '.join(sorted(KNOWN_PROVIDERS))}")
+               f"Must be one of: {', '.join(sorted(known_providers()))}")
         raise typer.Exit(code=1)
-    if provider is not None and provider not in DISCOVERABLE:
+    if provider is not None and provider not in discoverable():
         rprint(f"[yellow]No discovery adapter for '{provider}'.[/yellow] "
-               f"Discoverable: {', '.join(sorted(DISCOVERABLE))}")
+               f"Discoverable: {', '.join(sorted(discoverable()))}")
         raise typer.Exit(code=1)
 
-    targets = [provider] if provider else sorted(DISCOVERABLE)
-    # Hydrates the custom-model cache so available_models() sees runtime additions.
-    _run_db(lambda s: get_default_model(s))
+    targets = [provider] if provider else sorted(discoverable())
 
     any_drift = False
     for prov in targets:
