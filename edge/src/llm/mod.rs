@@ -5,6 +5,7 @@
 //!
 //! - `transcript` — the v1 record Python and Rust both read and write.
 //! - `compact` — clip stale tool output, collapse old tool-call groups.
+//! - `perf` — prefill/decode throughput per call and per run.
 //! - `shape` — strip thinking, repair orphaned calls, lay the prompt out.
 //! - `google`, `ollama`, `openai_chat` (OpenRouter), `openai_responses`
 //!   (Meta) — one module per wire format: render a [`Prompt`], stream the
@@ -18,6 +19,7 @@ mod lines;
 pub mod ollama;
 pub mod openai_chat;
 pub mod openai_responses;
+pub mod perf;
 pub mod shape;
 pub mod transcript;
 
@@ -50,11 +52,17 @@ pub struct Request<'a> {
     pub blobs: &'a Blobs,
 }
 
-/// A piece of the reply as it streams.
+/// What arrives while the reply streams: its text and thinking, and the
+/// signals per-call throughput is measured from.
 #[derive(Debug, PartialEq)]
 pub enum Delta<'a> {
     Text(&'a str),
     Thinking(&'a str),
+    /// Part of a tool call came in. Most agent steps are nothing but calls,
+    /// and the first output of any kind marks where prefill ended.
+    ToolCall,
+    /// The server's own measure of the call (Ollama), sent at the end.
+    Timings(perf::ServerTimings),
 }
 
 #[derive(Debug)]
@@ -135,30 +143,48 @@ impl Endpoints {
     }
 }
 
+/// A finished call: the assistant record, and how fast it ran.
+pub struct Reply {
+    pub message: Message,
+    pub perf: perf::CallPerf,
+}
+
 /// One model call: the reply as an assistant record, its text and thinking
 /// handed to `on_delta` as they arrive.
 ///
-/// A transient failure before anything streamed is retried once; after,
-/// it isn't — a retry would show the user the same tokens twice.
+/// A transient failure before any text streamed is retried once; after,
+/// it isn't — a retry would show the user the same tokens twice. The
+/// throughput is the attempt that answered.
 pub async fn complete(
     http: &reqwest::Client,
     ends: &Endpoints,
     req: &Request<'_>,
     on_delta: &mut (dyn FnMut(Delta) + Send),
-) -> Result<Message, Error> {
-    let mut streamed = false;
-    let mut first = |d: Delta| {
-        streamed = true;
+) -> Result<Reply, Error> {
+    let mut clock = perf::Clock::start();
+    let mut shown = false;
+    let first = call(http, ends, req, &mut |d: Delta| {
+        shown |= matches!(d, Delta::Text(_) | Delta::Thinking(_));
+        clock.saw(&d);
         on_delta(d)
-    };
-    match call(http, ends, req, &mut first).await {
-        Err(e) if e.transient && !streamed => {
+    })
+    .await;
+    let message = match first {
+        Err(e) if e.transient && !shown => {
             tracing::warn!("{}: {e} — retrying once", req.model);
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            call(http, ends, req, on_delta).await
+            clock = perf::Clock::start();
+            call(http, ends, req, &mut |d: Delta| {
+                clock.saw(&d);
+                on_delta(d)
+            })
+            .await?
         }
-        r => r,
-    }
+        r => r?,
+    };
+    let name = req.model.split_once(':').map_or(req.model, |(_, n)| n);
+    let perf = perf::CallPerf::measure(name, &message, &clock);
+    Ok(Reply { message, perf })
 }
 
 async fn call(
@@ -246,11 +272,21 @@ struct CliInput {
     /// `models.endpoints` rows, as stored.
     #[serde(default)]
     endpoints: Vec<Value>,
+    /// The run kind whose budget the call counts against.
+    #[serde(default = "chat")]
+    kind: String,
+}
+
+fn chat() -> String {
+    "chat".into()
 }
 
 /// `--llm-shape` prints the shaped [`Prompt`]; `--llm-call` makes the call
-/// and prints one JSON line per delta, then `{"message": …}` or
-/// `{"error": …}`. Endpoints and keys come from the environment.
+/// as a run of one call would: one JSON line per text or thinking delta, the
+/// `{"event", "data"}` records the run would emit for its budget and
+/// throughput, then `{"message": …, "perf": …}` (`perf` as the Message row
+/// stores it) or `{"error": …}`. Endpoints and keys come from the
+/// environment.
 pub async fn cli(call: bool) {
     use std::io::Read;
     let _ = dotenvy::dotenv();
@@ -281,16 +317,25 @@ pub async fn cli(call: bool) {
     }
     let http = reqwest::Client::new();
     let req = Request { model: &input.model, prompt: &prompt, tools: &input.tools, blobs: &input.blobs };
-    let mut print = |d: Delta| {
-        let line = match d {
-            Delta::Text(t) => serde_json::json!({"text": t}),
-            Delta::Thinking(t) => serde_json::json!({"thinking": t}),
-        };
-        println!("{line}");
+    let mut print = |d: Delta| match d {
+        Delta::Text(t) => println!("{}", serde_json::json!({"text": t})),
+        Delta::Thinking(t) => println!("{}", serde_json::json!({"thinking": t})),
+        Delta::ToolCall | Delta::Timings(_) => {}
     };
     let ends = Endpoints { compatible: crate::catalog::parse_endpoints(&input.endpoints), ..Endpoints::from_env() };
+    let mut budget = crate::budget::Budget::new(crate::budget::Limits::for_kind(&input.kind));
+    let mut perf = perf::PerfTracker::default();
     match complete(&http, &ends, &req, &mut print).await {
-        Ok(m) => println!("{}", serde_json::json!({"message": m})),
+        Ok(Reply { message, perf: call }) => {
+            let usage = message.usage.clone().unwrap_or_default();
+            let mut events = budget.record_llm(usage.input, usage.output);
+            events.push(("perf_update", perf.record(call)));
+            events.extend(budget.check());
+            for (event, data) in events {
+                println!("{}", serde_json::json!({"event": event, "data": data}));
+            }
+            println!("{}", serde_json::json!({"message": message, "perf": perf.message_perf()}));
+        }
         Err(e) => println!(
             "{}",
             serde_json::json!({"error": {"message": e.message, "status": e.status, "transient": e.transient}})

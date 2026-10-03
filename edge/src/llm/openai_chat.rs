@@ -238,6 +238,7 @@ impl Reply {
             self.text.push_str(t);
         }
         for tc in delta.get("tool_calls").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default() {
+            on_delta(Delta::ToolCall);
             let index = tc.get("index").and_then(Value::as_u64).unwrap_or(self.calls.len() as u64) as usize;
             while self.calls.len() <= index {
                 self.calls.push(PendingCall::default());
@@ -368,6 +369,7 @@ mod tests {
         );
         assert_eq!(m["model"], json!({"provider": "openrouter", "name": "m"}));
         assert_eq!(m["finish_reason"], "tool_calls");
-        assert_eq!(seen, ["Thinking(\"Hm.\")", "Text(\"Hi\")"]);
+        // One signal per tool-call fragment, for the throughput clock.
+        assert_eq!(seen, ["Thinking(\"Hm.\")", "Text(\"Hi\")", "ToolCall", "ToolCall", "ToolCall"]);
     }
 }
