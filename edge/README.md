@@ -150,8 +150,8 @@ has nothing to do:
 | memory-activity prune | `0 4 * * *` | deletes old access-log rows, in the edge |
 
 Python behind the edge (`JARVIS_EDGE_URL` set — `core/edge_link.py:behind_edge`)
-registers none of these but the idle-kernel reaper (kernels are its own
-children). Its `dispatch_board_tasks()` sends `dispatch` instead of claiming
+registers none of these, nor the idle-kernel reaper: the kernels are the
+edge's too (see "The kernels"). Its `dispatch_board_tasks()` sends `dispatch` instead of claiming
 cards itself, `_register_scheduler_job` / `_remove_scheduler_job` send
 `schedules`, and a `maintenance` worker runs the sweeps that need it
 (`core/scheduler.py:MAINTENANCE_TASKS`). The decision is configuration, not
@@ -237,8 +237,8 @@ pending in the mirror until the new worker claims it.
 
 **What keeps it up**: a proxied request or socket in progress (a log stream
 holds it while someone watches), a run in the mirror, a claimable or running
-job, and the worker's `holds` — `kernels` (a conversation's notebook still
-has its variables; held until the kernel's 30-minute idle reap, as before).
+job, and the worker's `holds` (none today: a conversation's notebook is the
+edge's, so it no longer keeps Python up — see "The kernels").
 A connected chat bot holds nothing: the bots are the edge's (see "The bots"). Ready means `/health` answers and the link has said hello.
 
 **How it stops**: `call drain` — the worker stops claiming and waits out a
@@ -263,6 +263,46 @@ and `browserAvailable`. A resolver that meets data only Python reads
 faithfully (a checkpoint in another encoding, an https CDP endpoint, a
 `models.custom` row Python itself would fail on) returns an `edgeDefer` error,
 and `graphql.rs` answers the whole operation in Python instead.
+
+## The kernels (`src/kernels/`)
+
+Phase 2c. The agent's notebooks — one `ipykernel` per session key (a
+conversation, or a worker's own key), started on its first cell — are the
+edge's children, not Python's. Python behind the edge runs `run_cell` here, so
+an idle worker is stopped while a notebook keeps its variables, and the next
+turn's worker finds them. A port of `core/kernels.py`; **a change to either is
+made in both.**
+
+- **The wire** (`wire.rs`, `kernel.rs`): the Jupyter messaging protocol over
+  ZeroMQ — the pure-Rust `zeromq` crate, so no libzmq to build — on `ipc`
+  sockets, HMAC-SHA256 signed. A kernel is `python -m ipykernel_launcher -f
+  <connection file>` in its own process group, with `JPY_PARENT_PID` so it
+  exits if the edge is killed. Ready means a `kernel_info_request` answered on
+  shell *and* seen on iopub (a late subscriber misses what came before).
+- **The interpreter** is `JARVIS_KERNEL_PYTHON`, else `$JARVIS_APP_DIR/.venv/bin/python`,
+  else `python3`; the kernel runs in the checkout with it on `sys.path`, and
+  `JARVIS_API_URL` pointed at this edge unless already set.
+- **As `core/kernels.py` does it**: the `search`/`read` + `jarvis` preload, the
+  SDK scoped per conversation and project, output assembled the same way
+  (streams, results, a note for rich output, ANSI-free tracebacks, 30,000
+  characters), a 60 s timeout that interrupts (SIGINT to the group) and keeps
+  the session, held while a tool approval for the conversation is open (the
+  `approvals` row, up to 30 minutes), 12 live kernels at most (least recently
+  used goes), and one idle 30 minutes reaped (checked every 10).
+- **`POST /internal/kernels/run`** `{key, code, timeout?, conversation_id?,
+  project_id?}` → `{output}` or a 500 `{error}`; **`/shutdown`** `{key}`.
+  Loopback only, `application/json` only, and refused with an `Origin` — a web
+  page can't make a browser send that cross-site without a preflight, which
+  nothing answers. Python's side is `core/kernels.py:EdgeKernels`, what
+  `get_kernel_registry()` returns when `JARVIS_EDGE_URL` is set.
+- **A caller that goes away** (a cancelled run closes its request) drops the
+  handler, which interrupts the cell; the session's next cell first waits for
+  that interrupt to land. A request the kernel receives before it has raised
+  is aborted (`stop_on_error`) and would read as no output at all — Python's
+  cancel path has that race.
+- **Departures**, named in `tests/test_edge_kernels.py`: stdin is never
+  offered, so `input()` raises at once (Python's client offered it with nobody
+  to answer, and the cell hung until its timeout).
 
 ## The LLM layer (`src/llm/`)
 

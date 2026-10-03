@@ -32,7 +32,7 @@ A message sent while a conversation has a run in flight is queued, not started (
 ## Automations (`automation_runtime.py`)
 Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a reply starting with `NO_CHANGE` finishes as `no_change` and sends no notification).
 - Stateful prompt automations and monitors share the conversation/thread `automation_{automation_id}`; overlapping runs are `skipped` (`_has_inflight_sibling`). Stateless runs use `automation_{run_id}`.
-- Behind the edge, the edge fires every schedule (automations, board dispatch, maintenance sweeps via `maintenance` jobs); only the kernel reaper stays in APScheduler.
+- Behind the edge, the edge fires every schedule (automations, board dispatch, maintenance sweeps via `maintenance` jobs) and owns the kernels and their reaper; APScheduler registers nothing.
 
 ## Task board (`task_board_runtime.py`)
 `BoardTask`: `todo → ready → running → blocked/done → archived`, with parent→child `BoardTaskLink`s.

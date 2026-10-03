@@ -1,9 +1,17 @@
-"""Stateful per-session IPython kernels — a Jupyter-notebook-like coding session."""
+"""Stateful per-session IPython kernels — a Jupyter-notebook-like coding session.
+
+Behind the Rust edge (`JARVIS_EDGE_URL`) the kernels are the edge's
+(`edge/src/kernels/`, a port of this module) and `get_kernel_registry()` hands
+out `EdgeKernels`, which runs cells there. A live notebook then no longer keeps
+this process up, and its variables outlive it. Standalone, `KernelRegistry`
+runs them here as before. A change to one is made in both.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import sys
 import tempfile
@@ -320,6 +328,11 @@ class KernelRegistry:
         for session in sessions:
             await session.shutdown()
 
+    def in_use(self, max_idle: float = IDLE_TIMEOUT_SECONDS) -> bool:
+        """Whether a kernel here was used within `max_idle` seconds."""
+        now = time.monotonic()
+        return any(now - s.last_used <= max_idle for s in list(self._sessions.values()))
+
     async def reap_idle(self, max_idle: float = IDLE_TIMEOUT_SECONDS) -> int:
         """Shut down kernels untouched for longer than ``max_idle`` seconds."""
         now = time.monotonic()
@@ -333,11 +346,71 @@ class KernelRegistry:
         return len(stale)
 
 
-_registry: KernelRegistry | None = None
+class EdgeKernels:
+    """The edge's kernels, through its loopback `/internal/kernels/*`.
+
+    Same calls as `KernelRegistry`. The approval hold, the cap and the idle
+    reap are the edge's; so are the kernels themselves, which outlive this
+    process — `shutdown_all` leaves them be. A cancelled `run_cell` closes
+    its request, which interrupts the cell.
+    """
+
+    def __init__(self, base_url: str) -> None:
+        import httpx
+
+        # No client timeout: a cell may wait on a human for up to 30 minutes.
+        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=None)
+
+    async def _post(self, path: str, body: dict) -> dict:
+        r = await self._client.post(f"/internal/kernels/{path}", json=body)
+        if r.status_code != 200:
+            try:
+                error = r.json().get("error") or r.text
+            except ValueError:
+                error = r.text
+            raise RuntimeError(error)
+        return r.json()
+
+    async def run_cell(
+        self,
+        key: str,
+        code: str,
+        timeout: float = DEFAULT_CELL_TIMEOUT,
+        conversation_id: str | None = None,
+        project_id: str | None = None,
+        hold_check: Callable[[], Awaitable[bool]] | None = None,
+    ) -> str:
+        # `hold_check` is answered by the edge, from the same approval rows.
+        body = {
+            "key": key,
+            "code": code,
+            "timeout": timeout,
+            "conversation_id": conversation_id,
+            "project_id": project_id,
+        }
+        return (await self._post("run", body))["output"]
+
+    async def shutdown(self, key: str) -> None:
+        await self._post("shutdown", {"key": key})
+
+    async def shutdown_all(self) -> None:
+        """Nothing: the kernels are the edge's, and outlive this process."""
+
+    def in_use(self, max_idle: float = IDLE_TIMEOUT_SECONDS) -> bool:
+        """None here to keep this process up for."""
+        return False
+
+    async def reap_idle(self, max_idle: float = IDLE_TIMEOUT_SECONDS) -> int:
+        """The edge reaps its own."""
+        return 0
 
 
-def get_kernel_registry() -> KernelRegistry:
+_registry: KernelRegistry | EdgeKernels | None = None
+
+
+def get_kernel_registry() -> KernelRegistry | EdgeKernels:
     global _registry
     if _registry is None:
-        _registry = KernelRegistry()
+        edge = os.environ.get("JARVIS_EDGE_URL", "").strip()
+        _registry = EdgeKernels(edge) if edge else KernelRegistry()
     return _registry
