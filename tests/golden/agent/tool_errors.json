@@ -1,0 +1,305 @@
+{
+ "thread": {
+  "messages": [
+   {
+    "content": "break things",
+    "id": "<id1>",
+    "type": "human"
+   },
+   {
+    "content": "Working. ",
+    "id": "<run2>",
+    "tool_calls": [
+     {
+      "args": {
+       "todos": [
+        "One"
+       ]
+      },
+      "id": "c1",
+      "name": "write_todos"
+     },
+     {
+      "args": {
+       "x": 1
+      },
+      "id": "c2",
+      "name": "no_such_tool"
+     },
+     {
+      "args": {
+       "index": "first",
+       "status": "done"
+      },
+      "id": "c3",
+      "name": "set_todo_status"
+     }
+    ],
+    "type": "ai",
+    "usage": {
+     "input_tokens": 100,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "Updated todo list (1 item).",
+    "id": "<id3>",
+    "name": "write_todos",
+    "status": "success",
+    "tool_call_id": "c1",
+    "type": "tool"
+   },
+   {
+    "content": "Error: no_such_tool is not a valid tool, try one of [run_cell, write_artifact, write_todos, set_todo_status, spawn_workers, run_workflow, remember].",
+    "id": "<id4>",
+    "name": "no_such_tool",
+    "status": "error",
+    "tool_call_id": "c2",
+    "type": "tool"
+   },
+   {
+    "content": "Error invoking tool 'set_todo_status' with kwargs {'index': 'first', 'status': 'done'} with error:\n index: Input should be a valid integer, unable to parse string as an integer\n Please fix the error and try again.",
+    "id": "<id5>",
+    "name": "set_todo_status",
+    "status": "error",
+    "tool_call_id": "c3",
+    "type": "tool"
+   },
+   {
+    "content": "Recovered.",
+    "id": "<run6>",
+    "type": "ai",
+    "usage": {
+     "input_tokens": 101,
+     "output_tokens": 10
+    }
+   }
+  ],
+  "todos": [
+   {
+    "status": "pending",
+    "text": "One"
+   }
+  ]
+ },
+ "turns": [
+  {
+   "events": [
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": []
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "Working. "
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"One\"]}}, {\"name\": \"no_such_tool\", \"args\": {\"x\": 1}}, {\"name\": \"set_todo_status\", \"args\": {\"index\": \"first\", \"status\": \"done\"}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": [
+       {
+        "status": "pending",
+        "text": "One"
+       }
+      ]
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"raw\": \"{}\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "Recovered."
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"text\": \"Recovered.\"}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "done",
+     {
+      "conversation_id": "<conversation>",
+      "message": "Working. Recovered."
+     }
+    ]
+   ],
+   "llm_calls": [
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+       "type": "system"
+      },
+      {
+       "content": "break things",
+       "id": "<id1>",
+       "type": "human"
+      }
+     ],
+     "n_messages": 2,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.\n\n## Current Tasks\n\n[ ] One",
+       "type": "system"
+      },
+      {
+       "content": "break things",
+       "id": "<id1>",
+       "type": "human"
+      },
+      {
+       "content": "Working. ",
+       "id": "<run2>",
+       "tool_calls": [
+        {
+         "args": {
+          "todos": [
+           "One"
+          ]
+         },
+         "id": "c1",
+         "name": "write_todos"
+        },
+        {
+         "args": {
+          "x": 1
+         },
+         "id": "c2",
+         "name": "no_such_tool"
+        },
+        {
+         "args": {
+          "index": "first",
+          "status": "done"
+         },
+         "id": "c3",
+         "name": "set_todo_status"
+        }
+       ],
+       "type": "ai",
+       "usage": {
+        "input_tokens": 100,
+        "output_tokens": 10
+       }
+      },
+      {
+       "content": "Updated todo list (1 item).",
+       "id": "<id3>",
+       "name": "write_todos",
+       "status": "success",
+       "tool_call_id": "c1",
+       "type": "tool"
+      },
+      {
+       "content": "Error: no_such_tool is not a valid tool, try one of [run_cell, write_artifact, write_todos, set_todo_status, spawn_workers, run_workflow, remember].",
+       "id": "<id4>",
+       "name": "no_such_tool",
+       "status": "error",
+       "tool_call_id": "c2",
+       "type": "tool"
+      },
+      {
+       "content": "Error invoking tool 'set_todo_status' with kwargs {'index': 'first', 'status': 'done'} with error:\n index: Input should be a valid integer, unable to parse string as an integer\n Please fix the error and try again.",
+       "id": "<id5>",
+       "name": "set_todo_status",
+       "status": "error",
+       "tool_call_id": "c3",
+       "type": "tool"
+      }
+     ],
+     "n_messages": 6,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    }
+   ],
+   "message": {
+    "content": "Working. Recovered.",
+    "status": "done"
+   },
+   "steps": [
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"write_todos\", \"args\": {\"todos\": [\"One\"]}}, {\"name\": \"no_such_tool\", \"args\": {\"x\": 1}}, {\"name\": \"set_todo_status\", \"args\": {\"index\": \"first\", \"status\": \"done\"}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"raw\": \"{}\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"text\": \"Recovered.\"}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    }
+   ],
+   "usage_events": [
+    [
+     "budget_update",
+     1
+    ],
+    [
+     "perf_update",
+     1
+    ],
+    [
+     "perf_update",
+     2
+    ]
+   ]
+  }
+ ]
+}

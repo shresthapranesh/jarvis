@@ -1,0 +1,266 @@
+{
+ "thread": {
+  "messages": [
+   {
+    "content": "first question",
+    "id": "<id1>",
+    "type": "human"
+   },
+   {
+    "content": "Answer 0.",
+    "id": "<run2>",
+    "type": "ai",
+    "usage": {
+     "input_tokens": 100,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "second question",
+    "id": "<id3>",
+    "type": "human"
+   },
+   {
+    "content": "Answer 1.",
+    "id": "<run4>",
+    "type": "ai",
+    "usage": {
+     "input_tokens": 101,
+     "output_tokens": 10
+    }
+   }
+  ],
+  "todos": []
+ },
+ "turns": [
+  {
+   "events": [
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": []
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "Answer 0."
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"text\": \"Answer 0.\"}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "done",
+     {
+      "conversation_id": "<conversation>",
+      "message": "Answer 0."
+     }
+    ]
+   ],
+   "llm_calls": [
+    {
+     "messages": [
+      {
+       "content": [
+        {
+         "cache_control": {
+          "type": "ephemeral"
+         },
+         "text": "<SYSTEM_PROMPT>",
+         "type": "text"
+        },
+        {
+         "cache_control": {
+          "type": "ephemeral"
+         },
+         "text": "## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+         "type": "text"
+        }
+       ],
+       "type": "system"
+      },
+      {
+       "content": [
+        {
+         "cache_control": {
+          "type": "ephemeral"
+         },
+         "text": "first question",
+         "type": "text"
+        }
+       ],
+       "id": "<id1>",
+       "type": "human"
+      }
+     ],
+     "n_messages": 2,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    }
+   ],
+   "message": {
+    "content": "Answer 0.",
+    "status": "done"
+   },
+   "steps": [
+    {
+     "data": "{\"text\": \"Answer 0.\"}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    }
+   ],
+   "usage_events": [
+    [
+     "budget_update",
+     1
+    ],
+    [
+     "perf_update",
+     1
+    ]
+   ]
+  },
+  {
+   "events": [
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": []
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "Answer 1."
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"text\": \"Answer 1.\"}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "done",
+     {
+      "conversation_id": "<conversation>",
+      "message": "Answer 1."
+     }
+    ]
+   ],
+   "llm_calls": [
+    {
+     "messages": [
+      {
+       "content": [
+        {
+         "cache_control": {
+          "type": "ephemeral"
+         },
+         "text": "<SYSTEM_PROMPT>",
+         "type": "text"
+        },
+        {
+         "cache_control": {
+          "type": "ephemeral"
+         },
+         "text": "## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+         "type": "text"
+        }
+       ],
+       "type": "system"
+      },
+      {
+       "content": [
+        {
+         "text": "first question",
+         "type": "text"
+        }
+       ],
+       "id": "<id1>",
+       "type": "human"
+      },
+      {
+       "content": "Answer 0.",
+       "id": "<run2>",
+       "type": "ai",
+       "usage": {
+        "input_tokens": 100,
+        "output_tokens": 10
+       }
+      },
+      {
+       "content": [
+        {
+         "cache_control": {
+          "type": "ephemeral"
+         },
+         "text": "second question",
+         "type": "text"
+        }
+       ],
+       "id": "<id3>",
+       "type": "human"
+      }
+     ],
+     "n_messages": 4,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    }
+   ],
+   "message": {
+    "content": "Answer 1.",
+    "status": "done"
+   },
+   "steps": [
+    {
+     "data": "{\"text\": \"Answer 1.\"}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    }
+   ],
+   "usage_events": [
+    [
+     "budget_update",
+     1
+    ],
+    [
+     "perf_update",
+     1
+    ]
+   ]
+  }
+ ]
+}

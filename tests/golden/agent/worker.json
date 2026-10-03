@@ -1,0 +1,327 @@
+{
+ "thread": {
+  "messages": [
+   {
+    "content": "delegate",
+    "id": "<id2>",
+    "type": "human"
+   },
+   {
+    "content": "",
+    "id": "<run4>",
+    "tool_calls": [
+     {
+      "args": {
+       "tasks": [
+        {
+         "role": "writer",
+         "task": "Summarise the thing"
+        }
+       ]
+      },
+      "id": "c1",
+      "name": "spawn_workers"
+     }
+    ],
+    "type": "ai",
+    "usage": {
+     "input_tokens": 100,
+     "output_tokens": 10
+    }
+   },
+   {
+    "content": "Task (writer): Summarise the thing\nThe worker's answer.",
+    "id": "<id5>",
+    "name": "spawn_workers",
+    "status": "success",
+    "tool_call_id": "c1",
+    "type": "tool"
+   },
+   {
+    "content": "Workers finished.",
+    "id": "<run6>",
+    "type": "ai",
+    "usage": {
+     "input_tokens": 102,
+     "output_tokens": 10
+    }
+   }
+  ],
+  "todos": []
+ },
+ "turns": [
+  {
+   "events": [
+    [
+     "todos_updated",
+     {
+      "source": "main",
+      "todos": []
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool_calls\": [{\"name\": \"spawn_workers\", \"args\": {\"tasks\": [{\"task\": \"Summarise the thing\", \"role\": \"writer\"}]}}]}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "worker_start",
+     {
+      "idx": 1,
+      "role": "writer",
+      "task": "Summarise the thing"
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "subagent",
+      "text": "The worker's answer."
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"raw\": \"{'messages': [AIMessage(content=\\\"The worker's answer.\\\", additional_kwargs={}, response_metadata={'finish_reason': 'STOP', 'model_name': 'scripted'}, id='<run1>', tool_calls=[], invalid_tool_calls=[], usage_metadata={'input_tokens': 101, 'output_tokens': 10, 'total_tokens': 111})]}\"}",
+      "node": "agent",
+      "source": "subagent",
+      "subagent": "tools"
+     }
+    ],
+    [
+     "worker_token",
+     {
+      "idx": 1,
+      "text": "The worker's answer."
+     }
+    ],
+    [
+     "worker_step",
+     {
+      "data": "{\"text\": \"The worker's answer.\"}",
+      "idx": 1,
+      "node": "model_request",
+      "role": "writer"
+     }
+    ],
+    [
+     "worker_done",
+     {
+      "idx": 1,
+      "result": "The worker's answer.",
+      "role": "writer",
+      "status": "done",
+      "task": "Summarise the thing"
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"tool\": \"spawn_workers\", \"output\": \"Task (writer): Summarise the thing\\nThe worker's answer.\"}",
+      "node": "tools",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "token",
+     {
+      "source": "main",
+      "text": "Workers finished."
+     }
+    ],
+    [
+     "step",
+     {
+      "data": "{\"text\": \"Workers finished.\"}",
+      "node": "model_request",
+      "source": "main",
+      "subagent": null
+     }
+    ],
+    [
+     "done",
+     {
+      "conversation_id": "<conversation>",
+      "message": "Workers finished."
+     }
+    ]
+   ],
+   "llm_calls": [
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+       "type": "system"
+      },
+      {
+       "content": "delegate",
+       "id": "<id2>",
+       "type": "human"
+      }
+     ],
+     "n_messages": 2,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    },
+    {
+     "messages": [
+      {
+       "content": "You are a writing worker. Your job is to produce final-quality prose. Read source material via read_file before drafting. Match the requested length, tone, and audience. You do NOT run code — no shell, no run_cell. Save drafts via write_file when asked. Return the final text.",
+       "type": "system"
+      },
+      {
+       "content": "Summarise the thing",
+       "id": "<id3>",
+       "type": "human"
+      }
+     ],
+     "n_messages": 2,
+     "system_roles": 1,
+     "tools": [
+      "read_file",
+      "write_file",
+      "write_artifact",
+      "read_artifact",
+      "list_artifacts",
+      "search_documents",
+      "read_document"
+     ]
+    },
+    {
+     "messages": [
+      {
+       "content": "<SYSTEM_PROMPT>\n\n## Memory\n\nYou have long-term memory that persists across conversations. When the user shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.",
+       "type": "system"
+      },
+      {
+       "content": "delegate",
+       "id": "<id2>",
+       "type": "human"
+      },
+      {
+       "content": "",
+       "id": "<run4>",
+       "tool_calls": [
+        {
+         "args": {
+          "tasks": [
+           {
+            "role": "writer",
+            "task": "Summarise the thing"
+           }
+          ]
+         },
+         "id": "c1",
+         "name": "spawn_workers"
+        }
+       ],
+       "type": "ai",
+       "usage": {
+        "input_tokens": 100,
+        "output_tokens": 10
+       }
+      },
+      {
+       "content": "Task (writer): Summarise the thing\nThe worker's answer.",
+       "id": "<id5>",
+       "name": "spawn_workers",
+       "status": "success",
+       "tool_call_id": "c1",
+       "type": "tool"
+      }
+     ],
+     "n_messages": 4,
+     "system_roles": 1,
+     "tools": [
+      "run_cell",
+      "write_artifact",
+      "write_todos",
+      "set_todo_status",
+      "spawn_workers",
+      "run_workflow",
+      "remember"
+     ]
+    }
+   ],
+   "message": {
+    "content": "Workers finished.",
+    "status": "done"
+   },
+   "steps": [
+    {
+     "data": "{\"tool_calls\": [{\"name\": \"spawn_workers\", \"args\": {\"tasks\": [{\"task\": \"Summarise the thing\", \"role\": \"writer\"}]}}]}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"idx\": 1, \"role\": \"writer\", \"task\": \"Summarise the thing\"}",
+     "node": "worker_start",
+     "source": "subagent",
+     "subagent": "writer:1"
+    },
+    {
+     "data": "{\"raw\": \"{'messages': [AIMessage(content=\\\"The worker's answer.\\\", additional_kwargs={}, response_metadata={'finish_reason': 'STOP', 'model_name': 'scripted'}, id='<run1>', tool_calls=[], invalid_tool_calls=[], usage_metadata={'input_tokens': 101, 'output_tokens': 10, 'total_tokens': 111})]}\"}",
+     "node": "agent",
+     "source": "subagent",
+     "subagent": "tools"
+    },
+    {
+     "data": "{\"text\": \"The worker's answer.\"}",
+     "node": "model_request",
+     "source": "subagent",
+     "subagent": "writer:1"
+    },
+    {
+     "data": "{\"idx\": 1, \"role\": \"writer\", \"task\": \"Summarise the thing\", \"status\": \"done\", \"result\": \"The worker's answer.\"}",
+     "node": "worker_done",
+     "source": "subagent",
+     "subagent": "writer:1"
+    },
+    {
+     "data": "{\"tool\": \"spawn_workers\", \"output\": \"Task (writer): Summarise the thing\\nThe worker's answer.\"}",
+     "node": "tools",
+     "source": "main",
+     "subagent": null
+    },
+    {
+     "data": "{\"text\": \"Workers finished.\"}",
+     "node": "model_request",
+     "source": "main",
+     "subagent": null
+    }
+   ],
+   "usage_events": [
+    [
+     "budget_update",
+     1
+    ],
+    [
+     "perf_update",
+     1
+    ],
+    [
+     "perf_update",
+     2
+    ],
+    [
+     "perf_update",
+     3
+    ]
+   ]
+  }
+ ]
+}
