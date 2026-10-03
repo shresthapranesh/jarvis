@@ -236,3 +236,95 @@ async def test_import_from_langgraph(database, tmp_path, work_dir):
     assert await _kv(("memory",), "AGENTS.md") == {"content": "already here"}
     assert await _kv(("memory_consolidation",), "state") == {"watermark": "m9"}
     assert json.loads(_rows(work_dir, "SELECT value FROM kv_store WHERE namespace = 'memory_consolidation'")[0][0])
+
+
+# ── the batch conversion (maintenance `convert_checkpoints`) ─────────────────
+
+
+async def _langgraph_threads(saver, *thread_ids: str) -> None:
+    """One user/assistant exchange per thread, written by LangGraph itself."""
+    from langgraph.graph import START, MessagesState, StateGraph
+
+    graph = StateGraph(MessagesState)  # type: ignore[bad-specialization]
+    graph.add_node("n", lambda state: {"messages": [AIMessage(content="hello back")]})
+    graph.add_edge(START, "n")
+    app = graph.compile(checkpointer=saver)
+    for thread_id in thread_ids:
+        await app.ainvoke({"messages": [HumanMessage(content=f"hi {thread_id}")]},
+                          {"configurable": {"thread_id": thread_id}})
+
+
+async def _conversations(*ids: str) -> None:
+    from db import async_session, ops
+
+    async with async_session() as s:
+        for conv_id in ids:
+            await ops.get_or_create_conversation(s, conv_id, model="test:model", title="t")
+
+
+async def test_convert_checkpoints_moves_every_conversation_thread_once(database, tmp_path):
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from core.transcript_store import convert_checkpoints, unconverted_threads
+    from db import async_session
+
+    db = str(tmp_path / "checkpoints.db")
+    await _conversations("conv-1", "conv-2", "conv-3")
+    async with AsyncSqliteSaver.from_conn_string(db) as saver:
+        await _langgraph_threads(saver, "conv-1", "conv-2", "automation_run9")
+        async with async_session() as s:
+            # Converted already, by a run that touched it.
+            assert await import_checkpoint(s, saver, "conv-2") is True
+            # conv-3 never ran; automation_run9 is no conversation's.
+            assert await unconverted_threads(s, db) == ["conv-1"]
+
+        report = await convert_checkpoints(saver, db)
+        assert (report.converted, report.skipped, report.failed) == (1, 0, [])
+        assert [m.content for m in await _history("conv-1")] == ["hi conv-1", "hello back"]
+        assert await _history("automation_run9") == []
+
+        again = await convert_checkpoints(saver, db)
+        assert (again.converted, again.skipped, again.failed) == (0, 0, [])
+
+
+async def test_convert_checkpoints_without_a_checkpoints_db(database, tmp_path):
+    from core.transcript_store import convert_checkpoints
+
+    report = await convert_checkpoints(None, str(tmp_path / "missing.db"))
+    assert (report.converted, report.skipped, report.failed) == (0, 0, [])
+
+
+async def test_a_run_that_loses_the_conversion_race_reads_the_winners_rows(database, monkeypatch):
+    """The batch sweep and a run's first load can convert one thread at once;
+    the second write is refused, and the run must start from the rows the
+    first one wrote — not from an empty thread."""
+    import core.transcript_store as store
+    from core.agent_loop import DbThread
+
+    async def converted_meanwhile(session, checkpointer, thread_id):
+        await _apply(thread_id, [HumanMessage(content="from the sweep", id="m1")])
+        raise RuntimeError("UNIQUE constraint failed: thread_messages.thread_id, thread_messages.seq")
+
+    monkeypatch.setattr(store, "import_checkpoint", converted_meanwhile)
+    thread = await DbThread.load("conv-1", checkpointer=object())
+    assert [m.content for m in thread.messages] == ["from the sweep"]
+
+
+async def test_startup_queues_the_sweep_only_while_there_is_work(jarvis, work_dir):
+    from core.config import get_config
+    from core.scheduler import enqueue_checkpoint_conversion, maintenance_job_handler
+    from core.state import get_async_checkpointer
+
+    await _conversations("conv-1")
+    await _langgraph_threads(get_async_checkpointer(), "conv-1")
+    assert get_config().checkpoints_db
+
+    assert await enqueue_checkpoint_conversion() is True
+    assert await enqueue_checkpoint_conversion() is False  # one is queued
+    job = await jarvis.queue.claim(["maintenance"], worker_id="t")
+    assert job is not None and job.payload == {"task": "convert_checkpoints"}
+    await maintenance_job_handler(job)
+    await jarvis.queue.complete(job.id, worker_id="t")
+
+    assert [m.content for m in await _history("conv-1")] == ["hi conv-1", "hello back"]
+    assert await enqueue_checkpoint_conversion() is False  # nothing left

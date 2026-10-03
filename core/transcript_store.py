@@ -14,7 +14,8 @@ appended. A message with no id gets one.
 
 `KvStore` replaces the LangGraph store (`aget` / `aput` / `adelete`) over the
 `kv_store` table. `import_checkpoint` and `import_store` convert what
-LangGraph left in `checkpoints.db`.
+LangGraph left in `checkpoints.db`; `convert_checkpoints` sweeps every thread
+still to convert (the `convert_checkpoints` maintenance job).
 """
 
 from __future__ import annotations
@@ -338,6 +339,77 @@ async def import_checkpoint(session: AsyncSession, checkpointer: Any, thread_id:
                             todos=None if todos is None else json.dumps(todos, ensure_ascii=False)))
     await session.commit()
     return True
+
+
+def checkpoint_thread_ids(checkpoints_db: str) -> list[str]:
+    """Every thread with a root checkpoint in `checkpoints.db`, read-only."""
+    import sqlite3  # noqa: PLC0415
+    from pathlib import Path  # noqa: PLC0415
+
+    path = Path(checkpoints_db)
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'checkpoints'").fetchone():
+            return []
+        rows = conn.execute("SELECT DISTINCT thread_id FROM checkpoints WHERE checkpoint_ns = ''").fetchall()
+    finally:
+        conn.close()
+    return sorted(r[0] for r in rows)
+
+
+async def unconverted_threads(session: AsyncSession, checkpoints_db: str) -> list[str]:
+    """The checkpoint threads still to convert: those of a conversation that
+    has no rows yet. A thread that is no conversation's (a stateless
+    automation run, a workflow node) was never read again, so it stays behind
+    with checkpoints.db."""
+    from db.models import Conversation  # noqa: PLC0415
+
+    ids = checkpoint_thread_ids(checkpoints_db)
+    if not ids:
+        return []
+    conversations = set((await session.execute(select(Conversation.id))).scalars())
+    converted = set((await session.execute(select(ThreadState.thread_id))).scalars())
+    converted |= set((await session.execute(select(ThreadMessage.thread_id).distinct())).scalars())
+    return [t for t in ids if t in conversations and t not in converted]
+
+
+@dataclass
+class ConversionReport:
+    converted: int = 0
+    # Converted meanwhile by the run that touched the thread first.
+    skipped: int = 0
+    failed: list[tuple[str, str]] = field(default_factory=list)
+
+
+async def convert_checkpoints(checkpointer: Any, checkpoints_db: str) -> ConversionReport:
+    """Convert every thread `unconverted_threads` names, one transaction each.
+
+    Safe beside live runs: a run converts its own thread on first load
+    (`agent_loop.DbThread.load`), and whichever of the two writes second is
+    refused by the tables' unique keys and finds the rows already there. A
+    thread that won't convert is reported and left for the lazy path.
+    """
+    from db import async_session  # noqa: PLC0415
+
+    async with async_session() as session:
+        pending = await unconverted_threads(session, checkpoints_db)
+    report = ConversionReport()
+    for thread_id in pending:
+        async with async_session() as session:
+            try:
+                if await import_checkpoint(session, checkpointer, thread_id):
+                    report.converted += 1
+                else:
+                    report.skipped += 1
+            except Exception as exc:
+                await session.rollback()
+                if (await load_thread(session, thread_id)).exists:
+                    report.skipped += 1
+                else:
+                    report.failed.append((thread_id, f"{type(exc).__name__}: {exc}"))
+    return report
 
 
 async def import_store(session: AsyncSession, checkpoints_db: str) -> int:

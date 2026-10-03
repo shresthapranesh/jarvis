@@ -675,6 +675,36 @@ def check_transcript(
     raise typer.Exit(code=1)
 
 
+@maintenance_app.command("convert-checkpoints")
+def convert_checkpoints() -> None:
+    """Move every conversation's thread from checkpoints.db into the transcript tables.
+
+    The server does this by itself on start (a `convert_checkpoints`
+    maintenance job); this runs the same sweep now. Safe while the server is
+    running, and again: converted threads are skipped. Threads in
+    checkpoints.db are only read.
+    """
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from core.transcript_store import convert_checkpoints as convert
+
+    db_path = _memory_db_path()
+    if not db_path.exists():
+        rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
+        raise typer.Exit(code=1)
+
+    async def _convert(_session):
+        async with AsyncSqliteSaver.from_conn_string(str(db_path)) as saver:
+            return await convert(saver, str(db_path))
+
+    report = _run_db(_convert)
+    rprint(f"[green]{report.converted} thread(s) converted[/green], {report.skipped} already  [dim]({db_path})[/dim]")
+    for thread_id, why in report.failed:
+        rprint(f"  [red]{thread_id}[/red]: {why}")
+    if report.failed:
+        raise typer.Exit(code=1)
+
+
 @maintenance_app.command("prune-checkpoints")
 def prune_checkpoints(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Report what would be removed without deleting anything.")] = False,

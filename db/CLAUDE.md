@@ -20,7 +20,7 @@ Todos live in `thread_state` (below), not on `conversations`.
 `thread_messages` (one v1 transcript record per message, `seq`-ordered; `evicted_at` = compacted away, kept), `thread_state` (todos), `transcript_blobs` (media bytes, once per sha256), `kv_store` (what the LangGraph store held). They replace `checkpoints.db`: the agent loop (`core/agent_loop.py`) reads and writes threads here, converting a LangGraph-only thread on first use (`DbThread.load`).
 - Write through `apply_messages` — it merges like LangGraph's `add_messages` (same id replaces in place, `RemoveMessage` evicts), checked against it in `tests/test_transcript_store.py`.
 - `thread_id` has no FK (automation threads aren't conversations); `delete_conversation` calls `delete_thread`, which also drops blobs no other thread uses.
-- `import_checkpoint` / `import_store` convert LangGraph's data once per thread.
+- `import_checkpoint` / `import_store` convert LangGraph's data once per thread. `convert_checkpoints` sweeps every conversation's thread still only in `checkpoints.db`: a `convert_checkpoints` maintenance job queued at server start while there is work (`core/scheduler.py:enqueue_checkpoint_conversion`), or `main.py maintenance convert-checkpoints`. Threads of no conversation (stateless automation runs, deleted conversations) are left behind.
 
 ## Two SQLite files (`~/.jarvis/`)
 - `database.db` — app state; PRAGMAs set per connection in `engine.py:_set_sqlite_pragmas`. `DATABASE_URL` overrides the path.
