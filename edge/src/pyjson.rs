@@ -12,24 +12,32 @@ use serde_json::Value;
 /// `json.dumps(value)` with the default arguments.
 pub fn dumps(value: &Value) -> String {
     let mut out = String::new();
-    write_value(&mut out, value);
+    write_value(&mut out, value, true);
     out
 }
 
-fn write_value(out: &mut String, value: &Value) {
+/// `json.dumps(value, ensure_ascii=False)` — how LangChain's OpenAI
+/// integration writes tool-call arguments.
+pub fn dumps_unicode(value: &Value) -> String {
+    let mut out = String::new();
+    write_value(&mut out, value, false);
+    out
+}
+
+fn write_value(out: &mut String, value: &Value, ascii: bool) {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(true) => out.push_str("true"),
         Value::Bool(false) => out.push_str("false"),
         Value::Number(n) => out.push_str(&number_repr(n)),
-        Value::String(s) => write_string(out, s),
+        Value::String(s) => write_string(out, s, ascii),
         Value::Array(items) => {
             out.push('[');
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                write_value(out, item);
+                write_value(out, item, ascii);
             }
             out.push(']');
         }
@@ -39,9 +47,9 @@ fn write_value(out: &mut String, value: &Value) {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                write_string(out, k);
+                write_string(out, k, ascii);
                 out.push_str(": ");
-                write_value(out, v);
+                write_value(out, v, ascii);
             }
             out.push('}');
         }
@@ -49,8 +57,9 @@ fn write_value(out: &mut String, value: &Value) {
 }
 
 /// `ensure_ascii=True`: everything outside printable ASCII becomes `\uXXXX`
-/// (astral characters as a surrogate pair), DEL included.
-fn write_string(out: &mut String, s: &str) {
+/// (astral characters as a surrogate pair), DEL included. Without it, only
+/// control characters are escaped.
+fn write_string(out: &mut String, s: &str, ascii: bool) {
     out.push('"');
     for c in s.chars() {
         match c {
@@ -62,6 +71,7 @@ fn write_string(out: &mut String, s: &str) {
             '\u{08}' => out.push_str("\\b"),
             '\u{0c}' => out.push_str("\\f"),
             ' '..='~' => out.push(c),
+            c if !ascii && c >= ' ' => out.push(c),
             _ => {
                 let mut units = [0u16; 2];
                 for unit in c.encode_utf16(&mut units) {
@@ -173,6 +183,12 @@ mod tests {
     use serde_json::json;
 
     // Expected strings are Python 3.13's repr / json.dumps output.
+    #[test]
+    fn dumps_unicode_matches_python() {
+        let v = json!({"a": "é\u{0}\u{7f}\n😀", "b": [1, 2.5]});
+        assert_eq!(dumps_unicode(&v), "{\"a\": \"é\\u0000\u{7f}\\n😀\", \"b\": [1, 2.5]}");
+    }
+
     #[test]
     fn float_repr_matches_python() {
         let cases = [

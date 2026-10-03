@@ -276,22 +276,36 @@ wired into serving yet. It is reached only through `--llm-shape` and
   `repair_orphan_tool_calls`, `build_llm_messages`) and the cache layout in
   `core/context_cache.py`. **A change to either is made in both.** The
   result is a `Prompt` with breakpoints as flags; each provider spells them.
-- `google.rs`, `ollama.rs` — one module per wire format, hand-written. No
-  client library sits above our request builder, so the request is ours
-  byte for byte. Each renders a `Prompt`, streams the reply (text and
-  thinking deltas) and builds the assistant record.
+- One module per wire format, hand-written. No client library sits above
+  our request builder, so the request is ours byte for byte. Each renders a
+  `Prompt`, streams the reply (text and thinking deltas) and builds the
+  assistant record:
+  - `google.rs`: Gemini's `streamGenerateContent`.
+  - `ollama.rs`: Ollama's `/api/chat`.
+  - `openai_chat.rs`: Chat Completions, for `openrouter`. It writes tool-call
+    arguments the way Python's `json.dumps(ensure_ascii=False)` does, so a
+    cached prefix stays the same bytes when a thread moves between runtimes.
+  - `openai_responses.rs`: the Responses API, for `meta`, which is what
+    `ChatMetaModel` uses. An assistant's text goes back with its server item
+    id and `phase`.
 - `complete()` retries a transient failure (429, 5xx, a dropped connection)
   once, and only if nothing had streamed yet.
 
-Endpoints come from the environment: `GOOGLE_API_KEY` (or `GEMINI_API_KEY`),
-`JARVIS_GOOGLE_BASE_URL` (tests), `OLLAMA_HOST` (read as the `ollama` client
-reads it).
+Endpoints and keys come from the environment:
+
+- Google: `GOOGLE_API_KEY` (or `GEMINI_API_KEY`).
+- Ollama: `OLLAMA_HOST`, read the way the `ollama` client reads it.
+- OpenRouter: `OPENROUTER_API_KEY`.
+- Meta: `META_API_KEY`, with `MODEL_API_BASE` as the base URL.
+- `JARVIS_GOOGLE_BASE_URL` and `JARVIS_OPENROUTER_BASE_URL` exist for the
+  tests.
 
 `tests/test_edge_llm.py` diffs the edge against the Python path through one
 fake provider server: the shaped prompt, the request body, and the record
-built from the same reply. Where the edge differs on purpose (LangChain
-dropping an assistant's text beside its calls, its lossy tool-schema
-conversion, Ollama's thinking), the test undoes the difference by name. Add
+built from the same reply. Where the edge differs on purpose, the test undoes
+the difference by name. Examples: LangChain dropped an assistant's text when it
+sat next to tool calls or was stored as a bare string, its tool-schema
+conversion was lossy, and it threw away reasoning. Add
 to it when adding a provider.
 
 ## Contracts with the Python side
