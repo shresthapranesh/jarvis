@@ -39,6 +39,11 @@ pub struct Prompt {
     pub messages: Vec<Message>,
     /// The message carrying the rolling history breakpoint.
     pub history_breakpoint: Option<usize>,
+    /// Laid out for a prefix cache: a provider renders a user or tool
+    /// message's string content as one text block, so the message the
+    /// breakpoint leaves on the next call serializes as it did when marked.
+    #[serde(skip)]
+    pub cached: bool,
 }
 
 // ── strip_historical_thinking ────────────────────────────────────────────────
@@ -271,7 +276,12 @@ fn uncached(layout: &Layout, rest: Vec<Message>, summaries: Vec<String>) -> Prom
             .collect::<Vec<_>>()
             .join("\n\n")
     };
-    Prompt { system: vec![SystemBlock { text, breakpoint: false }], messages: rest, history_breakpoint: None }
+    Prompt {
+        system: vec![SystemBlock { text, breakpoint: false }],
+        messages: rest,
+        history_breakpoint: None,
+        cached: false,
+    }
 }
 
 fn cached(layout: &Layout, rest: Vec<Message>, summaries: Vec<String>) -> Prompt {
@@ -312,7 +322,7 @@ fn cached(layout: &Layout, rest: Vec<Message>, summaries: Vec<String>) -> Prompt
             Content::Parts(vec![Part::Typed(Typed::Text { text, signature: None, extras: Map::new() })]),
         ));
     }
-    Prompt { system, messages, history_breakpoint }
+    Prompt { system, messages, history_breakpoint, cached: true }
 }
 
 /// Whether the history breakpoint can sit on `m` (`_markable`, over content

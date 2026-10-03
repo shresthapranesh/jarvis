@@ -347,6 +347,7 @@ mod tests {
             system: vec![SystemBlock { text: "S".into(), breakpoint: false }],
             messages: messages.into_iter().map(msg).collect(),
             history_breakpoint: None,
+            cached: false,
         }
     }
 

@@ -34,6 +34,8 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.messages.utils import message_chunk_to_message
 
 from core.context_cache import CacheSegment
+from core.model_catalog import ModelSpec, honors_cache_control
+from core.runner import RunnerConfig
 from core.messages import build_llm_messages, repair_orphan_tool_calls, strip_historical_thinking
 from core.transcript import decode, encode
 from edge_support import edge_binary  # noqa: F401 — a fixture
@@ -141,7 +143,37 @@ def _foreign_calls() -> list:
     ]
 
 
-HISTORIES = {"chat": _chat, "tool_loop": _tool_loop, "foreign_calls": _foreign_calls}
+def _responses_thread() -> list:
+    """A thread from Meta's Responses API, as LangChain recorded it: opaque
+    reasoning and function_call items, text tagged with its item id and phase."""
+    records = [
+        {"v": 1, "role": "user", "content": "What do you know about me?"},
+        {"v": 1, "role": "assistant", "id": "resp_6a57", "content": [
+            {"type": "opaque", "data": {"id": "rs_6a57:rs_bf48", "summary": [], "type": "reasoning", "index": 0}},
+            {"type": "text", "text": "I'll check what I have stored.",
+             "extras": {"phase": "commentary", "index": 1, "id": "msg_84dd"}},
+            {"type": "opaque", "data": {"type": "function_call", "name": "run_cell",
+                                        "arguments": "{\"code\": \"search_memory('user')\"}",
+                                        "call_id": "call_b002", "id": "fc_9121", "index": 2}}],
+         "tool_calls": [{"id": "call_b002", "name": "run_cell", "args": {"code": "search_memory('user')"}}],
+         "usage": {"input": 8027, "output": 307, "total": 8334, "input_details": {"cache_read": 0},
+                   "output_details": {"reasoning": 172}},
+         "model": {"provider": "openai", "name": "muse-spark-1.1"},
+         "extras": {"response_metadata": {"id": "resp_6a57", "model": "muse-spark-1.1", "object": "response",
+                                          "status": "completed"}}},
+        {"v": 1, "role": "tool", "name": "run_cell", "content": "[]", "tool_call_id": "call_b002", "status": "success"},
+        {"v": 1, "role": "assistant", "id": "resp_6a58", "content": [
+            {"type": "opaque", "data": {"id": "rs_6a58:rs_9240", "summary": [], "type": "reasoning", "index": 0}},
+            {"type": "text", "text": "Nothing yet — café orders aside.", "extras": {"index": 1}}],
+         "model": {"provider": "openai", "name": "muse-spark-1.1"}},
+        {"v": 1, "role": "user", "content": "Remember that I like tea."},
+    ]
+    return [decode(r) for r in records]
+
+
+HISTORIES = {
+    "chat": _chat, "tool_loop": _tool_loop, "foreign_calls": _foreign_calls, "responses_thread": _responses_thread,
+}
 
 
 def _records(history: list) -> tuple[list[dict], dict[str, str]]:
@@ -189,6 +221,66 @@ OLLAMA_REPLY = [
 ]
 
 
+CHAT_REPLY = [
+    {"id": "gen-1", "object": "chat.completion.chunk", "model": "anthropic/claude-sonnet-4.5",
+     "choices": [{"index": 0, "delta": {"role": "assistant", "content": "", "reasoning": "Weighing it."},
+                  "finish_reason": None}]},
+    {"id": "gen-1", "object": "chat.completion.chunk", "model": "anthropic/claude-sonnet-4.5",
+     "choices": [{"index": 0, "delta": {"content": "Let me"}, "finish_reason": None}]},
+    {"id": "gen-1", "object": "chat.completion.chunk", "model": "anthropic/claude-sonnet-4.5",
+     "choices": [{"index": 0, "delta": {"content": " check.", "tool_calls": [
+         {"index": 0, "id": "call_1", "type": "function", "function": {"name": "run_cell", "arguments": ""}}]},
+                  "finish_reason": None}]},
+    {"id": "gen-1", "object": "chat.completion.chunk", "model": "anthropic/claude-sonnet-4.5",
+     "choices": [{"index": 0, "delta": {"tool_calls": [
+         {"index": 0, "function": {"arguments": "{\"code\": \"che"}}]}, "finish_reason": None}]},
+    {"id": "gen-1", "object": "chat.completion.chunk", "model": "anthropic/claude-sonnet-4.5",
+     "choices": [{"index": 0, "delta": {"tool_calls": [
+         {"index": 0, "function": {"arguments": "ck()\"}"}},
+         {"index": 1, "id": "call_2", "type": "function",
+          "function": {"name": "write_todos", "arguments": "{\"todos\": [\"x\"]}"}}]}, "finish_reason": "tool_calls"}]},
+    {"id": "gen-1", "object": "chat.completion.chunk", "model": "anthropic/claude-sonnet-4.5", "choices": [],
+     "usage": {"prompt_tokens": 812, "completion_tokens": 40, "total_tokens": 852,
+               "prompt_tokens_details": {"cached_tokens": 700}, "completion_tokens_details": {"reasoning_tokens": 12}}},
+]
+
+RESPONSES_REPLY = [
+    ("response.created", {"response": {"id": "resp_1", "object": "response", "model": "muse-spark-1.1",
+                                       "status": "in_progress", "output": []}}),
+    ("response.output_item.added", {"output_index": 0, "item": {"type": "reasoning", "id": "rs_1", "summary": []}}),
+    ("response.reasoning_summary_part.added", {"item_id": "rs_1", "output_index": 0, "summary_index": 0,
+                                                "part": {"type": "summary_text", "text": ""}}),
+    ("response.reasoning_summary_text.delta", {"item_id": "rs_1", "output_index": 0, "summary_index": 0,
+                                                "delta": "Weighing it."}),
+    ("response.output_item.done", {"output_index": 0, "item": {
+        "type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "Weighing it."}]}}),
+    ("response.output_item.added", {"output_index": 1, "item": {
+        "type": "message", "id": "msg_1", "role": "assistant", "status": "in_progress", "content": [],
+        "phase": "commentary"}}),
+    ("response.content_part.added", {"item_id": "msg_1", "output_index": 1, "content_index": 0,
+                                     "part": {"type": "output_text", "text": "", "annotations": []}}),
+    ("response.output_text.delta", {"item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "Let me"}),
+    ("response.output_text.delta", {"item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": " check."}),
+    ("response.output_text.done", {"item_id": "msg_1", "output_index": 1, "content_index": 0,
+                                   "text": "Let me check."}),
+    ("response.output_item.done", {"output_index": 1, "item": {
+        "type": "message", "id": "msg_1", "role": "assistant", "status": "completed", "phase": "commentary",
+        "content": [{"type": "output_text", "text": "Let me check.", "annotations": []}]}}),
+    ("response.output_item.added", {"output_index": 2, "item": {
+        "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "run_cell", "arguments": "",
+        "status": "in_progress"}}),
+    ("response.function_call_arguments.delta", {"item_id": "fc_1", "output_index": 2, "delta": "{\"code\": "}),
+    ("response.function_call_arguments.delta", {"item_id": "fc_1", "output_index": 2, "delta": "\"check()\"}"}),
+    ("response.output_item.done", {"output_index": 2, "item": {
+        "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "run_cell",
+        "arguments": "{\"code\": \"check()\"}", "status": "completed"}}),
+    ("response.completed", {"response": {
+        "id": "resp_1", "object": "response", "model": "muse-spark-1.1", "status": "completed", "output": [],
+        "usage": {"input_tokens": 812, "input_tokens_details": {"cached_tokens": 700}, "output_tokens": 40,
+                  "output_tokens_details": {"reasoning_tokens": 12}, "total_tokens": 852}}}),
+]
+
+
 class _Provider:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
@@ -204,6 +296,20 @@ class _Provider:
                     self.end_headers()
                     for c in GEMINI_REPLY:
                         self.wfile.write(b"data: " + json.dumps(c).encode() + b"\r\n\r\n")
+                elif self.path.endswith("/chat/completions"):
+                    self.send_header("content-type", "text/event-stream")
+                    self.end_headers()
+                    for c in CHAT_REPLY:
+                        self.wfile.write(b"data: " + json.dumps(c).encode() + b"\n\n")
+                    self.wfile.write(b"data: [DONE]\n\n")
+                elif self.path.endswith("/responses"):
+                    self.send_header("content-type", "text/event-stream")
+                    self.end_headers()
+                    for i, (name, data) in enumerate(RESPONSES_REPLY):
+                        event = json.dumps({"type": name, "sequence_number": i, **data})
+                        self.wfile.write(f"event: {name}\ndata: {event}\n\n".encode())
+                    # OpenAI's stream just ends; OpenRouter's Responses endpoint says so.
+                    self.wfile.write(b"data: [DONE]\n\n")
                 else:
                     self.send_header("content-type", "application/x-ndjson")
                     self.end_headers()
@@ -235,10 +341,19 @@ SYSTEM = "You are jarvis."
 VOLATILE = "## Current Tasks\n\n[ ] pack"
 
 
+_PROVIDER_ENV = (
+    "GOOGLE_API_KEY", "GEMINI_API_KEY", "OLLAMA_HOST", "OPENROUTER_API_KEY", "META_API_KEY", "MODEL_API_BASE",
+)
+
+
 def _edge(edge_binary: Path, flag: str, tmp_path: Path, payload: dict, provider: _Provider | None = None) -> list:
-    env = {k: v for k, v in os.environ.items() if k not in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "OLLAMA_HOST")}
+    env = {k: v for k, v in os.environ.items() if k not in _PROVIDER_ENV}
     if provider:
-        env.update(JARVIS_GOOGLE_BASE_URL=provider.url, GOOGLE_API_KEY="test-key", OLLAMA_HOST=provider.url)
+        env.update(
+            JARVIS_GOOGLE_BASE_URL=provider.url, GOOGLE_API_KEY="test-key", OLLAMA_HOST=provider.url,
+            JARVIS_OPENROUTER_BASE_URL=provider.url, OPENROUTER_API_KEY="test-key",
+            MODEL_API_BASE=provider.url, META_API_KEY="test-key",
+        )
     # cwd = tmp_path so the repo's .env can't supply a real key.
     out = subprocess.run(
         [str(edge_binary), flag], input=json.dumps(payload), capture_output=True, text=True,
@@ -277,9 +392,26 @@ def _llm(model: str, url: str):
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return ChatGoogleGenerativeAI(model=name, base_url=url, google_api_key="test-key")
+    if provider == "openrouter":
+        from langchain_openai import ChatOpenAI
+
+        # As `ModelSpec.build_llm` builds it, at the fake's address.
+        return ChatOpenAI(model=name, base_url=url, api_key="test-key", stream_usage=True)
+    if provider == "meta":
+        from langchain_meta import ChatMetaModel
+
+        return ChatMetaModel(model=name, api_key="test-key", base_url=f"{url}/")
     from langchain_ollama import ChatOllama
 
     return ChatOllama(model=name, base_url=url)
+
+
+def _cache(model: str) -> bool:
+    """Whether the agent lays this model's prompt out for a cache
+    (`JarvisRunner.should_use_cache` with the default providers)."""
+    provider = model.partition(":")[0]
+    spec = ModelSpec(id=model, label=model, provider=provider)
+    return honors_cache_control(spec, RunnerConfig().cache_enabled_providers)
 
 
 def _python_call(model: str, url: str, messages: list) -> BaseMessage:
@@ -405,35 +537,90 @@ def _intended_ollama(python: dict, edge: dict) -> None:
             m["content"] = m["content"][1:]
 
 
-MODELS = ["google_genai:gemma-4-31b-it", "google_genai:gemini-3.1-flash-lite", "ollama:gemma4:26b"]
+def _intended_openai_chat(python: dict, edge: dict) -> None:
+    for m in python["messages"]:
+        if m["role"] == "assistant" and isinstance(m["content"], list):
+            # LangChain sent a recorded bare string as it was, which isn't a
+            # content part; the edge sends it as a text block.
+            m["content"] = [{"type": "text", "text": b} if isinstance(b, str) else b for b in m["content"]]
+
+
+def _intended_openai_responses(python: dict, edge: dict) -> None:
+    # LangChain skipped a recorded bare-string text part, so the assistant's
+    # words vanished from the model's context; the edge sends them as an
+    # output message (no server id, since it had none).
+    said = {json.dumps(i["content"]) for i in python["input"] if i.get("role") == "assistant"}
+    edge["input"] = [
+        i for i in edge["input"]
+        if not (i.get("role") == "assistant" and "id" not in i and json.dumps(i["content"]) not in said)
+    ]
+
+
+MODELS = [
+    "google_genai:gemma-4-31b-it",
+    "google_genai:gemini-3.1-flash-lite",
+    "ollama:gemma4:26b",
+    # cached: an Anthropic upstream honors cache_control
+    "openrouter:anthropic/claude-sonnet-4.5",
+    "openrouter:deepseek/deepseek-r1:free",
+    "meta:muse-spark-1.1",
+]
+INTENDED = {
+    "google_genai": _intended_gemini,
+    "ollama": _intended_ollama,
+    "openrouter": _intended_openai_chat,
+    "meta": _intended_openai_responses,
+}
+
+
+def _both(edge_binary, tmp_path, provider, model, records, blobs) -> tuple[dict, dict, list]:
+    """What Python and the edge each send for `records`, and the edge's output."""
+    cache = _cache(model)
+    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=cache,
+                                                     provider=model.split(":")[0]))
+    python = provider.take()
+    out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=cache), provider)
+    assert "message" in out[-1], out[-1]
+    return python, provider.take(), out
 
 
 @pytest.mark.parametrize("name", HISTORIES)
 @pytest.mark.parametrize("model", MODELS)
 def test_request_matches_python(edge_binary, tmp_path, provider, name, model):
     records, blobs = _records(HISTORIES[name]())
-    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False,
-                                                     provider=model.split(":")[0]))
-    python = provider.take()
-    out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
-    assert "message" in out[-1], out[-1]
-    edge = provider.take()
-
+    if model.startswith("ollama") and name == "responses_thread":
+        # LangChain can't send Ollama a thread that came from the Responses
+        # API: the function_call item left in the content is a ValueError.
+        with pytest.raises(ValueError, match="Unsupported message content type"):
+            _both(edge_binary, tmp_path, provider, model, records, blobs)
+        provider.requests.clear()
+        out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
+        assert "message" in out[-1], out[-1]
+        sent = provider.take()["body"]["messages"]
+        assert [m["tool_calls"] for m in sent if m.get("tool_calls")] == [
+            [{"function": {"name": "run_cell", "arguments": {"code": "search_memory('user')"}}}]
+        ]
+        assert [m["content"] for m in sent if m["role"] == "assistant"] == [
+            "I'll check what I have stored.", "Nothing yet — café orders aside."
+        ]
+        return
+    python, edge, _ = _both(edge_binary, tmp_path, provider, model, records, blobs)
     assert edge["path"] == python["path"]
     python, edge = python["body"], edge["body"]
-    if model.startswith("google_genai"):
-        assert provider.requests == []
-        _intended_gemini(python, edge)
-    else:
-        _intended_ollama(python, edge)
+    INTENDED[model.split(":")[0]](python, edge)
     assert edge == python
 
 
-def test_gemini_key_header(edge_binary, tmp_path, provider):
+@pytest.mark.parametrize("model,header,value", [
+    (MODELS[0], "x-goog-api-key", "test-key"),
+    (MODELS[3], "authorization", "Bearer test-key"),
+    (MODELS[5], "authorization", "Bearer test-key"),
+])
+def test_key_header(edge_binary, tmp_path, provider, model, header, value):
     records, blobs = _records(_chat())
-    _edge(edge_binary, "--llm-call", tmp_path, _edge_input(MODELS[0], records, blobs, cache=False), provider)
+    _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     headers = {k.lower(): v for k, v in provider.take()["headers"].items()}
-    assert headers["x-goog-api-key"] == "test-key"
+    assert headers[header] == value
 
 
 # ── replies ──────────────────────────────────────────────────────────────────
@@ -456,12 +643,17 @@ def _semantics(rec: dict) -> dict:
     }
 
 
-@pytest.mark.parametrize("model", [MODELS[0], MODELS[2]])
+@pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[3], MODELS[5]])
 def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     records, blobs = _records(_chat())
     reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False,
                                                              provider=model.split(":")[0]))
     python = _semantics(encode(reply)[0])
+    if model.startswith(("openrouter", "meta")):
+        # LangChain named the provider by wire format; the edge records the
+        # catalog's provider id, as the transcript format says.
+        assert python["model"]["provider"] == "openai"
+        python["model"]["provider"] = model.split(":")[0]
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     edge_rec = out[-1]["message"]
     edge = _semantics(edge_rec)
@@ -474,6 +666,15 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
         assert edge["finish_reason"] == encode(reply)[0]["extras"]["response_metadata"]["done_reason"]
         python["finish_reason"] = edge["finish_reason"]
         assert deltas == [{"thinking": "Hmm."}, {"text": "Let me"}, {"text": " check."}]
+    elif model.startswith(("openrouter", "meta")):
+        # LangChain dropped OpenRouter's reasoning, and kept the Responses
+        # summary only inside an opaque item; the edge keeps it as thinking.
+        assert edge.pop("thinking") == "Weighing it." and python.pop("thinking") == ""
+        if model.startswith("meta"):
+            # …and the response's status as its finish reason.
+            assert edge["finish_reason"] == "completed" and python["finish_reason"] is None
+            python["finish_reason"] = "completed"
+        assert deltas == [{"thinking": "Weighing it."}, {"text": "Let me"}, {"text": " check."}]
     else:
         assert deltas == [{"thinking": "Weighing "}, {"thinking": "it."}, {"text": "Let me"}, {"text": " check."}]
     assert edge == python
@@ -503,3 +704,28 @@ def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provide
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, follow, blobs, cache=False), provider)
     edge_turn = [c for c in provider.take()["body"]["contents"] if c["role"] == "model"][-1]
     assert edge_turn["parts"][0] == {"text": "Let me check.", "thoughtSignature": "dGV4dC1zaWc="}
+
+
+@pytest.mark.parametrize("model", [MODELS[3], MODELS[5]])
+def test_openai_record_goes_back_out_the_same(edge_binary, tmp_path, provider, model):
+    """The next request after a reply the edge recorded is the same from
+    either runtime — for Responses, the text item's server id and phase go
+    back with it."""
+    records, blobs = _records(_chat())
+    out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=_cache(model)), provider)
+    provider.take()
+    reply = out[-1]["message"]
+    follow = [
+        *records,
+        reply,
+        *({"v": 1, "role": "tool", "content": "ok", "tool_call_id": c["id"], "status": "success"}
+          for c in reply["tool_calls"]),
+    ]
+    python, edge, _ = _both(edge_binary, tmp_path, provider, model, follow, blobs)
+    python, edge = python["body"], edge["body"]
+    INTENDED[model.split(":")[0]](python, edge)
+    assert edge == python
+    if model.startswith("meta"):
+        said = [i for i in edge["input"] if i.get("id") == "msg_1"]
+        assert said == [{"type": "message", "role": "assistant", "id": "msg_1", "phase": "commentary",
+                         "content": [{"type": "output_text", "text": "Let me check.", "annotations": []}]}]

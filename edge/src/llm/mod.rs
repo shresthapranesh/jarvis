@@ -5,14 +5,17 @@
 //!
 //! - `transcript` — the v1 record Python and Rust both read and write.
 //! - `shape` — strip thinking, repair orphaned calls, lay the prompt out.
-//! - `google`, `ollama` — one module per wire format: render a [`Prompt`],
-//!   stream the reply, build the assistant record.
+//! - `google`, `ollama`, `openai_chat` (OpenRouter), `openai_responses`
+//!   (Meta) — one module per wire format: render a [`Prompt`], stream the
+//!   reply, build the assistant record.
 //!
 //! [`complete`] is the one entry point.
 
 pub mod google;
 mod lines;
 pub mod ollama;
+pub mod openai_chat;
+pub mod openai_responses;
 pub mod shape;
 pub mod transcript;
 
@@ -76,6 +79,13 @@ impl Error {
         let body = resp.text().await.unwrap_or_default();
         Error { transient: status == 429 || status >= 500, status: Some(status), message: format!("{status}: {body}") }
     }
+
+    /// An error object sent inside a stream, with an HTTP-like `code` when
+    /// the server gives one.
+    fn from_stream(err: &Value) -> Self {
+        let status = err.get("code").and_then(Value::as_u64).and_then(|c| u16::try_from(c).ok());
+        Error { transient: status.is_some_and(|c| c == 429 || c >= 500), status, message: err.to_string() }
+    }
 }
 
 impl std::fmt::Display for Error {
@@ -90,6 +100,10 @@ pub struct Endpoints {
     pub google_base: String,
     pub google_key: Option<String>,
     pub ollama_base: String,
+    pub openrouter_base: String,
+    pub openrouter_key: Option<String>,
+    pub meta_base: String,
+    pub meta_key: Option<String>,
 }
 
 impl Endpoints {
@@ -103,6 +117,14 @@ impl Endpoints {
             // The google-genai SDK's order.
             google_key: var("GOOGLE_API_KEY").or_else(|| var("GEMINI_API_KEY")),
             ollama_base: ollama::host(var("OLLAMA_HOST").as_deref()),
+            openrouter_base: var("JARVIS_OPENROUTER_BASE_URL")
+                .unwrap_or_else(|| "https://openrouter.ai/api/v1".into())
+                .trim_end_matches('/')
+                .to_string(),
+            openrouter_key: var("OPENROUTER_API_KEY"),
+            // `ChatMetaModel` reads MODEL_API_BASE; jarvis names the key META_API_KEY.
+            meta_base: var("MODEL_API_BASE").unwrap_or_else(|| "https://api.meta.ai/v1".into()).trim_end_matches('/').to_string(),
+            meta_key: var("META_API_KEY"),
         }
     }
 }
@@ -143,8 +165,37 @@ async fn call(
     match provider {
         "google_genai" => google::complete(http, ends, name, req, on_delta).await,
         "ollama" => ollama::complete(http, ends, name, req, on_delta).await,
+        "openrouter" => {
+            let key = needs(&ends.openrouter_key, "OPENROUTER_API_KEY", req.model)?;
+            openai_chat::complete(http, &ends.openrouter_base, key, provider, name, req, on_delta).await
+        }
+        "meta" => {
+            let key = needs(&ends.meta_key, "META_API_KEY", req.model)?;
+            openai_responses::complete(http, &ends.meta_base, key, provider, name, req, on_delta).await
+        }
         other => Err(Error::fatal(format!("provider {other} isn't served by the edge yet"))),
     }
+}
+
+fn needs<'a>(key: &'a Option<String>, var: &str, model: &str) -> Result<&'a str, Error> {
+    key.as_deref().ok_or_else(|| Error::fatal(format!("{var} is not set (required for '{model}')")))
+}
+
+/// A tool call's streamed arguments as JSON — empty is `{}` — or why not.
+fn parse_args(raw: &str) -> Result<Value, String> {
+    if raw.trim().is_empty() {
+        return Ok(Value::Object(Default::default()));
+    }
+    serde_json::from_str(raw).map_err(|e| format!("arguments are not valid JSON: {e}"))
+}
+
+/// A media part as a `data:` URL, or the URL it already is.
+fn data_url(media: &transcript::Media, blobs: &Blobs) -> Result<String, Error> {
+    if let (Some(url), None, None) = (&media.url, &media.data, &media.blob) {
+        return Ok(url.clone());
+    }
+    let mime = media.mime_type.as_deref().unwrap_or("application/octet-stream");
+    Ok(format!("data:{mime};base64,{}", media_base64(media, blobs)?))
 }
 
 /// A media part's bytes as base64, from wherever the part keeps them.
