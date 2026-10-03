@@ -26,6 +26,10 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - Threshold: `compact_threshold(model)` = 40% of `ModelSpec.context_window`, clamped [12k, 200k]; flat 80k when unknown; `JARVIS_COMPACT_TOKEN_THRESHOLD` overrides.
 - `summarization.py` is deprecated — use `compaction.maybe_compact`.
 
+### Transcript format (`transcript.py`, `transcript_format.md`)
+- The v1 record of a message — what the agent loop will store per message in place of LangGraph checkpoints, and what the Rust loop will read. Versioned and lossless: a LangChain message encodes and decodes back equal; anything not mapped to a field rides in `extras`.
+- A change to the format is a new version, made in `transcript_format.md` first. `main.py maintenance check-transcript` round-trips a real `checkpoints.db`.
+
 ## Model catalog (`model_catalog.py`, `builtin_models.json`, `model_discovery.py`)
 - Catalog = `BUILTIN_MODELS` (from `builtin_models.json`; first entry is the compile-time `DEFAULT_MODEL`) ∪ custom models in the `models.custom` setting. Ids are `provider:model_name`; providers: ollama, google_genai, bedrock, anthropic, meta, openrouter. A new model from those needs no code — `main.py model add` or Settings → Models.
 - The edge compiles `builtin_models.json` in too (`edge/src/catalog.rs`) — rebuild it after editing.

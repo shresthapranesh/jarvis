@@ -649,6 +649,32 @@ _KEEP_LATEST_PER_THREAD = """
 """
 
 
+@maintenance_app.command("check-transcript")
+def check_transcript(
+    path: Annotated[Optional[Path], typer.Option("--path", help="checkpoints.db to read (default: this install's).")] = None,
+) -> None:
+    """Check that every message in checkpoints.db survives the transcript format.
+
+    Read-only. Run before moving threads off LangGraph checkpoints: each
+    message is encoded to the v1 transcript format (core/transcript_format.md)
+    and decoded back, and any that doesn't come back equal is listed.
+    """
+    from core.transcript import check_checkpoints
+
+    db_path = path or _memory_db_path()
+    if not db_path.exists():
+        rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
+        raise typer.Exit(code=1)
+    report = check_checkpoints(str(db_path))
+    if not report.mismatches:
+        rprint(f"[green]{report.messages} messages round-trip exactly[/green]  [dim]({db_path})[/dim]")
+        return
+    rprint(f"[red]{len(report.mismatches)}+ of {report.messages} messages don't round-trip:[/red]")
+    for thread_id, index, why in report.mismatches:
+        rprint(f"  {thread_id} #{index}: {why}")
+    raise typer.Exit(code=1)
+
+
 @maintenance_app.command("prune-checkpoints")
 def prune_checkpoints(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Report what would be removed without deleting anything.")] = False,
