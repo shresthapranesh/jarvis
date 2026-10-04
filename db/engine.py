@@ -113,6 +113,10 @@ def _migrate(conn: Connection) -> None:
     job_cols = {c["name"] for c in inspector.get_columns("jobs")}
     if "thread_id" not in job_cols:
         conn.execute(text("ALTER TABLE jobs ADD COLUMN thread_id VARCHAR"))
+    # Which runtime claims the job (`Job.runtime`); NULL, Python, for every
+    # job written before the edge ran agents.
+    if "runtime" not in job_cols:
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN runtime VARCHAR"))
     conn.execute(text(
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_jobs_thread_lease ON jobs (thread_id) "
         "WHERE status = 'running' AND thread_id IS NOT NULL"

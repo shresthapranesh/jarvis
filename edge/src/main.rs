@@ -4,6 +4,7 @@
 //! GraphQL operations it has been taught, and proxies everything else to the
 //! Python server behind it. See `edge/README.md`.
 
+mod agent;
 mod bots;
 mod budget;
 mod catalog;
@@ -51,9 +52,10 @@ pub struct AppState {
 impl AppState {
     /// Whether the run mirror is the truth, so the edge answers what reads,
     /// steers or starts a run: a worker is linked, or the edge owns the worker
-    /// (and none being up means none is running anything).
+    /// (and none being up means none is running anything), or the edge runs
+    /// chat turns itself (`agent/`).
     pub fn runs_here(&self) -> bool {
-        self.supervisor.supervised() || self.runs.link_up()
+        self.supervisor.supervised() || self.runs.link_up() || agent::route::enabled()
     }
 }
 
@@ -156,6 +158,9 @@ async fn main() {
     let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
     tokio::spawn(scheduler.clone().run());
     tokio::spawn(sweep_pending_runs(runs.clone(), pool.clone()));
+    // The chat turns the edge runs itself (`agent/`), and the recovery of any
+    // a previous edge left running.
+    tokio::spawn(agent::Agent::new(pool.clone(), runs.clone()).run());
     let supervisor = supervisor::Supervisor::new(
         config.worker.take(),
         config.backend.clone(),

@@ -68,7 +68,7 @@ impl Config {
         let staging_dir = resolve(env_path("STAGING_DIR").unwrap_or(resolve(work_dir()?).join("staging")));
         let checkpoints_db = env_path("CHECKPOINTS_DB").unwrap_or(work_dir()?.join("checkpoints.db"));
         // The jarvis checkout: where Python runs, and where the SPA was built.
-        let app_dir = env_path("JARVIS_APP_DIR").unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let app_dir = app_dir();
         let static_dir = Some(app_dir.join("static").join("dist")).filter(|d| d.join("index.html").is_file());
         let worker = match std::env::var("JARVIS_WORKER_CMD") {
             Ok(command) if !command.trim().is_empty() => {
@@ -169,4 +169,9 @@ fn work_dir() -> Result<PathBuf, String> {
             Ok(PathBuf::from(home).join(".jarvis"))
         }
     }
+}
+
+/// The jarvis checkout: `JARVIS_APP_DIR`, else the working directory.
+pub fn app_dir() -> PathBuf {
+    env_path("JARVIS_APP_DIR").unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }

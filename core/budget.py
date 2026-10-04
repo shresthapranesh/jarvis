@@ -111,6 +111,17 @@ class BudgetTracker:
         logger.debug("budget: llm call +%d/%d total=%d/%d calls=%d", it, ot, self.input_tokens, self.output_tokens, self.llm_calls)
         self._check_exceeded()
 
+    def carry(self, usage: dict[str, Any]) -> None:
+        """Start from what another runtime already spent on this run (a turn
+        the edge handed over): `{input_tokens, output_tokens, llm_calls,
+        tool_calls}`."""
+        self.input_tokens += int(usage.get("input_tokens") or 0)
+        self.output_tokens += int(usage.get("output_tokens") or 0)
+        self.llm_calls += int(usage.get("llm_calls") or 0)
+        self.tool_calls += int(usage.get("tool_calls") or 0)
+        self._sync_to_task_state()
+        self._check_exceeded()
+
     def record_tool(self, count: int = 1) -> None:
         self.tool_calls += count
         self._sync_to_task_state()

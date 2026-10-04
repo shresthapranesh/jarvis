@@ -228,7 +228,9 @@ async fn insert_message(
 
 /// Mirror the run, then commit its rows and wake the worker. Mirrored first,
 /// as the Python triggers registered before committing: once the job is
-/// visible a worker may claim it, and its report must find the run.
+/// visible a worker may claim it, and its report must find the run. `edge`:
+/// the job is for the edge's agent loop, and so is the run.
+#[allow(clippy::too_many_arguments)]
 async fn commit_run(
     registry: &Registry,
     tx: Transaction<'_, Sqlite>,
@@ -237,6 +239,7 @@ async fn commit_run(
     label: String,
     parent_id: &str,
     enqueued_at: &str,
+    edge: bool,
 ) -> Result<()> {
     let meta = Meta {
         kind: kind.into(),
@@ -245,7 +248,7 @@ async fn commit_run(
         // The worker starts the run's clock from the job's `created_at` too.
         started_at: iso_from_db(enqueued_at).utc().0,
     };
-    registry.pre_register(id, meta);
+    registry.pre_register(id, meta, edge);
     if let Err(e) = tx.commit().await {
         registry.discard_pending(id);
         return Err(e.into());
@@ -428,9 +431,11 @@ pub async fn start_chat(
     if !attachments.is_empty() {
         payload["attachments"] = attachments.iter().map(Attachment::dump).collect();
     }
-    // The conversation is the thread: its turns run one at a time.
-    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(&conversation_id)).await?;
-    commit_run(registry, tx, &task_id, "chat", first_chars(&query, 60), &conversation_id, &enqueued_at).await?;
+    // The conversation is the thread: its turns run one at a time. The edge
+    // runs the turn itself when it can (`agent/route.rs`).
+    let edge = crate::agent::route::serves_chat(pool, &model, !attachments.is_empty()).await;
+    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(&conversation_id), edge).await?;
+    commit_run(registry, tx, &task_id, "chat", first_chars(&query, 60), &conversation_id, &enqueued_at, edge).await?;
 
     // The bytes now live in documents_dir or the job payload.
     for (bytes, meta) in attachments.iter().filter_map(|a| a.staged.as_ref()) {
@@ -554,8 +559,8 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"workflow_id": workflow_id, "inputs": inputs});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload, None).await?;
-        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload, None, false).await?;
+        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at, false).await?;
         Ok(run_id)
     }
 
@@ -609,8 +614,8 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"automation_id": automation_id, "triggered_by": "manual"});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload, None).await?;
-        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload, None, false).await?;
+        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at, false).await?;
         Ok(run_id)
     }
 }

@@ -292,13 +292,15 @@ impl Supervisor {
                 return true;
             }
         }
-        !self.runs.all().is_empty() || self.jobs_waiting().await
+        self.runs.need_worker() || self.jobs_waiting().await
     }
 
-    /// A job a worker would claim now, or one a dead worker left running.
+    /// A job a worker would claim now, or one a dead worker left running —
+    /// not the edge's own (`jobs.runtime`), which need no worker.
     async fn jobs_waiting(&self) -> bool {
         let found: sqlx::Result<Option<i64>> = sqlx::query_scalar(
-            "SELECT 1 FROM jobs WHERE status = 'running' OR (status = 'pending' AND run_at <= ?) LIMIT 1",
+            "SELECT 1 FROM jobs WHERE runtime IS NULL AND (status = 'running' OR (status = 'pending' AND run_at <= ?)) \
+             LIMIT 1",
         )
         .bind(now_stored())
         .fetch_optional(&self.pool)
@@ -484,7 +486,7 @@ impl Supervisor {
 
     /// Anything the worker is, or is about to be, doing.
     async fn busy(&self) -> bool {
-        if !self.lock().holds.is_empty() || !self.runs.all().is_empty() {
+        if !self.lock().holds.is_empty() || self.runs.need_worker() {
             return true;
         }
         self.jobs_waiting().await

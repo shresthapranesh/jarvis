@@ -26,7 +26,7 @@ from core.runner import JarvisRunner, set_runner
 from core.transcript_store import KvStore, import_store_once
 from db import async_session, close_db, get_database, init_db
 from core.approvals import reconcile_startup
-from db.ops import cleanup_zombie_running_rows, get_setting, hydrate_catalog, list_enabled_scheduled_automations
+from db.ops import adopt_edge_jobs, cleanup_zombie_running_rows, get_setting, hydrate_catalog, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
 from .routes_documents import router as documents_router
@@ -63,6 +63,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     get_broadcast_handler().attach_loop(state._main_loop)
     await init_db()
     async with async_session() as session:
+        if not behind_edge():
+            adopted = await adopt_edge_jobs(session)
+            if adopted:
+                logger.info("startup: took over %d job(s) the edge had", adopted)
         sweep = await cleanup_zombie_running_rows(session)
         if any(sweep.values()):
             logger.info("startup zombie sweep: %s", sweep)

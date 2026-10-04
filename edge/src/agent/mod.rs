@@ -1,0 +1,170 @@
+//! The edge's agent runtime (phase 2d): chat turns run here instead of in
+//! Python, so a conversation needs no Python process at all.
+//!
+//! A turn is routed when it is queued (`route.rs`): one the edge can serve
+//! start to finish gets `jobs.runtime = 'edge'`, and its run is mirrored as
+//! the edge's own (`runs.rs`), so the supervisor doesn't start Python for
+//! it. This loop claims those jobs (`queue.rs`) under the same one-turn-per-
+//! conversation lease Python's workers use, renews their locks, and runs
+//! them. A turn that needs something only Python has is handed over: the job
+//! goes back to pending with `runtime` cleared and what the turn carried in
+//! its payload, and Python's chat handler continues it.
+//!
+//! Python never claims, reaps or sweeps an edge job. The edge recovers its
+//! own at start (`queue::recover`), and Python running without the edge
+//! adopts them (`db/ops.py:adopt_edge_jobs`).
+//!
+//! Not the agent loop yet (2d-2): for now every claimed turn is handed to
+//! Python before it starts.
+
+mod queue;
+pub mod route;
+
+pub use queue::EDGE as EDGE_RUNTIME;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde_json::Value;
+use sqlx::SqlitePool;
+use tokio::sync::Semaphore;
+
+use crate::gql::codec::iso_from_db;
+use crate::runs::{Meta, Registry, Run};
+use queue::Job;
+
+/// How often the job table is looked at, besides the wakes.
+const POLL: Duration = Duration::from_secs(5);
+/// Turns running here at once.
+const MAX_RUNNING: usize = 8;
+
+pub struct Agent {
+    pool: SqlitePool,
+    runs: Arc<Registry>,
+    /// `locked_by` on the jobs this process claims.
+    worker: String,
+    slots: Arc<Semaphore>,
+}
+
+/// What a turn came to, for the job.
+enum Outcome {
+    /// Python runs the rest: the job is released to it, carrying the turn so
+    /// far (`None`: nothing ran here, Python starts it from the beginning).
+    HandOver(Option<Value>),
+}
+
+impl Agent {
+    pub fn new(pool: SqlitePool, runs: Arc<Registry>) -> Arc<Self> {
+        Arc::new(Self {
+            pool,
+            runs,
+            worker: format!("edge-{}", std::process::id()),
+            slots: Arc::new(Semaphore::new(MAX_RUNNING)),
+        })
+    }
+
+    /// Recover what a previous edge left, then claim and run edge jobs until
+    /// the process ends. With the agent loop off, only the recovery: every
+    /// edge job goes to Python.
+    pub async fn run(self: Arc<Self>) {
+        let serving = route::enabled();
+        match queue::recover(&self.pool, serving).await {
+            Ok(0) => {}
+            Ok(n) if serving => tracing::info!("agent: {n} job(s) a previous edge was running are pending again"),
+            Ok(n) => {
+                tracing::info!("agent: handed {n} edge job(s) to Python (JARVIS_AGENT_RUNTIME is not edge)");
+                self.runs.wake();
+            }
+            Err(e) => tracing::warn!("agent: recovering jobs: {e}"),
+        }
+        if !serving {
+            return;
+        }
+        loop {
+            // A slot before the claim: a claimed job's lock is ticking.
+            let Ok(slot) = self.slots.clone().acquire_owned().await else { return };
+            match queue::claim(&self.pool, &["chat"], &self.worker).await {
+                Ok(Some(job)) => {
+                    let me = self.clone();
+                    tokio::spawn(async move {
+                        me.process(job).await;
+                        drop(slot);
+                    });
+                    continue;
+                }
+                Ok(None) => {}
+                Err(e) => tracing::warn!("agent: claiming: {e}"),
+            }
+            drop(slot);
+            tokio::select! {
+                () = self.runs.agent_work.notified() => {}
+                () = tokio::time::sleep(POLL) => {}
+            }
+        }
+    }
+
+    /// One claimed job, start to finish, its lock renewed meanwhile.
+    async fn process(self: &Arc<Self>, job: Job) {
+        let Some(run) = self.runs.take(&job.id, || self.meta(&job)) else {
+            // A worker has the run under this id — not ours to touch.
+            tracing::warn!("agent: job {} is a worker's run; handing it back", job.id);
+            self.hand_over(&job, None, None).await;
+            return;
+        };
+        let outcome = tokio::select! {
+            outcome = self.serve(&job, &run) => outcome,
+            () = self.keep_lock(&job.id) => {
+                tracing::warn!("agent: lost the lock on job {}; abandoning it", job.id);
+                return;
+            }
+        };
+        match outcome {
+            Outcome::HandOver(carried) => self.hand_over(&job, Some(&run), carried).await,
+        }
+    }
+
+    async fn serve(&self, job: &Job, _run: &Arc<Run>) -> Outcome {
+        tracing::info!("agent: chat run {} claimed; handing it to Python (the loop isn't here yet)", job.id);
+        Outcome::HandOver(None)
+    }
+
+    /// Release the job to Python and wake it.
+    async fn hand_over(&self, job: &Job, run: Option<&Arc<Run>>, carried: Option<Value>) {
+        // Pending in the mirror first, so the worker's claim continues the run.
+        if let Some(run) = run {
+            self.runs.release(run);
+        }
+        match queue::release(&self.pool, job, &self.worker, carried).await {
+            Ok(true) => self.runs.wake(),
+            Ok(false) => tracing::warn!("agent: job {} was no longer ours to hand over", job.id),
+            Err(e) => tracing::error!("agent: handing job {} to Python: {e}", job.id),
+        }
+    }
+
+    /// Renew the job's lock at a third of its TTL, as the Python worker's
+    /// heartbeat does. Returns only when the lock is lost.
+    async fn keep_lock(&self, id: &str) {
+        let every = queue::LOCK_TTL / 3;
+        loop {
+            tokio::time::sleep(every).await;
+            match queue::extend_lock(&self.pool, id, &self.worker).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                // A busy database isn't a lost lock; the next beat retries.
+                Err(e) => tracing::warn!("agent: renewing the lock on {id}: {e}"),
+            }
+        }
+    }
+
+    /// The run as its trigger mirrored it, for one the mirror lost: the
+    /// edge restarted between the trigger and this claim.
+    fn meta(&self, job: &Job) -> Meta {
+        let query = job.payload["query"].as_str().unwrap_or_default();
+        Meta {
+            kind: job.kind.clone(),
+            label: query.chars().take(60).collect(),
+            parent_id: job.payload["conv_id"].as_str().map(str::to_string),
+            started_at: iso_from_db(&job.created_at).utc().0,
+        }
+    }
+}

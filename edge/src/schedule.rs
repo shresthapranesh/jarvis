@@ -292,7 +292,7 @@ impl Scheduler {
             return Ok(());
         }
         let job_id = new_id();
-        crate::jobs::insert(&self.pool, &job_id, "automation", &json!({"automation_id": id, "triggered_by": "schedule"}), None)
+        crate::jobs::insert(&self.pool, &job_id, "automation", &json!({"automation_id": id, "triggered_by": "schedule"}), None, false)
             .await?;
         tracing::info!("automation {id} scheduled run enqueued (job {job_id})");
         self.runs.wake();
@@ -329,7 +329,7 @@ impl Scheduler {
             tracing::debug!("maintenance {task}: one is already queued");
             return Ok(());
         }
-        crate::jobs::insert(&self.pool, &new_id(), "maintenance", &payload, None).await?;
+        crate::jobs::insert(&self.pool, &new_id(), "maintenance", &payload, None, false).await?;
         self.runs.wake();
         Ok(())
     }
@@ -517,14 +517,14 @@ impl Scheduler {
                 .await?;
             let thread = format!("boardtask_{task_id}");
             let enqueued_at =
-                crate::jobs::insert(&mut *tx, &run_id, "board_task", &json!({"task_id": task_id}), Some(&thread)).await?;
+                crate::jobs::insert(&mut *tx, &run_id, "board_task", &json!({"task_id": task_id}), Some(&thread), false).await?;
             let meta = Meta {
                 kind: "board_task".into(),
                 label: title.clone(),
                 parent_id: Some(task_id.clone()),
                 started_at: iso_from_db(&enqueued_at).utc().0,
             };
-            self.runs.pre_register(&run_id, meta);
+            self.runs.pre_register(&run_id, meta, false);
             started.push(run_id);
         }
         if let Err(e) = tx.commit().await {
@@ -596,7 +596,7 @@ mod tests {
             "CREATE TABLE automations (id TEXT PRIMARY KEY, enabled BOOLEAN NOT NULL, schedule TEXT)",
             "CREATE TABLE jobs (id TEXT PRIMARY KEY, kind TEXT, payload TEXT, status TEXT, run_at TEXT, attempts INT, \
              max_attempts INT, last_error TEXT, locked_by TEXT, locked_until TEXT, cancel_requested BOOLEAN, \
-             created_at TEXT, updated_at TEXT, completed_at TEXT, thread_id TEXT)",
+             created_at TEXT, updated_at TEXT, completed_at TEXT, thread_id TEXT, runtime TEXT)",
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
