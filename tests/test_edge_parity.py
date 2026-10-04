@@ -831,6 +831,17 @@ async def test_a_decomposition_the_edge_does_not_plan_goes_to_python(domains, ed
     assert done.json()["errors"][0]["message"] == "only waiting (todo/ready/blocked) tasks can be decomposed"
 
 
+async def test_a_consolidation_the_edge_does_not_call_goes_to_python(seeded, edge):
+    """The consolidation passes are model calls: with the agent loop off (as
+    here), or on a model the edge doesn't call, they are Python's — an
+    unknown project refused first, as Python refuses it."""
+    assert (await _edge(edge, "mutation { consolidateMemory }")).status_code == 502
+    q = "mutation($id: ID!) { consolidateProjectMemory(id: $id) }"
+    assert (await _edge(edge, q, {"id": _gid("Project", "p2")})).status_code == 502
+    refused = await _edge(edge, q, {"id": _gid("Project", "nope")})
+    assert refused.json()["errors"][0]["message"] == "project not found"
+
+
 async def test_agent_memory_blob(twin):
     """The free-text `AGENTS.md` blob in `kv_store`: read (a list content
     joined), the pre-fix `/AGENTS.md` key copied over on first touch, replaced
@@ -876,8 +887,8 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
         "{ conversations { id } settings { key } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
-        # A mutation that isn't ported (an LLM consolidates the memories).
-        'mutation { consolidateMemory }',
+        # A mutation that isn't ported.
+        'mutation { deleteSetting(key: "x") }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.

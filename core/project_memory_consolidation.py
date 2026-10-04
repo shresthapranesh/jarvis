@@ -21,6 +21,9 @@ correctness requirement.
 
 Watermarks live in `kv_store` (mirroring memory_consolidation's
 `last_run_at`), so none of this needs a schema migration.
+
+`edge/src/consolidate/project.rs` is a port that runs the pass behind the
+edge — a change here is made there too.
 """
 
 from __future__ import annotations
