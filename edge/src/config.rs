@@ -59,11 +59,12 @@ impl Config {
         if !backend.starts_with("http://") {
             return Err(format!("JARVIS_BACKEND_URL must be an http:// URL, got {backend}"));
         }
-        let artifacts_dir = match std::env::var("ARTIFACTS_DIR") {
+        // Resolved, as Python's are: an artifact's or a document's stored
+        // path is under these.
+        let artifacts_dir = resolve(match std::env::var("ARTIFACTS_DIR") {
             Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
-            _ => work_dir()?.join("artifacts"),
-        };
-        // Resolved, as Python's are: a document's stored path is this one.
+            _ => resolve(work_dir()?).join("artifacts"),
+        });
         let documents_dir = resolve(env_path("DOCUMENTS_DIR").unwrap_or(resolve(work_dir()?).join("documents")));
         let staging_dir = resolve(env_path("STAGING_DIR").unwrap_or(resolve(work_dir()?).join("staging")));
         let checkpoints_db = env_path("CHECKPOINTS_DB").unwrap_or(work_dir()?.join("checkpoints.db"));

@@ -375,8 +375,16 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
   tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
-  kernels), the todo tools and `remember`; an unknown tool gets ToolNode's
-  error.
+  kernels), the todo tools, `remember` and `write_artifact`; an unknown tool
+  gets ToolNode's error.
+- **Artifacts** (`artifacts.rs`) port `write_artifact`: a markdown body or a
+  file the agent wrote (a relative path from the checkout, as Python's
+  working directory), the live file plus one copy per version, the rows, and
+  the `artifact` event; an artifact from before versioning gets its file
+  saved as v1 first. A file's type is `mimetypes.guess_type`'s
+  (`src/mimetypes.rs`: Python's built-in table in `mimetypes.json`, then the
+  system's `mime.types` files Python reads). **A change to
+  `tools/artifacts.py` is made in both.**
 - **Events and steps** (`events.rs`): tokens batched as `TokenCoalescer`
   does, each step's row written before its event.
 
@@ -404,7 +412,7 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   runs the tool calls the edge recorded but didn't run, and goes on from
   there (`chat_job_handler`), its text, step rows and spend continuing the
   edge's. A turn goes over when its next step needs what only Python has:
-  a tool other than the edge's (workers, a workflow, an artifact),
+  a tool other than the edge's (workers, a workflow),
   arguments that aren't plainly valid, a tool a human must approve, or a
   conversation not yet converted from `checkpoints.db`.
   Throughput measured before a handover isn't carried.

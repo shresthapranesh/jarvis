@@ -1035,6 +1035,121 @@ async def test_a_board_task_stopped_from_the_board(twins):
     assert resp.json()["errors"][0]["message"] == "task is not running"
 
 
+# ── artifacts ────────────────────────────────────────────────────────────────
+
+
+def _artifacts(db: Path, norm: Normalizer) -> dict[str, Any]:
+    """The artifact rows, version rows and files a turn left, the artifact
+    directory named as such."""
+    art_dir = db.parent / "artifacts"
+    norm = Normalizer({**norm._map, str(art_dir.resolve()): "<dir>", str(art_dir): "<dir>"})
+    files = {p.name: p.read_bytes() for p in sorted(art_dir.glob("*"))} if art_dir.exists() else {}
+    return norm.value({
+        "artifacts": [list(r) for r in _rows(db, "SELECT id, title, filename, kind, mime_type, conversation_id, "
+                                                 "message_id FROM artifacts ORDER BY rowid")],
+        "versions": [list(r) for r in _rows(db, "SELECT artifact_id, version, title, filename FROM artifact_versions "
+                                                "ORDER BY rowid")],
+        # Bytes aren't text to the normalizer: name → contents, names normalized.
+        "files": {norm.text(name): data.decode("utf-8", "replace") for name, data in files.items()},
+    })
+
+
+async def _both_artifacts(twins: Twins, query: str, script: list[Reply]) -> tuple[dict, dict]:
+    python, python_requests = await twins.python(query, script)
+    edge, edge_requests = await twins.edge(query, script)
+    # Each side mints its own artifact ids, which the model reads back.
+    _requests(Normalizer().value(python_requests), Normalizer().value(edge_requests))
+    [(runtime,)] = _rows(twins.edge_db, "SELECT runtime FROM jobs WHERE id = ?", edge.task_id)
+    assert runtime == "edge", "the edge handed the turn over"
+    out = []
+    for turn in (python, edge):
+        norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
+        record = _record(turn)
+        out.append({**record, **_artifacts(turn.db, Normalizer(dict(norm._map)))})
+    return out[0], out[1]
+
+
+async def test_a_markdown_artifact(twins):
+    body = "# Rivers\n\n" + "The Nile is long. " * 30
+    script = [Reply("Writing it up. ", [("write_artifact", {"title": "Rivers", "content": body})]), Reply("Saved.")]
+    python, edge = await _both_artifacts(twins, "write a report on rivers", script)
+    assert edge == python
+    [event] = [e for e in python["events"] if "artifactId" in e]
+    assert (event["action"], event["kind"], len(event["preview"])) == ("created", "markdown", 300)
+    assert python["artifacts"][0][5:] == ["<conversation>", "<task>"]
+    assert sorted(python["files"]) == ["<id1>.md", "<id1>_v1.md"]
+
+
+async def test_file_artifacts_and_refusals(twins, tmp_path):
+    """A file the agent wrote, copied in with its type guessed; and the two
+    refusals the tool words itself."""
+    song = tmp_path / "theme.MP3"
+    song.write_bytes(b"ID3\x04fake audio")
+    script = [
+        Reply("", [
+            ("write_artifact", {"title": "Both", "content": "x", "file_path": str(song)}),
+            ("write_artifact", {"title": "Missing", "file_path": str(tmp_path / "gone.png")}),
+            ("write_artifact", {"title": "Theme", "file_path": str(song), "content": None}),
+        ]),
+        Reply("Here it is."),
+    ]
+    python, edge = await _both_artifacts(twins, "save the theme song", script)
+    assert edge == python
+    [event] = [e for e in python["events"] if "artifactId" in e]
+    assert event["kind"] == "audio" and event["preview"] == "[audio · audio/mpeg · 14 bytes]"
+    assert python["artifacts"][0][3:5] == ["audio", "audio/mpeg"]
+
+
+async def test_an_artifact_from_before_versioning_is_updated(twins):
+    """Its file becomes v1 under its old title, the new body v2; an unknown
+    id is refused."""
+    for db in (twins.python_db, twins.edge_db):
+        art_dir = (db.parent / "artifacts").resolve()
+        art_dir.mkdir(exist_ok=True)
+        (art_dir / "a-old.md").write_bytes(b"old\r\nbody")
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.execute("INSERT INTO artifacts (id, title, filename, kind, created_at, updated_at) VALUES "
+                      "('a-old', 'Draft', ?, 'markdown', '2026-01-01 00:00:00.000000', '2026-01-01 00:00:00.000000')",
+                      (str(art_dir / "a-old.md"),))
+            c.commit()
+    script = [
+        Reply("", [("write_artifact", {"title": "Final", "content": "new body", "artifact_id": "a-old"}),
+                   ("write_artifact", {"title": "x", "content": "y", "artifact_id": "nope"})]),
+        Reply("Updated."),
+    ]
+    python, edge = await _both_artifacts(twins, "finish the draft", script)
+    assert edge == python
+    assert python["versions"] == [["a-old", 1, "Draft", "<dir>/a-old_v1.md"], ["a-old", 2, "Final", "<dir>/a-old_v2.md"]]
+    assert python["files"]["a-old_v1.md"] == "old\nbody"
+
+
+MIMETYPES_JSON = REPO / "edge" / "src" / "mimetypes.json"
+
+
+def test_the_edge_guesses_file_types_as_python_does(edge_binary):
+    """`edge/src/mimetypes.json` is Python's built-in table (re-export with
+    `JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_loop.py -k mimetypes`,
+    then rebuild); the edge reads the system's mime.types files on top, as
+    Python does."""
+    import mimetypes
+    import os
+    import subprocess
+
+    defaults = {"types": mimetypes._types_map_default, "suffixes": mimetypes._suffix_map_default,
+                "encodings": mimetypes._encodings_map_default}
+    if os.environ.get("JARVIS_UPDATE_GOLDEN") == "1":
+        MIMETYPES_JSON.write_text(json.dumps(defaults, indent=1) + "\n")
+    assert json.loads(MIMETYPES_JSON.read_text()) == defaults
+
+    names = ["a.png", "A.PNG", "x.mp3", "clip.MP4", "doc.pdf", "t.csv", "page.html", "a.tar.gz", "a.tgz",
+             "a.svgz", "a.Z", "a.gz", "data.json", "notes.md", "s.svg", "w.webp", "noext", ".bashrc", "a.",
+             "..x", "f.weird", "img.jpeg", "m.m4a", "o.ogg", "f.flac", "v.mov", "v.webm", "x.xlsx", "x.docx",
+             "report:final.pdf", "x.py", "x.yaml", "font.woff2", "a.wasm", "song.aac", "c.heic"]
+    out = subprocess.run([str(edge_binary), "--guess-type"], input="\n".join(names) + "\n",
+                         capture_output=True, text=True, check=True).stdout.splitlines()
+    assert dict(zip(names, map(json.loads, out))) == {n: mimetypes.guess_type(n)[0] for n in names}
+
+
 # ── the handover ─────────────────────────────────────────────────────────────
 
 

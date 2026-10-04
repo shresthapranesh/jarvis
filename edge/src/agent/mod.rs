@@ -19,6 +19,7 @@
 //! prompt built as Python builds it (`prompt.rs`) and its events and step
 //! rows as Python emits them (`events.rs`).
 
+mod artifacts;
 mod automation;
 mod board;
 mod embed;
@@ -63,6 +64,8 @@ pub struct Agent {
     slots: Arc<Semaphore>,
     /// The board dispatcher, for the pass a finished task may unblock.
     scheduler: Option<Arc<crate::schedule::Scheduler>>,
+    /// Where `write_artifact` puts files (`AppConfig.artifacts_dir`).
+    artifacts_dir: std::path::PathBuf,
 }
 
 /// What a turn came to, for the job.
@@ -80,9 +83,11 @@ impl Agent {
         runs: Arc<Registry>,
         kernels: Arc<Kernels>,
         scheduler: Option<Arc<crate::schedule::Scheduler>>,
+        artifacts_dir: std::path::PathBuf,
     ) -> Arc<Self> {
         Arc::new(Self {
             scheduler,
+            artifacts_dir,
             pool,
             runs,
             kernels,
