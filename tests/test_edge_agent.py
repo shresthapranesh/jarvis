@@ -154,6 +154,58 @@ async def test_a_handed_over_turn_continues_where_the_edge_left_it(jarvis, scrip
     assert state.llm_calls == 2 and state.tool_calls >= 1
 
 
+async def test_a_handed_over_automation_run_continues_where_the_edge_left_it(jarvis, script):  # noqa: F811
+    """A stateful automation's run, handed over after its first model step:
+    Python runs the recorded call, then the model, and finishes the run —
+    without writing the prompt into the conversation a second time."""
+    from sqlalchemy import select
+
+    from core.transcript_store import apply_messages, load_thread
+    from db import async_session
+    from db.models import Automation, AutomationRun, Conversation, Job, Message
+    from db.ops import automation_conversation_id
+    from server.automation_runtime import automation_job_handler
+
+    run_id, auto_id = "run-1", "auto-1"
+    conv_id = automation_conversation_id(auto_id)
+    prompt = HumanMessage(content="check the tea", id="u-1")
+    reply = AIMessage(content="Checking. ", id="ai-1", tool_calls=[tool_call("write_todos", {"todos": ["Look"]}, "c1")])
+    handoff = {"text": "Checking. ", "step_seq": 0, "steps": 1,
+               "usage": {"input_tokens": 300, "output_tokens": 10, "llm_calls": 1, "tool_calls": 0}}
+    async with async_session() as s:
+        s.add(Automation(id=auto_id, name="Tea", input_type="prompt", prompt_text="check the tea", model=GOOGLE,
+                         stateful=True))
+        s.add(Conversation(id=conv_id, title="Tea", model=GOOGLE, surface="automation"))
+        s.add(Message(id="m-1", conversation_id=conv_id, role="user", content="check the tea"))
+        s.add(AutomationRun(id=run_id, automation_id=auto_id, triggered_by="schedule", status="running"))
+        s.add(Job(id=run_id, kind="automation", payload=json.dumps({
+            "automation_id": auto_id, "triggered_by": "schedule", "handoff": handoff})))
+        await s.commit()
+        await apply_messages(s, conv_id, [prompt, reply])
+
+    script.responder = lambda call: AIMessage(content="Still warm.")
+    job = await jarvis.queue.claim(kinds=["automation"], worker_id="test", ttl_seconds=600)
+    assert job is not None and job.id == run_id
+    await automation_job_handler(job)
+
+    [call] = script.calls
+    assert [(m.tool_call_id, m.content) for m in call.messages if isinstance(m, ToolMessage)] == [
+        ("c1", "Updated todo list (1 item)."),
+    ]
+    async with async_session() as s:
+        thread = await load_thread(s, conv_id)
+        run = await s.get(AutomationRun, run_id)
+        messages = (await s.execute(
+            select(Message.role, Message.content, Message.status)
+            .where(Message.conversation_id == conv_id).order_by(Message.created_at)
+        )).all()
+    assert sum(isinstance(m, HumanMessage) for m in thread.messages) == 1
+    assert run is not None and (run.status, run.output) == ("done", "Checking. Still warm.")
+    assert [tuple(m) for m in messages] == [
+        ("user", "check the tea", "done"), ("assistant", "Checking. Still warm.", "done"),
+    ]
+
+
 async def test_a_reclaimed_turn_never_runs_a_tool_twice(jarvis, script):  # noqa: F811
     """Without a handoff — a crash, not a handover — the unanswered call is
     repaired as an orphan, as before, not run."""

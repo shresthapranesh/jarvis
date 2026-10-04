@@ -166,7 +166,7 @@ pub fn first_chars(s: &str, n: usize) -> String {
 /// `get_or_create_conversation`: an existing conversation takes the run's
 /// model (it is sticky per conversation); a missing one is created, under the
 /// requested id if there was one.
-async fn conversation_for(
+pub(crate) async fn conversation_for(
     tx: &mut Transaction<'_, Sqlite>,
     requested: Option<&str>,
     model: &str,
@@ -174,7 +174,7 @@ async fn conversation_for(
     surface: &str,
     project_id: Option<&str>,
     ephemeral: bool,
-) -> Result<String> {
+) -> sqlx::Result<String> {
     if let Some(id) = requested {
         let current: Option<String> =
             sqlx::query_scalar("SELECT model FROM conversations WHERE id = ?").bind(id).fetch_optional(&mut **tx).await?;
@@ -202,14 +202,14 @@ async fn conversation_for(
     Ok(id)
 }
 
-async fn insert_message(
+pub(crate) async fn insert_message(
     executor: impl sqlx::SqliteExecutor<'_>,
     conversation_id: &str,
     role: &str,
     content: &str,
     model: Option<&str>,
     status: &str,
-) -> Result<String> {
+) -> sqlx::Result<String> {
     let id = new_id();
     sqlx::query(
         "INSERT INTO messages (id, conversation_id, role, content, model, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -642,6 +642,8 @@ impl StartMutation {
             .await?;
         let name = name.ok_or("automation not found")?;
         let run_id = new_id();
+        // Decided before the write lock is taken: it reads the catalog.
+        let edge = crate::agent::route::serves_automation(pool, &automation_id).await;
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO automation_runs (id, automation_id, status, triggered_by, output, error, started_at, \
@@ -653,8 +655,8 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"automation_id": automation_id, "triggered_by": "manual"});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload, None, false).await?;
-        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at, false).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload, None, edge).await?;
+        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at, edge).await?;
         Ok(run_id)
     }
 }

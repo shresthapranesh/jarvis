@@ -51,6 +51,9 @@ pub struct Emitter {
     conversation_id: String,
     /// The next `steps.seq`: a handed-over turn's Python side goes on from it.
     pub step_seq: i64,
+    /// Whether steps are written as rows (chat) or only announced
+    /// (`persist_steps=False`: automations, board tasks).
+    rows: bool,
     tokens: Bucket,
     thinking: Bucket,
 }
@@ -63,9 +66,16 @@ impl Emitter {
             task_id: task_id.into(),
             conversation_id: conversation_id.into(),
             step_seq: 0,
+            rows: true,
             tokens: Bucket::new("token"),
             thinking: Bucket::new("thinking_token"),
         }
+    }
+
+    /// Announce steps without writing their rows.
+    pub fn without_rows(mut self) -> Self {
+        self.rows = false;
+        self
     }
 
     pub fn token(&mut self, text: &str) {
@@ -105,6 +115,10 @@ impl Emitter {
     /// A finished step: its row, then its event.
     pub async fn step(&mut self, node: &str, data: String) -> Result<(), String> {
         self.flush();
+        if !self.rows {
+            self.raw("step", &json!({"node": node, "source": "main", "subagent": null, "data": data}));
+            return Ok(());
+        }
         sqlx::query(
             "INSERT INTO steps (id, message_id, conversation_id, node, source, subagent, data, seq, created_at) \
              VALUES (?, ?, ?, ?, 'main', NULL, ?, ?, ?)",

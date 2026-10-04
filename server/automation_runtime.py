@@ -78,10 +78,17 @@ async def _execute_prompt_type(
     auto: Automation, state: TaskState, thread_id: str,
     invocation_context: InvocationContext | None = None,
     model_id: str | None = None,
+    handoff: dict | None = None,
 ) -> str:
-    accumulated: list[str] = []
+    # A run the edge started and handed over mid-run (`edge/src/agent/`): the
+    # text it streamed and what it spent are this run's too.
+    carried: dict = handoff or {}
+    accumulated: list[str] = [carried["text"]] if carried.get("text") else []
     coalescer = TokenCoalescer(state)
-    callbacks = start_run_callbacks(state, "automation").handlers
+    run_cb = start_run_callbacks(state, "automation")
+    if carried.get("usage"):
+        run_cb.budget.carry(carried["usage"])
+    callbacks = run_cb.handlers
     _store = invocation_context.store if invocation_context and invocation_context.store else get_store()
     model = model_id or await _resolve_model(auto)
     agent = build_agent(model, store=_store, invocation_context=invocation_context)
@@ -90,8 +97,12 @@ async def _execute_prompt_type(
     if auto.input_type == "monitor":
         user_content = _MONITOR_WRAPPER.format(target=user_content)
 
+    stream_input: dict = {"messages": [{"role": "user", "content": user_content}]}
+    if handoff is not None:
+        # The edge already wrote the prompt; the run goes on from its last step.
+        stream_input = {"messages": [], "resume": True, "steps_taken": int(carried.get("steps") or 0)}
     async with aclosing(agent.astream(
-        {"messages": [{"role": "user", "content": user_content}]},
+        stream_input,
         config={
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 100,
@@ -294,6 +305,7 @@ async def _run_automation_inner(
     state: TaskState,
     run_id: str,
     invocation_context=None,
+    handoff: dict | None = None,
 ) -> None:
     """Execute the work for a single automation run: dispatch by input_type,
     write events to `state`, persist outcome to AutomationRun, send notifications,
@@ -331,11 +343,15 @@ async def _run_automation_inner(
                     session, conv_id, model_id or await _resolve_model(auto, session),
                     auto.name, surface="automation",
                 )
-                await add_message(session, conv_id, "user", auto.prompt_text or "")
+                # A handed-over run's prompt is on record already.
+                if handoff is None:
+                    await add_message(session, conv_id, "user", auto.prompt_text or "")
 
         if auto.input_type in ("prompt", "monitor"):
             thread_id = conv_id or f"automation_{run_id}"
-            output = await _execute_prompt_type(auto, state, thread_id, invocation_context=invocation_context, model_id=model_id)
+            output = await _execute_prompt_type(
+                auto, state, thread_id, invocation_context=invocation_context, model_id=model_id, handoff=handoff,
+            )
         elif auto.input_type == "code":
             output = await _execute_code_type(auto, state)
         elif auto.input_type == "webhook":
@@ -429,11 +445,14 @@ async def automation_job_handler(job: Job) -> None:
     lookups don't need a join. The manual path pre-creates the AutomationRun
     with status='pending'; the scheduled path leaves it for the worker.
 
-    Payload: ``{"automation_id": str, "triggered_by": "manual"|"schedule"}``.
+    Payload: ``{"automation_id": str, "triggered_by": "manual"|"schedule",
+    "handoff": dict | None}`` — ``handoff`` is what the edge's agent loop
+    carried when it handed this run over mid-run (see `_run_agent_task`).
     """
     payload = job.payload
     automation_id: str = payload["automation_id"]
     triggered_by: str = payload.get("triggered_by", "manual")
+    handoff: dict | None = payload.get("handoff")
     run_id = job.id
     invocation_context = await new_invocation_context(
         kind="automation",
@@ -465,7 +484,7 @@ async def automation_job_handler(job: Job) -> None:
     )
 
     async with queue_cancel_watch(run_id, state):
-        await _run_automation_inner(auto, state, run_id, invocation_context)
+        await _run_automation_inner(auto, state, run_id, invocation_context, handoff=handoff)
 
 
 # ── Manual trigger (shared by GraphQL triggerAutomation) ─────────────────────

@@ -292,7 +292,8 @@ impl Scheduler {
             return Ok(());
         }
         let job_id = new_id();
-        crate::jobs::insert(&self.pool, &job_id, "automation", &json!({"automation_id": id, "triggered_by": "schedule"}), None, false)
+        let edge = crate::agent::route::serves_automation(&self.pool, id).await;
+        crate::jobs::insert(&self.pool, &job_id, "automation", &json!({"automation_id": id, "triggered_by": "schedule"}), None, edge)
             .await?;
         tracing::info!("automation {id} scheduled run enqueued (job {job_id})");
         self.runs.wake();

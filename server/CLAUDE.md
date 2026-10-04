@@ -33,6 +33,7 @@ A message sent while a conversation has a run in flight is queued, not started (
 Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a reply starting with `NO_CHANGE` finishes as `no_change` and sends no notification).
 - Stateful prompt automations and monitors share the conversation/thread `automation_{automation_id}`; overlapping runs are `skipped` (`_has_inflight_sibling`). Stateless runs use `automation_{run_id}`.
 - Behind the edge, the edge fires every schedule (automations, board dispatch, maintenance sweeps via `maintenance` jobs) and owns the kernels and their reaper; APScheduler registers nothing.
+- The edge's agent loop runs prompt and monitor automations itself (`edge/src/agent/automation.rs` + `turn.rs`) — the run row, stateful conversation, monitor gate and notifications (`edge/src/notify.rs`) are ports: change both. A run it hands over mid-run carries `payload.handoff`, which `automation_job_handler` resumes from. Code and webhook runs stay here.
 
 ## Task board (`task_board_runtime.py`)
 `BoardTask`: `todo → ready → running → blocked/done → archived`, with parent→child `BoardTaskLink`s.
@@ -61,7 +62,7 @@ Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a
 - `downloadVoice` writes to `.part` then renames.
 
 ## Bots (`telegram_bot.py`, `discord_bot.py`)
-Behind the edge the bots run there (`edge/src/bots/`) and these modules aren't started (`behind_edge()`); they run only when this server stands alone, so change both. Notifications (`core/notifications.py`) call the Bot API / Discord REST directly and need no running bot.
+Behind the edge the bots run there (`edge/src/bots/`) and these modules aren't started (`behind_edge()`); they run only when this server stands alone, so change both. Notifications (`core/notifications.py`) call the Bot API / Discord REST directly and need no running bot; `edge/src/notify.rs` is a port — change both.
 Enabled by `TELEGRAM_BOT_TOKEN` / `DISCORD_BOT_TOKEN`. Allowlists (`telegram.allowed_users`, `discord.allowed_users`) reject everyone when empty. One thread per chat/channel (`telegram_{chat_id}`, `discord_{channel_id}`).
 - Never send a placeholder message — create it on the first real token, then edit roughly every second.
 - Discord: replies in DMs, or in guilds when @mentioned / replied to; message cap `_MAX_MSG_LEN = 1900`; needs the Message Content Intent.

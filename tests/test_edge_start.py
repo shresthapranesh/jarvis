@@ -212,7 +212,7 @@ class Scripted:
         emit_event(state, status, message="", conversation_id=conv_id)
         finish_task_state(task_id, state, status)
 
-    async def automation(self, auto, state, run_id, invocation_context=None):
+    async def automation(self, auto, state, run_id, invocation_context=None, handoff=None):
         from core.run_scaffold import finish_task_state
         from core.state import emit_event
 
