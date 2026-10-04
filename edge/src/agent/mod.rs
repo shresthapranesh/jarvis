@@ -19,9 +19,11 @@
 //! prompt built as Python builds it (`prompt.rs`) and its events and step
 //! rows as Python emits them (`events.rs`).
 
+mod embed;
 mod events;
 mod prompt;
 mod queue;
+mod retrieve;
 pub mod route;
 mod thread;
 mod tools;

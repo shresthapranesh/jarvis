@@ -10,10 +10,10 @@ use sqlx::SqlitePool;
 
 use crate::catalog;
 
-/// `JARVIS_AGENT_RUNTIME`: `edge` lets the edge run the chat turns it can;
-/// anything else (the default, `python`) leaves every turn to Python.
+/// `JARVIS_AGENT_RUNTIME`: the edge runs the chat turns it can unless this
+/// says `python`, which leaves every turn to Python.
 pub fn enabled() -> bool {
-    std::env::var("JARVIS_AGENT_RUNTIME").is_ok_and(|v| v.trim().eq_ignore_ascii_case("edge"))
+    !std::env::var("JARVIS_AGENT_RUNTIME").is_ok_and(|v| v.trim().eq_ignore_ascii_case("python"))
 }
 
 /// Providers the edge's LLM layer speaks (`llm::call`), besides the

@@ -40,7 +40,7 @@ it.
 | `JARVIS_WORKER_CMD` | unset | the command that runs Python (via `sh -c`, in `JARVIS_APP_DIR`); set, the edge owns the worker |
 | `JARVIS_WORKER_IDLE` | `300` | seconds idle before the worker is stopped; `0` keeps it up (restarted if it dies) |
 | `JARVIS_APP_DIR` | the current directory | the jarvis checkout: where the worker runs, and `static/dist`, the SPA the edge serves |
-| `JARVIS_AGENT_RUNTIME` | `python` | `edge` lets the edge claim the chat turns it can serve (see "The agent loop") |
+| `JARVIS_AGENT_RUNTIME` | `edge` | `python` leaves every chat turn to Python; otherwise the edge runs the ones it can (see "The agent loop") |
 
 The built-in model list is compiled in from `core/builtin_models.json`, so
 rebuild the edge after editing it.
@@ -309,9 +309,9 @@ made in both.**
 ## The agent loop (`src/agent/`)
 
 Phase 2d: chat turns run in the edge, so a conversation needs no Python at
-all. **In progress**: the loop runs here (2d-2); retrieval (2d-3) and
-summarizing compaction (2d-4) are still Python's, so a turn that needs them
-goes over (see "Handing over").
+all. On by default (`JARVIS_AGENT_RUNTIME=python` turns it off). Summarizing
+compaction (2d-4) is still Python's, so a turn that needs it goes over (see
+"Handing over").
 
 - **The turn** (`turn.rs`) is `_run_agent_task` and `core/agent_loop.py`:
   the prompt into the thread and the plan reset, then model step, tool
@@ -320,18 +320,28 @@ goes over (see "Handing over").
   the budget, the step limit, messages queued mid-run, and the leftover
   queue starting the next turn all behave as Python's.
 - **The prompt** (`prompt.rs`) is `model_request_node`'s: the system prompt
-  (read from the checkout), memory how-to and core memory, a small skill
-  catalog, the live browser, the project, then the todo list or the planning
-  directive. **A change to `core/agents.py`'s prompt is made in both.**
+  (read from the checkout), memory how-to, core and relevant memories, the
+  skill catalog (ranked against the request past 8), earlier episodes, the
+  live browser, the project, then the todo list or the planning directive.
+  Retrieval runs once per user message, as Python's cache does. **A change to
+  `core/agents.py`'s prompt is made in both.**
+- **Retrieval** (`retrieve.rs`, `embed.rs`) ports `core/retrieval.py`
+  (FTS5 + cosine, rank fusion, `select_hybrid`'s cutoffs), `search_memory`
+  (with its access log), `search_skills`, `search_episodes` and
+  `upsert_memory`. The embedder is the one Python picks — Gemini's
+  `batchEmbedContents` with `GOOGLE_API_KEY`, else Ollama's `/api/embed`,
+  model from `embedding.model` — with Python's query cache. **A change to
+  either is made in both.**
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
   tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
-  kernels) and the todo tools; an unknown tool gets ToolNode's error.
+  kernels), the todo tools and `remember`; an unknown tool gets ToolNode's
+  error.
 - **Events and steps** (`events.rs`): tokens batched as `TokenCoalescer`
   does, each step's row written before its event.
 
-- **Routing** (`route.rs`), when a turn is queued: with
-  `JARVIS_AGENT_RUNTIME=edge`, a turn on a provider the LLM layer speaks
+- **Routing** (`route.rs`), when a turn is queued: unless
+  `JARVIS_AGENT_RUNTIME=python`, a turn on a provider the LLM layer speaks
   (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint), with no
   attachments, and no MCP server configured anywhere Python looks (env, the
   first `mcp.json`, the `mcp.servers` setting) is the edge's: its job gets
@@ -351,11 +361,10 @@ goes over (see "Handing over").
   runs the tool calls the edge recorded but didn't run, and goes on from
   there (`chat_job_handler`), its text, step rows and spend continuing the
   edge's. A turn goes over when its next step needs what only Python has:
-  a tool other than the edge's (workers, a workflow, `remember`, an
-  artifact), arguments that aren't plainly valid, a tool a human must
-  approve, memories or earlier episodes to retrieve for the request, a
-  skill catalog large enough to rank, a history near the summarizing
-  threshold, or a conversation not yet converted from `checkpoints.db`.
+  a tool other than the edge's (workers, a workflow, an artifact),
+  arguments that aren't plainly valid, a tool a human must approve, a
+  history near the summarizing threshold, or a conversation not yet
+  converted from `checkpoints.db`.
   Throughput measured before a handover isn't carried.
 - **Recovery**: at start the edge re-queues its jobs a previous edge left
   running; with the loop off, it hands every live edge job to Python. Python

@@ -43,6 +43,25 @@ STOP = "mutation($id: String!) { stopTask(taskId: $id) }"
 # ── the model ────────────────────────────────────────────────────────────────
 
 
+# The fake embedder's vocabulary: a text's vector counts these words, over a
+# floor that differs per word — no vector is zero, and stored texts never tie
+# (a tie's order is float rounding, which numpy and Rust don't share).
+VOCAB = ["colour", "green", "rust", "edge", "lunch", "noon", "tea", "coffee", "deploy", "review", "maps", "river"]
+
+
+def fake_vector(text: str) -> list[float]:
+    import re
+
+    words = re.findall(r"[a-z]+", text.lower())
+    return [0.01 * (i + 1) + words.count(w) for i, w in enumerate(VOCAB)]
+
+
+def fake_blob(text: str) -> bytes:
+    import numpy as np
+
+    return np.asarray(fake_vector(text), dtype=np.float32).tobytes()
+
+
 @dataclass
 class Reply:
     text: str = ""
@@ -59,11 +78,19 @@ class FakeOllama:
         # Request n waits for `gates[n]` once `arrived[n]` is set.
         self.gates: dict[int, threading.Event] = {}
         self.arrived: dict[int, threading.Event] = {}
+        self.embeds: list[list[str]] = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802 — http.server's spelling
                 body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
+                if self.path == "/api/embed":
+                    fake.embeds.append(body["input"])
+                    self.send_response(200)
+                    self.send_header("content-type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"embeddings": [fake_vector(t) for t in body["input"]]}).encode())
+                    return
                 if self.path != "/api/chat":
                     self.send_response(404)
                     self.end_headers()
@@ -141,13 +168,18 @@ class Turn:
 async def twins(jarvis, work_dir: Path, tmp_path_factory, fake: FakeOllama, monkeypatch, edge_binary: Path):
     """Python in this process over `work_dir`, and an edge over a copy, both
     pointed at `fake` and at a CDP port nothing listens on."""
-    from core import agents
+    from core import agents, doc_index, memory_store
     from db import async_session
-    from db.models import ConfigSetting, Project
+    from db.models import ConfigSetting, Conversation, ConversationEpisode, Memory, Project, Skill
     from db.ops import hydrate_catalog
 
     dead = f"http://127.0.0.1:{_free_port()}"
     monkeypatch.setenv("OLLAMA_HOST", fake.url)
+    # Python's embedder is Ollama's — the fake — as the edge's is.
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    doc_index._embedder_cache.clear()
+    doc_index._query_cache.clear()
+    memory_store._core_cache.update(text=None, ts=0.0)
     monkeypatch.setenv("JARVIS_BROWSER_CDP_URL", dead)
     agents._browser_probe = (0.0, False)
     agents._retrieval_cache.clear()
@@ -155,6 +187,14 @@ async def twins(jarvis, work_dir: Path, tmp_path_factory, fake: FakeOllama, monk
     async with async_session() as s:
         s.add(ConfigSetting(key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}])))
         s.add(Project(id="p1", name="Atlas", description="Maps.", instructions="Be brief.", memory="Uses Rust."))
+        for i, text in enumerate(["The user's favourite colour is green", "The user deploys the rust edge",
+                                  "Lunch is at noon"]):
+            s.add(Memory(id=f"m{i}", kind="fact", text=text, embedding=fake_blob(text)))
+        s.add(Memory(id="core1", kind="core", text="The user is called Sam", embedding=fake_blob("sam")))
+        # An episode compacted out of an existing conversation.
+        s.add(Conversation(id="c-old", title="Old", model=MODEL))
+        s.add(ConversationEpisode(id="e1", conversation_id="c-old", text="We chose green for the river maps.",
+                                  embedding=fake_blob("green river maps")))
         await s.commit()
         await hydrate_catalog(s)
 
@@ -201,7 +241,7 @@ class Twins:
                    during: Any = None, **start: Any) -> tuple[Turn, list[dict]]:
         self.fake.reset(script, hold)
         # `register_chat_task`'s keywords, as `StartTaskInput` spells them.
-        gql = {"projectId" if k == "project_id" else k: v for k, v in start.items()}
+        gql = {{"project_id": "projectId", "conversation_id": "conversationId"}.get(k, k): v for k, v in start.items()}
         resp = await self.client.post("/graphql", json={"query": START, "variables": {"input": {
             "query": query, "model": MODEL, **gql}}})
         body = resp.json()
@@ -412,6 +452,68 @@ async def test_a_stop_while_the_model_is_answering(twins):
     assert edge == python
     assert python["message"][:2] == ["", "stopped"]
     assert python["events"][-1]["kind"] == "StoppedEvent"
+
+
+# ── retrieval ────────────────────────────────────────────────────────────────
+
+
+async def test_memories_retrieved_for_the_request(twins):
+    python, edge = await _both(twins, "which colour do I like best", [Reply("Green.")])
+    assert edge == python
+    prompt = twins.fake.requests[0]["messages"]
+    assert any("## Relevant Memories" in m["content"] and "favourite colour" in m["content"] for m in prompt)
+    activities = _rows(twins.edge_db, "SELECT memory_id, source FROM memory_activities")
+    assert activities == _rows(twins.python_db, "SELECT memory_id, source FROM memory_activities")
+    assert ("m0", "retrieval") in activities
+
+
+async def test_a_greeting_retrieves_nothing(twins):
+    python, edge = await _both(twins, "hi", [Reply("Hello.")])
+    assert edge == python
+    assert twins.fake.embeds == []
+
+
+async def test_remember(twins):
+    script = [Reply("", [("remember", {"text": "The user drinks tea"})]),
+              Reply("", [("remember", {"text": "The user's favourite colour is green", "kind": "fact"})]),
+              Reply("Noted.")]
+    python, edge = await _both(twins, "remember I drink tea", script)
+    assert edge == python
+    memories = "SELECT kind, text FROM memories ORDER BY kind, text"
+    assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
+    # The colour fact merged into the one already there.
+    assert len(_rows(twins.edge_db, "SELECT 1 FROM memories WHERE text LIKE '%colour%'")) == 1
+
+
+async def test_a_large_skill_catalog_is_ranked(twins):
+    from db import async_session
+    from db.models import Skill
+
+    names = ["deploy-app", "review-code", "brew-tea", "make-coffee", "draw-maps", "river-facts", "lunch-plan",
+             "colour-pick", "rust-help", "edge-ops"]
+    rows = [Skill(id=f"s{i}", name=n, description=f"How to {n.replace('-', ' ')}", body="...",
+                  embedding=fake_blob(n.replace("-", " "))) for i, n in enumerate(names)]
+    async with async_session() as s:
+        s.add_all(rows)
+        await s.commit()
+    with contextlib.closing(sqlite3.connect(twins.edge_db)) as c:
+        c.executemany("INSERT INTO skills (id, name, description, body, enabled, embedding, created_at, updated_at) "
+                      "VALUES (?, ?, ?, ?, 1, ?, '2026-10-04 00:00:00.000000', '2026-10-04 00:00:00.000000')",
+                      [(r.id, r.name, r.description, r.body, r.embedding) for r in rows])
+        c.commit()
+    python, edge = await _both(twins, "how should I brew tea or coffee", [Reply("Steep it.")])
+    assert edge == python
+    # Uncached (Ollama): the volatile sections are in the one system message.
+    system = twins.fake.requests[0]["messages"][0]["content"]
+    shortlist = system.split("## Available Skills", 1)[1]
+    assert shortlist.count("- **") == 5 and "brew-tea" in shortlist
+
+
+async def test_an_earlier_episode_is_recalled(twins):
+    python, edge = await _both(twins, "what colour did we pick for the river maps", [Reply("Green.")],
+                               conversation_id="c-old")
+    assert edge == python
+    assert "## Earlier in this conversation" in twins.fake.requests[0]["messages"][0]["content"]
 
 
 # ── the handover ─────────────────────────────────────────────────────────────

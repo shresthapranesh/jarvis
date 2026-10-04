@@ -5,8 +5,8 @@
 //! sees the same tool list whichever runtime calls it — and a cached prefix
 //! stays byte-stable when a conversation moves between them.
 //!
-//! The edge runs `run_cell` and the todo tools. Any other call — workers, a
-//! workflow, `remember`, an artifact — or a call whose arguments aren't
+//! The edge runs `run_cell`, the todo tools and `remember`. Any other call —
+//! workers, a workflow, an artifact — or a call whose arguments aren't
 //! plainly valid, or one a human must approve, is Python's: the batch is
 //! handed over (`Plan::Python`) and Python runs it, validating and gating as
 //! it always has.
@@ -75,6 +75,7 @@ pub enum Native {
     RunCell { code: String },
     WriteTodos { todos: Vec<String> },
     SetTodoStatus { index: i64, status: String },
+    Remember { text: String, kind: String },
 }
 
 /// How a batch of calls will run.
@@ -134,6 +135,14 @@ fn native(name: &str, args: &Value) -> Option<Native> {
             let index = obj.get("index")?.as_i64()?;
             let status = obj.get("status")?.as_str()?;
             ["pending", "in_progress", "done"].contains(&status).then(|| Native::SetTodoStatus { index, status: status.into() })
+        }
+        "remember" if only(&["text", "kind"]) => {
+            let text = obj.get("text")?.as_str()?.to_string();
+            let kind = match obj.get("kind") {
+                None => "fact".to_string(),
+                Some(k) => k.as_str()?.to_string(),
+            };
+            Some(Native::Remember { text, kind })
         }
         _ => None,
     }
