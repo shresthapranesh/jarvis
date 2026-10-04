@@ -19,6 +19,7 @@
 //! prompt built as Python builds it (`prompt.rs`) and its events and step
 //! rows as Python emits them (`events.rs`).
 
+mod automation;
 mod embed;
 mod events;
 mod prompt;
@@ -101,7 +102,7 @@ impl Agent {
         loop {
             // A slot before the claim: a claimed job's lock is ticking.
             let Ok(slot) = self.slots.clone().acquire_owned().await else { return };
-            match queue::claim(&self.pool, &["chat"], &self.worker).await {
+            match queue::claim(&self.pool, &["chat", "automation"], &self.worker).await {
                 Ok(Some(job)) => {
                     let me = self.clone();
                     tokio::spawn(async move {
@@ -123,7 +124,8 @@ impl Agent {
 
     /// One claimed job, start to finish, its lock renewed meanwhile.
     async fn process(self: &Arc<Self>, job: Job) {
-        let Some(run) = self.runs.take(&job.id, || self.meta(&job)) else {
+        let meta = self.meta(&job).await;
+        let Some(run) = self.runs.take(&job.id, || meta) else {
             // A worker has the run under this id — not ours to touch.
             tracing::warn!("agent: job {} is a worker's run; handing it back", job.id);
             self.hand_over(&job, None, None).await;
@@ -147,14 +149,53 @@ impl Agent {
     }
 
     async fn serve(&self, job: &Job, run: &Arc<Run>) -> Outcome {
-        tracing::info!("agent: chat run {} claimed", job.id);
-        match turn::Turn::new(self, job, run.clone()) {
+        tracing::info!("agent: {} run {} claimed", job.kind, job.id);
+        if job.kind == "automation" {
+            return self.serve_automation(job, run).await;
+        }
+        match turn::Turn::chat(self, job, run.clone()) {
             Some(turn) => turn.run().await,
             None => {
                 tracing::warn!("agent: job {} has no chat payload; handing it to Python", job.id);
                 Outcome::HandOver(None)
             }
         }
+    }
+
+    /// `automation_job_handler` up to the agent: the run's row, then a
+    /// stateful run that would overlap a sibling is skipped.
+    async fn serve_automation(&self, job: &Job, run: &Arc<Run>) -> Outcome {
+        let spec = match automation::prepare(&self.pool, job).await {
+            Ok(automation::Prepared::Ready(spec)) => spec,
+            Ok(automation::Prepared::Gone) => {
+                tracing::warn!("agent: automation run {} has no automation; dropping it", job.id);
+                self.end(run, "error");
+                return Outcome::Finished;
+            }
+            Ok(automation::Prepared::Python) => return Outcome::HandOver(None),
+            Err(e) => {
+                tracing::warn!("agent: preparing automation run {}: {e}; handing it to Python", job.id);
+                return Outcome::HandOver(None);
+            }
+        };
+        if !route::serves_model(&self.pool, &spec.model).await {
+            return Outcome::HandOver(None);
+        }
+        if spec.stateful && automation::sibling_running(&self.pool, &spec).await.unwrap_or(false) {
+            let skip = "skipped: a previous run of this stateful automation is still in flight";
+            automation::finish_run(&self.pool, &spec.run_id, "skipped", None, Some(skip)).await;
+            run.emit_local("error", &serde_json::json!({"error": skip, "run_id": spec.run_id}));
+            self.end(run, "skipped");
+            return Outcome::Finished;
+        }
+        turn::Turn::automation(self, job, run.clone(), spec).run().await
+    }
+
+    /// `finish_task_state` for a run that ended before its turn began.
+    fn end(&self, run: &Arc<Run>, status: &str) {
+        tracing::info!("task complete: kind={} task={} status={status}", run.meta.kind, run.id);
+        run.update(|st| st.fields.done = true);
+        self.runs.retire(&run.id);
     }
 
     /// Release the job to Python and wake it.
@@ -187,13 +228,22 @@ impl Agent {
 
     /// The run as its trigger mirrored it, for one the mirror lost: the
     /// edge restarted between the trigger and this claim.
-    fn meta(&self, job: &Job) -> Meta {
-        let query = job.payload["query"].as_str().unwrap_or_default();
-        Meta {
-            kind: job.kind.clone(),
-            label: query.chars().take(60).collect(),
-            parent_id: job.payload["conv_id"].as_str().map(str::to_string),
-            started_at: iso_from_db(&job.created_at).utc().0,
-        }
+    /// A scheduled automation's run is first mirrored here: the schedule
+    /// enqueues it without one, as Python's handler registers it on claim.
+    async fn meta(&self, job: &Job) -> Meta {
+        let (label, parent_id) = if job.kind == "automation" {
+            let id = job.payload["automation_id"].as_str().unwrap_or_default().to_string();
+            let name: Option<String> = sqlx::query_scalar("SELECT name FROM automations WHERE id = ?")
+                .bind(&id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+            (name.unwrap_or_default(), Some(id))
+        } else {
+            let query = job.payload["query"].as_str().unwrap_or_default();
+            (query.chars().take(60).collect(), job.payload["conv_id"].as_str().map(str::to_string))
+        };
+        Meta { kind: job.kind.clone(), label, parent_id, started_at: iso_from_db(&job.created_at).utc().0 }
     }
 }

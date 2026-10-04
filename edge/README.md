@@ -308,8 +308,9 @@ made in both.**
 
 ## The agent loop (`src/agent/`)
 
-Phase 2d: chat turns run in the edge, so a conversation needs no Python at
-all. On by default (`JARVIS_AGENT_RUNTIME=python` turns it off).
+Phase 2d: chat turns and prompt/monitor automation runs run in the edge, so
+neither a conversation nor a scheduled automation needs Python at all. On by
+default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 
 - **The turn** (`turn.rs`) is `_run_agent_task` and `core/agent_loop.py`:
   the prompt into the thread and the plan reset, then model step, tool
@@ -340,6 +341,18 @@ all. On by default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   fallback comes to for every provider here but Google (its countTokens API —
   a named departure). **A change to `core/compaction.py` or
   `core/episodes.py` is made in both.**
+- **Automations** (`automation.rs`) port `automation_job_handler` around the
+  same turn: the `AutomationRun` row (created at claim for a scheduled run),
+  the thread (`automation_{id}` for a stateful run or a monitor, else
+  `automation_{run_id}`), a stateful run's conversation messages, the
+  monitor's wrapper and its `NO_CHANGE` gate, the skip for an overlapping
+  stateful run, and the end — run status, `automationRunEvents`, and
+  notifications (`src/notify.rs`, Telegram and Discord as Python sends them).
+  Steps are announced but not written as rows, no plan reset, no throughput,
+  the automation budget. The prompt's id is derived from the run, so a
+  re-claimed run replaces it (Python gives it a fresh one). Code and webhook
+  automations stay Python's. **A change to `server/automation_runtime.py` or
+  `core/notifications.py` is made in both.**
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
   tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
@@ -348,11 +361,13 @@ all. On by default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 - **Events and steps** (`events.rs`): tokens batched as `TokenCoalescer`
   does, each step's row written before its event.
 
-- **Routing** (`route.rs`), when a turn is queued: unless
+- **Routing** (`route.rs`), when a turn or automation run is queued
+  (`startTask`, `triggerAutomation`, a schedule firing): unless
   `JARVIS_AGENT_RUNTIME=python`, a turn on a provider the LLM layer speaks
   (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint), with no
   attachments, and no MCP server configured anywhere Python looks (env, the
-  first `mcp.json`, the `mcp.servers` setting) is the edge's: its job gets
+  first `mcp.json`, the `mcp.servers` setting) is the edge's — for an
+  automation, a prompt or monitor one on such a model: its job gets
   `runtime = 'edge'` and its run is mirrored as the edge's own. Everything
   else is Python's, as before.
 - **Claiming** (`queue.rs`) is `SqliteJobQueue._claim` plus `runtime =

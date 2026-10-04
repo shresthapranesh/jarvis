@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
+use super::automation::{self, Spec};
 use super::events::Emitter;
 use super::queue::Job;
 use super::summarize::{self, Summarizer};
@@ -54,11 +55,33 @@ enum Stop {
     Failed(String),
 }
 
+/// What a turn is for: where its prompt comes from and where its end goes.
+pub enum Kind {
+    /// A chat turn: the user's message, answered on its Message row.
+    Chat,
+    /// A prompt or monitor automation's run (`automation.rs`).
+    Automation(Spec),
+}
+
+impl Kind {
+    fn name(&self) -> &'static str {
+        match self {
+            Kind::Chat => "chat",
+            Kind::Automation(_) => "automation",
+        }
+    }
+}
+
 pub struct Turn<'a> {
     agent: &'a Agent,
     run: Arc<Run>,
+    kind: Kind,
     task_id: String,
-    conversation_id: String,
+    /// The agent thread — and, for chat, the conversation.
+    thread_id: String,
+    /// The conversation `run_cell`'s SDK is scoped to: `ToolContext.conversation_id`,
+    /// which only chat sets.
+    conversation: Option<String>,
     model: String,
     query: String,
     project_id: Option<String>,
@@ -81,31 +104,49 @@ pub struct Turn<'a> {
 }
 
 impl<'a> Turn<'a> {
-    pub fn new(agent: &'a Agent, job: &Job, run: Arc<Run>) -> Option<Self> {
+    pub fn chat(agent: &'a Agent, job: &Job, run: Arc<Run>) -> Option<Self> {
         let payload = &job.payload;
         let conversation_id = payload["conv_id"].as_str()?.to_string();
-        Some(Turn {
+        let mut turn = Self::new(agent, job, run, Kind::Chat, conversation_id.clone(), payload["model"].as_str()?, payload["query"].as_str()?);
+        turn.conversation = Some(conversation_id);
+        turn.attachments = payload["attachments"].as_array().is_some_and(|a| !a.is_empty());
+        Some(turn)
+    }
+
+    /// An automation's run: its own thread or its conversation's, steps
+    /// announced but not written as rows, as `_execute_prompt_type` runs it.
+    pub fn automation(agent: &'a Agent, job: &Job, run: Arc<Run>, spec: Spec) -> Self {
+        let (thread, model, prompt) = (spec.thread_id(), spec.model.clone(), spec.prompt());
+        let mut turn = Self::new(agent, job, run, Kind::Automation(spec), thread, &model, &prompt);
+        turn.events = turn.events.without_rows();
+        turn
+    }
+
+    fn new(agent: &'a Agent, job: &Job, run: Arc<Run>, kind: Kind, thread_id: String, model: &str, query: &str) -> Self {
+        Turn {
             agent,
-            events: Emitter::new(run.clone(), agent.pool.clone(), &job.id, &conversation_id),
+            events: Emitter::new(run.clone(), agent.pool.clone(), &job.id, &thread_id),
             run,
+            budget: Budget::new(Limits::for_kind(kind.name())),
+            kind,
             task_id: job.id.clone(),
-            model: payload["model"].as_str()?.to_string(),
-            query: payload["query"].as_str()?.to_string(),
-            conversation_id,
+            model: model.to_string(),
+            query: query.to_string(),
+            thread_id,
+            conversation: None,
             project_id: None,
             ephemeral: false,
             retrieved: None,
-            attachments: payload["attachments"].as_array().is_some_and(|a| !a.is_empty()),
+            attachments: false,
             cancel_requested: job.cancel_requested,
             started: parse_stamp(&job.created_at),
-            budget: Budget::new(Limits::for_kind("chat")),
             perf: PerfTracker::default(),
             text: String::new(),
             input_tokens: 0,
             output_tokens: 0,
             has_usage: false,
             steps: 0,
-        })
+        }
     }
 
     fn pool(&self) -> &SqlitePool {
@@ -116,10 +157,12 @@ impl<'a> Turn<'a> {
         if self.attachments {
             return Outcome::HandOver(None);
         }
-        let (project_id, ephemeral) = self.scope().await;
-        self.project_id = project_id;
-        self.ephemeral = ephemeral;
-        let mut thread = match Thread::load(self.pool(), &self.conversation_id).await {
+        if matches!(self.kind, Kind::Chat) {
+            let (project_id, ephemeral) = self.scope().await;
+            self.project_id = project_id;
+            self.ephemeral = ephemeral;
+        }
+        let mut thread = match Thread::load(self.pool(), &self.thread_id).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::warn!("agent: {e}; handing the turn to Python");
@@ -135,38 +178,64 @@ impl<'a> Turn<'a> {
             self.run.update(|st| st.fields.cancelled = true);
         }
 
-        // The prompt, and the plan reset — live subscribers first, as Python.
-        self.events.emit("todos_updated", &json!({"todos": [], "source": "main"}));
+        // The prompt — and for chat, the plan reset, live subscribers first,
+        // as Python. An automation's thread keeps its plan between runs.
+        // The prompt's id is derived from the run, so a re-claimed run
+        // replaces it (Python gives an automation's a fresh one).
         let prompt = Message { id: Some(user_message_id(&self.task_id)), ..Message::new(Role::User, Content::Text(self.query.clone())) };
-        let wrote = async {
-            thread.set_todos(self.pool(), vec![]).await?;
-            thread.apply(self.pool(), vec![prompt]).await
+        let wrote = match &self.kind {
+            Kind::Chat => {
+                self.events.emit("todos_updated", &json!({"todos": [], "source": "main"}));
+                let wrote = async {
+                    thread.set_todos(self.pool(), vec![]).await?;
+                    thread.apply(self.pool(), vec![prompt]).await
+                };
+                wrote.await
+            }
+            Kind::Automation(spec) => {
+                let wrote = async {
+                    if spec.stateful {
+                        automation::begin_conversation(self.pool(), spec).await.map_err(|e| e.to_string())?;
+                    }
+                    thread.apply(self.pool(), vec![prompt]).await
+                };
+                wrote.await
+            }
         };
-        if let Err(e) = wrote.await {
-            return self.finish_failed(e).await;
+        let result = match wrote {
+            Ok(()) => self.turn(&mut thread).await,
+            Err(e) => Err(Stop::Failed(e)),
+        };
+        if let Err(Stop::Python(why)) = &result {
+            tracing::info!("agent: run {} goes to Python: {why}", self.task_id);
+            return self.hand_over();
         }
-
-        match self.turn(&mut thread).await {
+        if matches!(self.kind, Kind::Automation(_)) {
+            return self.finish_automation(result).await;
+        }
+        match result {
             Ok(()) => self.finish_done(false).await,
             Err(Stop::Limit) => self.finish_done(true).await,
             Err(Stop::Cancelled) => self.finish_stopped().await,
-            Err(Stop::Python(why)) => {
-                tracing::info!("agent: run {} goes to Python: {why}", self.task_id);
-                self.events.flush();
-                Outcome::HandOver(Some(json!({
-                    "text": self.text,
-                    "step_seq": self.events.step_seq,
-                    "steps": self.steps,
-                    "usage": {
-                        "input_tokens": self.input_tokens,
-                        "output_tokens": self.output_tokens,
-                        "llm_calls": self.budget.llm_calls,
-                        "tool_calls": self.budget.tool_calls,
-                    },
-                })))
-            }
+            Err(Stop::Python(_)) => unreachable!("handed over above"),
             Err(Stop::Failed(e)) => self.finish_failed(e).await,
         }
+    }
+
+    /// The job goes to Python, carrying what the run did here.
+    fn hand_over(&mut self) -> Outcome {
+        self.events.flush();
+        Outcome::HandOver(Some(json!({
+            "text": self.text,
+            "step_seq": self.events.step_seq,
+            "steps": self.steps,
+            "usage": {
+                "input_tokens": self.input_tokens,
+                "output_tokens": self.output_tokens,
+                "llm_calls": self.budget.llm_calls,
+                "tool_calls": self.budget.tool_calls,
+            },
+        })))
     }
 
     // ── the loop ────────────────────────────────────────────────────────────
@@ -207,7 +276,11 @@ impl<'a> Turn<'a> {
 
 
     async fn model_step(&mut self, thread: &mut Thread, bound: &[llm::Tool]) -> Result<Message, Stop> {
-        let queued = self.drain_queued().await.map_err(Stop::Failed)?;
+        // Mid-run messages are a chat's; nothing queues behind an automation.
+        let queued = match self.kind {
+            Kind::Chat => self.drain_queued().await.map_err(Stop::Failed)?,
+            Kind::Automation(_) => vec![],
+        };
         let mut history = thread.messages.clone();
         history.extend(queued.iter().cloned());
         let query = latest_user_text(&history);
@@ -215,7 +288,7 @@ impl<'a> Turn<'a> {
 
         let retrieved = match &self.retrieved {
             Some((id, parts)) if *id == message_id => Ok(parts.clone()),
-            _ => prompt::retrieved(self.pool(), &self.agent.http, &query, &self.conversation_id).await,
+            _ => prompt::retrieved(self.pool(), &self.agent.http, &query, &self.thread_id).await,
         };
         let context = match retrieved {
             Ok(parts) => {
@@ -256,7 +329,7 @@ impl<'a> Turn<'a> {
         if let Some((text, evicted)) = &compaction.episode {
             // Awaited, so it can't race the next turn's retrieval. Losing one
             // only loses detail the running summary still outlines.
-            if let Err(e) = summarize::record_episode(self.pool(), &self.agent.http, &self.conversation_id, text, evicted).await {
+            if let Err(e) = summarize::record_episode(self.pool(), &self.agent.http, &self.thread_id, text, evicted).await {
                 tracing::warn!("episode recording failed: {e}");
             }
         }
@@ -296,7 +369,10 @@ impl<'a> Turn<'a> {
             self.output_tokens += usage.output.unwrap_or(0);
         }
         let mut emitted = self.budget.record_llm(usage.input, usage.output);
-        emitted.push(("perf_update", self.perf.record(reply.perf)));
+        // Only a chat run tracks throughput (`start_run_callbacks(with_perf=…)`).
+        if matches!(self.kind, Kind::Chat) {
+            emitted.push(("perf_update", self.perf.record(reply.perf)));
+        }
         emitted.extend(self.budget.check());
         for (event, data) in emitted {
             self.events.emit(event, &data);
@@ -362,10 +438,10 @@ impl<'a> Turn<'a> {
                 let cell = crate::kernels::Cell {
                     code: &code,
                     timeout: tools::CELL_TIMEOUT,
-                    conversation_id: Some(&self.conversation_id),
+                    conversation_id: self.conversation.as_deref(),
                     project_id: self.project_id.as_deref(),
                 };
-                self.agent.kernels.run(&self.conversation_id, &cell).await
+                self.agent.kernels.run(&self.thread_id, &cell).await
             }
             Native::WriteTodos { todos } => {
                 let items: Vec<Value> = todos.iter().map(|t| json!({"text": t, "status": "pending"})).collect();
@@ -413,7 +489,7 @@ impl<'a> Turn<'a> {
             "SELECT id, content FROM messages WHERE conversation_id = ? AND role = 'user' AND status = 'queued' \
              ORDER BY created_at ASC",
         )
-        .bind(&self.conversation_id)
+        .bind(&self.thread_id)
         .fetch_all(self.pool())
         .await
         .map_err(|e| e.to_string())?;
@@ -461,7 +537,7 @@ impl<'a> Turn<'a> {
     async fn scope(&self) -> (Option<String>, bool) {
         let row: Option<(Option<String>, Option<bool>)> =
             sqlx::query_as("SELECT project_id, ephemeral FROM conversations WHERE id = ?")
-                .bind(&self.conversation_id)
+                .bind(&self.thread_id)
                 .fetch_optional(self.pool())
                 .await
                 .ok()
@@ -473,7 +549,7 @@ impl<'a> Turn<'a> {
         let earlier: Option<i64> = sqlx::query_scalar(
             "SELECT 1 FROM messages WHERE conversation_id = ? AND role = 'assistant' AND id != ? LIMIT 1",
         )
-        .bind(&self.conversation_id)
+        .bind(&self.thread_id)
         .bind(&self.task_id)
         .fetch_optional(self.pool())
         .await
@@ -494,9 +570,9 @@ impl<'a> Turn<'a> {
             return self.finish_stopped().await;
         }
         self.finalize(&message, "done").await;
-        self.events.emit("done", &json!({"message": message, "conversation_id": self.conversation_id}));
+        self.events.emit("done", &json!({"message": message, "conversation_id": self.thread_id}));
         if !limit {
-            crate::gql::start::redispatch_queued(self.pool(), &self.agent.runs, &self.conversation_id, &self.model).await;
+            crate::gql::start::redispatch_queued(self.pool(), &self.agent.runs, &self.thread_id, &self.model).await;
         }
         self.finished("done");
         Outcome::Finished
@@ -514,12 +590,12 @@ impl<'a> Turn<'a> {
             self.finalize(&message, "stopped").await;
             self.events.emit(
                 "budget_exceeded",
-                &json!({"reason": reason, "message": message, "conversation_id": self.conversation_id}),
+                &json!({"reason": reason, "message": message, "conversation_id": self.thread_id}),
             );
         } else {
             self.finalize(&message, "stopped").await;
         }
-        self.events.emit("stopped", &json!({"message": message, "conversation_id": self.conversation_id}));
+        self.events.emit("stopped", &json!({"message": message, "conversation_id": self.thread_id}));
         self.finished("stopped");
         Outcome::Finished
     }
@@ -532,6 +608,58 @@ impl<'a> Turn<'a> {
         self.events.emit("error", &json!({"error": error}));
         self.finalize(&message, "error").await;
         self.finished("error");
+        Outcome::Finished
+    }
+
+    /// `_run_automation_inner` after the agent: the run's row, its reply in a
+    /// stateful conversation, notifications, and the closing event. A failed
+    /// run (the step limit included — Python raises it) records the error; a
+    /// spent budget is an error too; a stop keeps what was said; a monitor
+    /// that saw nothing new finishes `no_change`, silently.
+    async fn finish_automation(mut self, result: Result<(), Stop>) -> Outcome {
+        self.events.flush();
+        let Kind::Automation(spec) = &self.kind else { unreachable!("an automation's turn") };
+        let pool = &self.agent.pool;
+        let output = self.text.clone();
+        let failed = match result {
+            Err(Stop::Failed(e)) => Some(e),
+            Err(Stop::Limit) => Some(format!("agent 'main' reached its limit of {RECURSION_LIMIT} steps")),
+            _ => None,
+        };
+        let status = if let Some(error) = failed {
+            tracing::warn!("agent: run {} failed: {error}", self.task_id);
+            automation::finish_run(pool, &spec.run_id, "error", None, Some(&error)).await;
+            crate::notify::send(pool, spec.notifications.as_deref(), "error", &spec.name, &error).await;
+            automation::reply(pool, spec, &error, "error").await;
+            self.events.emit("error", &json!({"error": error}));
+            "error"
+        } else if let Some(reason) = self.budget.exceeded().map(str::to_string) {
+            let error = format!("budget exceeded: {reason}");
+            automation::finish_run(pool, &spec.run_id, "error", Some(&output), Some(&error)).await;
+            let said = if output.is_empty() { format!("[budget exceeded: {reason}]") } else { output.clone() };
+            automation::reply(pool, spec, &said, "error").await;
+            self.events.emit("budget_exceeded", &json!({"reason": reason, "run_id": spec.run_id}));
+            self.events.emit("error", &json!({"error": error}));
+            "error"
+        } else if self.cancelled() {
+            automation::finish_run(pool, &spec.run_id, "stopped", Some(&output), None).await;
+            automation::reply(pool, spec, &output, "stopped").await;
+            self.events.emit("stopped", &json!({"output": output, "run_id": spec.run_id}));
+            "stopped"
+        } else {
+            let status =
+                if spec.input_type == "monitor" && automation::reported_no_change(&output) { "no_change" } else { "done" };
+            automation::finish_run(pool, &spec.run_id, status, Some(&output), None).await;
+            // The delta gate: an unchanged monitor stays silent.
+            if status != "no_change" {
+                crate::notify::send(pool, spec.notifications.as_deref(), "done", &spec.name, &output).await;
+            }
+            // "no_change" is a run status, not a message status.
+            automation::reply(pool, spec, &output, "done").await;
+            self.events.emit("done", &json!({"output": output, "run_id": spec.run_id}));
+            status
+        };
+        self.finished(status);
         Outcome::Finished
     }
 
@@ -582,9 +710,10 @@ impl<'a> Turn<'a> {
     /// `finish_task_state`: done in the mirror; it leaves a little later.
     fn finished(&self, status: &str) {
         tracing::info!(
-            "task complete: kind=chat task={} parent={} status={status} duration_ms={}",
+            "task complete: kind={} task={} parent={} status={status} duration_ms={}",
+            self.kind.name(),
             self.task_id,
-            self.conversation_id,
+            self.thread_id,
             (chrono::Utc::now() - self.started).num_milliseconds()
         );
         self.run.update(|st| st.fields.done = true);

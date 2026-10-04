@@ -18,6 +18,7 @@ mod jobs;
 mod kernels;
 mod link;
 mod llm;
+mod notify;
 mod proxy;
 mod pyjson;
 mod runs;
