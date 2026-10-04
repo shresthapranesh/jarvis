@@ -63,7 +63,7 @@ impl Thread {
                 m.id = Some(new_id());
             }
         }
-        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+        let mut tx = crate::db::write_tx(pool).await.map_err(|e| e.to_string())?;
         let top: Option<i64> = sqlx::query_scalar("SELECT MAX(seq) FROM thread_messages WHERE thread_id = ?")
             .bind(&self.id)
             .fetch_one(&mut *tx)

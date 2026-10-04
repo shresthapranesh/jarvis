@@ -29,3 +29,11 @@ pub fn pool(path: &Path) -> Result<SqlitePool, sqlx::Error> {
         .idle_timeout(Duration::from_secs(60))
         .connect_lazy_with(opts))
 }
+
+/// A write transaction. `BEGIN IMMEDIATE` takes the write lock up front, so
+/// a busy database waits out `busy_timeout`; a deferred one that reads before
+/// it writes fails at once (SQLITE_BUSY) if another connection committed in
+/// between.
+pub async fn write_tx(pool: &SqlitePool) -> sqlx::Result<sqlx::Transaction<'static, sqlx::Sqlite>> {
+    pool.begin_with("BEGIN IMMEDIATE").await
+}

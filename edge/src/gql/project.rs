@@ -153,7 +153,7 @@ impl ProjectMutation {
     // UPDATE is what keeps them from pointing at nothing.
     async fn delete_project(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
-        let mut tx = ctx.data::<SqlitePool>()?.begin().await?;
+        let mut tx = crate::db::write_tx(ctx.data::<SqlitePool>()?).await?;
         sqlx::query("UPDATE conversations SET project_id = NULL WHERE project_id = ?")
             .bind(&raw)
             .execute(&mut *tx)

@@ -337,7 +337,7 @@ pub async fn start_chat(
 ) -> Result<Dispatched> {
     let ChatTurn { query, model, conversation_id, title, surface, display, mut attachments, project_id, ephemeral } =
         turn;
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::write_tx(pool).await?;
     let conversation_id = conversation_for(
         &mut tx,
         conversation_id.as_deref().filter(|c| !c.is_empty()),
@@ -474,7 +474,7 @@ pub async fn redispatch_queued(pool: &SqlitePool, registry: &Registry, conversat
     .await;
     let Ok(Some((message_id, text))) = first else { return };
     let started = async {
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query("UPDATE messages SET status = 'done' WHERE id = ?").bind(&message_id).execute(&mut *tx).await?;
         enqueue_turn(pool, registry, tx, conversation_id, &text, model, &[]).await
     };
@@ -586,7 +586,7 @@ impl StartMutation {
             _ => json!({}),
         };
         let run_id = new_id();
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO workflow_runs (id, workflow_id, status, inputs, outputs, node_results, error, started_at, \
              finished_at) VALUES (?, ?, 'running', ?, NULL, '[]', NULL, ?, NULL)",
@@ -642,7 +642,7 @@ impl StartMutation {
             .await?;
         let name = name.ok_or("automation not found")?;
         let run_id = new_id();
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO automation_runs (id, automation_id, status, triggered_by, output, error, started_at, \
              finished_at) VALUES (?, ?, 'running', 'manual', NULL, NULL, ?, NULL)",
