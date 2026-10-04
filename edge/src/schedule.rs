@@ -461,7 +461,7 @@ impl Scheduler {
     /// Returns how many it started.
     pub async fn dispatch(&self) -> sqlx::Result<usize> {
         let _one = self.dispatching.lock().await;
-        let mut tx = self.pool.begin().await?;
+        let mut tx = crate::db::write_tx(&self.pool).await?;
 
         // Only cards that have parents promote; a parentless todo is parked.
         let waiting: Vec<String> = sqlx::query_scalar(

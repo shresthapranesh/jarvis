@@ -171,7 +171,7 @@ impl WorkflowMutation {
     // cascade takes them.
     async fn delete_workflow(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
-        let mut tx = ctx.data::<SqlitePool>()?.begin().await?;
+        let mut tx = crate::db::write_tx(ctx.data::<SqlitePool>()?).await?;
         sqlx::query("DELETE FROM workflow_runs WHERE workflow_id = ?").bind(&raw).execute(&mut *tx).await?;
         let deleted = sqlx::query("DELETE FROM workflows WHERE id = ?").bind(&raw).execute(&mut *tx).await?;
         if deleted.rows_affected() == 0 {

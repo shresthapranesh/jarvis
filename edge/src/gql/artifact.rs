@@ -339,7 +339,7 @@ impl ArtifactMutation {
             .bind(&raw)
             .fetch_all(pool)
             .await?;
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query("DELETE FROM artifact_versions WHERE artifact_id = ?").bind(&raw).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM artifacts WHERE id = ?").bind(&raw).execute(&mut *tx).await?;
         tx.commit().await?;
@@ -357,7 +357,7 @@ impl ArtifactMutation {
         let path: Option<(String,)> =
             sqlx::query_as("SELECT path FROM documents WHERE id = ?").bind(&raw).fetch_optional(pool).await?;
         let (path,) = path.ok_or("document not found")?;
-        let mut tx = pool.begin().await?;
+        let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query("DELETE FROM document_chunks WHERE document_id = ?").bind(&raw).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM documents WHERE id = ?").bind(&raw).execute(&mut *tx).await?;
         tx.commit().await?;

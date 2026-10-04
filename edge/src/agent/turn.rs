@@ -534,7 +534,7 @@ impl<'a> Turn<'a> {
         let (input, output) = if self.has_usage { (Some(self.input_tokens), Some(self.output_tokens)) } else { (None, None) };
         let now = now_stored();
         let written = async {
-            let mut tx = self.pool().begin().await?;
+            let mut tx = crate::db::write_tx(self.pool()).await?;
             sqlx::query(
                 "UPDATE messages SET content = ?, status = ?, input_tokens = ?, output_tokens = ?, duration_ms = ?, \
                  ttft_ms = COALESCE(?, ttft_ms), llm_ms = COALESCE(?, llm_ms), prefill_tps = COALESCE(?, prefill_tps), \
