@@ -30,7 +30,7 @@ import pytest
 from agent_harness import Normalizer
 from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 from test_edge_llm import _intended_ollama, _semantics
-from test_edge_runs import AUTOMATION, CHAT, _python_subscribe
+from test_edge_runs import AUTOMATION, BOARD, CHAT, _python_subscribe
 
 REPO = Path(__file__).resolve().parent.parent
 MODEL = "ollama:fake"
@@ -236,6 +236,7 @@ async def twins(request, jarvis, work_dir: Path, tmp_path_factory, fake: FakeOll
             contextlib.closing(sqlite3.connect(edge_dir / "database.db")) as dst:
         src.backup(dst)
     env = {"JARVIS_AGENT_RUNTIME": "edge", "OLLAMA_HOST": fake.url, "JARVIS_BROWSER_CDP_URL": dead,
+           "JARVIS_BOARD_DISPATCH_EVERY": "1",
            "HOME": str(edge_dir), "JARVIS_APP_DIR": str(REPO), **extra}
     async with _run_edge(edge_binary, edge_dir, edge_dir / "database.db", env) as client:
         yield Twins(jarvis, client, work_dir / "database.db", edge_dir / "database.db", fake)
@@ -363,6 +364,64 @@ class Twins:
         return (Turn(run_id, _automation_thread(self.edge_db, auto_id, run_id), events, self.edge_db),
                 list(self.fake.requests), list(self.fake.telegram))
 
+    # ── board tasks ──────────────────────────────────────────────────────
+
+    async def board_task(self, *, both: bool = False, parents: tuple[str, ...] = (), **fields: Any) -> str:
+        """A board task in Python's database — and the edge's too when
+        `both` (a finished parent); a task to run reaches the edge's only
+        when its turn comes (`edge_board`), or its dispatcher would start it
+        early."""
+        from db import async_session
+        from db.models import BoardTask, BoardTaskLink
+
+        task = BoardTask(id=fields.pop("id"), title=fields.pop("title", "Task"), model=MODEL, **fields)
+        async with async_session() as s:
+            s.add(task)
+            for i, parent in enumerate(parents):
+                s.add(BoardTaskLink(id=f"{parent}->{task.id}", parent_id=parent, child_id=task.id))
+            await s.commit()
+        if both:
+            _copy(self.python_db, self.edge_db, "board_tasks", task.id)
+        return task.id
+
+    async def python_board(self, task_id: str, script: list[Reply], *, hold: int | None = None,
+                           during: Any = None) -> tuple[Turn, list[dict]]:
+        """Python's dispatcher starts the task, and its handler runs it."""
+        from server.task_board_runtime import board_task_job_handler, dispatch_board_tasks
+
+        self.fake.reset(script, hold)
+        assert await dispatch_board_tasks() == 1
+        job = await self.jarvis.queue.claim(kinds=["board_task"], worker_id="test", ttl_seconds=600)
+        assert job is not None
+        handler = asyncio.create_task(board_task_job_handler(job))
+        if during is not None:
+            await self._during(task_id, hold, during)
+        async with asyncio.timeout(60):
+            await handler
+        await self.jarvis.queue.complete(job.id, worker_id="test")
+        events = await _python_subscribe(BOARD, {"id": job.id})
+        return Turn(job.id, f"boardtask_{task_id}", events, self.python_db), list(self.fake.requests)
+
+    async def edge_board(self, task_id: str, before: tuple, script: list[Reply], *, hold: int | None = None,
+                         during: Any = None) -> tuple[Turn, list[dict]]:
+        """The task as it was before Python's run (`before`), in the edge's
+        database; the edge's dispatcher (every second here) starts it."""
+        self.fake.reset(script, hold)
+        _sync_board(self.python_db, self.edge_db, task_id, before)
+        # The synced row has no job; the dispatch gives it one. A quick run
+        # may be over by the next look, so its status isn't waited on.
+        run_id = None
+        for _ in range(400):
+            [(run_id,)] = _rows(self.edge_db, "SELECT job_id FROM board_tasks WHERE id = ?", task_id)
+            if run_id:
+                break
+            await asyncio.sleep(0.05)
+        assert run_id, "the edge never dispatched the task"
+        if during is not None:
+            await self._during(task_id, hold, during)
+        events = await self.subscribe(run_id, BOARD)
+        return Turn(run_id, f"boardtask_{task_id}", events, self.edge_db), list(self.fake.requests)
+
     async def _during(self, run_id: str, hold: int | None, during: Any) -> None:
         """`during(run_id)` while the held request waits — or, for a run that
         never calls the model, once it has had a moment to start."""
@@ -406,6 +465,27 @@ def _copy(src: Path, dst: Path, table: str, row_id: str) -> None:
         cur = a.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,))
         cols = [d[0] for d in cur.description]
         b.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", cur.fetchone())
+        b.commit()
+
+
+_BOARD_COLS = ("title", "body", "status", "priority", "created_by", "model", "skill", "pending_answer", "failure_count",
+               "summary", "result_metadata", "blocked_reason", "blocked_kind", "created_at")
+
+
+def _board_row(db: Path, task_id: str) -> tuple:
+    [row] = _rows(db, f"SELECT {', '.join(_BOARD_COLS)} FROM board_tasks WHERE id = ?", task_id)
+    return row
+
+
+def _sync_board(src: Path, dst: Path, task_id: str, row: tuple) -> None:
+    """The task as `row` has it in the edge's database, with its links."""
+    with contextlib.closing(sqlite3.connect(dst)) as b:
+        b.execute(f"INSERT OR REPLACE INTO board_tasks (id, {', '.join(_BOARD_COLS)}, updated_at) "
+                  f"VALUES (?, {', '.join('?' * len(_BOARD_COLS))}, '2026-10-04 00:00:00.000000')", (task_id, *row))
+        for (link_id, parent, child, created) in _rows(src, "SELECT id, parent_id, child_id, created_at FROM "
+                                                            "board_task_links WHERE child_id = ?", task_id):
+            b.execute("INSERT OR IGNORE INTO board_task_links (id, parent_id, child_id, created_at) VALUES (?, ?, ?, ?)",
+                      (link_id, parent, child, created))
         b.commit()
 
 
@@ -823,6 +903,112 @@ async def test_a_webhook_automation(twins):
     assert python["run"][:2] == ["done", 'HTTP 201\n{"received": true}']
     # One call each, the same call.
     assert twins.fake.hooks == [{"method": "POST", "path": "/hook?x=1", "body": '{"ping": 1}', "x-token": "s3cret"}]
+
+
+# ── board tasks ──────────────────────────────────────────────────────────────
+
+
+def _board_record(turn: Turn, task_id: str) -> dict[str, Any]:
+    norm = Normalizer({turn.task_id: "<run>"})
+    [task] = _rows(turn.db, "SELECT status, summary, result_metadata, blocked_reason, blocked_kind, pending_answer, "
+                            "failure_count, job_id FROM board_tasks WHERE id = ?", task_id)
+    thread = _thread(turn)
+    for rec in thread:
+        rec["id"] = f"<{rec['role']}>"
+    return norm.value({
+        "events": _events(turn),
+        "task": list(task),
+        "thread": thread,
+        "conversation": [list(r) for r in _rows(
+            turn.db, "SELECT role, content, status FROM messages WHERE conversation_id = ? ORDER BY created_at",
+            turn.conversation_id)],
+        "questions": _rows(turn.db, "SELECT source, kind, status, question, label, parent_id, board_task_id "
+                                    "FROM approvals WHERE board_task_id = ? ORDER BY requested_at", task_id),
+    })
+
+
+async def _both_board(twins: Twins, task_id: str, script: list[Reply], *, before_edge: Any = None,
+                      **kw: Any) -> tuple[dict, dict]:
+    python_during, edge_during = kw.pop("python_during", None), kw.pop("edge_during", None)
+    before = _board_row(twins.python_db, task_id)
+    python, python_requests = await twins.python_board(task_id, script, during=python_during, **kw)
+    if before_edge is not None:
+        before_edge()
+    edge, edge_requests = await twins.edge_board(task_id, before, script, during=edge_during, **kw)
+    _requests(python_requests, edge_requests)
+    [(runtime,)] = _rows(twins.edge_db, "SELECT runtime FROM jobs WHERE id = ?", edge.task_id)
+    assert runtime == "edge"
+    return _board_record(python, task_id), _board_record(edge, task_id)
+
+
+async def test_a_board_task_with_handoffs_completes_itself(twins):
+    """The prompt carries its skill and the finished parent's handoff; the
+    agent's complete_task sets the summary its final reply then doesn't.
+
+    Departure, by name: `metadata` is left out. langchain-ollama parses any
+    tool argument that is itself a JSON string, so Python hands
+    complete_task a dict, which it rejects; the edge passes the string the
+    model wrote."""
+    parent = await twins.board_task(id="p1", title="Gather", status="done", summary="Found 3 rivers.",
+                                    result_metadata='{"n": 3}', both=True)
+    task = await twins.board_task(id="t1", title="Report", body="Write it up.", status="ready", skill="writer",
+                                  parents=(parent,))
+    script = [Reply("Writing. ", [("complete_task", {"summary": "Report written."})]), Reply("Done.")]
+    python, edge = await _both_board(twins, task, script)
+    assert edge == python
+    assert python["task"][:3] == ["done", "Report written.", None]
+    prompt = twins.fake.requests[0]["messages"][1]["content"]
+    assert "use_skill('writer')" in prompt and "### Gather\nFound 3 rivers.\nMetadata: {\"n\": 3}" in prompt
+
+
+async def test_a_board_task_asks_then_resumes_with_the_answer(twins):
+    task = await twins.board_task(id="t2", title="Pick", body="Choose a colour.", status="ready")
+    ask = [Reply("", [("block_task", {"reason": "Which colour?", "needs_input": True})]), Reply("Asked.")]
+    python, edge = await _both_board(twins, task, ask)
+    assert edge == python
+    assert python["task"][0] == "blocked" and python["task"][4] == "needs_input"
+    assert [q[:4] for q in python["questions"]] == [("board_task", "input", "pending", "Which colour?")]
+
+    # The answer, as answerBoardTask leaves it: ready again, answer waiting.
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.execute("UPDATE board_tasks SET status = 'ready', pending_answer = 'Green' WHERE id = ?", (task,))
+            c.commit()
+    resume = [Reply("", [("complete_task", {"summary": "Green it is."})]), Reply("Picked.")]
+    python, edge = await _both_board(twins, task, resume)
+    assert edge == python
+    assert python["task"][:2] == ["done", "Green it is."] and python["task"][5] is None
+    assert 'The user has answered:\n\nGreen' in twins.fake.requests[0]["messages"][-1]["content"]
+    # Done: the question left the inbox.
+    assert [q[2] for q in python["questions"]] == ["cancelled"]
+
+
+async def test_a_board_task_without_its_tools_finishes_with_its_reply(twins):
+    task = await twins.board_task(id="t3", title="Note", status="ready")
+    python, edge = await _both_board(twins, task, [Reply("Noted it.")])
+    assert edge == python
+    assert python["task"][:2] == ["done", "Noted it."]
+
+
+async def test_a_board_task_stopped_through_its_job(twins):
+    """Python's stopBoardTask only flags the job for a run it doesn't hold;
+    the edge sees the flag within its poll and stops the run."""
+    from server.task_board_runtime import stop_board_task
+
+    async def python_stop(task_id: str) -> None:
+        assert await stop_board_task(task_id) is True
+
+    async def edge_stop(task_id: str) -> None:
+        with contextlib.closing(sqlite3.connect(twins.edge_db)) as c:
+            c.execute("UPDATE jobs SET cancel_requested = 1 WHERE kind = 'board_task' AND status = 'running'")
+            c.commit()
+        await asyncio.sleep(6)  # past the edge's poll
+
+    task = await twins.board_task(id="t4", title="Long", status="ready")
+    python, edge = await _both_board(twins, task, [Reply("Never sent.")], hold=0,
+                                     python_during=python_stop, edge_during=edge_stop)
+    assert edge == python
+    assert python["task"][:5] == ["blocked", None, None, "stopped by user", "stopped"]
 
 
 # ── the handover ─────────────────────────────────────────────────────────────

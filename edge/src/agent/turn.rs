@@ -19,6 +19,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use super::automation::{self, Spec};
+use super::board;
 use super::events::Emitter;
 use super::queue::Job;
 use super::summarize::{self, Summarizer};
@@ -61,6 +62,8 @@ pub enum Kind {
     Chat,
     /// A prompt or monitor automation's run (`automation.rs`).
     Automation(Spec),
+    /// A board task's run (`board.rs`), with the board tools bound.
+    Board(board::Spec),
 }
 
 impl Kind {
@@ -68,6 +71,7 @@ impl Kind {
         match self {
             Kind::Chat => "chat",
             Kind::Automation(_) => "automation",
+            Kind::Board(_) => "board_task",
         }
     }
 }
@@ -118,6 +122,16 @@ impl<'a> Turn<'a> {
     pub fn automation(agent: &'a Agent, job: &Job, run: Arc<Run>, spec: Spec) -> Self {
         let (thread, model, prompt) = (spec.thread_id(), spec.model.clone(), spec.prompt());
         let mut turn = Self::new(agent, job, run, Kind::Automation(spec), thread, &model, &prompt);
+        turn.events = turn.events.without_rows();
+        turn
+    }
+
+    /// A board task's run: its conversation's thread, which `run_cell`'s SDK
+    /// is scoped to too; steps announced, not written.
+    pub fn board(agent: &'a Agent, job: &Job, run: Arc<Run>, spec: board::Spec) -> Self {
+        let (thread, model, prompt) = (board::conversation_id(&spec.task_id), spec.model.clone(), spec.prompt.clone());
+        let mut turn = Self::new(agent, job, run, Kind::Board(spec), thread.clone(), &model, &prompt);
+        turn.conversation = Some(thread);
         turn.events = turn.events.without_rows();
         turn
     }
@@ -201,6 +215,13 @@ impl<'a> Turn<'a> {
                 };
                 wrote.await
             }
+            Kind::Board(spec) => {
+                let wrote = async {
+                    board::begin_conversation(self.pool(), spec).await.map_err(|e| e.to_string())?;
+                    thread.apply(self.pool(), vec![prompt]).await
+                };
+                wrote.await
+            }
         };
         let result = match wrote {
             Ok(()) => self.turn(&mut thread).await,
@@ -210,8 +231,10 @@ impl<'a> Turn<'a> {
             tracing::info!("agent: run {} goes to Python: {why}", self.task_id);
             return self.hand_over();
         }
-        if matches!(self.kind, Kind::Automation(_)) {
-            return self.finish_automation(result).await;
+        match self.kind {
+            Kind::Automation(_) => return self.finish_automation(result).await,
+            Kind::Board(_) => return self.finish_board(result).await,
+            Kind::Chat => {}
         }
         match result {
             Ok(()) => self.finish_done(false).await,
@@ -242,7 +265,7 @@ impl<'a> Turn<'a> {
 
     async fn turn(&mut self, thread: &mut Thread) -> Result<(), Stop> {
         let policy = Policy::load(self.pool()).await;
-        let bound = tools::bound(&policy);
+        let bound = tools::bound_for(&policy, matches!(self.kind, Kind::Board(_)));
         loop {
             self.take_step()?;
             let reply = self.model_step(thread, &bound).await?;
@@ -276,10 +299,10 @@ impl<'a> Turn<'a> {
 
 
     async fn model_step(&mut self, thread: &mut Thread, bound: &[llm::Tool]) -> Result<Message, Stop> {
-        // Mid-run messages are a chat's; nothing queues behind an automation.
+        // Mid-run messages are a chat's; nothing queues behind other runs.
         let queued = match self.kind {
             Kind::Chat => self.drain_queued().await.map_err(Stop::Failed)?,
-            Kind::Automation(_) => vec![],
+            Kind::Automation(_) | Kind::Board(_) => vec![],
         };
         let mut history = thread.messages.clone();
         history.extend(queued.iter().cloned());
@@ -451,6 +474,14 @@ impl<'a> Turn<'a> {
                 Ok(tools::todos_written(items.len()))
             }
             Native::Remember { text, kind } => Ok(self.remember(&text, &kind).await),
+            Native::CompleteTask { summary, metadata } => match &self.kind {
+                Kind::Board(spec) => board::complete(self.pool(), spec, &summary, metadata.as_deref()).await,
+                _ => Ok("Error: complete_task is only available while executing a board task.".into()),
+            },
+            Native::BlockTask { reason, needs_input } => match &self.kind {
+                Kind::Board(spec) => board::block(self.pool(), spec, &reason, needs_input).await,
+                _ => Ok("Error: block_task is only available while executing a board task.".into()),
+            },
             Native::SetTodoStatus { index, status } => match tools::set_status(&thread.todos, index, &status) {
                 Ok((todos, answer)) => {
                     self.events.emit("todos_updated", &json!({"todos": todos, "source": "main"}));
@@ -634,6 +665,32 @@ impl<'a> Turn<'a> {
         }
         let status = automation::finish(&self.agent.pool, &self.run, spec, end).await;
         self.finished(status);
+        Outcome::Finished
+    }
+
+    /// `_run_board_task_inner` after the agent, then the dispatch pass a
+    /// finished task may unblock children for.
+    async fn finish_board(mut self, result: Result<(), Stop>) -> Outcome {
+        self.events.flush();
+        let Kind::Board(spec) = &self.kind else { unreachable!("a board task's turn") };
+        let output = self.text.clone();
+        let end = match result {
+            Err(Stop::Failed(e)) => automation::End::Failed(e),
+            Err(Stop::Limit) => automation::End::Failed(format!("agent 'main' reached its limit of {RECURSION_LIMIT} steps")),
+            _ => match self.budget.exceeded() {
+                Some(reason) => automation::End::Budget { output, reason: reason.to_string() },
+                None if self.cancelled() => automation::End::Stopped(Some(output)),
+                None => automation::End::Done(output),
+            },
+        };
+        if let automation::End::Failed(e) = &end {
+            tracing::warn!("agent: run {} failed: {e}", self.task_id);
+        }
+        let (status, done) = board::finish(&self.agent.pool, &self.run, spec, end).await;
+        self.finished(&status);
+        if done {
+            self.agent.dispatch();
+        }
         Outcome::Finished
     }
 

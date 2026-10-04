@@ -84,6 +84,13 @@ pub async fn claim(pool: &SqlitePool, kinds: &[&str], worker: &str) -> sqlx::Res
     }))
 }
 
+/// `is_cancel_requested`.
+pub async fn cancel_requested(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
+    let flag: Option<Option<bool>> =
+        sqlx::query_scalar("SELECT cancel_requested FROM jobs WHERE id = ?").bind(id).fetch_optional(pool).await?;
+    Ok(flag.flatten().unwrap_or(false))
+}
+
 /// `extend_lock`: false when the job is no longer ours to run.
 pub async fn extend_lock(pool: &SqlitePool, id: &str, worker: &str) -> sqlx::Result<bool> {
     let r = sqlx::query(

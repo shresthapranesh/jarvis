@@ -20,6 +20,7 @@
 //! rows as Python emits them (`events.rs`).
 
 mod automation;
+mod board;
 mod embed;
 mod events;
 mod prompt;
@@ -47,6 +48,8 @@ use queue::Job;
 
 /// How often the job table is looked at, besides the wakes.
 const POLL: Duration = Duration::from_secs(5);
+/// `CANCEL_POLL_INTERVAL_SECONDS`.
+const CANCEL_POLL: Duration = Duration::from_secs(5);
 /// Turns running here at once.
 const MAX_RUNNING: usize = 8;
 
@@ -58,6 +61,8 @@ pub struct Agent {
     /// `locked_by` on the jobs this process claims.
     worker: String,
     slots: Arc<Semaphore>,
+    /// The board dispatcher, for the pass a finished task may unblock.
+    scheduler: Option<Arc<crate::schedule::Scheduler>>,
 }
 
 /// What a turn came to, for the job.
@@ -70,8 +75,14 @@ enum Outcome {
 }
 
 impl Agent {
-    pub fn new(pool: SqlitePool, runs: Arc<Registry>, kernels: Arc<Kernels>) -> Arc<Self> {
+    pub fn new(
+        pool: SqlitePool,
+        runs: Arc<Registry>,
+        kernels: Arc<Kernels>,
+        scheduler: Option<Arc<crate::schedule::Scheduler>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            scheduler,
             pool,
             runs,
             kernels,
@@ -102,7 +113,7 @@ impl Agent {
         loop {
             // A slot before the claim: a claimed job's lock is ticking.
             let Ok(slot) = self.slots.clone().acquire_owned().await else { return };
-            match queue::claim(&self.pool, &["chat", "automation"], &self.worker).await {
+            match queue::claim(&self.pool, &["chat", "automation", "board_task"], &self.worker).await {
                 Ok(Some(job)) => {
                     let me = self.clone();
                     tokio::spawn(async move {
@@ -137,6 +148,7 @@ impl Agent {
                 tracing::warn!("agent: lost the lock on job {}; abandoning it", job.id);
                 return;
             }
+            () = self.watch_cancel(&job.id, &run) => unreachable!("watching never ends"),
         };
         match outcome {
             Outcome::Finished => match queue::complete(&self.pool, &job.id, &self.worker).await {
@@ -150,8 +162,10 @@ impl Agent {
 
     async fn serve(&self, job: &Job, run: &Arc<Run>) -> Outcome {
         tracing::info!("agent: {} run {} claimed", job.kind, job.id);
-        if job.kind == "automation" {
-            return self.serve_automation(job, run).await;
+        match job.kind.as_str() {
+            "automation" => return self.serve_automation(job, run).await,
+            "board_task" => return self.serve_board(job, run).await,
+            _ => {}
         }
         match turn::Turn::chat(self, job, run.clone()) {
             Some(turn) => turn.run().await,
@@ -201,6 +215,55 @@ impl Agent {
         turn::Turn::automation(self, job, run.clone(), spec).run().await
     }
 
+    /// `board_task_job_handler`: a task that is gone, done or archived has
+    /// nothing to run; otherwise the claim is re-asserted and the task runs —
+    /// checked before anything is written, so a task Python takes instead
+    /// still has its answer.
+    async fn serve_board(&self, job: &Job, run: &Arc<Run>) -> Outcome {
+        let spec = match board::load(&self.pool, job).await {
+            Ok(Some(spec)) => spec,
+            Ok(None) => {
+                self.end(run, "done");
+                return Outcome::Finished;
+            }
+            Err(e) => {
+                tracing::warn!("agent: preparing board run {}: {e}; handing it to Python", job.id);
+                return Outcome::HandOver(None);
+            }
+        };
+        if !route::serves_model(&self.pool, &spec.model).await {
+            return Outcome::HandOver(None);
+        }
+        if let Err(e) = board::claim(&self.pool, &spec).await {
+            tracing::warn!("agent: claiming board task {}: {e}; handing it to Python", spec.task_id);
+            return Outcome::HandOver(None);
+        }
+        turn::Turn::board(self, job, run.clone(), spec).run().await
+    }
+
+    /// A board dispatch pass, in the background.
+    fn dispatch(&self) {
+        if let Some(scheduler) = self.scheduler.clone() {
+            tokio::spawn(async move {
+                if let Err(e) = scheduler.dispatch().await {
+                    tracing::error!("board dispatch failed: {e}");
+                }
+            });
+        }
+    }
+
+    /// `watch_queue_cancel`: a stop that reached only the job — through
+    /// Python, or a stop mutation the edge doesn't serve — still stops the
+    /// run. Polled as often as Python polls. Never returns.
+    async fn watch_cancel(&self, id: &str, run: &Arc<Run>) {
+        loop {
+            tokio::time::sleep(CANCEL_POLL).await;
+            if !run.fields().cancelled && queue::cancel_requested(&self.pool, id).await.unwrap_or(false) {
+                run.update(|st| st.fields.cancelled = true);
+            }
+        }
+    }
+
     /// `finish_task_state` for a run that ended before its turn began.
     fn end(&self, run: &Arc<Run>, status: &str) {
         tracing::info!("task complete: kind={} task={} status={status}", run.meta.kind, run.id);
@@ -241,7 +304,16 @@ impl Agent {
     /// A scheduled automation's run is first mirrored here: the schedule
     /// enqueues it without one, as Python's handler registers it on claim.
     async fn meta(&self, job: &Job) -> Meta {
-        let (label, parent_id) = if job.kind == "automation" {
+        let (label, parent_id) = if job.kind == "board_task" {
+            let id = job.payload["task_id"].as_str().unwrap_or_default().to_string();
+            let title: Option<String> = sqlx::query_scalar("SELECT title FROM board_tasks WHERE id = ?")
+                .bind(&id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+            (title.unwrap_or_default(), Some(id))
+        } else if job.kind == "automation" {
             let id = job.payload["automation_id"].as_str().unwrap_or_default().to_string();
             let name: Option<String> = sqlx::query_scalar("SELECT name FROM automations WHERE id = ?")
                 .bind(&id)

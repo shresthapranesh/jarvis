@@ -189,13 +189,20 @@ def _compose_task_prompt(task: BoardTask, parents: list[BoardTask]) -> str:
 async def _run_agent(
     task: BoardTask, state: TaskState, conv_id: str, prompt: str, model: str,
     invocation_context: InvocationContext | None = None,
+    handoff: dict | None = None,
 ) -> str:
-    accumulated: list[str] = []
+    # A run the edge started and handed over mid-run (`edge/src/agent/`): the
+    # text it streamed and what it spent are this run's too.
+    carried: dict = handoff or {}
+    accumulated: list[str] = [carried["text"]] if carried.get("text") else []
     coalescer = TokenCoalescer(state)
+    run_cb = start_run_callbacks(state, "board_task")
+    if carried.get("usage"):
+        run_cb.budget.carry(carried["usage"])
     # Declared as the base type: `list` is invariant, so the concrete handler
     # list is not assignable to RunnableConfig's `list[BaseCallbackHandler]`
     # without this.
-    callbacks: list[BaseCallbackHandler] = start_run_callbacks(state, "board_task").handlers
+    callbacks: list[BaseCallbackHandler] = run_cb.handlers
 
     if invocation_context is not None and invocation_context.store is not None:
         st = invocation_context.store
@@ -219,8 +226,12 @@ async def _run_agent(
         "recursion_limit": 100,
         "callbacks": callbacks,
     }
+    stream_input: dict = {"messages": [{"role": "user", "content": prompt}]}
+    if handoff is not None:
+        # The edge already wrote the prompt; the run goes on from its last step.
+        stream_input = {"messages": [], "resume": True, "steps_taken": int(carried.get("steps") or 0)}
     async with aclosing(agent.astream(
-        {"messages": [{"role": "user", "content": prompt}]},
+        stream_input,
         config=run_config,
         stream_mode=STREAM_MODES,
         subgraphs=True,
@@ -272,6 +283,7 @@ async def _run_board_task_inner(
     task: BoardTask, state: TaskState, run_id: str,
     pending_answer: str | None = None,
     invocation_context=None,
+    handoff: dict | None = None,
 ) -> None:
     final_status = "error"
     conv_id = board_task_conversation_id(task.id)
@@ -290,10 +302,14 @@ async def _run_board_task_inner(
         else:
             prompt = _compose_task_prompt(task, parents)
 
-        async with async_session() as session:
-            await add_message(session, conv_id, "user", prompt)
+        # A handed-over run's prompt is on record already.
+        if handoff is None:
+            async with async_session() as session:
+                await add_message(session, conv_id, "user", prompt)
 
-        output = await _run_agent(task, state, conv_id, prompt, model, invocation_context=invocation_context)
+        output = await _run_agent(
+            task, state, conv_id, prompt, model, invocation_context=invocation_context, handoff=handoff,
+        )
         if invocation_context is not None:
             try:
                 await invocation_context.persist_state_deltas()
@@ -508,9 +524,13 @@ async def decompose_board_task(task_id: str) -> list[BoardTask]:
 # ── Queue handler ────────────────────────────────────────────────────────────
 
 async def board_task_job_handler(job: Job) -> None:
-    """Consume a 'board_task' job. Payload: {"task_id": str}. job.id is the
-    run id (== BoardTask.job_id at dispatch time)."""
+    """Consume a 'board_task' job. Payload: {"task_id": str, "handoff": dict |
+    None}. job.id is the run id (== BoardTask.job_id at dispatch time).
+    ``handoff`` is what the edge's agent loop carried when it handed this run
+    over mid-run (see `_run_agent_task`); the answer it consumed is in the
+    thread already."""
     task_id: str = job.payload["task_id"]
+    handoff: dict | None = job.payload.get("handoff")
     run_id = job.id
     invocation_context = await new_invocation_context(
         kind="board_task",
@@ -543,7 +563,7 @@ async def board_task_job_handler(job: Job) -> None:
     async with queue_cancel_watch(run_id, state):
         await _run_board_task_inner(
             task, state, run_id, pending_answer,
-            invocation_context=invocation_context,
+            invocation_context=invocation_context, handoff=handoff,
         )
 
 

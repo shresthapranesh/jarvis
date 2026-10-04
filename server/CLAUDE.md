@@ -42,6 +42,7 @@ Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a
 - `_finish_task` only applies when the row still belongs to this run (`job_id == run_id`) and is still `running`. The dispatcher skips `ready` tasks whose previous job is still live.
 - `block_task(needs_input=True)` → `answerBoardTask` stores `pending_answer` and re-queues; the next run resumes on the same conversation `boardtask_{id}`.
 - `decompose_board_task` parks the original in `todo` **first**, then creates subtasks as its parents.
+- The edge's agent loop runs board tasks itself (`edge/src/agent/board.rs` + `turn.rs`): the claim, `_compose_task_prompt`/`_RESUME_PROMPT`, `_finish_task` and the board tools (`tools/board.py`) are ports — change both. A run it hands over mid-run carries `payload.handoff`, which `board_task_job_handler` resumes from. It also polls a running job's `cancel_requested`, so `stop_board_task` here reaches its runs.
 - Startup sweep flips `running` tasks back to `ready` only if no live job holds them.
 
 ## Projects

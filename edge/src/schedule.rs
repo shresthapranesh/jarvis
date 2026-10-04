@@ -172,10 +172,15 @@ impl Scheduler {
     }
 
     fn system_entries(&self, now: DateTime<Utc>) -> Vec<Entry> {
+        /// `register_board_dispatch_job(interval_seconds=15)`; the edge alone
+        /// reads `JARVIS_BOARD_DISPATCH_EVERY` (seconds), which tests shorten.
+        fn dispatch_every() -> i64 {
+            std::env::var("JARVIS_BOARD_DISPATCH_EVERY").ok().and_then(|v| v.trim().parse().ok()).filter(|&n| n > 0).unwrap_or(15)
+        }
         let cron = |expr: &str| When::Cron(Trigger::parse(expr, self.tz).expect("a valid built-in schedule"));
         let minutes = |m: i64| When::Every(chrono::Duration::minutes(m));
         vec![
-            Entry::new(Action::Dispatch, When::Every(chrono::Duration::seconds(15)), 30, self.tz, now),
+            Entry::new(Action::Dispatch, When::Every(chrono::Duration::seconds(dispatch_every())), 30, self.tz, now),
             Entry::new(Action::Maintenance("memory_consolidation"), cron("0 */6 * * *"), 300, self.tz, now),
             Entry::new(Action::Maintenance("project_memory"), minutes(30), 300, self.tz, now),
             Entry::new(Action::StagingCleanup, cron("0 * * * *"), 300, self.tz, now),
@@ -498,8 +503,8 @@ impl Scheduler {
         }
         // A card whose previous run is still wrapping up (re-readied by its
         // own tool call) waits, or two runs would share its thread.
-        let ready: Vec<(String, String)> = sqlx::query_as(
-            "SELECT id, title FROM board_tasks WHERE status = 'ready' AND \
+        let ready: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT id, title, model FROM board_tasks WHERE status = 'ready' AND \
              (job_id IS NULL OR job_id NOT IN (SELECT id FROM jobs WHERE status IN ('pending', 'running'))) \
              ORDER BY priority DESC, created_at ASC LIMIT ?",
         )
@@ -508,8 +513,10 @@ impl Scheduler {
         .await?;
 
         let mut started = vec![];
-        for (task_id, title) in &ready {
+        for (task_id, title, model) in &ready {
             let run_id = new_id();
+            // A read beside the write lock, which WAL allows.
+            let edge = crate::agent::route::serves_board(&self.pool, model.as_deref()).await;
             sqlx::query("UPDATE board_tasks SET status = 'running', job_id = ?, updated_at = ? WHERE id = ?")
                 .bind(&run_id)
                 .bind(now_stored())
@@ -518,14 +525,14 @@ impl Scheduler {
                 .await?;
             let thread = format!("boardtask_{task_id}");
             let enqueued_at =
-                crate::jobs::insert(&mut *tx, &run_id, "board_task", &json!({"task_id": task_id}), Some(&thread), false).await?;
+                crate::jobs::insert(&mut *tx, &run_id, "board_task", &json!({"task_id": task_id}), Some(&thread), edge).await?;
             let meta = Meta {
                 kind: "board_task".into(),
                 label: title.clone(),
                 parent_id: Some(task_id.clone()),
                 started_at: iso_from_db(&enqueued_at).utc().0,
             };
-            self.runs.pre_register(&run_id, meta, false);
+            self.runs.pre_register(&run_id, meta, edge);
             started.push(run_id);
         }
         if let Err(e) = tx.commit().await {

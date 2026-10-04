@@ -59,11 +59,16 @@ impl Policy {
 }
 
 /// The main agent's tools in `_build_agent`'s order, without the ones a
-/// human switched off. With an embedder — which Python always has — `remember`
-/// is bound too.
-pub fn bound(policy: &Policy) -> Vec<Tool> {
-    ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow", "remember"]
-        .into_iter()
+/// human switched off. A board run (`board=True`) also gets `complete_task`
+/// and `block_task`, before `remember`; with an embedder — which Python
+/// always has — `remember` is bound too.
+pub fn bound_for(policy: &Policy, board: bool) -> Vec<Tool> {
+    let board_tools: &[&str] = if board { &["complete_task", "block_task"] } else { &[] };
+    ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow"]
+        .iter()
+        .chain(board_tools)
+        .chain(&["remember"])
+        .copied()
         .filter(|n| policy.enabled(n))
         .map(schema)
         .collect()
@@ -76,6 +81,8 @@ pub enum Native {
     WriteTodos { todos: Vec<String> },
     SetTodoStatus { index: i64, status: String },
     Remember { text: String, kind: String },
+    CompleteTask { summary: String, metadata: Option<String> },
+    BlockTask { reason: String, needs_input: bool },
 }
 
 /// How a batch of calls will run.
@@ -143,6 +150,23 @@ fn native(name: &str, args: &Value) -> Option<Native> {
                 Some(k) => k.as_str()?.to_string(),
             };
             Some(Native::Remember { text, kind })
+        }
+        "complete_task" if only(&["summary", "metadata"]) => {
+            let summary = obj.get("summary")?.as_str()?.to_string();
+            let metadata = match obj.get("metadata") {
+                None | Some(Value::Null) => None,
+                // Not JSON at all: Python words that error from its parser.
+                Some(m) => Some(m.as_str().filter(|m| serde_json::from_str::<Value>(m).is_ok())?.to_string()),
+            };
+            Some(Native::CompleteTask { summary, metadata })
+        }
+        "block_task" if only(&["reason", "needs_input"]) => {
+            let reason = obj.get("reason")?.as_str()?.to_string();
+            let needs_input = match obj.get("needs_input") {
+                None => false,
+                Some(b) => b.as_bool()?,
+            };
+            Some(Native::BlockTask { reason, needs_input })
         }
         _ => None,
     }
@@ -212,7 +236,7 @@ mod tests {
     #[test]
     fn a_batch_is_the_edges_only_if_every_call_is() {
         let policy = Policy::default();
-        let tools = bound(&policy);
+        let tools = bound_for(&policy, false);
         let plan = plan(
             &[call("run_cell", json!({"code": "1"})), call("nope", json!({})), call("write_todos", json!({"todos": ["a"]}))],
             &tools,
@@ -249,7 +273,7 @@ mod tests {
             "bound:run_cell": {"approval": true},
         }))
         .unwrap());
-        let tools = bound(&policy);
+        let tools = bound_for(&policy, false);
         assert!(!tools.iter().any(|t| t.name == "remember"));
         assert!(matches!(plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy), Plan::Python(_)));
     }
