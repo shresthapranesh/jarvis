@@ -161,6 +161,11 @@ static CACHE: std::sync::LazyLock<Mutex<Cache>> =
     std::sync::LazyLock::new(|| Mutex::new(Cache { entries: HashMap::new(), order: VecDeque::new() }));
 
 /// A stored float32 vector (`np.frombuffer(blob, dtype=np.float32)`).
+/// `embed_for_storage`: `text` in document space, as stored bytes.
+pub async fn for_storage(pool: &SqlitePool, http: &reqwest::Client, text: &str) -> Result<Vec<u8>, String> {
+    Ok(to_blob(&Embedder::resolve(pool).await.embed(http, text, Space::Document).await?))
+}
+
 pub fn from_blob(blob: &[u8]) -> Vec<f32> {
     blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect()
 }

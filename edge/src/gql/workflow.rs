@@ -167,17 +167,25 @@ impl WorkflowMutation {
         Workflow::by_id(pool, &raw).await?.ok_or_else(|| "workflow not found".into())
     }
 
-    // The human path only — see `delete_skill`. Runs go with it, as the ORM
-    // cascade takes them.
+    // The human path only — see `delete_skill`.
     async fn delete_workflow(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
-        let mut tx = crate::db::write_tx(ctx.data::<SqlitePool>()?).await?;
-        sqlx::query("DELETE FROM workflow_runs WHERE workflow_id = ?").bind(&raw).execute(&mut *tx).await?;
-        let deleted = sqlx::query("DELETE FROM workflows WHERE id = ?").bind(&raw).execute(&mut *tx).await?;
-        if deleted.rows_affected() == 0 {
+        if !delete_workflow(ctx.data()?, &raw).await? {
             return Err("workflow not found".into());
         }
-        tx.commit().await?;
         Ok(true)
     }
+}
+
+/// `db/ops.py:delete_workflow`: its runs go with it, as the ORM cascade
+/// takes them. False when there's no such workflow.
+pub async fn delete_workflow(pool: &SqlitePool, raw_id: &str) -> sqlx::Result<bool> {
+    let mut tx = crate::db::write_tx(pool).await?;
+    sqlx::query("DELETE FROM workflow_runs WHERE workflow_id = ?").bind(raw_id).execute(&mut *tx).await?;
+    let deleted = sqlx::query("DELETE FROM workflows WHERE id = ?").bind(raw_id).execute(&mut *tx).await?;
+    if deleted.rows_affected() == 0 {
+        return Ok(false);
+    }
+    tx.commit().await?;
+    Ok(true)
 }

@@ -1284,6 +1284,174 @@ async def test_the_inbox_answers_through_the_edge(twins):
         assert edge == python, table
 
 
+async def test_deferred_actions_run_through_the_edge(twins):
+    """An agent's delete recorded for approval (`core/approvals.py:ACTIONS`):
+    approving runs it, in the edge — workflow with its runs, automation with
+    its runs and conversation, a skill already gone — and a denial of any
+    action, an MCP call's included, only closes the row. An approved MCP call
+    is still Python's."""
+    ts = "'2026-01-01 00:00:00'"
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.execute(f"INSERT INTO workflows (id, name, definition, created_at, updated_at) VALUES ('wf', 'flow', '{{}}', {ts}, {ts})")
+            c.execute(f"INSERT INTO workflow_runs (id, workflow_id, status, started_at) VALUES ('wr', 'wf', 'done', {ts})")
+            c.execute("INSERT INTO automations (id, name, input_type, enabled, stateful, created_at, updated_at) "
+                      f"VALUES ('au', 'daily', 'prompt', 1, 1, {ts}, {ts})")
+            c.execute("INSERT INTO automation_runs (id, automation_id, status, triggered_by, started_at) "
+                      f"VALUES ('ar', 'au', 'done', 'manual', {ts})")
+            c.execute("INSERT INTO conversations (id, title, model, surface, pinned, ephemeral, created_at) "
+                      f"VALUES ('automation_au', 'daily', 'm', 'automation', 0, 0, {ts})")
+            c.execute("INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
+                      f"VALUES ('am', 'automation_au', 'user', 'go', 'done', {ts})")
+            c.execute(f"INSERT INTO skills (id, name, description, body, enabled, created_at, updated_at) VALUES ('sk', 'kept', 'd', 'b', 1, {ts}, {ts})")
+            for aid, action, payload in (
+                ("ap-wf", "delete_workflow", {"workflow_id": "wf", "name": "flow"}),
+                ("ap-au", "delete_automation", {"automation_id": "au", "name": "daily"}),
+                ("ap-gone", "delete_skill", {"skill_id": "nope", "name": "gone"}),
+                ("ap-sk", "delete_skill", {"skill_id": "sk", "name": "kept"}),
+                ("ap-mcp", "call_mcp_tool", {"server": "s", "tool": "t", "args": {}}),
+                ("ap-mcp2", "call_mcp_tool", {"server": "s", "tool": "t", "args": {}}),
+                ("ap-odd", "launch", {}),
+            ):
+                c.execute("INSERT INTO approvals (id, source, kind, status, question, label, action, action_payload, "
+                          f"requested_at, updated_at) VALUES (?, 'deferred', 'approval', 'pending', 'q?', 'l', ?, ?, {ts}, {ts})",
+                          (aid, action, json.dumps(payload)))
+            c.commit()
+
+    for aid, answer in (("ap-wf", "yes"), ("ap-au", "yes"), ("ap-gone", "yes"), ("ap-sk", "what is it?"),
+                        ("ap-mcp", "no"), ("ap-odd", "yes"), ("ap-wf", "yes")):
+        python = await _python_gql(RESOLVE, {"id": aid, "a": answer})
+        edge = await _edge_gql(twins, RESOLVE, {"id": aid, "a": answer})
+        assert edge == python, aid
+    tables = {"approvals": _APPROVAL_COLS, "workflows": "id", "workflow_runs": "id", "automations": "id",
+              "automation_runs": "id", "conversations": "id", "messages": "id", "skills": "id"}
+    for table, cols in tables.items():
+        python, edge = (_rows(db, f"SELECT {cols} FROM {table} ORDER BY rowid") for db in (twins.python_db, twins.edge_db))
+        assert edge == python, table
+    assert not _rows(twins.edge_db, "SELECT id FROM automations") and _rows(twins.edge_db, "SELECT id FROM skills")
+
+    resp = await twins.client.post("/graphql", json={"query": RESOLVE, "variables": {"id": "ap-mcp2", "a": "yes"}})
+    assert resp.status_code != 200  # deferred to Python
+    assert _rows(twins.edge_db, "SELECT status FROM approvals WHERE id = 'ap-mcp2'") == [("pending",)]
+
+
+async def test_memory_and_skill_writes_through_the_edge(twins):
+    """`addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill`: embedded
+    by the same embedder (a new fact merged into its near-duplicate), row for
+    row and byte for byte with Python, refusals worded as Python's."""
+    import base64
+    import re
+
+    def _gid(ty: str, raw: str) -> str:
+        return base64.b64encode(f"{ty}:{raw}".encode()).decode()
+
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.execute("INSERT INTO skills (id, name, description, body, enabled, embedding, created_at, updated_at) "
+                      "VALUES ('sk1', 'review', 'How to review', 'Read it.', 1, ?, '2026-01-01 00:00:00', "
+                      "'2026-01-01 00:00:00')", (fake_blob("review"),))
+            c.commit()
+    # Each side mints its own ids: numbered by first sight, per side.
+    norms = {"python": Normalizer(), "edge": Normalizer()}
+
+    def shape(side: str, out: dict) -> Any:
+        # Timestamps by their shape only.
+        return json.loads(re.sub(r"\d{2}:\d{2}:\d{2}\.\d+", "<time>", json.dumps(norms[side].value(out))))
+
+    async def both(query: str, variables: dict) -> None:
+        python = await _python_gql(query, variables)
+        edge = await _edge_gql(twins, query, variables)
+        assert shape("edge", edge) == shape("python", python), variables
+
+    add = "mutation($t: String!, $k: String!) { addMemory(text: $t, kind: $k) { id kind text updatedAt useCount } }"
+    for text, kind in (("  Tea at noon  ", "fact"), ("The user's favourite colour is green!", "fact"),
+                       ("Coffee after lunch", "weird"), ("Sam drinks coffee", "core"), ("   ", "fact")):
+        await both(add, {"t": text, "k": kind})
+    update = "mutation($id: String!, $t: String!, $k: String) { updateMemoryItem(id: $id, text: $t, kind: $k) { id kind text } }"
+    for mid, text, kind in (("m1", " The user reviews the rust edge ", "core"), ("m2", "Lunch is at one", "bogus"),
+                            ("m2", "Lunch is at one", None), ("nope", "x", None), ("m1", " ", None)):
+        await both(update, {"id": mid, "t": text, "k": kind})
+
+    fields = "name description body enabled"
+    create = f"mutation($i: SkillCreateInput!) {{ createSkill(input: $i) {{ {fields} }} }}"
+    for i in ({"name": " deploy ", "description": " How to deploy the edge ", "body": " steps "},
+              {"name": "deploy", "description": "d", "body": "b"}, {"name": "off", "description": "d", "body": "b", "enabled": False},
+              {"name": " ", "description": "d", "body": "b"}, {"name": "x", "description": " ", "body": "b"},
+              {"name": "x", "description": "d", "body": "  "}):
+        await both(create, {"i": i})
+    gid = _gid("Skill", "sk1")
+    upd = f"mutation($id: ID!, $i: SkillUpdateInput!) {{ updateSkill(id: $id, input: $i) {{ {fields} }} }}"
+    for i in ({"name": "deploy"}, {"name": " "}, {"description": " "}, {"name": " review ", "body": ""},
+              {"description": "How to review maps"}, {"enabled": False}, {}):
+        await both(upd, {"id": gid, "i": i})
+    await both(upd, {"id": _gid("Skill", "nope"), "i": {"name": "x"}})
+
+    for table, cols, order in (("memories", "kind, text, embedding", "text"),
+                               ("skills", "name, description, body, enabled, embedding", "name")):
+        python, edge = (_rows(db, f"SELECT {cols} FROM {table} ORDER BY {order}") for db in (twins.python_db, twins.edge_db))
+        assert edge == python, table
+    assert _rows(twins.edge_db, "SELECT embedding FROM skills WHERE name = 'deploy'") == [(fake_blob("How to deploy the edge"),)]
+    # The near-duplicate replaced the fact it repeats.
+    assert _rows(twins.edge_db, "SELECT text FROM memories WHERE id = 'm0'") == [("The user's favourite colour is green!",)]
+
+
+async def test_a_board_task_is_decomposed_through_the_edge(twins):
+    """`decomposeBoardTask`: the planner's prompt, its reply parsed (prose
+    around the object, repeated and boolean indexes), the original parked
+    behind its subtasks — and every refusal, before or after the call — row
+    for row with Python. The run slots are full, so no dispatch starts one."""
+    import base64
+
+    def gid(raw: str) -> str:
+        return base64.b64encode(f"BoardTask:{raw}".encode()).decode()
+
+    ts = "'2026-01-01 00:00:00'"
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.executemany("INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, cancel_requested, "
+                          f"run_at, created_at, updated_at) VALUES (?, 'board_task', '{{}}', 'pending', 0, 3, 0, "
+                          f"'2099-01-01 00:00:00', {ts}, {ts})", [("full-1",), ("full-2",), ("full-3",)])
+            for tid, status, extra in (("dt", "blocked", "'Which?', 'needs_input'"), ("dt2", "todo", "NULL, NULL"),
+                                       ("dt-run", "running", "NULL, NULL"), ("dt-kid", "todo", "NULL, NULL")):
+                c.execute("INSERT INTO board_tasks (id, title, body, status, priority, created_by, model, blocked_reason, "
+                          f"blocked_kind, failure_count, created_at, updated_at) VALUES (?, ?, 'Plan the trip.', ?, 4, "
+                          f"'user', ?, {extra}, 0, {ts}, {ts})", (tid, f"Task {tid}", status, MODEL))
+            c.execute(f"INSERT INTO board_task_links (id, parent_id, child_id, created_at) VALUES ('l', 'dt2', 'dt-kid', {ts})")
+            c.commit()
+
+    plan = {"subtasks": [{"title": " Book flights ", "body": "Find flights.", "depends_on": []},
+                         {"title": "Book hotel", "body": "Near the venue.", "depends_on": [0, 0]},
+                         {"title": "Itinerary", "body": "Day by day.", "depends_on": [1, True]}]}
+    replies = [
+        "Not JSON at all",
+        json.dumps({"subtasks": [{"title": "only", "body": "one"}]}),
+        json.dumps({"subtasks": [{"title": "a", "body": "b", "depends_on": [0]}, {"title": "c", "body": "d"}]}),
+        json.dumps({"subtasks": ["a", "b"]}),
+        json.dumps({"subtasks": [{"title": "a", "body": ""}, {"title": "c", "body": "d"}]}),
+        "Here is the plan:\n" + json.dumps(plan) + "\nGood luck!",
+    ]
+    twins.fake.script = [Reply(r) for r in replies for _ in ("python", "edge")]
+
+    fields = "title body status priority createdBy model parentIds childIds blockedReason"
+    q = f"mutation($id: ID!) {{ decomposeBoardTask(id: $id) {{ {fields} }} }}"
+    for tid in ("nope", "dt-run", "dt-kid", "dt", "dt", "dt", "dt", "dt", "dt"):
+        python = await _python_gql(q, {"id": gid(tid)})
+        edge = await _edge_gql(twins, q, {"id": gid(tid)})
+        assert edge == python, tid
+    assert edge["data"]["decomposeBoardTask"][2]["title"] == "Itinerary"
+
+    # Each side asked the same thing.
+    asked = [[(m["role"], m["content"]) for m in r["messages"]] for r in twins.fake.requests]
+    assert len(asked) == 2 * len(replies) and all(a == asked[0] for a in asked)
+    assert asked[0][0][1].startswith("You are a planner") and "# Task: Task dt\nPlan the trip." in asked[0][1][1]
+
+    tasks = "SELECT title, body, status, priority, created_by, model, blocked_reason, blocked_kind, finished_at FROM board_tasks ORDER BY title"
+    links = ("SELECT p.title, c.title FROM board_task_links l JOIN board_tasks p ON p.id = l.parent_id "
+             "JOIN board_tasks c ON c.id = l.child_id ORDER BY l.rowid")
+    for sql in (tasks, links):
+        assert _rows(twins.edge_db, sql) == _rows(twins.python_db, sql), sql
+
+
 async def test_the_sdk_asks_through_the_edge(twins):
     """`requestToolApproval` as the `jarvis` SDK sends it from a kernel."""
     agent = {"X-Jarvis-Caller": "agent", "X-Jarvis-Conversation": "c-old"}

@@ -70,10 +70,14 @@ PARITY_OPERATIONS = {
 
 
 @pytest.fixture
-async def edge(database, work_dir: Path, edge_binary: Path, monkeypatch):
-    # One scheduler zone for both sides (`Automation.nextRunAt`), with DST.
+def one_zone(monkeypatch):
+    """One scheduler zone for both sides (`Automation.nextRunAt`), with DST."""
     monkeypatch.setenv("JARVIS_TIMEZONE", "America/New_York")
     monkeypatch.setattr("core.scheduler._timezone", None)
+
+
+@pytest.fixture
+async def edge(database, work_dir: Path, edge_binary: Path, one_zone):
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
         yield client
 
@@ -490,7 +494,7 @@ class Twin:
 
 
 @pytest.fixture
-async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: Path):
+async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: Path, one_zone):
     import sqlite3
 
     from db import async_session
@@ -748,9 +752,84 @@ async def test_conversation_deletes_and_model_change(twin):
     await twin.run(update, {"id": _gid("Conversation", "nope"), "m": BUILTIN})
 
 
+AUTOMATION_FIELDS = ("id name description inputType promptText model codeText webhookUrl webhookMethod webhookHeaders "
+                     "webhookBody schedule enabled stateful notifications conversationId nextRunAt lastRunStatus "
+                     "createdAt updatedAt")
+
+
+async def test_automation_mutations(twin):
+    """Create, update (every field written: one left out is cleared) and a
+    human's delete, which takes the runs and a stateful automation's
+    conversation with it. Validation refuses an unknown model and a schedule
+    the scheduler can't build — the edge's cron engine, not APScheduler, now."""
+    gid = lambda raw: _gid("Automation", raw)  # noqa: E731
+    _sql_both(twin, "INSERT INTO conversations (id, title, model, surface, pinned, ephemeral, created_at) "
+                    "VALUES ('automation_au-off', 'disabled', 'm', 'automation', 0, 0, '2026-01-03 00:00:00.000000')")
+    _sql_both(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
+                    "VALUES ('am1', 'automation_au-off', 'user', 'run', 'done', '2026-01-03 00:00:00.000000')")
+    _sql_both(twin, "INSERT INTO automation_runs (id, automation_id, status, triggered_by, started_at) "
+                    "VALUES ('r-off', 'au-off', 'done', 'manual', '2026-01-03 00:00:00.000000')")
+
+    create = f"mutation($input: AutomationInput!) {{ createAutomation(input: $input) {{ {AUTOMATION_FIELDS} }} }}"
+    await twin.run(create, {"input": {"name": "bare", "inputType": "prompt"}})
+    await twin.run(create, {"input": {
+        "name": "full", "inputType": "webhook", "description": "d", "webhookUrl": "http://x", "webhookMethod": "PUT",
+        "webhookHeaders": '{"a": "b"}', "webhookBody": "{}", "schedule": "0 9 * * 1-5", "enabled": False,
+        "stateful": True, "notifications": "[]",
+    }})
+    await twin.run(create, {"input": {"name": "scheduled", "inputType": "monitor", "promptText": "watch",
+                                      "model": BUILTIN, "schedule": "*/15 * * * *"}})
+    await twin.run(create, {"input": {"name": "empty schedule", "inputType": "code", "codeText": "1", "schedule": ""}})
+    for bad in ("nope", "60 * * * *", "0 9 * * 8", "* * * *"):
+        await twin.run(create, {"input": {"name": "bad", "inputType": "prompt", "schedule": bad}})
+    await twin.run(create, {"input": {"name": "bad", "inputType": "prompt", "model": "nope:x", "schedule": "nope"}})
+
+    update = f"mutation($id: ID!, $input: AutomationInput!) {{ updateAutomation(id: $id, input: $input) {{ {AUTOMATION_FIELDS} }} }}"
+    await twin.run(update, {"id": gid("au-hook"), "input": {"name": "hook 2", "inputType": "webhook"}})  # rest cleared
+    await twin.run(update, {"id": gid("au-and"), "input": {"name": "x", "inputType": "prompt", "promptText": "p",
+                                                           "schedule": "0 0 * * sun", "model": BUILTIN}})
+    await twin.run(update, {"id": gid("au-and"), "input": {"name": "x", "inputType": "prompt", "schedule": "*/0 * * * *"}})
+    await twin.run(update, {"id": gid("au-and"), "input": {"name": "x", "inputType": "prompt", "model": "nope:x"}})
+    await twin.run(update, {"id": gid("nope"), "input": {"name": "x", "inputType": "prompt"}})
+
+    delete = "mutation($id: ID!) { deleteAutomation(id: $id) }"
+    await twin.run(delete, {"id": gid("au-off")})   # its runs and its conversation go
+    await twin.run(delete, {"id": gid("au-and")})   # runs, no conversation
+    await twin.run(delete, {"id": gid("au-and")})
+
+
+async def test_a_failing_embedder_leaves_memory_writes_to_python(database, work_dir: Path, edge_binary: Path):
+    """A memory item can't be saved unembedded, and the embedder's error is
+    Python's to word: the edge proxies before writing. A skill saves
+    unembedded, as Python's does."""
+    from edge_support import _free_port
+
+    dead = {"OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}"}
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", dead) as client:
+        add = 'mutation { addMemory(text: "tea at noon") { id } }'
+        assert (await client.post("/graphql", json={"query": add})).status_code == 502
+        create = 'mutation { createSkill(input: {name: "n", description: "d", body: "b"}) { name } }'
+        assert (await client.post("/graphql", json={"query": create})).json() == {"data": {"createSkill": {"name": "n"}}}
+    import sqlite3
+
+    with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
+        assert c.execute("SELECT count(*) FROM memories").fetchone() == (0,)
+        assert c.execute("SELECT embedding FROM skills WHERE name = 'n'").fetchall() == [(None,)]
+
+
+async def test_a_decomposition_the_edge_does_not_plan_goes_to_python(domains, edge):
+    """The planner is a model call: with the agent loop off (as here), or on a
+    model the edge doesn't call, `decomposeBoardTask` is Python's — decided
+    after the checks, before anything is written."""
+    q = 'mutation($id: ID!) { decomposeBoardTask(id: $id) { id } }'
+    assert (await _edge(edge, q, {"id": _gid("BoardTask", "b-b")})).status_code == 502
+    done = await _edge(edge, q, {"id": _gid("BoardTask", "b-a")})  # refused here, as Python refuses it
+    assert done.json()["errors"][0]["message"] == "only waiting (todo/ready/blocked) tasks can be decomposed"
+
+
 async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     # An agent's delete is approval-gated in Python; a human's isn't.
-    for mutation in ("deleteWorkflow", "deleteSkill"):
+    for mutation in ("deleteWorkflow", "deleteSkill", "deleteAutomation"):
         q = f'mutation {{ {mutation}(id: "{_gid("Workflow", "nope")}") }}'
         assert (await edge.post("/graphql", json={"query": q}, headers={"X-Jarvis-Caller": "agent"})).status_code == 502
         assert (await edge.post("/graphql", json={"query": q})).status_code == 200
@@ -768,8 +847,8 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
         "{ conversations { id } settings { key } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
-        # A mutation that isn't ported (an LLM plans the subtasks).
-        'mutation { decomposeBoardTask(id: "x") { id } }',
+        # A mutation that isn't ported (the agent's memory blob lives in the store).
+        'mutation { updateMemory(content: "x") { content } }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.

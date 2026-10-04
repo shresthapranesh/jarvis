@@ -54,6 +54,7 @@ pub struct Mutation(
     conversation::ConversationMutation,
     project::ProjectMutation,
     board::BoardTaskMutation,
+    automation::AutomationMutation,
     approval::ApprovalMutation,
     artifact::ArtifactMutation,
     workflow::WorkflowMutation,

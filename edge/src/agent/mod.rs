@@ -22,11 +22,11 @@
 mod artifacts;
 mod automation;
 mod board;
-mod embed;
+pub mod embed;
 mod events;
 mod prompt;
 mod queue;
-mod retrieve;
+pub mod retrieve;
 pub mod route;
 mod summarize;
 mod thread;

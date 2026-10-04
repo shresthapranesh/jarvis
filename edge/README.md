@@ -422,9 +422,12 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   minutes) before it expires as denied. Every gate in a batch is answered, in
   order, before anything runs; a denied call is answered with the denial.
   The answer comes through `resolveApproval` (`src/gql/approval.rs`), which
-  the edge serves for a gate and a board task's question; a deferred action
-  to execute, a workflow paused on a future, or a gate a worker's run is
-  waiting on is deferred to Python before anything is written — which is
+  the edge serves for a gate, a board task's question, and a deferred action
+  (`core/approvals.py:ACTIONS` — a denial closes the row; an approved delete
+  of a workflow, automation or skill runs here before the row closes, so a
+  failure leaves it answerable). An approved MCP call, a workflow paused on
+  a future, or a gate a worker's run is waiting on is deferred to Python
+  before anything is written — which is
   why it's owned only alone in an operation. `requestToolApproval`, the
   SDK's request from a kernel, is the edge's on the same terms.
   Throughput measured before a handover isn't carried.
@@ -531,24 +534,34 @@ Mutations that only write rows and files:
 | Domain | Root fields |
 |---|---|
 | conversations | `updateConversation` (a model checked against the catalog), `deleteConversation`, `discardConversation` |
-| task board | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `deleteBoardTask` — a card made ready runs a dispatch pass at once |
+| task board | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `deleteBoardTask` — a card made ready runs a dispatch pass at once; `decomposeBoardTask` — the planner called through `src/llm/` on the task's model, or the whole operation sent to Python when the agent loop is off or doesn't serve that model |
+| automations | `createAutomation`, `updateAutomation`, `deleteAutomation` (human callers) — the scheduler reloads at once |
 | projects | `createProject`, `updateProject`, `deleteProject`, `setConversationProject` |
 | artifacts & documents | `updateArtifact`, `restoreArtifactVersion`, `deleteArtifact`, `deleteDocument` |
 | workflows | `createWorkflow`, `updateWorkflow`, `deleteWorkflow` (human callers) |
-| lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `deleteSkill` (human callers) |
-| memory | `deleteMemory` |
+| lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `createSkill`, `updateSkill`, `deleteSkill` (human callers) — a skill's description embedded, or saved unembedded if the embedder fails |
+| memory | `addMemory` (merged into a near-duplicate), `updateMemoryItem`, `deleteMemory` — embedded by `agent/embed.rs`; an embedder that fails sends the operation to Python before anything is written |
 | runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun`, `stopBoardTask` |
 | starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
 | steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
-| approvals (worker linked or owned) | `resolveApproval` (a tool gate, a board question), `requestToolApproval` (the agent's) — see "The agent loop" |
+| approvals (worker linked or owned) | `resolveApproval` (a tool gate, a board question, a deferred delete), `requestToolApproval` (the agent's) — see "The agent loop" |
 
 And while a worker is linked, or the edge owns it: every subscription
 (`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`)
 and `runningTasks`, from the run mirror.
 
-Two are owned per call (`router.rs:Walk::field_rule`): `deleteWorkflow` /
-`deleteSkill` go to Python when the caller is the agent (`X-Jarvis-Caller:
-agent` — approval-gated there).
+Some are owned per call (`router.rs:Walk::field_rule`): `deleteWorkflow`,
+`deleteSkill` and `deleteAutomation` go to Python when the caller is the agent
+(`X-Jarvis-Caller: agent` — approval-gated there).
+
+The automation writes (`gql/automation.rs`) port `mutations/automation.py`
+with `db/ops.py`'s automation CRUD: a schedule is validated by `cron.rs`
+(what `_cron` builds is what fires — "invalid cron expression", as Python
+words every refusal), an update writes every field as Python's `setattr` loop
+does (one left out is cleared), and a delete takes the runs and a stateful
+automation's `automation_{id}` conversation with it. Each one tells the
+scheduler to reload (`Scheduler::schedules_changed`) after its commit. **A
+change to either side is made in both.**
 
 Deleting a conversation (`conversation.rs:delete_conversation`, shared with
 `deleteBoardTask`) ports `db/ops.py:delete_conversation`: the ORM cascades as
@@ -585,12 +598,9 @@ moves when the thing it reads moves.
 | Mutations | Touch | Move with |
 |---|---|---|
 | `browserActivity` | a running handler's `TaskState`; the agent's kernel is the only caller | the agent loop |
-| `createAutomation`, `updateAutomation`, `deleteAutomation` | cron validation with APScheduler's messages; deleting the backing conversation's thread and kernel | the agent loop (Python reports each change to the edge's scheduler: `schedules`) |
-| `decomposeBoardTask` | an LLM plans the subtasks | the LLM callers (2e/2f) |
-| `addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill` | embeddings (Gemini) on write | embeddings |
 | `updateMemory`, `deleteAgentMemory`, `consolidateMemory`, `consolidateProjectMemory` | `kv_store` through `KvStore`; an LLM | the agent loop |
 | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `setToolPolicy` | the catalog cache and compiled agent graphs | the catalog becoming data |
 | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` | the live `McpManager` | MCP |
-| `resolveApproval` for a deferred action or a paused workflow; either it or `requestToolApproval` for a worker's run (the edge defers those per call) | a deferred action's executor; a future in a running workflow; a worker's run stream | the workflow engine, MCP |
+| `resolveApproval` for an approved MCP call or a paused workflow; either it or `requestToolApproval` for a worker's run (the edge defers those per call) | `call_mcp_tool`; a future in a running workflow; a worker's run stream | the workflow engine, MCP |
 | `setSetting`, `deleteSetting` | `apply_setting`'s in-process caches | the registry becoming data |
 | `downloadVoice` | the Piper download | audio |
