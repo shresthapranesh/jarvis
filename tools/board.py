@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+from langchain_core.tools import tool
+
 from db.engine import async_session
 from db.ops import (
     create_board_task as _create,
@@ -121,6 +123,9 @@ async def list_tasks(status: str | None = None) -> str:
     return "\n".join(lines)
 
 
+# Bound as tools in a board run (`core/agents.py`); the two above are SDK
+# functions. As tools, as LangGraph's ToolNode made them of plain functions.
+@tool
 async def complete_task(summary: str, metadata: str | None = None) -> str:
     """Mark the board task you are currently executing as done.
 
@@ -153,6 +158,7 @@ async def complete_task(summary: str, metadata: str | None = None) -> str:
     return "Task marked done. Wrap up with a short final reply."
 
 
+@tool
 async def block_task(reason: str, needs_input: bool = False) -> str:
     """Mark the board task you are currently executing as blocked.
 
