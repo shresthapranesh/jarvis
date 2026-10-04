@@ -49,6 +49,17 @@ pub async fn serves_automation(pool: &SqlitePool, automation_id: &str) -> bool {
     }
 }
 
+/// Whether the edge runs a board task's dispatch: its model is one it serves.
+pub async fn serves_board(pool: &SqlitePool, model: Option<&str>) -> bool {
+    if !enabled() {
+        return false;
+    }
+    match catalog::resolve_model(pool, model).await {
+        Ok(model) => serves_model(pool, &model).await,
+        Err(_) => false,
+    }
+}
+
 /// The model's provider is one the edge calls, and no MCP server is
 /// configured (their tools live in Python's MCP client).
 pub async fn serves_model(pool: &SqlitePool, model: &str) -> bool {

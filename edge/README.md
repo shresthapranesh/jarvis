@@ -308,8 +308,8 @@ made in both.**
 
 ## The agent loop (`src/agent/`)
 
-Phase 2d: chat turns and automation runs run in the edge, so
-neither a conversation nor a scheduled automation needs Python at all. On by
+Phase 2d: chat turns, automation runs and board tasks run in the edge, so
+none of them needs Python at all. On by
 default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 
 - **The turn** (`turn.rs`) is `_run_agent_task` and `core/agent_loop.py`:
@@ -356,6 +356,21 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   terminating it; webhook runs are one request, 30 s, no redirects. **A
   change to `server/automation_runtime.py` or `core/notifications.py` is
   made in both.**
+- **Board tasks** (`board.rs`) port `board_task_job_handler` and
+  `tools/board.py` around the same turn, with `complete_task`/`block_task`
+  bound (`tools::bound_for(…, board)`): the claim re-asserted and a waiting
+  answer consumed (only once the edge is sure to run it), the task's prompt
+  — skill, finished parents' handoffs — or the answer's resume prompt, the
+  `boardtask_{id}` conversation, the tools' writes (a `needs_input` block
+  asks in the inbox; any other move closes its question), and
+  `_finish_task`, which never overwrites a task the run no longer owns. A
+  task that finishes done starts a dispatch pass (which otherwise runs every
+  15 s; `JARVIS_BOARD_DISPATCH_EVERY` shortens it, as the tests do). Steps are announced, not
+  written; the board budget applies. **A change to
+  `server/task_board_runtime.py` or `tools/board.py` is made in both.**
+- **Stops through the job**: a running job's `cancel_requested` is polled
+  every 5 s (`watch_queue_cancel`), so a stop that only reached the job —
+  Python's `stopBoardTask` today — still stops the edge's run.
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
   tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
@@ -371,7 +386,7 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   attachments, and no MCP server configured anywhere Python looks (env, the
   first `mcp.json`, the `mcp.servers` setting) is the edge's — for an
   automation, a code or webhook one, or a prompt or monitor one on such a
-  model: its job gets
+  model; for a board task (at dispatch), one on such a model: its job gets
   `runtime = 'edge'` and its run is mirrored as the edge's own. Everything
   else is Python's, as before.
 - **Claiming** (`queue.rs`) is `SqliteJobQueue._claim` plus `runtime =

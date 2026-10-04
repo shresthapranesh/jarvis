@@ -206,6 +206,54 @@ async def test_a_handed_over_automation_run_continues_where_the_edge_left_it(jar
     ]
 
 
+async def test_a_handed_over_board_run_continues_where_the_edge_left_it(jarvis, script):  # noqa: F811
+    """A board run handed over after its first model step: Python runs the
+    recorded complete_task, then the model, without writing the prompt into
+    the task's conversation again; the task keeps the tool's summary."""
+    from sqlalchemy import select
+
+    from core.transcript_store import apply_messages, load_thread
+    from db import async_session
+    from db.models import BoardTask, Conversation, Job, Message
+    from db.ops import board_task_conversation_id
+    from server.task_board_runtime import board_task_job_handler
+
+    run_id, task_id = "run-b", "task-b"
+    conv_id = board_task_conversation_id(task_id)
+    prompt = HumanMessage(content="do the task", id="u-1")
+    reply = AIMessage(content="Doing. ", id="ai-1",
+                      tool_calls=[tool_call("complete_task", {"summary": "Did it."}, "c1")])
+    handoff = {"text": "Doing. ", "step_seq": 0, "steps": 1,
+               "usage": {"input_tokens": 300, "output_tokens": 10, "llm_calls": 1, "tool_calls": 0}}
+    async with async_session() as s:
+        s.add(BoardTask(id=task_id, title="T", status="running", job_id=run_id, model=GOOGLE))
+        s.add(Conversation(id=conv_id, title="T", model=GOOGLE, surface="task"))
+        s.add(Message(id="m-1", conversation_id=conv_id, role="user", content="do the task"))
+        s.add(Job(id=run_id, kind="board_task", thread_id=conv_id,
+                  payload=json.dumps({"task_id": task_id, "handoff": handoff})))
+        await s.commit()
+        await apply_messages(s, conv_id, [prompt, reply])
+
+    script.responder = lambda call: AIMessage(content="All set.")
+    job = await jarvis.queue.claim(kinds=["board_task"], worker_id="test", ttl_seconds=600)
+    assert job is not None and job.id == run_id
+    await board_task_job_handler(job)
+
+    [call] = script.calls
+    assert [(m.tool_call_id, m.content) for m in call.messages if isinstance(m, ToolMessage)] == [
+        ("c1", "Task marked done. Wrap up with a short final reply."),
+    ]
+    async with async_session() as s:
+        thread = await load_thread(s, conv_id)
+        task = await s.get(BoardTask, task_id)
+        messages = (await s.execute(
+            select(Message.role, Message.content).where(Message.conversation_id == conv_id).order_by(Message.created_at)
+        )).all()
+    assert sum(isinstance(m, HumanMessage) for m in thread.messages) == 1
+    assert task is not None and (task.status, task.summary) == ("done", "Did it.")
+    assert [tuple(m) for m in messages] == [("user", "do the task"), ("assistant", "Doing. All set.")]
+
+
 async def test_a_reclaimed_turn_never_runs_a_tool_twice(jarvis, script):  # noqa: F811
     """Without a handoff — a crash, not a handover — the unanswered call is
     repaired as an orphan, as before, not run."""
