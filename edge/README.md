@@ -309,9 +309,7 @@ made in both.**
 ## The agent loop (`src/agent/`)
 
 Phase 2d: chat turns run in the edge, so a conversation needs no Python at
-all. On by default (`JARVIS_AGENT_RUNTIME=python` turns it off). Summarizing
-compaction (2d-4) is still Python's, so a turn that needs it goes over (see
-"Handing over").
+all. On by default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 
 - **The turn** (`turn.rs`) is `_run_agent_task` and `core/agent_loop.py`:
   the prompt into the thread and the plan reset, then model step, tool
@@ -332,6 +330,16 @@ compaction (2d-4) is still Python's, so a turn that needs it goes over (see
   `batchEmbedContents` with `GOOGLE_API_KEY`, else Ollama's `/api/embed`,
   model from `embedding.model` — with Python's query cache. **A change to
   either is made in both.**
+- **Summarizing** (`summarize.rs`, the pure half in `llm/compact.rs`) ports
+  `maybe_compact` and `record_episode`: past the model's threshold, the older
+  groups are summarized by the turn's own model (merged into the running
+  summary when there is one), the summary replaces them in the thread with
+  the step's reply, and the evicted stretch's own summary is stored as an
+  episode. History is counted from the last call's usage less the rest of the
+  request, except on Ollama; otherwise by chars/4, which is what Python's
+  fallback comes to for every provider here but Google (its countTokens API —
+  a named departure). **A change to `core/compaction.py` or
+  `core/episodes.py` is made in both.**
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
   tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
@@ -362,9 +370,8 @@ compaction (2d-4) is still Python's, so a turn that needs it goes over (see
   there (`chat_job_handler`), its text, step rows and spend continuing the
   edge's. A turn goes over when its next step needs what only Python has:
   a tool other than the edge's (workers, a workflow, an artifact),
-  arguments that aren't plainly valid, a tool a human must approve, a
-  history near the summarizing threshold, or a conversation not yet
-  converted from `checkpoints.db`.
+  arguments that aren't plainly valid, a tool a human must approve, or a
+  conversation not yet converted from `checkpoints.db`.
   Throughput measured before a handover isn't carried.
 - **Recovery**: at start the edge re-queues its jobs a previous edge left
   running; with the loop off, it hands every live edge job to Python. Python

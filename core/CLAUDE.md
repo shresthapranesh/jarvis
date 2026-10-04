@@ -34,6 +34,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - The token check uses the provider's `usage_metadata.input_tokens` minus an estimate of the non-history overhead (`usage_overhead_tokens`) — **not** a tokenizer, which is a blocking network call for Google/Anthropic. Ollama opts out (`None`). Fallback counting runs in `asyncio.to_thread`.
 - Threshold: `compact_threshold(model)` = 40% of `ModelSpec.context_window`, clamped [12k, 200k]; flat 80k when unknown; `JARVIS_COMPACT_TOKEN_THRESHOLD` overrides.
 - `summarization.py` is deprecated — use `compaction.maybe_compact`.
+- `edge/src/agent/summarize.rs` + `edge/src/llm/compact.rs` port `maybe_compact` and `core/episodes.py:record_episode` for the Rust loop — change both; `tests/test_edge_loop.py` diffs them.
 
 ### Transcript format (`transcript.py`, `transcript_format.md`)
 - The v1 record of a message — what the agent loop stores per message (in place of LangGraph checkpoints), and what the Rust loop will read. Versioned and lossless: a LangChain message encodes and decodes back equal; anything not mapped to a field rides in `extras`.

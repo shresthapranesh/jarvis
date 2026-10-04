@@ -7,8 +7,9 @@
 //! each result once it and the calls before it are done — so a turn handed to
 //! Python, or re-claimed after a crash, goes on from the rows.
 //!
-//! A step that needs Python (`prompt::NeedsPython`, `tools::Plan::Python`, a
-//! history big enough to summarize) hands the turn over with what it carried
+//! A history that outgrows the model's threshold is summarized before the
+//! call (`summarize.rs`). A step that needs Python (`prompt::NeedsPython`,
+//! `tools::Plan::Python`) hands the turn over with what it carried
 //! (`Outcome::HandOver`); Python runs the recorded calls and goes on.
 
 use std::sync::Arc;
@@ -19,6 +20,7 @@ use uuid::Uuid;
 
 use super::events::Emitter;
 use super::queue::Job;
+use super::summarize::{self, Summarizer};
 use super::thread::Thread;
 use super::tools::{self, Native, Plan, Policy, Step};
 use super::{Agent, Outcome, prompt};
@@ -230,12 +232,35 @@ impl<'a> Turn<'a> {
                 return Err(Stop::Python(why.into()));
             }
         };
-        if self.needs_summarizing(&history).await {
-            thread.apply(self.pool(), queued).await.map_err(Stop::Failed)?;
-            return Err(Stop::Python("the history needs summarizing".into()));
-        }
 
         let provider = self.model.split_once(':').map_or("", |(p, _)| p);
+        let ends = Endpoints {
+            compatible: crate::catalog::endpoints(self.pool()).await.unwrap_or_default(),
+            ..Endpoints::from_env()
+        };
+        // The history counted from the last call's usage, less this estimate
+        // of the rest of the request — except on Ollama, whose input count
+        // leaves out a KV-cached prefix.
+        let overhead = (provider != "ollama").then(|| {
+            let chars = context.system.chars().count()
+                + context.segments.iter().map(|s| s.content.chars().count()).sum::<usize>()
+                + context.volatile.chars().count();
+            summarize::schema_tokens(bound) + (chars / 4) as i64
+        });
+        let threshold = compact_threshold(self.pool(), &self.model).await;
+        let summarizer = Summarizer { http: &self.agent.http, ends: &ends, model: &self.model, blobs: &thread.blobs };
+        let compaction = tokio::select! {
+            c = summarize::maybe_compact(&summarizer, &history, threshold, overhead) => c,
+            () = until_stopped(self.run.clone()) => return Err(Stop::Cancelled),
+        };
+        if let Some((text, evicted)) = &compaction.episode {
+            // Awaited, so it can't race the next turn's retrieval. Losing one
+            // only loses detail the running summary still outlines.
+            if let Err(e) = summarize::record_episode(self.pool(), &self.agent.http, &self.conversation_id, text, evicted).await {
+                tracing::warn!("episode recording failed: {e}");
+            }
+        }
+
         let layout = Layout {
             system: &context.system,
             segments: &context.segments,
@@ -243,12 +268,8 @@ impl<'a> Turn<'a> {
             cache: honors_cache_control(&self.model),
             provider,
         };
-        let shaped = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(llm::compact::per_call(history)));
+        let shaped = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(compaction.messages));
         let prompt = shape::build(&layout, shaped);
-        let ends = Endpoints {
-            compatible: crate::catalog::endpoints(self.pool()).await.unwrap_or_default(),
-            ..Endpoints::from_env()
-        };
         let req = Request { model: &self.model, prompt: &prompt, tools: bound, blobs: &thread.blobs };
 
         let events = &mut self.events;
@@ -283,9 +304,14 @@ impl<'a> Turn<'a> {
         self.sync_fields();
 
         let message = reply.message;
-        let mut update = queued;
+        // The compaction lands with the reply, as Python's step returns it.
+        let (removed, mut update) = match compaction.update {
+            Some((removed, summary)) => (removed, vec![summary]),
+            None => (vec![], vec![]),
+        };
+        update.extend(queued);
         update.push(message.clone());
-        thread.apply(self.pool(), update).await.map_err(Stop::Failed)?;
+        thread.update(self.pool(), &removed, update).await.map_err(Stop::Failed)?;
         if self.cancelled() {
             return Err(Stop::Cancelled);
         }
@@ -408,22 +434,6 @@ impl<'a> Turn<'a> {
             .into_iter()
             .map(|(id, text)| Message { id: Some(id), ..Message::new(Role::User, Content::Text(text)) })
             .collect())
-    }
-
-    /// Whether Python's `maybe_compact` might summarize before this call —
-    /// erring towards yes, since Python then decides. Its cheap estimate, or
-    /// the last call's reported input, near the model's threshold.
-    async fn needs_summarizing(&self, history: &[Message]) -> bool {
-        let threshold = compact_threshold(self.pool(), &self.model).await;
-        let leaned = llm::compact::per_call(history.to_vec());
-        let heuristic = leaned.iter().map(message_chars).sum::<usize>() / 4;
-        let last_input = history
-            .iter()
-            .rev()
-            .find(|m| m.role == Role::Assistant)
-            .and_then(|m| m.usage.as_ref()?.input)
-            .unwrap_or(0);
-        heuristic as i64 > threshold * 8 / 10 || last_input > threshold
     }
 
     fn sync_fields(&self) {
@@ -599,21 +609,6 @@ fn parse_stamp(stored: &str) -> chrono::DateTime<chrono::Utc> {
     chrono::NaiveDateTime::parse_from_str(stored, "%Y-%m-%d %H:%M:%S%.f")
         .map(|t| t.and_utc())
         .unwrap_or_else(|_| chrono::Utc::now())
-}
-
-/// `message_text`: a message's text, or its text and thinking parts joined.
-fn message_chars(m: &Message) -> usize {
-    match &m.content {
-        Content::Text(s) => s.chars().count(),
-        Content::Parts(parts) => parts
-            .iter()
-            .map(|p| match p {
-                Part::Typed(Typed::Text { text, .. }) => text.chars().count(),
-                Part::Typed(Typed::Thinking { thinking, .. }) => thinking.chars().count(),
-                _ => 0,
-            })
-            .sum(),
-    }
 }
 
 /// `_latest_user_text`: the newest user message's text, stripped.

@@ -1,5 +1,9 @@
-//! Per-call compaction — a port of `apply_per_call_compaction`
-//! (`core/compaction.py`, `elide_stale_tool_results` in `core/messages.py`).
+//! Compaction — a port of `core/compaction.py`. Per-call compaction
+//! (`apply_per_call_compaction`, with `elide_stale_tool_results` from
+//! `core/messages.py`) is below; the pure half of summarizing compaction
+//! (`maybe_compact`'s counting, grouping and eviction plan) follows it, and
+//! `agent/summarize.rs` makes its calls.
+//!
 //! Old tool output is most of an agent loop's history and is rarely read
 //! again once acted on, yet every call re-bills it. Nothing here is stored:
 //! the thread keeps the full output, and each call derives the same view.
@@ -163,7 +167,7 @@ fn stub(group: &[Message]) -> Message {
 /// `thinking`) as LangChain spells the part — `extras` spread beside the
 /// fields. A bare string in a list is not read: Python's loop only looks at
 /// dicts.
-fn text(m: &Message) -> String {
+pub fn text(m: &Message) -> String {
     let parts = match &m.content {
         Content::Text(s) => return s.clone(),
         Content::Parts(p) => p,
@@ -186,6 +190,210 @@ fn text(m: &Message) -> String {
     };
     parts.iter().filter_map(|p| field(p, "text").or_else(|| field(p, "thinking"))).collect()
 }
+
+// ── summarizing compaction (`maybe_compact`'s pure half) ─────────────────────
+
+/// `KEEP_RECENT_GROUPS`: the newest groups a summarizing pass keeps verbatim.
+pub const KEEP_RECENT_GROUPS: usize = 2;
+/// `USAGE_SANITY_FLOOR`: a usage-derived count under this share of the
+/// heuristic isn't believed — an undercount would keep compaction from firing.
+pub const USAGE_SANITY_FLOOR: f64 = 0.5;
+
+/// `estimate_tokens_heuristic`: four characters a token over `message_text`.
+pub fn heuristic(messages: &[Message]) -> i64 {
+    (messages.iter().map(|m| text(m).chars().count()).sum::<usize>() / 4) as i64
+}
+
+/// `history_tokens_from_usage`: the history's size from the provider's own
+/// count on the previous call — its input less `overhead` (the request's
+/// non-history part), plus that reply's output and the heuristic over what
+/// came after it. `None` when the newest assistant message carries no input
+/// count.
+pub fn history_tokens_from_usage(messages: &[Message], overhead: i64) -> Option<i64> {
+    let i = messages.iter().rposition(|m| m.role == Role::Assistant)?;
+    let usage = messages[i].usage.as_ref();
+    let input = usage.and_then(|u| u.input).unwrap_or(0);
+    if input <= 0 {
+        return None;
+    }
+    let output = usage.and_then(|u| u.output).unwrap_or(0);
+    Some((input - overhead).max(0) + output + heuristic(&messages[i + 1..]))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kind {
+    Summary,
+    System,
+    User,
+    ToolCall,
+    AssistantText,
+}
+
+#[derive(Debug)]
+struct Group {
+    kind: Kind,
+    range: std::ops::Range<usize>,
+}
+
+fn is_summary(m: &Message) -> bool {
+    if m.role != Role::System {
+        return false;
+    }
+    let t = text(m).to_lowercase();
+    t.contains("[conversation summary") || t.contains("[prior conversation summary")
+}
+
+fn is_user(m: &Message) -> bool {
+    m.role == Role::User && !carries_results(m)
+}
+
+/// `group_messages`: semantic turns — a summary, a system message, a user
+/// message, an assistant call with its results (or a run of results), or
+/// anything else on its own.
+fn group_messages(messages: &[Message]) -> Vec<Group> {
+    let mut groups = vec![];
+    let mut i = 0;
+    while i < messages.len() {
+        let m = &messages[i];
+        let start = i;
+        i += 1;
+        let kind = if is_summary(m) {
+            Kind::Summary
+        } else if m.role == Role::System {
+            Kind::System
+        } else if is_user(m) {
+            Kind::User
+        } else if (m.role == Role::Assistant && !m.tool_calls.is_empty()) || carries_results(m) {
+            while i < messages.len() && carries_results(&messages[i]) {
+                i += 1;
+            }
+            Kind::ToolCall
+        } else {
+            Kind::AssistantText
+        };
+        groups.push(Group { kind, range: start..i });
+    }
+    groups
+}
+
+/// What one summarizing pass takes out of a history and keeps.
+#[derive(Debug, PartialEq)]
+pub struct Eviction {
+    /// The evicted stretch as the summarizer reads it.
+    pub for_summary: Vec<Message>,
+    /// The summaries already in the history, joined — merged with the new one.
+    pub old_summary: Option<String>,
+    /// The kept groups' messages, in order.
+    pub kept: Vec<Message>,
+    /// Every message to evict: the summarized ones and the old summaries.
+    pub removed: Vec<String>,
+    /// Just the summarized ones — what the episode covers.
+    pub evicted: Vec<String>,
+}
+
+/// `maybe_compact` steps 2–3: the newest `KEEP_RECENT_GROUPS` groups and the
+/// newest user message stay, the kept window starts at a user message when
+/// it can, and everything else that isn't a summary is summarized. `None`
+/// when there is nothing to summarize.
+pub fn eviction(messages: &[Message]) -> Option<Eviction> {
+    let groups = group_messages(messages);
+    if groups.len() <= KEEP_RECENT_GROUPS {
+        return None;
+    }
+    let old: Vec<&Group> = groups.iter().filter(|g| g.kind == Kind::Summary).collect();
+    let rest: Vec<&Group> = groups.iter().filter(|g| g.kind != Kind::Summary).collect();
+    if rest.len() <= KEEP_RECENT_GROUPS {
+        return None;
+    }
+    // Indices into `rest`, which is in order.
+    let mut kept: Vec<usize> = (rest.len() - KEEP_RECENT_GROUPS..rest.len()).collect();
+    if let Some(u) = rest.iter().rposition(|g| g.kind == Kind::User) {
+        kept.push(u);
+    }
+    kept.sort_unstable();
+    kept.dedup();
+    let first = rest[kept[0]];
+    if first.kind != Kind::User {
+        if let Some(u) = rest.iter().rposition(|g| g.range.end <= first.range.start && g.kind == Kind::User) {
+            kept.push(u);
+            kept.sort_unstable();
+            kept.dedup();
+        }
+    }
+    let summarized: Vec<&Group> = rest.iter().enumerate().filter(|(i, _)| !kept.contains(i)).map(|(_, g)| *g).collect();
+    if summarized.is_empty() {
+        return None;
+    }
+    let for_summary = for_summary(messages, &summarized);
+    if for_summary.is_empty() {
+        tracing::warn!("compact: nothing left to summarize after conversion — skip");
+        return None;
+    }
+    let ids = |gs: &[&Group]| -> Vec<String> {
+        gs.iter().flat_map(|g| messages[g.range.clone()].iter().filter_map(|m| m.id.clone())).collect()
+    };
+    let evicted = ids(&summarized);
+    let mut removed = evicted.clone();
+    removed.extend(ids(&old));
+    let old_summary = (!old.is_empty())
+        .then(|| old.iter().flat_map(|g| messages[g.range.clone()].iter().map(text)).collect::<Vec<_>>().join("\n\n"));
+    Some(Eviction {
+        for_summary,
+        old_summary,
+        kept: kept.iter().flat_map(|&i| messages[rest[i].range.clone()].iter().cloned()).collect(),
+        removed,
+        evicted,
+    })
+}
+
+/// `_build_safe_messages_for_summary`: user messages as they are; assistant
+/// messages as their text and the tools they called; results as user text
+/// quoting their start; other system messages as they are.
+///
+/// A result with no text is quoted as empty. Python quotes the repr of its
+/// content instead, as `stub` above notes.
+fn for_summary(messages: &[Message], groups: &[&Group]) -> Vec<Message> {
+    let mut out = vec![];
+    for m in groups.iter().flat_map(|g| &messages[g.range.clone()]) {
+        if is_user(m) {
+            out.push(m.clone());
+        } else if m.role == Role::Assistant {
+            let mut said = text(m);
+            if !m.tool_calls.is_empty() {
+                let calls: Vec<String> = m
+                    .tool_calls
+                    .iter()
+                    .map(|c| {
+                        let args: Vec<String> =
+                            c.args.as_object().map(|a| a.keys().map(|k| format!("{k}=...")).collect()).unwrap_or_default();
+                        format!("{}({})", c.name, args.join(", "))
+                    })
+                    .collect();
+                let calls = calls.join(", ");
+                said = if said.is_empty() { format!("[Called tools: {calls}]") } else { format!("{said}\n[Called tools: {calls}]") };
+            }
+            if !said.is_empty() {
+                out.push(Message::new(Role::Assistant, Content::Text(said)));
+            }
+        } else if carries_results(m) {
+            // `getattr(m, "name", "tool")`: the attribute exists, so an unset
+            // name reads as Python's `None`.
+            let name = m.name.as_deref().unwrap_or("None");
+            let quoted = head(&text(m), 500);
+            out.push(Message::new(Role::User, Content::Text(format!("[Tool result from {name}]: {quoted}"))));
+        } else if m.role == Role::System && !is_summary(m) {
+            out.push(m.clone());
+        }
+    }
+    out
+}
+
+/// The summarizer's instructions, as `maybe_compact` words them.
+pub const DELTA_PROMPT: &str = "Summarize the following conversation history concisely. Preserve key facts, decisions, \
+tool outputs, file changes, and unresolved items. Keep it under 600 words.";
+pub const MERGE_PROMPT: &str = "You have an existing conversation summary and a new chunk summary. Merge them into a \
+single coherent summary under 800 words. Preserve all durable facts, decisions, tool outputs, and goals. Do not \
+invent details. Prioritize newer information if conflict.";
 
 #[cfg(test)]
 mod tests {
@@ -267,5 +475,96 @@ mod tests {
             "bare", {"type": "text", "text": "t"}, {"type": "thinking", "thinking": "h"},
             {"type": "opaque", "data": {"type": "x", "text": "o"}}, {"type": "image", "data": "AA=="}]}));
         assert_eq!(text(&m), "tho");
+    }
+
+    // ── summarizing ─────────────────────────────────────────────────────────
+
+    fn m(v: serde_json::Value) -> Message {
+        let mut v = v;
+        v["v"] = json!(1);
+        msg(v)
+    }
+
+    fn said(e: &Eviction) -> Vec<(Role, String)> {
+        e.for_summary.iter().map(|m| (m.role, text(m))).collect()
+    }
+
+    fn ids(ms: &[Message]) -> Vec<&str> {
+        ms.iter().map(|m| m.id.as_deref().unwrap_or("-")).collect()
+    }
+
+    /// Expectations are Python's `maybe_compact` on the same messages.
+    #[test]
+    fn eviction_keeps_from_a_user_message() {
+        let history = vec![
+            m(json!({"role": "user", "id": "u1", "content": "first"})),
+            m(json!({"role": "assistant", "id": "a1", "content": "",
+                     "tool_calls": [{"id": "c1", "name": "run_cell", "args": {"code": "1", "x": 2}}]})),
+            m(json!({"role": "tool", "id": "t1", "name": "run_cell", "content": "out", "tool_call_id": "c1"})),
+            m(json!({"role": "assistant", "id": "a2", "content": "said"})),
+            m(json!({"role": "user", "id": "u2", "content": "second"})),
+        ];
+        let e = eviction(&history).unwrap();
+        assert_eq!(said(&e), vec![
+            (Role::Assistant, "[Called tools: run_cell(code=..., x=...)]".into()),
+            (Role::User, "[Tool result from run_cell]: out".into()),
+        ]);
+        assert_eq!(ids(&e.kept), ["u1", "a2", "u2"]);
+        assert_eq!((e.removed.clone(), e.evicted.clone(), e.old_summary.clone()), (vec!["a1".into(), "t1".into()], vec!["a1".into(), "t1".into()], None));
+    }
+
+    #[test]
+    fn eviction_merges_the_old_summary() {
+        let history = vec![
+            m(json!({"role": "user", "id": "u0", "content": "q0"})),
+            m(json!({"role": "assistant", "id": "a0", "content": "a"})),
+            m(json!({"role": "system", "id": "s0", "content": "[Conversation summary]\nold"})),
+            m(json!({"role": "user", "id": "u1", "content": "q1"})),
+            m(json!({"role": "assistant", "id": "a1", "content": "thinking aloud",
+                     "tool_calls": [{"id": "c1", "name": "write_todos", "args": {"todos": ["x"]}}]})),
+            m(json!({"role": "tool", "id": "t1", "content": "done", "tool_call_id": "c1"})),
+            m(json!({"role": "assistant", "id": "a2", "content": "", "tool_calls": [{"id": "c2", "name": "run_cell", "args": {}}]})),
+            m(json!({"role": "tool", "id": "t2", "name": "run_cell", "content": "r2", "tool_call_id": "c2"})),
+        ];
+        let e = eviction(&history).unwrap();
+        assert_eq!(said(&e), vec![(Role::User, "q0".into()), (Role::Assistant, "a".into())]);
+        assert_eq!(e.old_summary.as_deref(), Some("[Conversation summary]\nold"));
+        assert_eq!(ids(&e.kept), ["u1", "a1", "t1", "a2", "t2"]);
+        assert_eq!(e.removed, ["u0", "a0", "s0"]);
+        assert_eq!(e.evicted, ["u0", "a0"]);
+    }
+
+    #[test]
+    fn nothing_to_evict_in_a_short_history() {
+        let history = vec![
+            m(json!({"role": "user", "id": "u1", "content": "q"})),
+            m(json!({"role": "assistant", "id": "a1", "content": "a"})),
+            m(json!({"role": "user", "id": "u2", "content": "q2"})),
+        ];
+        assert_eq!(eviction(&history), None);
+    }
+
+    #[test]
+    fn a_result_without_a_name_is_from_none() {
+        let history = vec![
+            m(json!({"role": "assistant", "id": "a1", "content": "", "tool_calls": [{"id": "c1", "name": "x", "args": {}}]})),
+            m(json!({"role": "tool", "id": "t1", "content": "r", "tool_call_id": "c1"})),
+            m(json!({"role": "user", "id": "u1", "content": "q"})),
+            m(json!({"role": "assistant", "id": "a2", "content": "a"})),
+        ];
+        let e = eviction(&history).unwrap();
+        assert_eq!(said(&e)[1].1, "[Tool result from None]: r");
+    }
+
+    #[test]
+    fn history_from_usage() {
+        let mut history = rounds(1, "abcdefgh");
+        assert_eq!(history_tokens_from_usage(&history, 10), None);
+        history[1].usage = Some(serde_json::from_value(json!({"input": 1000, "output": 30})).unwrap());
+        // 1000 less 10 overhead, the 30 it wrote, and "abcdefgh" since.
+        assert_eq!(history_tokens_from_usage(&history, 10), Some(990 + 30 + 2));
+        assert_eq!(history_tokens_from_usage(&history, 5000), Some(32));
+        history[1].usage = Some(serde_json::from_value(json!({"output": 30})).unwrap());
+        assert_eq!(history_tokens_from_usage(&history, 10), None);
     }
 }
