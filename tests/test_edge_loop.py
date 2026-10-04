@@ -1452,6 +1452,189 @@ async def test_a_board_task_is_decomposed_through_the_edge(twins):
         assert _rows(twins.edge_db, sql) == _rows(twins.python_db, sql), sql
 
 
+# ── memory consolidation ─────────────────────────────────────────────────────
+
+
+def _talk(twins: Twins, conv: str, rows: list[tuple[str, str, str]], *, project: str | None = None,
+          title: str | None = "Trip", ephemeral: bool = False, status: dict[int, str] | None = None) -> None:
+    """A conversation's (role, content, created_at) rows, in both databases."""
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            if not c.execute("SELECT 1 FROM conversations WHERE id = ?", (conv,)).fetchone():
+                c.execute("INSERT INTO conversations (id, title, model, created_at, surface, pinned, project_id, ephemeral) "
+                          "VALUES (?, ?, ?, '2026-01-01 00:00:00', 'web', 0, ?, ?)", (conv, title, MODEL, project, ephemeral))
+            for i, (role, content, at) in enumerate(rows):
+                c.execute("INSERT INTO messages (id, conversation_id, role, content, created_at, status) "
+                          "VALUES (?, ?, ?, ?, ?, ?)", (f"{conv}-{at}", conv, role, content, at,
+                                                        (status or {}).get(i, "done")))
+            c.commit()
+
+
+def _sql(twins: Twins, sql: str, *args: Any) -> None:
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.execute(sql, args)
+            c.commit()
+
+
+def _edge_sweep(twins: Twins, edge_binary: Path, task: str) -> dict:
+    """One maintenance sweep by the edge, over its database, as its timer runs it."""
+    import os
+    import subprocess
+
+    env = {**os.environ, "WORK_DIR": str(twins.edge_db.parent), "DATABASE_URL": f"sqlite+aiosqlite:///{twins.edge_db}",
+           "OLLAMA_HOST": twins.fake.url, "HOME": str(twins.edge_db.parent), "JARVIS_APP_DIR": str(REPO),
+           "JARVIS_EDGE_LOG": "warn"}
+    for var in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+        env.pop(var, None)
+    out = subprocess.run([str(edge_binary), "--maintenance-run", task], env=env, cwd=twins.edge_db.parent,
+                         capture_output=True, text=True, check=True).stdout
+    return json.loads(out.strip().splitlines()[-1])
+
+
+def _asked(twins: Twins, sides: int = 2) -> list:
+    """Each side's model requests (Python's first), ids numbered per side."""
+    reqs = [[[m["role"], m["content"]] for m in r["messages"]] for r in twins.fake.requests]
+    half = len(reqs) // sides
+    return [Normalizer().value(reqs[i * half:(i + 1) * half]) for i in range(sides)]
+
+
+def _kv(db: Path, namespace: str, key: str) -> dict:
+    [(raw,)] = _rows(db, "SELECT value FROM kv_store WHERE namespace = ? AND key = ?", namespace, key)
+    return json.loads(raw)
+
+
+async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
+    """`consolidateMemory` and the 6-hourly sweep: the transcript batched
+    oldest first (incognito left out, stopping before a reply still being
+    written), every operation the model can ask for — row for row with
+    Python, embeddings included, and the same watermark."""
+    from core.memory_consolidation import consolidate_memory
+    from core.state import get_store
+
+    _sql(twins, "INSERT INTO config_settings (key, value, updated_at) VALUES ('default.model', ?, '2026-01-01 00:00:00')", MODEL)
+    rows = [("user" if i % 2 == 0 else "assistant", f"{i}: " + "rust edge " * 60, f"2026-01-01 10:{i:02d}:00")
+            for i in range(40)]
+    rows[39] = (rows[39][0], rows[39][1], "2026-01-01 10:39:00.250000")
+    rows.append(("assistant", "still typing", "2026-01-01 10:45:00"))
+    _talk(twins, "c-mem", rows, title=None, status={40: "running"})
+    _talk(twins, "c-ghost", [("user", "I am incognito", "2026-01-01 10:05:30")], ephemeral=True)
+
+    ops = ("Noted:\n" + json.dumps([
+        {"op": "add", "text": " Sam drinks tea ", "kind": "core"},
+        {"op": "update", "id": "m2", "text": "Lunch is at one", "kind": "fact"},
+        {"op": "delete", "id": "m0", "reason": "contradicted"},
+        {"op": "delete", "id": "ghost"},
+        {"op": "update", "id": "unknown", "text": "The river maps are green"},
+        {"text": "No op is an add", "kind": "odd"},
+        {"op": "add", "text": "The user's favourite colour is green!"},
+    ]) + "\nDone.")
+    replies = [ops, "nothing [] to do"]
+    twins.fake.script = [Reply(r) for r in replies * 2]
+
+    memories = "SELECT kind, text, embedding FROM memories ORDER BY kind, text"
+    q = "mutation($m: String) { consolidateMemory(model: $m) }"
+    python = await _python_gql(q, {"m": MODEL})
+    edge = await _edge_gql(twins, q, {"m": MODEL})
+    assert edge == python
+    assert python["data"]["consolidateMemory"] == "consolidated 40 messages in 2 batch(es) → +4 ~1 -1 (+0 seeded)"
+    assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
+    py_asked, edge_asked = _asked(twins)
+    assert edge_asked == py_asked and len(py_asked) == 2
+    assert "I am incognito" not in json.dumps(py_asked) and "still typing" not in json.dumps(py_asked)
+    assert "] Untitled | USER: 0: rust edge" in py_asked[0][1][1]
+    state = [_kv(db, "memory_consolidation", "state") for db in (twins.python_db, twins.edge_db)]
+    assert [s["messages_through"] for s in state] == ["2026-01-01T10:39:00.250000+00:00"] * 2
+    assert all(list(s) == ["messages_through", "last_run_at"] for s in state)
+
+    # Nothing past the watermark but the reply still being written.
+    twins.fake.reset([])
+    assert await _edge_gql(twins, q, {"m": None}) == await _python_gql(q, {"m": None}) == {
+        "data": {"consolidateMemory": "skipped: no new messages since last run"}}
+
+    # The timer's pass, on the default model.
+    _sql(twins, "UPDATE messages SET status = 'done' WHERE conversation_id = 'c-mem'")
+    _talk(twins, "c-mem2", [("user", "Forget the lunch thing", "2026-01-02 09:00:00")])
+    twins.fake.script = [Reply(json.dumps([{"op": "delete", "id": "m2", "reason": "user_requested"}]))] * 2
+    python = await consolidate_memory(get_store())
+    assert _edge_sweep(twins, edge_binary, "memory_consolidation") == {"result": python}
+    assert python == "consolidated 2 messages in 1 batch(es) → +0 ~0 -1 (+0 seeded)"
+    assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
+    assert _asked(twins)[0] == _asked(twins)[1]
+    assert _edge_sweep(twins, edge_binary, "nope") == {"error": "unknown maintenance task 'nope'"}
+
+
+async def test_project_memory_is_consolidated_through_the_edge(twins, edge_binary):
+    """`consolidateProjectMemory` and the 30-minute sweep: merge (lines
+    already said dropped), nothing new, a due rewrite, a merge that would
+    overflow handed to rewrite, the quiet and minimum-material gates — the
+    memory, the watermarks and every request as Python's."""
+    import base64
+
+    from core.project_memory_consolidation import consolidate_project_memories
+    from core.state import get_store
+
+    def gid(raw: str) -> str:
+        return base64.b64encode(f"Project:{raw}".encode()).decode()
+
+    _sql(twins, "INSERT INTO config_settings (key, value, updated_at) VALUES ('default.model', ?, '2026-01-01 00:00:00')", MODEL)
+    long = "We settled the GraphQL contract. " * 120
+    _talk(twins, "c-p", [("user", "  How should the edge serve GraphQL?  ", "2026-01-01 09:00:00"),
+                         ("assistant", long, "2026-01-01 09:01:00.500000"),
+                         ("user", "And the tests?", "2026-01-01 09:02:00")], project="p1", title="Atlas work")
+    _talk(twins, "c-p-ghost", [("user", "secret plans", "2026-01-01 09:03:00")], project="p1", ephemeral=True)
+
+    project = "SELECT memory FROM projects WHERE id = ?"
+    q = "mutation($id: ID!, $m: String) { consolidateProjectMemory(id: $id, model: $m) }"
+
+    async def both(pid: str, script: list[str], expect: str) -> None:
+        twins.fake.reset([Reply(r) for r in script * 2])
+        python = await _python_gql(q, {"id": gid(pid), "m": MODEL})
+        edge = await _edge_gql(twins, q, {"id": gid(pid), "m": MODEL})
+        assert edge == python
+        assert python["data"]["consolidateProjectMemory"] == expect
+        assert _rows(twins.edge_db, project, pid) == _rows(twins.python_db, project, pid)
+        py_asked, edge_asked = _asked(twins)
+        assert edge_asked == py_asked
+        metas = [_kv(db, "project_memory_consolidation", pid) for db in (twins.python_db, twins.edge_db)]
+        assert metas[0]["messages_through"] == metas[1]["messages_through"]
+        assert [list(m) for m in metas] == [["messages_through", "last_rewrite_at"]] * 2
+
+    await both("p1", ["- Uses Rust.\n- The edge serves GraphQL over axum\n## Stack\n- uses rust"],
+               "merge: added 1 line(s)")
+    assert _rows(twins.python_db, project, "p1") == [("Uses Rust.\n\n- The edge serves GraphQL over axum",)]
+    assert "secret plans" not in json.dumps(twins.fake.requests)
+    assert " …[truncated]" in twins.fake.requests[0]["messages"][1]["content"]
+
+    _talk(twins, "c-p", [("user", "Thanks, " + "that is all. " * 60, "2026-01-01 09:30:00")], project="p1")
+    await both("p1", ["__NO_UPDATE__"], "merge: nothing new (1 messages read)")
+
+    # A day since the last rewrite: this pass may prune.
+    _sql(twins, "UPDATE kv_store SET value = json_set(value, '$.last_rewrite_at', '2025-12-01T00:00:00Z') "
+                "WHERE namespace = 'project_memory_consolidation'")
+    _talk(twins, "c-p", [("assistant", "We dropped axum for hyper. " * 30, "2026-01-01 10:00:00")], project="p1")
+    await both("p1", ["- The edge serves GraphQL over hyper\n- Uses Rust."], "rewrite: 47 → 49 chars")
+    await both("p1", [], "skipped: no new messages since last run")
+    assert (await _python_gql(q, {"id": gid("nope"), "m": None})) == (await _edge_gql(twins, q, {"id": gid("nope"), "m": None}))
+
+    # The sweep: a quiet project whose merge would pass 20 bullets goes to
+    # rewrite; one with too little to read is skipped; p1 has nothing new.
+    full = "\n".join(f"- Fact number {i} about the beacon" for i in range(19))
+    _sql(twins, "INSERT INTO projects (id, name, instructions, memory, created_at, updated_at) VALUES "
+                "('p2', 'Beacon', '', ?, '2026-01-01 00:00:00', '2026-01-01 00:00:00'), "
+                "('p3', 'Tiny', '', '', '2026-01-01 00:00:00', '2026-01-01 00:00:00')", full)
+    _talk(twins, "c-b", [("user", "Beacon status? " * 50, "2026-01-01 11:00:00")], project="p2", title="Beacon")
+    _talk(twins, "c-t", [("user", "hi", "2026-01-01 11:00:00")], project="p3")
+    twins.fake.reset([Reply(r) for r in ["- The beacon ships in March\n- Telemetry goes over LoRa radio", "- Condensed beacon"] * 2])
+    python = await consolidate_project_memories(get_store())
+    assert _edge_sweep(twins, edge_binary, "project_memory") == {"result": python}
+    assert python == f"Beacon: rewrite: {len(full)} → 18 chars"
+    for pid in ("p1", "p2", "p3"):
+        assert _rows(twins.edge_db, project, pid) == _rows(twins.python_db, project, pid)
+    py_asked, edge_asked = _asked(twins)
+    assert edge_asked == py_asked and len(py_asked) == 2
+
+
 async def test_the_sdk_asks_through_the_edge(twins):
     """`requestToolApproval` as the `jarvis` SDK sends it from a kernel."""
     agent = {"X-Jarvis-Caller": "agent", "X-Jarvis-Conversation": "c-old"}

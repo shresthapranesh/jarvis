@@ -412,11 +412,11 @@ def register_memory_activity_prune_job(cron_expr: str = "0 4 * * *") -> None:
 
 
 # ── Maintenance jobs ─────────────────────────────────────────────────────────
-# Behind the Rust edge, the sweeps that need this process (an LLM, the
-# memory store) are not timers here: the edge's scheduler
-# enqueues them as `maintenance` jobs on the same timetable, and the worker
-# runs them like any other job. That is what lets this process be absent
-# between jobs. The edge does the sweeps that are only rows and files itself.
+# Behind the Rust edge, these sweeps are not timers here: the edge's scheduler
+# runs the memory sweeps itself (`edge/src/consolidate/`) when it calls the
+# default model, and otherwise enqueues them as `maintenance` jobs on the same
+# timetable, which the worker runs like any other job. That is what lets this
+# process be absent between jobs. The edge does the row-and-file sweeps itself.
 
 async def _memory_consolidation() -> None:
     from core.memory_consolidation import consolidate_memory  # noqa: PLC0415

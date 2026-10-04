@@ -291,36 +291,9 @@ JSON shape: {{\"subtasks\": [{{\"title\": \"...\", \"body\": \"...\", \"depends_
 /// The planner call: no tools, nothing streamed, the reply's text blocks —
 /// joined by a space, as Python joins a reasoning model's list.
 async fn plan(pool: &SqlitePool, http: &reqwest::Client, model: &str, task: &BoardTask) -> Result<String> {
-    use crate::llm::shape::SystemBlock;
-    use crate::llm::transcript::{Content, Part, Role, Typed};
-
-    let user = crate::llm::Message::new(
-        Role::User,
-        Content::Text(decompose_prompt(&task.title, task.body.as_deref().unwrap_or(""))),
-    );
-    let prompt = crate::llm::Prompt {
-        system: vec![SystemBlock { text: DECOMPOSE_SYSTEM.into(), breakpoint: false }],
-        messages: vec![user],
-        history_breakpoint: None,
-        cached: false,
-    };
-    let ends = crate::llm::Endpoints {
-        compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(),
-        ..crate::llm::Endpoints::from_env()
-    };
-    let req = crate::llm::Request { model, prompt: &prompt, tools: &[], blobs: &Default::default() };
-    let reply = crate::llm::complete(http, &ends, &req, &mut |_| {}).await.map_err(|e| e.message)?;
-    Ok(match reply.message.content {
-        Content::Text(s) => s,
-        Content::Parts(parts) => parts
-            .iter()
-            .filter_map(|p| match p {
-                Part::Typed(Typed::Text { text, .. }) => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-    })
+    let user = decompose_prompt(&task.title, task.body.as_deref().unwrap_or(""));
+    let texts = crate::llm::ask(pool, http, model, DECOMPOSE_SYSTEM, user).await.map_err(|e| e.message)?;
+    Ok(texts.join(" "))
 }
 
 #[derive(Debug, PartialEq)]
@@ -329,19 +302,6 @@ struct SubtaskSpec {
     body: String,
     /// Earlier subtasks' indexes, sorted, no repeats.
     depends_on: Vec<usize>,
-}
-
-/// Python's type name, for the error its `.get` on a non-dict raises.
-fn py_type(v: &Value) -> &'static str {
-    match v {
-        Value::Null => "NoneType",
-        Value::Bool(_) => "bool",
-        Value::Number(n) if n.is_f64() => "float",
-        Value::Number(_) => "int",
-        Value::String(_) => "str",
-        Value::Array(_) => "list",
-        Value::Object(_) => "dict",
-    }
 }
 
 /// `_parse_decomposition`: the planner's text → validated subtask specs, or
@@ -369,7 +329,7 @@ fn parse_decomposition(text: &str) -> Result<Vec<SubtaskSpec>, String> {
     let mut specs = vec![];
     for (i, s) in subtasks.iter().enumerate() {
         let Value::Object(fields) = s else {
-            return Err(format!("'{}' object has no attribute 'get'", py_type(s)));
+            return Err(format!("'{}' object has no attribute 'get'", crate::pyjson::py_type(s)));
         };
         let field = |key: &str| match fields.get(key) {
             Some(v) if crate::pyjson::truthy(v) => crate::pyjson::py_str(v).trim().to_string(),

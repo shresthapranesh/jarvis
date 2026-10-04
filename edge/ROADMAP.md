@@ -38,7 +38,7 @@ it's on `main`.
 - [x] `decomposeBoardTask` (an LLM call)
 - [x] Automations: `createAutomation`, `updateAutomation`, `deleteAutomation` (a human's; an agent's delete is approval-gated in Python)
 - [x] Agent memory: `agentMemory`, `updateMemory`, `deleteAgentMemory`
-- [ ] Memory consolidation and project memory (the maintenance jobs, `consolidateMemory`, `consolidateProjectMemory`) — M
+- [x] Memory consolidation and project memory (the maintenance sweeps, `consolidateMemory`, `consolidateProjectMemory`)
 - [ ] Settings: `settings`, `setting`, `setSetting`, `deleteSetting` (the `KNOWN_SETTINGS` registry) — M
 - [ ] Models: `addModel`, `updateModel`, `removeModel`, `setDefaultModel`, `addDiscoveredModels`, `setToolPolicy`, endpoints, `modelSync` — M
 - [ ] `tools` query, `browserActivity` — S

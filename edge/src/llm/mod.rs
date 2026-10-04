@@ -212,6 +212,38 @@ async fn call(
     }
 }
 
+/// `build_llm().ainvoke([SystemMessage(system), HumanMessage(user)])`: a
+/// one-shot call, no tools, nothing streamed — the reply's text blocks.
+pub async fn ask(
+    pool: &sqlx::SqlitePool,
+    http: &reqwest::Client,
+    model: &str,
+    system: &str,
+    user: String,
+) -> Result<Vec<String>, Error> {
+    use transcript::{Content, Part, Role, Typed};
+
+    let prompt = Prompt {
+        system: vec![shape::SystemBlock { text: system.into(), breakpoint: false }],
+        messages: vec![Message::new(Role::User, Content::Text(user))],
+        history_breakpoint: None,
+        cached: false,
+    };
+    let ends = Endpoints { compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(), ..Endpoints::from_env() };
+    let req = Request { model, prompt: &prompt, tools: &[], blobs: &Default::default() };
+    let reply = complete(http, &ends, &req, &mut |_| {}).await?;
+    Ok(match reply.message.content {
+        Content::Text(s) => vec![s],
+        Content::Parts(parts) => parts
+            .into_iter()
+            .filter_map(|p| match p {
+                Part::Typed(Typed::Text { text, .. }) => Some(text),
+                _ => None,
+            })
+            .collect(),
+    })
+}
+
 fn needs<'a>(key: &'a Option<String>, var: &str, model: &str) -> Result<&'a str, Error> {
     key.as_deref().ok_or_else(|| Error::fatal(format!("{var} is not set (required for '{model}')")))
 }

@@ -219,6 +219,19 @@ pub fn py_float(value: &Value) -> Option<f64> {
     }
 }
 
+/// `type(value).__name__` for a JSON-decoded value.
+pub fn py_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "NoneType",
+        Value::Bool(_) => "bool",
+        Value::Number(n) if n.is_f64() => "float",
+        Value::Number(_) => "int",
+        Value::String(_) => "str",
+        Value::Array(_) => "list",
+        Value::Object(_) => "dict",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -145,8 +145,8 @@ has nothing to do:
 |---|---|---|
 | each enabled automation | its cron schedule | enqueues an `automation` job |
 | board dispatch | every 15 s, and when Python sends `dispatch` | `dispatch_board_tasks`, in the edge |
-| memory consolidation | `0 */6 * * *` | enqueues a `maintenance` job, if due |
-| project memory | every 30 min | enqueues a `maintenance` job, if due |
+| memory consolidation | `0 */6 * * *` | the sweep in the edge (`src/consolidate/`), if due |
+| project memory | every 30 min | the sweep in the edge (`src/consolidate/`), if due |
 | staging cleanup | `0 * * * *` | deletes abandoned uploads, in the edge |
 | memory-activity prune | `0 4 * * *` | deletes old access-log rows, in the edge |
 
@@ -154,8 +154,10 @@ Python behind the edge (`JARVIS_EDGE_URL` set — `core/edge_link.py:behind_edge
 registers none of these, nor the idle-kernel reaper: the kernels are the
 edge's too (see "The kernels"). Its `dispatch_board_tasks()` sends `dispatch` instead of claiming
 cards itself, `_register_scheduler_job` / `_remove_scheduler_job` send
-`schedules`, and a `maintenance` worker runs the sweeps that need it
-(`core/scheduler.py:MAINTENANCE_TASKS`). The decision is configuration, not
+`schedules`. The memory sweeps run in the edge when it calls the default
+model (`consolidate::served`: the agent loop on, a provider it speaks);
+otherwise they are queued as `maintenance` jobs for Python's worker
+(`core/scheduler.py:MAINTENANCE_TASKS`), as before. The decision is configuration, not
 link state, so a reconnecting link can't leave both sides firing.
 
 - **Cron is APScheduler's, not a library's.** `cron.rs` ports
@@ -597,7 +599,6 @@ moves when the thing it reads moves.
 | Mutations | Touch | Move with |
 |---|---|---|
 | `browserActivity` | a running handler's `TaskState`; the agent's kernel is the only caller | the agent loop |
-| `consolidateMemory`, `consolidateProjectMemory` | an LLM over the transcripts; watermarks in `kv_store` | the LLM callers (2e/2f) |
 | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `setToolPolicy` | the catalog cache and compiled agent graphs | the catalog becoming data |
 | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` | the live `McpManager` | MCP |
 | `resolveApproval` for an approved MCP call or a paused workflow; either it or `requestToolApproval` for a worker's run (the edge defers those per call) | `call_mcp_tool`; a future in a running workflow; a worker's run stream | the workflow engine, MCP |

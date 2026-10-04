@@ -11,6 +11,7 @@ mod budget;
 mod catalog;
 mod checkpoints;
 mod config;
+mod consolidate;
 mod cron;
 mod db;
 mod gql;
@@ -23,6 +24,7 @@ mod mimetypes;
 mod notify;
 mod proxy;
 mod pyjson;
+mod pystr;
 mod runs;
 mod schedule;
 mod supervisor;
@@ -156,6 +158,17 @@ async fn main() {
             out.insert(task.into(), due);
         }
         println!("{}", serde_json::Value::Object(out));
+        return;
+    }
+    // `--maintenance-run <task>`: one sweep, as the timer runs it, its
+    // summary (or error) as one JSON line — the tests diff it against Python's.
+    if let Some(at) = std::env::args().position(|a| a == "--maintenance-run") {
+        let task = std::env::args().nth(at + 1).unwrap_or_default();
+        let out = match consolidate::sweep(&pool, &reqwest::Client::new(), &task).await {
+            Ok(summary) => serde_json::json!({"result": summary}),
+            Err(e) => serde_json::json!({"error": e}),
+        };
+        println!("{out}");
         return;
     }
     let http = reqwest::Client::builder()

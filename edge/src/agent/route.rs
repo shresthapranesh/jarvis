@@ -63,10 +63,13 @@ pub async fn serves_board(pool: &SqlitePool, model: Option<&str>) -> bool {
 /// The model's provider is one the edge calls, and no MCP server is
 /// configured (their tools live in Python's MCP client).
 pub async fn serves_model(pool: &SqlitePool, model: &str) -> bool {
+    calls_model(pool, model).await && !mcp_configured(pool, &crate::config::app_dir()).await
+}
+
+/// The model's provider is one the edge's LLM layer calls.
+pub async fn calls_model(pool: &SqlitePool, model: &str) -> bool {
     let Some((provider, _)) = model.split_once(':') else { return false };
-    let known = PROVIDERS.contains(&provider)
-        || catalog::endpoints(pool).await.is_ok_and(|eps| eps.iter().any(|e| e.name == provider));
-    known && !mcp_configured(pool, &crate::config::app_dir()).await
+    PROVIDERS.contains(&provider) || catalog::endpoints(pool).await.is_ok_and(|eps| eps.iter().any(|e| e.name == provider))
 }
 
 /// Whether Python would find any MCP server configured — env, the first

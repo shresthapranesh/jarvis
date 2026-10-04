@@ -157,7 +157,7 @@ async fn kv_put(tx: &mut Transaction<'_, Sqlite>, key: &str, value: &Value) -> R
 
 /// `_migrate_legacy_key`: the pre-fix `/AGENTS.md` copied onto the canonical
 /// key when that has nothing — the legacy row is kept as a backup.
-async fn migrate_legacy_key(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
+pub(crate) async fn migrate_legacy_key(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
     if kv_get(tx, BLOB_KEY).await?.is_some() {
         return Ok(());
     }
@@ -168,7 +168,7 @@ async fn migrate_legacy_key(tx: &mut Transaction<'_, Sqlite>) -> Result<()> {
 }
 
 /// `datetime.now(timezone.utc).isoformat()`: microseconds left out when zero.
-fn now_iso() -> String {
+pub(crate) fn now_iso() -> String {
     let now = chrono::Utc::now();
     let fmt = if now.timestamp_subsec_micros() == 0 { "%Y-%m-%dT%H:%M:%S+00:00" } else { "%Y-%m-%dT%H:%M:%S%.6f+00:00" };
     now.format(fmt).to_string()
@@ -290,6 +290,15 @@ impl MemoryMutation {
         kv_put(&mut tx, BLOB_KEY, &value).await?;
         tx.commit().await?;
         Ok(Memory { content, exists: true, modified_at: Some(now) })
+    }
+
+    // A consolidation pass now. A model the edge doesn't call is Python's.
+    async fn consolidate_memory(&self, ctx: &Context<'_>, model: Option<String>) -> Result<String> {
+        let pool: &SqlitePool = ctx.data()?;
+        let model = crate::consolidate::served(pool, model.as_deref())
+            .await
+            .ok_or_else(|| defer("the consolidation model is called from Python".into()))?;
+        Ok(crate::consolidate::memory::consolidate(pool, &ctx.data::<EdgeData>()?.http, Some(&model)).await?)
     }
 
     // Delete the blob entirely — `main.py memory reset`. Not the same as

@@ -52,7 +52,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 ## Memory (`memory_store.py`, `memory_consolidation.py`, `episodes.py`, `retrieval.py`)
 - **With an embedder**: discrete `Memory` rows (`core` always injected; `fact` retrieved per turn into the tail). Agent writes via the bound `remember`; searches via `jarvis.search_memory`.
 - **Without**: one `AGENTS.md` blob in `kv_store`.
-- Consolidation (every 6h / `consolidateMemory`): watermark = last message consumed; batches of ≤16KB, ≤6 per pass, oldest first; stops before any `status="running"` row; 30% delete cap per pass.
+- Consolidation (every 6h / `consolidateMemory`): watermark = last message consumed; batches of ≤16KB, ≤6 per pass, oldest first; stops before any `status="running"` row; 30% delete cap per pass. Behind the edge it runs in `edge/src/consolidate/` (a port — change both).
 - **Episodes**: each compaction chunk's summary is stored as a `ConversationEpisode` and retrieved into the tail on later turns. A `prefetch_retrieval` call that omits `conversation_id` disables episodes for that turn.
 - **Hybrid retrieval**: dense cosine + BM25 via FTS5, fused with RRF (never a weighted sum of raw scores). Never pass user text to `MATCH` — use `fts_match_expr()`. Zero results is valid; callers must handle an empty list. Thresholds are per-install env vars (`JARVIS_MEMORY_MIN_COSINE`, etc.).
 

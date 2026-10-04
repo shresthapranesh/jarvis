@@ -5,12 +5,13 @@
 //! |---|---|---|
 //! | each enabled automation | its cron schedule | enqueues an `automation` job |
 //! | board dispatch | every 15 s, and on request | `dispatch_board_tasks`, here |
-//! | memory consolidation | `0 */6 * * *` | enqueues a `maintenance` job |
-//! | project memory | every 30 min | enqueues a `maintenance` job |
+//! | memory consolidation | `0 */6 * * *` | the sweep, here (`consolidate/`) |
+//! | project memory | every 30 min | the sweep, here (`consolidate/`) |
 //! | staging cleanup | `0 * * * *` | deletes abandoned uploads, here |
 //! | memory-activity prune | `0 4 * * *` | deletes old access-log rows, here |
 //!
-//! Only the idle-kernel reaper stays in Python: kernels are its children.
+//! A memory sweep is Python's — a queued `maintenance` job — when the edge
+//! doesn't call the default model (`consolidate::served`).
 //! Python behind the edge registers none of these (`core/edge_link.py:
 //! behind_edge`), and asks the edge instead — `dispatch` after a board
 //! change, `schedules` after an automation's schedule changed.
@@ -83,7 +84,7 @@ pub fn next_run_at(schedule: Option<&str>, enabled: bool, tz: Tz) -> Option<Stri
 enum Action {
     Automation { id: String, schedule: String },
     Dispatch,
-    /// A sweep Python runs: `core/scheduler.py:MAINTENANCE_TASKS`.
+    /// A memory sweep: `core/scheduler.py:MAINTENANCE_TASKS`.
     Maintenance(&'static str),
     StagingCleanup,
     ActivityPrune,
@@ -147,6 +148,8 @@ pub struct Scheduler {
     runs: Arc<Registry>,
     tz: Tz,
     staging_dir: PathBuf,
+    /// The memory sweeps' model calls.
+    http: reqwest::Client,
     /// Python changed an automation's schedule.
     changed: Notify,
     /// One dispatch pass at a time: a tick and a requested pass must not
@@ -161,6 +164,7 @@ impl Scheduler {
             runs,
             tz,
             staging_dir,
+            http: reqwest::Client::new(),
             changed: Notify::new(),
             dispatching: Mutex::new(()),
         })
@@ -305,37 +309,57 @@ impl Scheduler {
         Ok(())
     }
 
-    /// A maintenance tick: enqueue the sweep only with something for it to
-    /// do (`maintenance_due`). A job starts Python, and on an idle box most
-    /// ticks would start it just to find nothing new.
-    async fn fire_maintenance(&self, task: &str) -> sqlx::Result<()> {
+    /// A maintenance tick: the sweep, only with something for it to do
+    /// (`maintenance_due`) — a model call costs, and a job for Python would
+    /// start it just to find nothing new. Run here when the edge calls the
+    /// default model and Python has no pass of its own queued; else queued
+    /// for Python.
+    async fn fire_maintenance(&self, task: &'static str) -> sqlx::Result<()> {
         match self.maintenance_due(task).await {
             Ok(false) => {
                 tracing::debug!("maintenance {task}: nothing to do");
                 return Ok(());
             }
             Ok(true) => {}
-            // Python's own checks decide, as they did before this one.
-            Err(e) => tracing::warn!("maintenance {task}: could not tell whether it is due ({e}); enqueuing"),
+            // The sweep's own checks decide, as they did before this one.
+            Err(e) => tracing::warn!("maintenance {task}: could not tell whether it is due ({e}); going ahead"),
         }
-        self.enqueue_maintenance(task).await
+        if crate::consolidate::served(&self.pool, None).await.is_none() {
+            return self.enqueue_maintenance(task).await;
+        }
+        if self.queued_maintenance(task).await?.is_some() {
+            tracing::debug!("maintenance {task}: Python has one queued");
+            return Ok(());
+        }
+        let (pool, http) = (self.pool.clone(), self.http.clone());
+        // Off the timer loop: a pass takes as long as its model calls.
+        tokio::spawn(async move {
+            match crate::consolidate::sweep(&pool, &http, task).await {
+                Ok(summary) => tracing::info!("maintenance {task}: {summary}"),
+                Err(e) => tracing::error!("maintenance {task} failed: {e}"),
+            }
+        });
+        Ok(())
+    }
+
+    /// A `maintenance` job for this task that is pending or running.
+    async fn queued_maintenance(&self, task: &str) -> sqlx::Result<Option<String>> {
+        sqlx::query_scalar(
+            "SELECT id FROM jobs WHERE kind = 'maintenance' AND status IN ('pending', 'running') AND payload = ? LIMIT 1",
+        )
+        .bind(crate::pyjson::dumps(&json!({"task": task})))
+        .fetch_optional(&self.pool)
+        .await
     }
 
     /// One at a time per task: a box that was off for a day shouldn't come
     /// back to four queued consolidation passes.
     async fn enqueue_maintenance(&self, task: &str) -> sqlx::Result<()> {
-        let payload = json!({"task": task});
-        let waiting: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM jobs WHERE kind = 'maintenance' AND status IN ('pending', 'running') AND payload = ? LIMIT 1",
-        )
-        .bind(crate::pyjson::dumps(&payload))
-        .fetch_optional(&self.pool)
-        .await?;
-        if waiting.is_some() {
+        if self.queued_maintenance(task).await?.is_some() {
             tracing::debug!("maintenance {task}: one is already queued");
             return Ok(());
         }
-        crate::jobs::insert(&self.pool, &new_id(), "maintenance", &payload, None, false).await?;
+        crate::jobs::insert(&self.pool, &new_id(), "maintenance", &json!({"task": task}), None, false).await?;
         self.runs.wake();
         Ok(())
     }

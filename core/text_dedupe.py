@@ -8,6 +8,9 @@ would let a fact the tool rejects slip in through the job, or vice versa.
 
 Deliberately dependency-free (re + difflib) so the kernel-side SDK can import
 it without dragging the rest of `core` into the kernel process.
+
+`edge/src/consolidate/dedupe.rs` is a port (difflib's ratio included) — a
+change here is made there too.
 """
 
 from __future__ import annotations

@@ -1,4 +1,8 @@
-"""Memory consolidation."""
+"""Memory consolidation.
+
+`edge/src/consolidate/memory.rs` is a port (the item path) that runs the pass
+behind the edge — a change here is made there too.
+"""
 
 from __future__ import annotations
 

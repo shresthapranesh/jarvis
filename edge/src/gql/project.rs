@@ -96,6 +96,21 @@ pub struct ProjectMutation;
 
 #[Object]
 impl ProjectMutation {
+    // The pass for one project now, without the quiet-period wait the
+    // timer observes. A model the edge doesn't call is Python's.
+    async fn consolidate_project_memory(&self, ctx: &Context<'_>, id: ID, model: Option<String>) -> Result<String> {
+        let (_, raw) = decode_global_id(&id)?;
+        let pool: &SqlitePool = ctx.data()?;
+        if Project::by_id(pool, &raw).await?.is_none() {
+            return Err("project not found".into());
+        }
+        let model = crate::consolidate::served(pool, model.as_deref())
+            .await
+            .ok_or_else(|| super::defer("the consolidation model is called from Python".into()))?;
+        let http = &ctx.data::<super::EdgeData>()?.http;
+        Ok(crate::consolidate::project::consolidate(pool, http, &raw, Some(&model), true).await?)
+    }
+
     async fn create_project(&self, ctx: &Context<'_>, input: ProjectCreateInput) -> Result<Project> {
         let name = input.name.trim();
         if name.is_empty() {
