@@ -474,6 +474,29 @@ impl<'a> Turn<'a> {
                 Ok(tools::todos_written(items.len()))
             }
             Native::Remember { text, kind } => Ok(self.remember(&text, &kind).await),
+            Native::WriteArtifact { title, content, file_path, artifact_id } => {
+                let cwd = crate::config::app_dir();
+                let scope = super::artifacts::Scope {
+                    pool: self.pool(),
+                    dir: &self.agent.artifacts_dir,
+                    cwd: &cwd,
+                    conversation_id: self.conversation.as_deref(),
+                    // `message_id == task_id`: the chat reply the card sits under.
+                    message_id: matches!(self.kind, Kind::Chat).then_some(self.task_id.as_str()),
+                };
+                let written = super::artifacts::write(
+                    &scope,
+                    &title,
+                    content.as_deref(),
+                    file_path.as_deref(),
+                    artifact_id.as_deref(),
+                )
+                .await?;
+                if let Some(event) = written.event {
+                    self.events.emit("artifact", &event);
+                }
+                Ok(written.answer)
+            }
             Native::CompleteTask { summary, metadata } => match &self.kind {
                 Kind::Board(spec) => board::complete(self.pool(), spec, &summary, metadata.as_deref()).await,
                 _ => Ok("Error: complete_task is only available while executing a board task.".into()),

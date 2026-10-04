@@ -5,8 +5,8 @@
 //! sees the same tool list whichever runtime calls it — and a cached prefix
 //! stays byte-stable when a conversation moves between them.
 //!
-//! The edge runs `run_cell`, the todo tools and `remember`. Any other call —
-//! workers, a workflow, an artifact — or a call whose arguments aren't
+//! The edge runs `run_cell`, `write_artifact`, the todo tools and `remember`.
+//! Any other call — workers, a workflow — or a call whose arguments aren't
 //! plainly valid, or one a human must approve, is Python's: the batch is
 //! handed over (`Plan::Python`) and Python runs it, validating and gating as
 //! it always has.
@@ -81,6 +81,7 @@ pub enum Native {
     WriteTodos { todos: Vec<String> },
     SetTodoStatus { index: i64, status: String },
     Remember { text: String, kind: String },
+    WriteArtifact { title: String, content: Option<String>, file_path: Option<String>, artifact_id: Option<String> },
     CompleteTask { summary: String, metadata: Option<String> },
     BlockTask { reason: String, needs_input: bool },
 }
@@ -150,6 +151,20 @@ fn native(name: &str, args: &Value) -> Option<Native> {
                 Some(k) => k.as_str()?.to_string(),
             };
             Some(Native::Remember { text, kind })
+        }
+        "write_artifact" if only(&["title", "content", "file_path", "artifact_id"]) => {
+            // Each optional one a string or null; anything else is Pydantic's to word.
+            let opt = |key: &str| match obj.get(key) {
+                None | Some(Value::Null) => Some(None),
+                Some(Value::String(s)) => Some(Some(s.clone())),
+                Some(_) => None,
+            };
+            Some(Native::WriteArtifact {
+                title: obj.get("title")?.as_str()?.to_string(),
+                content: opt("content")?,
+                file_path: opt("file_path")?,
+                artifact_id: opt("artifact_id")?,
+            })
         }
         "complete_task" if only(&["summary", "metadata"]) => {
             let summary = obj.get("summary")?.as_str()?.to_string();

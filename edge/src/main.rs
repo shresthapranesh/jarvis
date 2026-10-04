@@ -18,6 +18,7 @@ mod jobs;
 mod kernels;
 mod link;
 mod llm;
+mod mimetypes;
 mod notify;
 mod proxy;
 mod pyjson;
@@ -88,6 +89,16 @@ async fn main() {
     // times, each computed from the one before, or `null` if it won't parse.
     if std::env::args().any(|a| a == "--cron-next") {
         cron_next();
+        return;
+    }
+
+    // The artifact tests diff this against `mimetypes.guess_type`: one file
+    // name per stdin line → its type as a JSON string, or null.
+    if std::env::args().any(|a| a == "--guess-type") {
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            println!("{}", serde_json::json!(mimetypes::guess_type(&line.expect("stdin"))));
+        }
         return;
     }
 
@@ -201,7 +212,7 @@ async fn main() {
     tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
     // The chat turns the edge runs itself (`agent/`), and the recovery of any
     // a previous edge left running.
-    tokio::spawn(agent::Agent::new(pool.clone(), runs.clone(), kernels.clone(), Some(scheduler.clone())).run());
+    tokio::spawn(agent::Agent::new(pool.clone(), runs.clone(), kernels.clone(), Some(scheduler.clone()), config.artifacts_dir.clone()).run());
 
     let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
     fields.sort();

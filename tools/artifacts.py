@@ -10,6 +10,9 @@ Binary deliverables (audio/video/image) go through the same tool via `file_path`
 
 Files are stored on disk under ``AppConfig.artifacts_dir`` as ``{uuid}.md``;
 the DB row in ``artifacts`` tracks metadata (title, conversation, timestamps).
+
+The Rust edge runs `write_artifact` itself (`edge/src/agent/artifacts.rs`), a
+port of this module: a change to either is made in both.
 """
 
 from __future__ import annotations
