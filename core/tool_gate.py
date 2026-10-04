@@ -19,6 +19,9 @@ surfaces is not an approval requirement.
 
 The cost is honest and bounded: a waiting run holds its worker slot (and, for
 an SDK call, its kernel) until answered or until `GATE_TIMEOUT_SECONDS`.
+
+The Rust edge ports this module (`edge/src/approvals.rs`) for the runs it
+executes and for `requestToolApproval`: a change to either is made in both.
 """
 
 from __future__ import annotations

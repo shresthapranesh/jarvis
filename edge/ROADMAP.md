@@ -23,7 +23,8 @@ it's on `main`.
 ## A. Finish the agent loop — no turn hands over to Python
 
 - [x] `write_artifact`: markdown and files, versions, the `artifact` event
-- [ ] Approvals: gated tools, `resolveApproval`, `requestToolApproval` — M
+- [x] Approvals: gated tools wait in the edge; `resolveApproval` (gates, board questions), `requestToolApproval`
+- [ ] `resolveApproval` for deferred actions (`delete_*`, `call_mcp_tool`) — S, with automation delete and MCP
 - [ ] Attachments: text extraction at turn start (PDF, docx, xlsx, …) — M–L
 - [ ] Workers: `spawn_workers` — M
 - [ ] Anthropic client — M

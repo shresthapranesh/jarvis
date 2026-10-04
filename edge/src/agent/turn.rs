@@ -419,13 +419,22 @@ impl<'a> Turn<'a> {
     }
 
     async fn tool_step(&mut self, thread: &mut Thread, calls: &[ToolCall], steps: Vec<Step>) -> Result<(), Stop> {
-        let mut results = Vec::with_capacity(calls.len());
+        // Every gate is answered, in call order, before anything runs.
+        let mut ready = Vec::with_capacity(steps.len());
         for (call, step) in calls.iter().zip(steps) {
+            ready.push(match step {
+                Step::Gated(native) => self.gate(call, native).await?,
+                other => other,
+            });
+        }
+        let mut results = Vec::with_capacity(calls.len());
+        for (call, step) in calls.iter().zip(ready) {
             if self.cancelled() {
                 return Err(Stop::Cancelled);
             }
             let (content, status) = match step {
-                Step::Unknown(error) => (error, "error"),
+                Step::Unknown(error) | Step::Denied(error) => (error, "error"),
+                Step::Gated(_) => unreachable!("gates are answered first"),
                 Step::Run(native) => {
                     self.budget.record_tool(1).into_iter().for_each(|(e, d)| self.events.emit(e, &d));
                     self.sync_fields();
@@ -451,6 +460,45 @@ impl<'a> Turn<'a> {
         }
         self.events.step("tools", tools_step_data(&results)).await.map_err(Stop::Failed)?;
         Ok(())
+    }
+
+    /// `make_tool_gate`'s wait for one call: the request recorded (and shown
+    /// in a chat), then the row polled until a human answers or it times
+    /// out. A stop while waiting stops the run.
+    async fn gate(&mut self, call: &ToolCall, native: Native) -> Result<Step, Stop> {
+        // `live_task_id(conversation_id)`: only a chat run is its
+        // conversation's, so only a chat's request names its run and is shown.
+        let task_id = matches!(self.kind, Kind::Chat).then(|| self.task_id.clone());
+        let request = crate::approvals::create(
+            self.pool(),
+            &format!("bound:{}", call.name),
+            &call.name,
+            &call.args,
+            self.conversation.as_deref(),
+            task_id.as_deref(),
+        )
+        .await
+        .map_err(|e| Stop::Failed(e.to_string()))?;
+        if task_id.is_some() {
+            self.events.emit("approval_request", &request.event);
+        }
+        tracing::info!("tool gate: waiting on approval {} for {}", request.id, call.name);
+        let run = self.run.clone();
+        let outcome = tokio::select! {
+            o = crate::approvals::wait(self.pool(), &request.id, crate::approvals::gate_timeout()) => o,
+            () = until_stopped(run) => return Err(Stop::Cancelled),
+        };
+        let (approved, answer) = match outcome.map_err(|e| Stop::Failed(e.to_string()))? {
+            crate::approvals::Outcome::Answered { approved, answer } => (approved, answer),
+            crate::approvals::Outcome::TimedOut => {
+                if task_id.is_some() {
+                    self.events.emit("approval_resolved", &crate::approvals::resolved_event(&call.name, false, "timed out"));
+                }
+                (false, "timed out".to_string())
+            }
+        };
+        tracing::info!("tool gate: {} {} ({})", call.name, if approved { "approved" } else { "denied" }, request.id);
+        Ok(if approved { Step::Run(native) } else { Step::Denied(crate::approvals::denial_message(&call.name, &answer)) })
     }
 
     /// One of the edge's tools; an `Err` fails the run, as a tool that raises

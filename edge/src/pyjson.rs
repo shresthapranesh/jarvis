@@ -138,9 +138,20 @@ pub fn py_str(value: &Value) -> String {
         Value::Bool(false) => "False".into(),
         Value::String(s) => s.clone(),
         Value::Number(n) => number_repr(n),
-        // repr of a list/dict uses single quotes; not reachable from any
-        // producer, so the JSON form stands in rather than a full port.
-        other => dumps(other),
+        other => py_repr(other),
+    }
+}
+
+/// `repr(value)` for a JSON-decoded value: `['a', 1]`, `{'k': None}`.
+pub fn py_repr(value: &Value) -> String {
+    match value {
+        Value::String(s) => repr_str(s),
+        Value::Array(items) => format!("[{}]", items.iter().map(py_repr).collect::<Vec<_>>().join(", ")),
+        Value::Object(map) => format!(
+            "{{{}}}",
+            map.iter().map(|(k, v)| format!("{}: {}", repr_str(k), py_repr(v))).collect::<Vec<_>>().join(", ")
+        ),
+        scalar => py_str(scalar),
     }
 }
 
@@ -285,5 +296,6 @@ mod tests {
         assert_eq!(repr_str("it's"), "\"it's\"");
         assert_eq!(repr_str("both ' and \""), "'both \\' and \"'");
         assert_eq!(repr_str("a\\b\n\u{1}\u{e9}"), "'a\\\\b\\n\\x01\u{e9}'");
+        assert_eq!(py_str(&json!(["a", 1, 2.5, null, true, {"k": "it's"}])), "['a', 1, 2.5, None, True, {'k': \"it's\"}]");
     }
 }

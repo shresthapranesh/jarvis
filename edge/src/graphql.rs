@@ -51,8 +51,15 @@ pub async fn post(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<
         let variables = op.variables.unwrap_or(serde_json::Value::Null);
         match decide(&state.owned, &op.query, op.operation_name.as_deref(), &variables, caller, state.runs_here()) {
             Decision::Edge => {
+                let conversation = parts
+                    .headers
+                    .get("x-jarvis-conversation")
+                    .and_then(|v| v.to_str().ok())
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string);
                 let mut request = async_graphql::Request::new(op.query)
-                    .variables(async_graphql::Variables::from_json(variables));
+                    .variables(async_graphql::Variables::from_json(variables))
+                    .data(crate::gql::RequestFrom { caller, conversation });
                 if let Some(name) = &op.operation_name {
                     request = request.operation_name(name);
                 }
@@ -77,8 +84,8 @@ pub async fn post(State(state): State<AppState>, ConnectInfo(peer): ConnectInfo<
 }
 
 /// A resolver met data it can read only in Python (`gql::defer`): answer
-/// the whole operation there instead. Only read-only resolvers defer, so
-/// running the operation twice is harmless.
+/// the whole operation there instead. A resolver defers before it writes
+/// anything, so running the operation twice is harmless.
 fn deferred(resp: &async_graphql::Response) -> Option<&str> {
     resp.errors
         .iter()
