@@ -619,46 +619,20 @@ impl<'a> Turn<'a> {
     async fn finish_automation(mut self, result: Result<(), Stop>) -> Outcome {
         self.events.flush();
         let Kind::Automation(spec) = &self.kind else { unreachable!("an automation's turn") };
-        let pool = &self.agent.pool;
         let output = self.text.clone();
-        let failed = match result {
-            Err(Stop::Failed(e)) => Some(e),
-            Err(Stop::Limit) => Some(format!("agent 'main' reached its limit of {RECURSION_LIMIT} steps")),
-            _ => None,
+        let end = match result {
+            Err(Stop::Failed(e)) => automation::End::Failed(e),
+            Err(Stop::Limit) => automation::End::Failed(format!("agent 'main' reached its limit of {RECURSION_LIMIT} steps")),
+            _ => match self.budget.exceeded() {
+                Some(reason) => automation::End::Budget { output, reason: reason.to_string() },
+                None if self.cancelled() => automation::End::Stopped(Some(output)),
+                None => automation::End::Done(output),
+            },
         };
-        let status = if let Some(error) = failed {
-            tracing::warn!("agent: run {} failed: {error}", self.task_id);
-            automation::finish_run(pool, &spec.run_id, "error", None, Some(&error)).await;
-            crate::notify::send(pool, spec.notifications.as_deref(), "error", &spec.name, &error).await;
-            automation::reply(pool, spec, &error, "error").await;
-            self.events.emit("error", &json!({"error": error}));
-            "error"
-        } else if let Some(reason) = self.budget.exceeded().map(str::to_string) {
-            let error = format!("budget exceeded: {reason}");
-            automation::finish_run(pool, &spec.run_id, "error", Some(&output), Some(&error)).await;
-            let said = if output.is_empty() { format!("[budget exceeded: {reason}]") } else { output.clone() };
-            automation::reply(pool, spec, &said, "error").await;
-            self.events.emit("budget_exceeded", &json!({"reason": reason, "run_id": spec.run_id}));
-            self.events.emit("error", &json!({"error": error}));
-            "error"
-        } else if self.cancelled() {
-            automation::finish_run(pool, &spec.run_id, "stopped", Some(&output), None).await;
-            automation::reply(pool, spec, &output, "stopped").await;
-            self.events.emit("stopped", &json!({"output": output, "run_id": spec.run_id}));
-            "stopped"
-        } else {
-            let status =
-                if spec.input_type == "monitor" && automation::reported_no_change(&output) { "no_change" } else { "done" };
-            automation::finish_run(pool, &spec.run_id, status, Some(&output), None).await;
-            // The delta gate: an unchanged monitor stays silent.
-            if status != "no_change" {
-                crate::notify::send(pool, spec.notifications.as_deref(), "done", &spec.name, &output).await;
-            }
-            // "no_change" is a run status, not a message status.
-            automation::reply(pool, spec, &output, "done").await;
-            self.events.emit("done", &json!({"output": output, "run_id": spec.run_id}));
-            status
-        };
+        if let automation::End::Failed(e) = &end {
+            tracing::warn!("agent: run {} failed: {e}", self.task_id);
+        }
+        let status = automation::finish(&self.agent.pool, &self.run, spec, end).await;
         self.finished(status);
         Outcome::Finished
     }
@@ -724,7 +698,7 @@ impl<'a> Turn<'a> {
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /// Resolves once the run is stopped — by a human, or by its budget.
-async fn until_stopped(run: Arc<Run>) {
+pub(super) async fn until_stopped(run: Arc<Run>) {
     let mut watch = run.subscribe();
     while !run.fields().cancelled {
         if watch.changed().await.is_err() {

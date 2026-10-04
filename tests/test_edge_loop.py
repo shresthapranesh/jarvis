@@ -83,11 +83,20 @@ class FakeOllama:
         self.arrived: dict[int, threading.Event] = {}
         self.embeds: list[list[str]] = []
         self.telegram: list[dict[str, Any]] = []
+        self.hooks: list[dict[str, Any]] = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802 — http.server's spelling
-                body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
+                raw = self.rfile.read(int(self.headers.get("content-length", 0)))
+                if self.path.startswith("/hook"):
+                    fake.hooks.append({"method": "POST", "path": self.path, "body": raw.decode(),
+                                       "x-token": self.headers.get("x-token")})
+                    self.send_response(201)
+                    self.end_headers()
+                    self.wfile.write(b'{"received": true}')
+                    return
+                body = json.loads(raw or b"{}")
                 if self.path.startswith("/bot"):
                     method = self.path.rsplit("/", 1)[-1]
                     if method == "sendMessage":
@@ -151,7 +160,7 @@ class FakeOllama:
 
     def reset(self, script: list[Reply], hold: int | None = None) -> None:
         """A new script; with `hold`, that request waits for `release()`."""
-        self.script, self.requests, self.telegram = list(script), [], []
+        self.script, self.requests, self.telegram, self.hooks = list(script), [], [], []
         self.gates = {hold: threading.Event()} if hold is not None else {}
         self.arrived = {hold: threading.Event()} if hold is not None else {}
 
@@ -329,9 +338,7 @@ class Twins:
         assert job is not None and job.id == run_id
         handler = asyncio.create_task(automation_job_handler(job))
         if during is not None:
-            await self.fake.held()
-            await during(run_id)
-            self.fake.release()
+            await self._during(run_id, hold, during)
         async with asyncio.timeout(60):
             await handler
         await self.jarvis.queue.complete(job.id, worker_id="test")
@@ -350,13 +357,22 @@ class Twins:
         assert "errors" not in body, body
         run_id = body["data"]["triggerAutomation"]
         if during is not None:
-            await self.fake.held()
-            await during(run_id)
-            self.fake.release()
+            await self._during(run_id, hold, during)
         events = await self.subscribe(run_id, AUTOMATION)
         # Notifications go out before the run's last event.
         return (Turn(run_id, _automation_thread(self.edge_db, auto_id, run_id), events, self.edge_db),
                 list(self.fake.requests), list(self.fake.telegram))
+
+    async def _during(self, run_id: str, hold: int | None, during: Any) -> None:
+        """`during(run_id)` while the held request waits — or, for a run that
+        never calls the model, once it has had a moment to start."""
+        if hold is None:
+            await asyncio.sleep(1.5)
+            await during(run_id)
+            return
+        await self.fake.held()
+        await during(run_id)
+        self.fake.release()
 
     async def subscribe(self, task_id: str, query: str = CHAT) -> list[dict]:
         import websockets
@@ -767,13 +783,46 @@ async def test_an_automation_hands_over_a_call_only_python_runs(twins):
     assert _rows(twins.edge_db, "SELECT status FROM automation_runs WHERE id = ?", run_id) == [("running",)]
 
 
-async def test_a_code_automation_stays_with_python(twins):
-    from edge_support import _gid
+async def test_a_code_automation(twins):
+    """Its output, stderr included, line by line; a failing exit is still
+    `done` — Python never looks at the exit code."""
+    code = "import sys\nprint('one')\nsys.stdout.flush()\nprint('two', file=sys.stderr)\nraise SystemExit(3)\n"
+    auto = await twins.automation(input_type="code", code_text=code)
+    python, edge, _, _ = await _both_automation(twins, auto, [])
+    assert edge == python
+    assert python["run"][:2] == ["done", "one\ntwo"]
+    assert [e["text"] for e in python["events"] if e["kind"] == "TokenEvent"] == ["one\ntwo\n"]
 
-    auto = await twins.automation(input_type="code", code_text="print(1)")
-    resp = await twins.client.post("/graphql", json={"query": TRIGGER, "variables": {"id": _gid("Automation", auto)}})
-    run_id = resp.json()["data"]["triggerAutomation"]
-    assert _rows(twins.edge_db, "SELECT runtime FROM jobs WHERE id = ?", run_id) == [(None,)]
+
+async def test_a_code_automation_stopped_mid_run(twins):
+    """Terminated where it was: what it printed reached the subscriber, and
+    the run ends stopped with no output, as Python's cancelled run does."""
+    from test_edge_runs import _python
+
+    stop = "mutation($id: String!) { stopAutomationRun(runId: $id) }"
+
+    async def python_stop(run_id: str) -> None:
+        assert (await _python(stop, {"id": run_id}))["data"] == {"stopAutomationRun": True}
+
+    async def edge_stop(run_id: str) -> None:
+        resp = await twins.client.post("/graphql", json={"query": stop, "variables": {"id": run_id}})
+        assert resp.json()["data"] == {"stopAutomationRun": True}
+
+    auto = await twins.automation(input_type="code", code_text="import time\nprint('started', flush=True)\ntime.sleep(30)\n")
+    python, edge, _, _ = await _both_automation(twins, auto, [], python_during=python_stop, edge_during=edge_stop)
+    assert edge == python
+    assert python["run"][:2] == ["stopped", None]
+    assert [e["kind"] for e in python["events"]] == ["TokenEvent", "AutomationStoppedEvent"]
+
+
+async def test_a_webhook_automation(twins):
+    auto = await twins.automation(input_type="webhook", webhook_url=f"{twins.fake.url}/hook?x=1",
+                                  webhook_headers=json.dumps({"x-token": "s3cret"}), webhook_body='{"ping": 1}')
+    python, edge, _, _ = await _both_automation(twins, auto, [])
+    assert edge == python
+    assert python["run"][:2] == ["done", 'HTTP 201\n{"received": true}']
+    # One call each, the same call.
+    assert twins.fake.hooks == [{"method": "POST", "path": "/hook?x=1", "body": '{"ping": 1}', "x-token": "s3cret"}]
 
 
 # ── the handover ─────────────────────────────────────────────────────────────

@@ -178,6 +178,16 @@ impl Agent {
                 return Outcome::HandOver(None);
             }
         };
+        if spec.input_type == "code" || spec.input_type == "webhook" {
+            let end = if spec.input_type == "code" {
+                automation::run_code(&spec, run).await
+            } else {
+                automation::run_webhook(&spec, run).await
+            };
+            let status = automation::finish(&self.pool, run, &spec, end).await;
+            self.end(run, status);
+            return Outcome::Finished;
+        }
         if !route::serves_model(&self.pool, &spec.model).await {
             return Outcome::HandOver(None);
         }
