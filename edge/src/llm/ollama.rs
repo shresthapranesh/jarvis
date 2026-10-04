@@ -103,11 +103,35 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
         let tools: Vec<Value> = req
             .tools
             .iter()
-            .map(|t| json!({"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}))
+            .map(|t| {
+                json!({"type": "function", "function": {
+                    "name": t.name, "description": t.description, "parameters": parameters(&t.parameters)}})
+            })
             .collect();
         body["tools"] = tools.into();
     }
     Ok(body)
+}
+
+/// A tool's parameters as the `ollama` client's `Tool` model keeps them —
+/// what Ollama's API defines: per argument only `type`, `items`,
+/// `description` and `enum`, so an optional one (`anyOf` with null) is an
+/// empty schema and a default is dropped. The server reads no more, and the
+/// same bytes keep a conversation's KV prefix when it moves between runtimes.
+fn parameters(schema: &Value) -> Value {
+    let keep = |from: &Value, keys: &[&str]| -> serde_json::Map<String, Value> {
+        keys.iter().filter_map(|k| Some((k.to_string(), from.get(*k).filter(|v| !v.is_null())?.clone()))).collect()
+    };
+    let mut out = keep(schema, &["type", "$defs", "items", "required"]);
+    out.entry("type").or_insert_with(|| "object".into());
+    if let Some(Value::Object(props)) = schema.get("properties") {
+        let props: serde_json::Map<String, Value> = props
+            .iter()
+            .map(|(name, p)| (name.clone(), Value::Object(keep(p, &["type", "items", "description", "enum"]))))
+            .collect();
+        out.insert("properties".into(), Value::Object(props));
+    }
+    Value::Object(out)
 }
 
 /// The name of the tool call `id` answers.

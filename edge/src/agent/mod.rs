@@ -14,11 +14,18 @@
 //! own at start (`queue::recover`), and Python running without the edge
 //! adopts them (`db/ops.py:adopt_edge_jobs`).
 //!
-//! Not the agent loop yet (2d-2): for now every claimed turn is handed to
-//! Python before it starts.
+//! The turn itself (`turn.rs`) runs the model and the tools the edge has
+//! (`tools.rs`) against the transcript tables (`thread.rs`), with the
+//! prompt built as Python builds it (`prompt.rs`) and its events and step
+//! rows as Python emits them (`events.rs`).
 
+mod events;
+mod prompt;
 mod queue;
 pub mod route;
+mod thread;
+mod tools;
+mod turn;
 
 pub use queue::EDGE as EDGE_RUNTIME;
 
@@ -30,6 +37,7 @@ use sqlx::SqlitePool;
 use tokio::sync::Semaphore;
 
 use crate::gql::codec::iso_from_db;
+use crate::kernels::Kernels;
 use crate::runs::{Meta, Registry, Run};
 use queue::Job;
 
@@ -41,6 +49,8 @@ const MAX_RUNNING: usize = 8;
 pub struct Agent {
     pool: SqlitePool,
     runs: Arc<Registry>,
+    kernels: Arc<Kernels>,
+    http: reqwest::Client,
     /// `locked_by` on the jobs this process claims.
     worker: String,
     slots: Arc<Semaphore>,
@@ -48,16 +58,21 @@ pub struct Agent {
 
 /// What a turn came to, for the job.
 enum Outcome {
+    /// Finished here — answered, stopped or failed; the run's rows say which.
+    Finished,
     /// Python runs the rest: the job is released to it, carrying the turn so
     /// far (`None`: nothing ran here, Python starts it from the beginning).
     HandOver(Option<Value>),
 }
 
 impl Agent {
-    pub fn new(pool: SqlitePool, runs: Arc<Registry>) -> Arc<Self> {
+    pub fn new(pool: SqlitePool, runs: Arc<Registry>, kernels: Arc<Kernels>) -> Arc<Self> {
         Arc::new(Self {
             pool,
             runs,
+            kernels,
+            // Model calls stream for as long as the reply takes; no overall timeout.
+            http: reqwest::Client::new(),
             worker: format!("edge-{}", std::process::id()),
             slots: Arc::new(Semaphore::new(MAX_RUNNING)),
         })
@@ -119,13 +134,24 @@ impl Agent {
             }
         };
         match outcome {
+            Outcome::Finished => match queue::complete(&self.pool, &job.id, &self.worker).await {
+                // The conversation's next turn may be waiting on its lease.
+                Ok(_) => self.runs.wake(),
+                Err(e) => tracing::error!("agent: completing job {}: {e}", job.id),
+            },
             Outcome::HandOver(carried) => self.hand_over(&job, Some(&run), carried).await,
         }
     }
 
-    async fn serve(&self, job: &Job, _run: &Arc<Run>) -> Outcome {
-        tracing::info!("agent: chat run {} claimed; handing it to Python (the loop isn't here yet)", job.id);
-        Outcome::HandOver(None)
+    async fn serve(&self, job: &Job, run: &Arc<Run>) -> Outcome {
+        tracing::info!("agent: chat run {} claimed", job.id);
+        match turn::Turn::new(self, job, run.clone()) {
+            Some(turn) => turn.run().await,
+            None => {
+                tracing::warn!("agent: job {} has no chat payload; handing it to Python", job.id);
+                Outcome::HandOver(None)
+            }
+        }
     }
 
     /// Release the job to Python and wake it.

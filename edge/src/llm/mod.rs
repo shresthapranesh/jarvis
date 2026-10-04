@@ -13,7 +13,7 @@
 //!
 //! [`complete`] is the one entry point.
 
-mod compact;
+pub mod compact;
 pub mod google;
 mod lines;
 pub mod ollama;

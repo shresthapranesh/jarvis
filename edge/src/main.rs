@@ -158,9 +158,7 @@ async fn main() {
     let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
     tokio::spawn(scheduler.clone().run());
     tokio::spawn(sweep_pending_runs(runs.clone(), pool.clone()));
-    // The chat turns the edge runs itself (`agent/`), and the recovery of any
-    // a previous edge left running.
-    tokio::spawn(agent::Agent::new(pool.clone(), runs.clone()).run());
+
     let supervisor = supervisor::Supervisor::new(
         config.worker.take(),
         config.backend.clone(),
@@ -192,6 +190,9 @@ async fn main() {
         pool.clone(),
     );
     tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
+    // The chat turns the edge runs itself (`agent/`), and the recovery of any
+    // a previous edge left running.
+    tokio::spawn(agent::Agent::new(pool.clone(), runs.clone(), kernels.clone()).run());
 
     let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
     fields.sort();

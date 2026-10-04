@@ -309,8 +309,26 @@ made in both.**
 ## The agent loop (`src/agent/`)
 
 Phase 2d: chat turns run in the edge, so a conversation needs no Python at
-all. **In progress**: the plumbing is here (2d-1), the loop isn't — every
-turn the edge claims is handed to Python before it starts.
+all. **In progress**: the loop runs here (2d-2); retrieval (2d-3) and
+summarizing compaction (2d-4) are still Python's, so a turn that needs them
+goes over (see "Handing over").
+
+- **The turn** (`turn.rs`) is `_run_agent_task` and `core/agent_loop.py`:
+  the prompt into the thread and the plan reset, then model step, tool
+  batch, repeat. Each message is written as it arrives, so a handover or a
+  re-claim goes on from the rows (`thread.rs`, the transcript tables). Stops,
+  the budget, the step limit, messages queued mid-run, and the leftover
+  queue starting the next turn all behave as Python's.
+- **The prompt** (`prompt.rs`) is `model_request_node`'s: the system prompt
+  (read from the checkout), memory how-to and core memory, a small skill
+  catalog, the live browser, the project, then the todo list or the planning
+  directive. **A change to `core/agents.py`'s prompt is made in both.**
+- **Tools** (`tools.rs`): the schemas are Python's own, exported to
+  `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
+  tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
+  kernels) and the todo tools; an unknown tool gets ToolNode's error.
+- **Events and steps** (`events.rs`): tokens batched as `TokenCoalescer`
+  does, each step's row written before its event.
 
 - **Routing** (`route.rs`), when a turn is queued: with
   `JARVIS_AGENT_RUNTIME=edge`, a turn on a provider the LLM layer speaks
@@ -332,18 +350,28 @@ turn the edge claims is handed to Python before it starts.
   carries `payload.handoff = {text, step_seq, steps, usage}`: Python then
   runs the tool calls the edge recorded but didn't run, and goes on from
   there (`chat_job_handler`), its text, step rows and spend continuing the
-  edge's.
+  edge's. A turn goes over when its next step needs what only Python has:
+  a tool other than the edge's (workers, a workflow, `remember`, an
+  artifact), arguments that aren't plainly valid, a tool a human must
+  approve, memories or earlier episodes to retrieve for the request, a
+  skill catalog large enough to rank, a history near the summarizing
+  threshold, or a conversation not yet converted from `checkpoints.db`.
+  Throughput measured before a handover isn't carried.
 - **Recovery**: at start the edge re-queues its jobs a previous edge left
   running; with the loop off, it hands every live edge job to Python. Python
   running without the edge adopts them (`db/ops.py:adopt_edge_jobs`).
 
-Tested in `tests/test_edge_agent.py`.
+Tested in `tests/test_edge_agent.py` (routing, the queue, the handover's
+Python side) and `tests/test_edge_loop.py`, which runs scripted turns
+through both runtimes against one fake Ollama and diffs the events a
+subscriber gets, the step rows, the message, the thread and every model
+request. Departures are named there.
 
 ## The LLM layer (`src/llm/`)
 
-Phase 2b: model calls from Rust, for the agent loop that will run here. Not
-wired into serving yet. It is reached only through `--llm-shape` and
-`--llm-call`, which read one request as JSON on stdin.
+Phase 2b: model calls from Rust, which the agent loop (`src/agent/`) makes.
+`--llm-shape` and `--llm-call` drive it alone, reading one request as JSON
+on stdin.
 
 - `transcript.rs` — the v1 record (`core/transcript_format.md`). A row Python
   wrote reads and writes back equal, `null`s included.
@@ -356,7 +384,8 @@ wired into serving yet. It is reached only through `--llm-shape` and
   `Prompt`, streams the reply (text and thinking deltas) and builds the
   assistant record:
   - `google.rs`: Gemini's `streamGenerateContent`.
-  - `ollama.rs`: Ollama's `/api/chat`.
+  - `ollama.rs`: Ollama's `/api/chat`. Tool schemas as the `ollama`
+    client's `Tool` model keeps them (an optional argument is `{}`).
   - `openai_chat.rs`: Chat Completions, for `openrouter`. It writes tool-call
     arguments the way Python's `json.dumps(ensure_ascii=False)` does, so a
     cached prefix stays the same bytes when a thread moves between runtimes.

@@ -415,15 +415,36 @@ pub async fn start_chat(
         att.document_path = Some(path);
     }
 
-    // The assistant row the run writes into; its id is the task id.
+    let task_id = enqueue_turn(pool, registry, tx, &conversation_id, &query, &model, &attachments).await?;
+
+    // The bytes now live in documents_dir or the job payload.
+    for (bytes, meta) in attachments.iter().filter_map(|a| a.staged.as_ref()) {
+        let _ = std::fs::remove_file(bytes);
+        let _ = std::fs::remove_file(meta);
+    }
+    Ok(Dispatched::Started { task_id, conversation_id })
+}
+
+/// `enqueue_chat_task`: the assistant row the run writes into (its id is the
+/// task id) and the job, committed with `tx` and mirrored. The user's message
+/// is the caller's.
+async fn enqueue_turn(
+    pool: &SqlitePool,
+    registry: &Registry,
+    mut tx: Transaction<'_, Sqlite>,
+    conversation_id: &str,
+    query: &str,
+    model: &str,
+    attachments: &[Attachment],
+) -> Result<String> {
     let task_id = new_id();
     sqlx::query(
         "INSERT INTO messages (id, conversation_id, role, content, model, created_at, status) \
          VALUES (?, ?, 'assistant', '', ?, ?, 'running')",
     )
     .bind(&task_id)
-    .bind(&conversation_id)
-    .bind(&model)
+    .bind(conversation_id)
+    .bind(model)
     .bind(now_stored())
     .execute(&mut *tx)
     .await?;
@@ -433,16 +454,34 @@ pub async fn start_chat(
     }
     // The conversation is the thread: its turns run one at a time. The edge
     // runs the turn itself when it can (`agent/route.rs`).
-    let edge = crate::agent::route::serves_chat(pool, &model, !attachments.is_empty()).await;
-    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(&conversation_id), edge).await?;
-    commit_run(registry, tx, &task_id, "chat", first_chars(&query, 60), &conversation_id, &enqueued_at, edge).await?;
+    let edge = crate::agent::route::serves_chat(pool, model, !attachments.is_empty()).await;
+    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(conversation_id), edge).await?;
+    commit_run(registry, tx, &task_id, "chat", first_chars(query, 60), conversation_id, &enqueued_at, edge).await?;
+    Ok(task_id)
+}
 
-    // The bytes now live in documents_dir or the job payload.
-    for (bytes, meta) in attachments.iter().filter_map(|a| a.staged.as_ref()) {
-        let _ = std::fs::remove_file(bytes);
-        let _ = std::fs::remove_file(meta);
+/// `_redispatch_queued`: a message queued after a run's last model call has
+/// no run left to join, so the first one becomes the next turn — its queued
+/// row is that turn's user message. The rest stay queued; that turn adopts
+/// them.
+pub async fn redispatch_queued(pool: &SqlitePool, registry: &Registry, conversation_id: &str, model: &str) {
+    let first: sqlx::Result<Option<(String, String)>> = sqlx::query_as(
+        "SELECT id, content FROM messages WHERE conversation_id = ? AND role = 'user' AND status = 'queued' \
+         ORDER BY created_at ASC LIMIT 1",
+    )
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await;
+    let Ok(Some((message_id, text))) = first else { return };
+    let started = async {
+        let mut tx = pool.begin().await?;
+        sqlx::query("UPDATE messages SET status = 'done' WHERE id = ?").bind(&message_id).execute(&mut *tx).await?;
+        enqueue_turn(pool, registry, tx, conversation_id, &text, model, &[]).await
+    };
+    if let Err(e) = started.await {
+        // The rows are still queued: the next run on the conversation adopts them.
+        tracing::warn!("re-dispatch of queued messages failed: {}", e.message);
     }
-    Ok(Dispatched::Started { task_id, conversation_id })
 }
 
 #[derive(Default)]

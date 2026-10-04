@@ -36,6 +36,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::pyjson;
 
+/// How long a finished run stays mirrored (`TASK_LINGER_SECONDS`).
+const LINGER: Duration = Duration::from_secs(5);
+
 /// How long a `call` waits for the worker's reply.
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -327,6 +330,21 @@ impl Registry {
     /// worker's claim continues it (`register`).
     pub fn release(&self, run: &Run) {
         run.update(|st| st.edge = false);
+    }
+
+    /// A run the edge finished: it leaves the mirror a little later, so a
+    /// subscriber that arrives just after still replays it
+    /// (`TASK_LINGER_SECONDS`).
+    pub fn retire(self: &Arc<Self>, id: &str) {
+        let Some(run) = self.get(id) else { return };
+        let me = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(LINGER).await;
+            let mut inner = me.lock();
+            if inner.runs.get(&run.id).is_some_and(|r| Arc::ptr_eq(r, &run)) {
+                inner.runs.shift_remove(&run.id);
+            }
+        });
     }
 
     /// Whether any run in the mirror needs a worker: one a worker has, or

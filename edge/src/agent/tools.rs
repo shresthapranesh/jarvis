@@ -1,0 +1,261 @@
+//! The tools the main agent is bound to, and the ones the edge runs itself.
+//!
+//! The schemas are Python's own (`tools.json`, exported from
+//! `convert_to_openai_tool` and diffed against it by the tests), so the model
+//! sees the same tool list whichever runtime calls it — and a cached prefix
+//! stays byte-stable when a conversation moves between them.
+//!
+//! The edge runs `run_cell` and the todo tools. Any other call — workers, a
+//! workflow, `remember`, an artifact — or a call whose arguments aren't
+//! plainly valid, or one a human must approve, is Python's: the batch is
+//! handed over (`Plan::Python`) and Python runs it, validating and gating as
+//! it always has.
+
+use std::sync::LazyLock;
+use std::time::Duration;
+
+use serde_json::{Value, json};
+use sqlx::SqlitePool;
+
+use crate::llm::Tool;
+use crate::llm::transcript::ToolCall;
+
+static SCHEMAS: LazyLock<Vec<Tool>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("tools.json")).expect("tools.json is a list of tool schemas")
+});
+
+fn schema(name: &str) -> Tool {
+    SCHEMAS.iter().find(|t| t.name == name).cloned().unwrap_or_else(|| panic!("tools.json has no {name}"))
+}
+
+/// The policy a human set for a bound tool (`tools.policy`, `bound:<name>`);
+/// absent entries are enabled and ungated.
+#[derive(Default)]
+pub struct Policy(serde_json::Map<String, Value>);
+
+impl Policy {
+    pub async fn load(pool: &SqlitePool) -> Self {
+        let raw = crate::catalog::setting(pool, "tools.policy").await.ok().flatten();
+        match raw.as_deref().map(serde_json::from_str::<Value>) {
+            Some(Ok(Value::Object(map))) => Policy(map),
+            _ => Policy::default(),
+        }
+    }
+
+    fn entry(&self, name: &str, field: &str, default: bool) -> bool {
+        match self.0.get(&format!("bound:{name}")) {
+            Some(Value::Object(e)) => e.get(field).map_or(default, crate::pyjson::truthy),
+            _ => default,
+        }
+    }
+
+    pub fn enabled(&self, name: &str) -> bool {
+        self.entry(name, "enabled", true)
+    }
+
+    pub fn needs_approval(&self, name: &str) -> bool {
+        self.entry(name, "approval", false)
+    }
+}
+
+/// The main agent's tools in `_build_agent`'s order, without the ones a
+/// human switched off. With an embedder — which Python always has — `remember`
+/// is bound too.
+pub fn bound(policy: &Policy) -> Vec<Tool> {
+    ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow", "remember"]
+        .into_iter()
+        .filter(|n| policy.enabled(n))
+        .map(schema)
+        .collect()
+}
+
+/// A call the edge runs itself, its arguments checked.
+#[derive(Debug, PartialEq)]
+pub enum Native {
+    RunCell { code: String },
+    WriteTodos { todos: Vec<String> },
+    SetTodoStatus { index: i64, status: String },
+}
+
+/// How a batch of calls will run.
+#[derive(Debug, PartialEq)]
+pub enum Plan {
+    /// Every call is the edge's: unknown tools get ToolNode's error, the rest
+    /// run here.
+    Edge(Vec<Step>),
+    /// Something in it is Python's; the batch goes over whole.
+    Python(String),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Step {
+    Run(Native),
+    /// ToolNode's answer to a call naming no bound tool.
+    Unknown(String),
+}
+
+/// `_UNKNOWN_TOOL`.
+pub fn unknown_tool(name: &str, bound: &[Tool]) -> String {
+    let names: Vec<&str> = bound.iter().map(|t| t.name.as_str()).collect();
+    format!("Error: {name} is not a valid tool, try one of [{}].", names.join(", "))
+}
+
+pub fn plan(calls: &[ToolCall], bound: &[Tool], policy: &Policy) -> Plan {
+    let mut steps = vec![];
+    for call in calls {
+        if !bound.iter().any(|t| t.name == call.name) {
+            steps.push(Step::Unknown(unknown_tool(&call.name, bound)));
+            continue;
+        }
+        if policy.needs_approval(&call.name) {
+            return Plan::Python(format!("{} needs approval", call.name));
+        }
+        match native(&call.name, &call.args) {
+            Some(n) => steps.push(Step::Run(n)),
+            None => return Plan::Python(format!("{} runs in Python", call.name)),
+        }
+    }
+    Plan::Edge(steps)
+}
+
+/// The call as a native one, if its arguments are exactly what its schema
+/// asks for. Anything Pydantic would coerce, default or reject is left to
+/// Python, which says it the way the model has always been told.
+fn native(name: &str, args: &Value) -> Option<Native> {
+    let obj = args.as_object()?;
+    let only = |keys: &[&str]| obj.keys().all(|k| keys.contains(&k.as_str()));
+    match name {
+        "run_cell" if only(&["code"]) => Some(Native::RunCell { code: obj.get("code")?.as_str()?.to_string() }),
+        "write_todos" if only(&["todos"]) => {
+            let todos = obj.get("todos")?.as_array()?.iter().map(|t| t.as_str().map(str::to_string)).collect::<Option<_>>()?;
+            Some(Native::WriteTodos { todos })
+        }
+        "set_todo_status" if only(&["index", "status"]) => {
+            let index = obj.get("index")?.as_i64()?;
+            let status = obj.get("status")?.as_str()?;
+            ["pending", "in_progress", "done"].contains(&status).then(|| Native::SetTodoStatus { index, status: status.into() })
+        }
+        _ => None,
+    }
+}
+
+/// `_normalise_todos`: `[{text, status}]`, legacy strings and odd statuses
+/// made pending.
+pub fn normalise_todos(raw: &[Value]) -> Vec<Value> {
+    raw.iter()
+        .filter_map(|item| match item {
+            Value::String(s) => Some(json!({"text": s, "status": "pending"})),
+            Value::Object(o) if o.contains_key("text") => {
+                let status = o.get("status").and_then(Value::as_str).filter(|s| ["pending", "in_progress", "done"].contains(s));
+                Some(json!({"text": crate::pyjson::py_str(&o["text"]), "status": status.unwrap_or("pending")}))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// `reduce_todos`: a list of the same length merges index by index, keeping
+/// the more advanced status; anything else replaces the list.
+pub fn reduce_todos(current: &[Value], update: &[Value]) -> Vec<Value> {
+    let (cur, upd) = (normalise_todos(current), normalise_todos(update));
+    if cur.is_empty() || upd.is_empty() || cur.len() != upd.len() {
+        return upd;
+    }
+    let rank = |t: &Value| match t["status"].as_str() {
+        Some("in_progress") => 1,
+        Some("done") => 2,
+        _ => 0,
+    };
+    cur.into_iter().zip(upd).map(|(c, u)| if rank(&u) >= rank(&c) { u } else { c }).collect()
+}
+
+/// `write_todos`' answer.
+pub fn todos_written(n: usize) -> String {
+    format!("Updated todo list ({n} item{}).", if n == 1 { "" } else { "s" })
+}
+
+/// `set_todo_status`: the new list, or the error the model gets.
+pub fn set_status(todos: &[Value], index: i64, status: &str) -> Result<(Vec<Value>, String), String> {
+    let mut todos = normalise_todos(todos);
+    let Some(slot) = usize::try_from(index).ok().filter(|&i| i < todos.len()) else {
+        return Err(format!("Error: index {index} out of range (have {} todos).", todos.len()));
+    };
+    todos[slot] = json!({"text": todos[slot]["text"], "status": status});
+    Ok((todos, format!("Set todo {index} to {}.", py_repr_str(status))))
+}
+
+/// `repr()` of a status: the values are plain words, so single-quoted.
+fn py_repr_str(s: &str) -> String {
+    format!("'{s}'")
+}
+
+/// `DEFAULT_CELL_TIMEOUT`.
+pub const CELL_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(name: &str, args: Value) -> ToolCall {
+        ToolCall { id: Some("c".into()), name: name.into(), args, signature: None }
+    }
+
+    #[test]
+    fn a_batch_is_the_edges_only_if_every_call_is() {
+        let policy = Policy::default();
+        let tools = bound(&policy);
+        let plan = plan(
+            &[call("run_cell", json!({"code": "1"})), call("nope", json!({})), call("write_todos", json!({"todos": ["a"]}))],
+            &tools,
+            &policy,
+        );
+        let Plan::Edge(steps) = plan else { panic!("{plan:?}") };
+        assert_eq!(steps[0], Step::Run(Native::RunCell { code: "1".into() }));
+        assert_eq!(
+            steps[1],
+            Step::Unknown(
+                "Error: nope is not a valid tool, try one of [run_cell, write_artifact, write_todos, set_todo_status, \
+                 spawn_workers, run_workflow, remember]."
+                    .into()
+            )
+        );
+        for python in [
+            call("spawn_workers", json!({"tasks": []})),
+            call("set_todo_status", json!({"index": "first", "status": "done"})),
+            call("set_todo_status", json!({"index": 0, "status": "finished"})),
+            call("run_cell", json!({"code": "1", "extra": true})),
+        ] {
+            assert!(matches!(plan_one(python, &tools, &policy), Plan::Python(_)));
+        }
+    }
+
+    fn plan_one(c: ToolCall, tools: &[Tool], policy: &Policy) -> Plan {
+        plan(&[c], tools, policy)
+    }
+
+    #[test]
+    fn policy_unbinds_and_gates() {
+        let policy = Policy(serde_json::from_value(json!({
+            "bound:remember": {"enabled": false},
+            "bound:run_cell": {"approval": true},
+        }))
+        .unwrap());
+        let tools = bound(&policy);
+        assert!(!tools.iter().any(|t| t.name == "remember"));
+        assert!(matches!(plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy), Plan::Python(_)));
+    }
+
+    #[test]
+    fn todos_reduce_like_python() {
+        let cur = vec![json!({"text": "a", "status": "done"}), json!("b")];
+        let upd = vec![json!({"text": "a", "status": "pending"}), json!({"text": "b", "status": "in_progress"})];
+        assert_eq!(
+            reduce_todos(&cur, &upd),
+            vec![json!({"text": "a", "status": "done"}), json!({"text": "b", "status": "in_progress"})]
+        );
+        assert_eq!(reduce_todos(&cur, &[]), Vec::<Value>::new());
+        assert_eq!(set_status(&cur, 1, "done").unwrap().1, "Set todo 1 to 'done'.");
+        assert_eq!(set_status(&cur, 2, "done").unwrap_err(), "Error: index 2 out of range (have 2 todos).");
+        assert_eq!(todos_written(1), "Updated todo list (1 item).");
+    }
+}
