@@ -334,7 +334,7 @@ async fn stop(
 /// `SqliteJobQueue.cancel`: a pending job won't be claimed; a running one is
 /// asked to stop, which its handler polls for. Durable, so it reaches the
 /// worker even if the link message didn't.
-async fn cancel_job(pool: &SqlitePool, job_id: &str) -> Result<()> {
+pub(super) async fn cancel_job(pool: &SqlitePool, job_id: &str) -> Result<()> {
     let now = now_stored();
     sqlx::query("UPDATE jobs SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'")
         .bind(&now)

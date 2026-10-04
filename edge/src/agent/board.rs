@@ -154,18 +154,7 @@ async fn message(pool: &SqlitePool, spec: &Spec, content: &str, status: &str) {
 /// `update_board_task`'s side effect: a task that is no longer waiting on an
 /// answer leaves no question in the inbox.
 async fn close_questions(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, task_id: &str, status: &str) -> sqlx::Result<()> {
-    let now = now_stored();
-    sqlx::query(
-        "UPDATE approvals SET status = 'cancelled', resolved_at = ?, result = ?, updated_at = ? \
-         WHERE status = 'pending' AND board_task_id = ?",
-    )
-    .bind(&now)
-    .bind(format!("The task moved to {status}."))
-    .bind(&now)
-    .bind(task_id)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
+    crate::gql::board::close_open_approvals(tx, task_id, "cancelled", &format!("The task moved to {status}."), None).await
 }
 
 /// `complete_task(summary, metadata)`; the metadata is already known to be

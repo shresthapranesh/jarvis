@@ -1011,6 +1011,30 @@ async def test_a_board_task_stopped_through_its_job(twins):
     assert python["task"][:5] == ["blocked", None, None, "stopped by user", "stopped"]
 
 
+async def test_a_board_task_stopped_from_the_board(twins):
+    """The edge's stopBoardTask on its own run: the turn stops at once, not
+    at the next poll of the job, and ends as Python's does."""
+    from edge_support import _gid
+    from server.task_board_runtime import stop_board_task
+
+    async def python_stop(task_id: str) -> None:
+        assert await stop_board_task(task_id) is True
+
+    async def edge_stop(task_id: str) -> None:
+        q = "mutation($id: ID!) { stopBoardTask(id: $id) }"
+        resp = await twins.client.post("/graphql", json={"query": q, "variables": {"id": _gid("BoardTask", task_id)}})
+        assert resp.json() == {"data": {"stopBoardTask": True}}
+
+    task = await twins.board_task(id="t5", title="Long", status="ready")
+    python, edge = await _both_board(twins, task, [Reply("Never sent.")], hold=0,
+                                     python_during=python_stop, edge_during=edge_stop)
+    assert edge == python
+    assert python["task"][:5] == ["blocked", None, None, "stopped by user", "stopped"]
+    resp = await twins.client.post("/graphql", json={"query": "mutation($id: ID!) { stopBoardTask(id: $id) }",
+                                                     "variables": {"id": _gid("BoardTask", task)}})
+    assert resp.json()["errors"][0]["message"] == "task is not running"
+
+
 # ── the handover ─────────────────────────────────────────────────────────────
 
 

@@ -1,10 +1,12 @@
 //! Conversation, Message and Step — `server/graphql/types/conversation.py`
 //! and `server/graphql/queries/conversation.py`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use async_graphql::{ComplexObject, Context, ID, Object, Result, SimpleObject};
-use sqlx::SqlitePool;
+use serde_json::Value;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::codec::{DateTime, decode_cursor, decode_global_id, encode_cursor, global_id};
 use super::events::TodoItem;
@@ -270,10 +272,7 @@ pub struct ConversationMutation;
 
 #[Object]
 impl ConversationMutation {
-    // Rename or pin. A `model` change is validated against the model
-    // catalog, which lives in Python, so the router sends any call that sets
-    // one there (`router::Walk::field_rule`); `model` is declared here only so
-    // the signature matches.
+    // Rename, pin, or pick the model; a model must be in the catalog.
     async fn update_conversation(
         &self,
         ctx: &Context<'_>,
@@ -282,28 +281,214 @@ impl ConversationMutation {
         model: Option<String>,
         pinned: Option<bool>,
     ) -> Result<Conversation> {
-        if model.is_some() {
-            return Err("a model change must be routed to the backend".into());
+        let pool: &SqlitePool = ctx.data()?;
+        if let Some(m) = &model {
+            if !crate::catalog::is_valid_model(pool, m).await? {
+                return Err(unknown_model(m).into());
+            }
         }
-        if title.is_none() && pinned.is_none() {
+        if title.is_none() && model.is_none() && pinned.is_none() {
             return Err("no fields to update".into());
         }
         let (_, raw) = decode_global_id(&id)?;
-        let pool: &SqlitePool = ctx.data()?;
         let mut conv = Conversation::by_id(pool, &raw).await?.ok_or("conversation not found")?;
         if let Some(t) = title {
             conv.title = Some(t);
+        }
+        if let Some(m) = model {
+            conv.model = m;
         }
         if let Some(p) = pinned {
             conv.pinned = p;
         }
         // Conversation has no updated_at column.
-        sqlx::query("UPDATE conversations SET title = ?, pinned = ? WHERE id = ?")
+        sqlx::query("UPDATE conversations SET title = ?, model = ?, pinned = ? WHERE id = ?")
             .bind(&conv.title)
+            .bind(&conv.model)
             .bind(conv.pinned)
             .bind(&raw)
             .execute(pool)
             .await?;
         Ok(conv)
+    }
+
+    async fn delete_conversation(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        let (_, raw) = decode_global_id(&id)?;
+        let (pool, data) = (ctx.data::<SqlitePool>()?, ctx.data::<super::EdgeData>()?);
+        let mut tx = crate::db::write_tx(pool).await?;
+        let teardown = delete_conversation(&mut tx, &raw, &data.artifacts_dir).await?;
+        tx.commit().await?;
+        if let Some(t) = teardown {
+            t.finish(data).await;
+        }
+        Ok(true)
+    }
+
+    // Tear down an incognito conversation (fired on tab close / ending
+    // incognito). Only an ephemeral row, so a stray call can never delete a
+    // real conversation: false for anything else.
+    async fn discard_conversation(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        let (_, raw) = decode_global_id(&id)?;
+        let (pool, data) = (ctx.data::<SqlitePool>()?, ctx.data::<super::EdgeData>()?);
+        if !Conversation::by_id(pool, &raw).await?.is_some_and(|c| c.ephemeral) {
+            return Ok(false);
+        }
+        let mut tx = crate::db::write_tx(pool).await?;
+        let teardown = delete_conversation(&mut tx, &raw, &data.artifacts_dir).await?;
+        tx.commit().await?;
+        if let Some(t) = teardown {
+            t.finish(data).await;
+        }
+        Ok(true)
+    }
+}
+
+/// `is_valid_model`'s refusal, worded as Python's mutations word it.
+pub fn unknown_model(model: &str) -> String {
+    format!("unknown model {}; query `models` for the catalog", crate::pyjson::repr_str(model))
+}
+
+/// What's left of a deleted conversation once its rows are committed: its
+/// files and its notebook.
+pub struct Teardown {
+    conversation_id: String,
+    files: Vec<PathBuf>,
+    /// Artifact ids whose `{id}_v*` files are swept from the artifact
+    /// directory, in case a version escaped its row.
+    version_globs: Vec<String>,
+    artifacts_dir: PathBuf,
+}
+
+impl Teardown {
+    pub async fn finish(self, data: &super::EdgeData) {
+        for path in &self.files {
+            if let Err(e) = std::fs::remove_file(path) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!("failed to unlink {}: {e}", path.display());
+                }
+            }
+        }
+        if !self.version_globs.is_empty() {
+            if let Ok(entries) = std::fs::read_dir(&self.artifacts_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if self.version_globs.iter().any(|id| name.starts_with(&format!("{id}_v"))) {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
+                }
+            }
+        }
+        data.kernels.shutdown(&self.conversation_id).await;
+    }
+}
+
+/// `db/ops.py:delete_conversation`, rows only: the conversation and what its
+/// ORM relationships cascade to — messages and their steps, artifacts and
+/// their versions, documents and their chunks, episodes — then its
+/// transcript thread (`transcript_store.delete_thread`). None when there's
+/// no such conversation, which deletes nothing at all, thread included. The
+/// caller commits, then runs the returned `Teardown`.
+pub async fn delete_conversation(
+    tx: &mut Transaction<'_, Sqlite>,
+    conv_id: &str,
+    artifacts_dir: &Path,
+) -> sqlx::Result<Option<Teardown>> {
+    let exists: Option<String> =
+        sqlx::query_scalar("SELECT id FROM conversations WHERE id = ?").bind(conv_id).fetch_optional(&mut **tx).await?;
+    if exists.is_none() {
+        return Ok(None);
+    }
+    let artifacts: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT id, filename FROM artifacts WHERE conversation_id = ?")
+            .bind(conv_id)
+            .fetch_all(&mut **tx)
+            .await?;
+    let versions: Vec<String> = sqlx::query_scalar(
+        "SELECT filename FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE conversation_id = ?)",
+    )
+    .bind(conv_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let documents: Vec<String> = sqlx::query_scalar("SELECT path FROM documents WHERE conversation_id = ?")
+        .bind(conv_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+    for sql in [
+        "DELETE FROM steps WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)",
+        "DELETE FROM messages WHERE conversation_id = ?",
+        "DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE conversation_id = ?)",
+        "DELETE FROM artifacts WHERE conversation_id = ?",
+        "DELETE FROM document_chunks WHERE document_id IN (SELECT id FROM documents WHERE conversation_id = ?)",
+        "DELETE FROM documents WHERE conversation_id = ?",
+        "DELETE FROM conversation_episodes WHERE conversation_id = ?",
+        "DELETE FROM conversations WHERE id = ?",
+    ] {
+        sqlx::query(sql).bind(conv_id).execute(&mut **tx).await?;
+    }
+    delete_thread(tx, conv_id).await?;
+
+    let mut files: Vec<PathBuf> = artifacts
+        .iter()
+        .map(|(id, filename)| match filename.as_deref().filter(|f| !f.is_empty()) {
+            Some(f) => PathBuf::from(f),
+            None => artifacts_dir.join(format!("{id}.md")),
+        })
+        .collect();
+    files.extend(versions.into_iter().map(PathBuf::from));
+    files.extend(documents.into_iter().map(PathBuf::from));
+    Ok(Some(Teardown {
+        conversation_id: conv_id.to_string(),
+        files,
+        version_globs: artifacts.into_iter().map(|(id, _)| id).collect(),
+        artifacts_dir: artifacts_dir.to_path_buf(),
+    }))
+}
+
+/// `transcript_store.delete_thread`: every row of the thread, and each of its
+/// blobs no other thread still names.
+async fn delete_thread(tx: &mut Transaction<'_, Sqlite>, thread_id: &str) -> sqlx::Result<()> {
+    let datas: Vec<String> = sqlx::query_scalar("SELECT data FROM thread_messages WHERE thread_id = ?")
+        .bind(thread_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    let mut refs = HashSet::new();
+    for data in &datas {
+        if let Ok(record) = serde_json::from_str::<Value>(data) {
+            if let Some(content) = record.get("content") {
+                blob_refs(content, &mut refs);
+            }
+        }
+    }
+    sqlx::query("DELETE FROM thread_messages WHERE thread_id = ?").bind(thread_id).execute(&mut **tx).await?;
+    sqlx::query("DELETE FROM thread_state WHERE thread_id = ?").bind(thread_id).execute(&mut **tx).await?;
+    for blob in refs {
+        // `ThreadMessage.data.contains(ref)`, LIKE's case folding included.
+        let still_used: Option<String> =
+            sqlx::query_scalar("SELECT id FROM thread_messages WHERE data LIKE '%' || ? || '%' LIMIT 1")
+                .bind(&blob)
+                .fetch_optional(&mut **tx)
+                .await?;
+        if still_used.is_none() {
+            sqlx::query("DELETE FROM transcript_blobs WHERE hash = ?").bind(&blob).execute(&mut **tx).await?;
+        }
+    }
+    Ok(())
+}
+
+/// `_blob_refs`: every string under a `"blob"` key, at any depth.
+fn blob_refs(value: &Value, out: &mut HashSet<String>) {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::String(r)) = map.get("blob") {
+                out.insert(r.clone());
+            }
+            for v in map.values() {
+                blob_refs(v, out);
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|v| blob_refs(v, out)),
+        _ => {}
     }
 }

@@ -370,7 +370,8 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   `server/task_board_runtime.py` or `tools/board.py` is made in both.**
 - **Stops through the job**: a running job's `cancel_requested` is polled
   every 5 s (`watch_queue_cancel`), so a stop that only reached the job —
-  Python's `stopBoardTask` today — still stops the edge's run.
+  Python's `stopBoardTask`, served when no worker is linked — still stops the
+  edge's run. The edge's own `stopBoardTask` stops it at once.
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
   tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
@@ -509,13 +510,14 @@ Mutations that only write rows and files:
 
 | Domain | Root fields |
 |---|---|
-| conversations | `updateConversation` — title and pin only, see below |
+| conversations | `updateConversation` (a model checked against the catalog), `deleteConversation`, `discardConversation` |
+| task board | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `deleteBoardTask` — a card made ready runs a dispatch pass at once |
 | projects | `createProject`, `updateProject`, `deleteProject`, `setConversationProject` |
 | artifacts & documents | `updateArtifact`, `restoreArtifactVersion`, `deleteArtifact`, `deleteDocument` |
 | workflows | `createWorkflow`, `updateWorkflow`, `deleteWorkflow` (human callers) |
 | lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `deleteSkill` (human callers) |
 | memory | `deleteMemory` |
-| runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun` |
+| runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun`, `stopBoardTask` |
 | starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
 | steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
 
@@ -523,10 +525,20 @@ And while a worker is linked, or the edge owns it: every subscription
 (`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`)
 and `runningTasks`, from the run mirror.
 
-Three are owned per call (`router.rs:Walk::field_rule`):
-`updateConversation` goes to Python when it sets `model` (validated against the
-model catalog), and `deleteWorkflow` / `deleteSkill` go to Python when the
-caller is the agent (`X-Jarvis-Caller: agent` — approval-gated there).
+Two are owned per call (`router.rs:Walk::field_rule`): `deleteWorkflow` /
+`deleteSkill` go to Python when the caller is the agent (`X-Jarvis-Caller:
+agent` — approval-gated there).
+
+Deleting a conversation (`conversation.rs:delete_conversation`, shared with
+`deleteBoardTask`) ports `db/ops.py:delete_conversation`: the ORM cascades as
+explicit DELETEs (messages and their steps, artifacts and their versions,
+documents and their chunks, episodes), the transcript thread with the blobs
+no other thread names, then the files and the conversation's notebook. **A
+change to either is made in both.**
+
+`stopBoardTask` ports `stop_board_task`: the worker or the edge's loop is told
+at once, the job is cancelled, and a job no one had claimed yet ends the card
+(blocked, "stopped by user") and the mirrored run here.
 
 A write must leave a row exactly as SQLAlchemy would: `uuid4()` ids, its
 stored timestamp text, `updated_at` bumped by hand where `onupdate=_now`
@@ -551,10 +563,9 @@ moves when the thing it reads moves.
 
 | Mutations | Touch | Move with |
 |---|---|---|
-| `stopBoardTask`, `browserActivity` | the board row and a running handler's `TaskState`; the agent's kernel is the only caller of the latter | the board dispatcher; the agent loop |
-| `deleteConversation`, `discardConversation` | the transcript thread and the conversation's kernel | the agent loop |
+| `browserActivity` | a running handler's `TaskState`; the agent's kernel is the only caller | the agent loop |
 | `createAutomation`, `updateAutomation`, `deleteAutomation` | cron validation with APScheduler's messages; deleting the backing conversation's thread and kernel | the agent loop (Python reports each change to the edge's scheduler: `schedules`) |
-| `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `decomposeBoardTask`, `deleteBoardTask`, `stopBoardTask` | the board dispatcher, model validation, an LLM (decompose) | the job queue |
+| `decomposeBoardTask` | an LLM plans the subtasks | the LLM callers (2e/2f) |
 | `addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill` | embeddings (Gemini) on write | embeddings |
 | `updateMemory`, `deleteAgentMemory`, `consolidateMemory`, `consolidateProjectMemory` | `kv_store` through `KvStore`; an LLM | the agent loop |
 | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `setToolPolicy` | the catalog cache and compiled agent graphs | the catalog becoming data |
