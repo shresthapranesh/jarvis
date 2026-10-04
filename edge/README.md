@@ -40,6 +40,7 @@ it.
 | `JARVIS_WORKER_CMD` | unset | the command that runs Python (via `sh -c`, in `JARVIS_APP_DIR`); set, the edge owns the worker |
 | `JARVIS_WORKER_IDLE` | `300` | seconds idle before the worker is stopped; `0` keeps it up (restarted if it dies) |
 | `JARVIS_APP_DIR` | the current directory | the jarvis checkout: where the worker runs, and `static/dist`, the SPA the edge serves |
+| `JARVIS_AGENT_RUNTIME` | `python` | `edge` lets the edge claim the chat turns it can serve (see "The agent loop") |
 
 The built-in model list is compiled in from `core/builtin_models.json`, so
 rebuild the edge after editing it.
@@ -229,15 +230,16 @@ been none for `JARVIS_WORKER_IDLE` seconds. Idle, jarvis is the edge alone.
 
 **What starts it**: a request the edge proxies (REST, the other WebSockets,
 GraphQL it hasn't ported) — which waits for it, 2–3 s on a laptop; a job a
-worker could claim now, or one a dead worker left `running`; a voice note a
+worker could claim now, or one a dead worker left `running` — not one the
+edge's own agent loop runs (`jobs.runtime`); a voice note a
 bot needs transcribed (Whisper is Python's); and the edge's own start, so the
 startup sweeps run and a broken command shows up at once. A run the edge
 starts itself needs nothing more: its job kicks the supervisor, and the run is
 pending in the mirror until the new worker claims it.
 
 **What keeps it up**: a proxied request or socket in progress (a log stream
-holds it while someone watches), a run in the mirror, a claimable or running
-job, and the worker's `holds` (none today: a conversation's notebook is the
+holds it while someone watches), a run in the mirror that isn't the edge's
+own, a claimable or running job (again, not the edge's), and the worker's `holds` (none today: a conversation's notebook is the
 edge's, so it no longer keeps Python up — see "The kernels").
 A connected chat bot holds nothing: the bots are the edge's (see "The bots"). Ready means `/health` answers and the link has said hello.
 
@@ -303,6 +305,39 @@ made in both.**
 - **Departures**, named in `tests/test_edge_kernels.py`: stdin is never
   offered, so `input()` raises at once (Python's client offered it with nobody
   to answer, and the cell hung until its timeout).
+
+## The agent loop (`src/agent/`)
+
+Phase 2d: chat turns run in the edge, so a conversation needs no Python at
+all. **In progress**: the plumbing is here (2d-1), the loop isn't — every
+turn the edge claims is handed to Python before it starts.
+
+- **Routing** (`route.rs`), when a turn is queued: with
+  `JARVIS_AGENT_RUNTIME=edge`, a turn on a provider the LLM layer speaks
+  (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint), with no
+  attachments, and no MCP server configured anywhere Python looks (env, the
+  first `mcp.json`, the `mcp.servers` setting) is the edge's: its job gets
+  `runtime = 'edge'` and its run is mirrored as the edge's own. Everything
+  else is Python's, as before.
+- **Claiming** (`queue.rs`) is `SqliteJobQueue._claim` plus `runtime =
+  'edge'`, under the same thread lease, so a conversation's turns still run
+  one at a time whichever side runs each. The lock is renewed at a third of
+  its 300 s TTL; a lost lock abandons the turn.
+- **Python leaves edge jobs alone**: its claim and lock reaper skip them, its
+  startup sweep doesn't take their rows (or their open tool approvals) for a
+  crashed run's, and the supervisor doesn't start or keep Python for them.
+- **Handing over**: the job goes back to pending with `runtime` cleared and
+  the run pending in the mirror, so a worker's claim continues it — events
+  after the edge's, as for any pending run. A turn the edge had started
+  carries `payload.handoff = {text, step_seq, steps, usage}`: Python then
+  runs the tool calls the edge recorded but didn't run, and goes on from
+  there (`chat_job_handler`), its text, step rows and spend continuing the
+  edge's.
+- **Recovery**: at start the edge re-queues its jobs a previous edge left
+  running; with the loop off, it hands every live edge job to Python. Python
+  running without the edge adopts them (`db/ops.py:adopt_edge_jobs`).
+
+Tested in `tests/test_edge_agent.py`.
 
 ## The LLM layer (`src/llm/`)
 

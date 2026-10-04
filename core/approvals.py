@@ -428,14 +428,21 @@ async def reconcile_startup() -> dict[str, int]:
     * **tool gate** (`core/tool_gate.py`) — the waiter was an in-flight call, in
       this process or in a kernel that died with it. Nothing is left to release,
       so it expires with the workflow rows rather than becoming a button that
-      unblocks a caller that no longer exists.
+      unblocks a caller that no longer exists — unless the edge runs it
+      (`Job.runtime`): its waiter is in the edge, which this start didn't touch.
     """
+    from sqlalchemy import select
+
     from db import async_session
+    from db.models import EDGE_RUNTIME, Job
 
     counts = {"expired": 0, "backfilled": 0, "kept": 0}
     async with async_session() as session:
+        edge_runs = set((await session.execute(
+            select(Job.id).where(Job.runtime == EDGE_RUNTIME, Job.status.in_(["pending", "running"]))
+        )).scalars())
         for row in await ops.list_approvals(session, status=ops.APPROVAL_OPEN):
-            if row.action or row.board_task_id:
+            if row.action or row.board_task_id or row.task_id in edge_runs:
                 counts["kept"] += 1
                 continue
             await ops.resolve_approval_row(

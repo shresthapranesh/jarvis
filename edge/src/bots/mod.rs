@@ -373,7 +373,7 @@ mod tests {
             parent_id: Some("c".into()),
             started_at: "2026-01-01T00:00:00+00:00".into(),
         };
-        let run = registry.pre_register("t", meta);
+        let run = registry.pre_register("t", meta, false);
         let mut reply = Reply::new(run.clone());
         run.update(|st| {
             st.events.push(record("step", serde_json::json!({"node": "agent"})));
@@ -397,7 +397,7 @@ mod tests {
             parent_id: Some("c".into()),
             started_at: "2026-01-01T00:00:00+00:00".into(),
         };
-        let run = registry.pre_register("t", meta);
+        let run = registry.pre_register("t", meta, false);
         let mut reply = Reply::new(run.clone());
         let waiter = tokio::spawn(async move { reply.next().await });
         tokio::time::sleep(Duration::from_millis(20)).await;

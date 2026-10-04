@@ -17,6 +17,11 @@
 //! and a new worker process doesn't end it, because no worker had it. The
 //! claim is the worker's `register` for that id: from then on the worker's
 //! event 0 follows whatever the edge appended (`worker_base`).
+//!
+//! A run whose job the edge's own agent loop runs (`agent/`, `jobs.runtime`)
+//! is *edge-owned* from the start: the edge appends its every event, and no
+//! worker is needed for it. If the edge hands it to a worker, it becomes
+//! pending again until that worker claims it.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -71,6 +76,8 @@ pub struct RunState {
     /// A message was queued onto the run while it was pending, so the worker
     /// that claims it is told to look for queued messages again.
     queued_while_pending: bool,
+    /// The edge's agent loop owns the run (see the module docs).
+    pub edge: bool,
 }
 
 pub struct Run {
@@ -105,9 +112,14 @@ impl Run {
         self.state.lock().expect("run state lock").worker_base.is_some()
     }
 
+    /// Whether the edge's agent loop owns the run.
+    pub fn edge_owned(&self) -> bool {
+        self.state.lock().expect("run state lock").edge
+    }
+
     /// Append an event the edge produced, as `emit_event` would have. Only
-    /// while the run is pending: once a worker has claimed it, every event is
-    /// the worker's, and this returns false.
+    /// while the run is pending or edge-owned: once a worker has claimed it,
+    /// every event is the worker's, and this returns false.
     pub fn emit_local(&self, event: &str, data: &Value) -> bool {
         self.update(|st| {
             if st.worker_base.is_some() {
@@ -169,6 +181,8 @@ pub struct Registry {
     /// Signalled by `wake`: a job was written. The supervisor listens, to
     /// start a worker when none is up to be woken.
     pub work: tokio::sync::Notify,
+    /// Signalled by `wake` too, for the edge's own agent loop (`agent/`).
+    pub agent_work: tokio::sync::Notify,
     /// Bumped on every registration, so a subscriber waiting for a run that
     /// hasn't been reported yet can wake when it is.
     registered: watch::Sender<u64>,
@@ -181,6 +195,7 @@ impl Default for Registry {
         Self {
             inner: Mutex::default(),
             work: tokio::sync::Notify::new(),
+            agent_work: tokio::sync::Notify::new(),
             registered: watch::channel(0).0,
             sessions: AtomicU64::new(0),
             call_ids: AtomicU64::new(0),
@@ -222,6 +237,7 @@ impl Registry {
     /// its next poll.
     pub fn wake(&self) {
         self.work.notify_one();
+        self.agent_work.notify_one();
         self.control(&json!({"type": "wake"}));
     }
 
@@ -258,12 +274,15 @@ impl Registry {
     /// that gets its id back finds it — what the Python triggers did by
     /// setting `_tasks[task_id]` before their commit. If a worker somehow
     /// registered the id first, that run stands.
-    pub fn pre_register(&self, id: &str, meta: Meta) -> Arc<Run> {
+    ///
+    /// `edge` mirrors it as the edge's own: its job is for the edge's agent
+    /// loop, so no worker need come for it.
+    pub fn pre_register(&self, id: &str, meta: Meta, edge: bool) -> Arc<Run> {
         let mut inner = self.lock();
         if let Some(run) = inner.runs.get(id) {
             return run.clone();
         }
-        let run = Run::new(id.to_string(), meta, RunState::default());
+        let run = Run::new(id.to_string(), meta, RunState { edge, ..Default::default() });
         inner.runs.insert(id.to_string(), run.clone());
         drop(inner);
         self.registered.send_modify(|v| *v += 1);
@@ -278,6 +297,42 @@ impl Registry {
                 mark_gone(&run);
             }
         }
+    }
+
+    /// The edge's agent loop claimed the job `id`: the run is its own. A run
+    /// the mirror lost (the edge restarted since its trigger) is mirrored
+    /// again from `meta`. None if a worker has the run — not the edge's.
+    pub fn take(&self, id: &str, meta: impl FnOnce() -> Meta) -> Option<Arc<Run>> {
+        let mut inner = self.lock();
+        if let Some(run) = inner.runs.get(id).cloned() {
+            drop(inner);
+            return run
+                .update(|st| {
+                    if st.worker_base.is_some() {
+                        return false;
+                    }
+                    st.edge = true;
+                    true
+                })
+                .then_some(run);
+        }
+        let run = Run::new(id.to_string(), meta(), RunState { edge: true, ..Default::default() });
+        inner.runs.insert(id.to_string(), run.clone());
+        drop(inner);
+        self.registered.send_modify(|v| *v += 1);
+        Some(run)
+    }
+
+    /// The edge is handing the run's job to a worker: pending again, so the
+    /// worker's claim continues it (`register`).
+    pub fn release(&self, run: &Run) {
+        run.update(|st| st.edge = false);
+    }
+
+    /// Whether any run in the mirror needs a worker: one a worker has, or
+    /// one waiting for a worker to claim it — anything not the edge's own.
+    pub fn need_worker(&self) -> bool {
+        self.lock().runs.values().any(|run| !run.edge_owned())
     }
 
     /// Tell the worker that claimed `id` to adopt messages queued onto it;
@@ -408,6 +463,7 @@ impl Registry {
                 match st.worker_base {
                     None => {
                         st.worker_base = Some(st.events.len());
+                        st.edge = false;
                         st.events.extend(events);
                         // Stopped while pending: the job carries the stop, so
                         // the worker normally starts it cancelled. If the stop
@@ -621,7 +677,7 @@ mod tests {
         let reg = Registry::default();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let s = reg.attach("A".into(), tx);
-        let run = reg.pre_register("t", meta("edge's label"));
+        let run = reg.pre_register("t", meta("edge's label"), false);
         assert!(run.queue_local("q1", "also", 1));
         reg.register(s, reported("t", vec![ev(1)]));
         // The same run, its subscribers' cursors intact, the trigger's label kept.
@@ -643,7 +699,7 @@ mod tests {
         let reg = Registry::default();
         let (tx, _rx) = mpsc::unbounded_channel();
         let s1 = reg.attach("A".into(), tx.clone());
-        reg.pre_register("p", meta("l"));
+        reg.pre_register("p", meta("l"), false);
         reg.snapshot(s1, vec![]);
         assert!(reg.get("p").is_some());
         reg.attach("B".into(), tx);
@@ -653,9 +709,44 @@ mod tests {
     #[test]
     fn local_events_are_python_shaped() {
         let reg = Registry::default();
-        let run = reg.pre_register("p", meta("l"));
+        let run = reg.pre_register("p", meta("l"), false);
         assert!(run.emit_local("queued_withdrawn", &json!({"message_id": "é"})));
         assert_eq!(events(&run), [json!({"event": "queued_withdrawn", "data": "{\"message_id\": \"\\u00e9\"}"})]);
+    }
+
+    #[test]
+    fn an_edge_run_needs_no_worker_until_it_is_handed_over() {
+        let reg = Registry::default();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let run = reg.pre_register("e", meta("edge's"), true);
+        assert!(run.edge_owned() && !reg.need_worker());
+        // The edge's agent loop claims it, and appends its events.
+        let taken = reg.take("e", || unreachable!("mirrored already")).unwrap();
+        assert!(Arc::ptr_eq(&run, &taken));
+        assert!(run.emit_local("token", &json!({"text": "a"})));
+        assert!(run.queue_local("q1", "also", 1));
+        // A new worker process doesn't end it: no worker had it.
+        let s = reg.attach("A".into(), tx);
+        assert!(reg.get("e").is_some());
+        // Handed over: pending, so a worker is wanted, and its claim continues
+        // the run after the edge's events.
+        reg.release(&run);
+        assert!(!run.edge_owned() && reg.need_worker());
+        reg.register(s, reported("e", vec![ev(1)]));
+        assert!(Arc::ptr_eq(&run, &reg.get("e").unwrap()));
+        assert_eq!(events(&run).len(), 3);
+        let msg: Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!(msg["type"], "adopt_queued");
+        // The edge can't take back a run a worker has.
+        assert!(reg.take("e", || unreachable!()).is_none());
+    }
+
+    #[test]
+    fn a_run_the_mirror_lost_is_taken_from_its_job() {
+        let reg = Registry::default();
+        let run = reg.take("lost", || meta("from the job")).unwrap();
+        assert!(run.edge_owned() && !reg.need_worker());
+        assert_eq!(run.meta.label, "from the job");
     }
 
     #[tokio::test]

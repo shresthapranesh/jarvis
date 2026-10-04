@@ -200,7 +200,7 @@ pub async fn endpoints(pool: &SqlitePool) -> sqlx::Result<Vec<Endpoint>> {
     })
 }
 
-async fn setting(pool: &SqlitePool, key: &str) -> sqlx::Result<Option<String>> {
+pub async fn setting(pool: &SqlitePool, key: &str) -> sqlx::Result<Option<String>> {
     sqlx::query_scalar("SELECT value FROM config_settings WHERE key = ?").bind(key).fetch_optional(pool).await
 }
 

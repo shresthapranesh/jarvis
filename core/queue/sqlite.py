@@ -39,6 +39,13 @@ def _thread_free():
     )
 
 
+def _python_job():
+    """A job a Python worker may claim, or reap: not one the edge runs. The
+    edge renews its own locks and recovers its own jobs, and hands one over by
+    clearing `runtime`."""
+    return JobModel.runtime.is_(None)
+
+
 class SqliteJobQueue(JobQueue):
     def __init__(self) -> None:
         self._wake_event = asyncio.Event()
@@ -143,6 +150,7 @@ class SqliteJobQueue(JobQueue):
                     JobModel.kind.in_(kinds),
                     JobModel.status == "pending",
                     JobModel.run_at <= now,
+                    _python_job(),
                     _thread_free(),
                 )
                 .order_by(JobModel.run_at.asc())
@@ -172,6 +180,7 @@ class SqliteJobQueue(JobQueue):
                 .where(
                     JobModel.id == job_id_str,
                     JobModel.status == "pending",
+                    _python_job(),
                     _thread_free(),
                 )
                 .values(
@@ -317,6 +326,7 @@ class SqliteJobQueue(JobQueue):
                     JobModel.status == "running",
                     JobModel.locked_until.is_not(None),
                     JobModel.locked_until < now,
+                    _python_job(),
                 )
                 .values(
                     status="pending",

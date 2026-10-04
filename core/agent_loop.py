@@ -349,7 +349,9 @@ class Agent:
     ) -> AsyncGenerator[Any, None]:
         """Run to completion, yielding chunks as they happen.
 
-        `input` is `{"messages": [...], "todos": [...]?}`. Without `thread` the
+        `input` is `{"messages": [...], "todos": [...]?}`, plus, for a turn
+        taken over mid-run, `"resume": True` (run the thread's unanswered tool
+        calls first) and `"steps_taken"`. Without `thread` the
         history is the database thread named by `configurable.thread_id`.
         Chunks are `(namespace, mode, data)` with `subgraphs=True`, else
         `(mode, data)`; `stream_mode` keeps only those modes. Closing the
@@ -416,13 +418,27 @@ class Agent:
             await run.thread.apply(input["messages"])
 
         limit = int(run.config.get("recursion_limit") or DEFAULT_RECURSION_LIMIT)
-        steps = 0
+        # A run taken over from another runtime mid-turn counts the steps
+        # that one already took against the same limit.
+        steps = int(input.get("steps_taken") or 0)
 
         def take_step() -> None:
             nonlocal steps
             if steps >= limit:
                 raise RecursionLimitReached(f"agent {self.name!r} reached its limit of {limit} steps")
             steps += 1
+
+        if input.get("resume"):
+            # Taken over mid-turn (the edge handed it here): the tool calls it
+            # recorded but didn't run are run now, not repaired as orphans.
+            # Only a handover sets this — a re-claim after a crash must never
+            # run a tool twice.
+            pending = unanswered_tool_calls(run.thread.messages)
+            if pending:
+                reply, calls = pending
+                take_step()
+                results = await self._run_tools(run, reply, calls)
+                await run.step_done("tools", results)
 
         while True:
             take_step()
@@ -440,8 +456,10 @@ class Agent:
             results = await self._run_tools(run, reply)
             await run.step_done("tools", results)
 
-    async def _run_tools(self, run: Run, reply: AIMessage) -> list[ToolMessage]:
-        calls = [dict(c) for c in reply.tool_calls]
+    async def _run_tools(
+        self, run: Run, reply: AIMessage, calls: list[dict[str, Any]] | None = None,
+    ) -> list[ToolMessage]:
+        calls = [dict(c) for c in (reply.tool_calls if calls is None else calls)]
         ready = await self.gate(run, calls) if self.gate is not None else {}
 
         async def one(call: dict[str, Any]) -> ToolMessage:
@@ -470,6 +488,21 @@ class Agent:
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
         return results
+
+
+def unanswered_tool_calls(messages: Sequence[BaseMessage]) -> tuple[AIMessage, list[dict[str, Any]]] | None:
+    """The thread's last model reply and those of its tool calls with no
+    result yet, when the thread ends on that reply's tool batch."""
+    answered: set[str] = set()
+    for message in reversed(messages):
+        if isinstance(message, ToolMessage):
+            answered.add(message.tool_call_id)
+            continue
+        if isinstance(message, AIMessage) and message.tool_calls:
+            calls = [dict(c) for c in message.tool_calls if c.get("id") not in answered]
+            return (message, calls) if calls else None
+        return None
+    return None
 
 
 def _thread_id(config: RunnableConfig | None) -> str:

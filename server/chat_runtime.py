@@ -72,17 +72,25 @@ async def _run_agent_task(
     task_id: str, query: str, model: str, conv_id: str,
     attachments: list | None = None,
     invocation_context: InvocationContext | None = None,
+    handoff: dict[str, Any] | None = None,
 ) -> None:
     state = _tasks[task_id]
     ctx = invocation_context
 
-    accumulated: list[str] = []
-    step_seq_ref = [0]
+    # A turn the edge started and handed over mid-run (`edge/src/agent/`):
+    # the text it streamed, the step rows it wrote and what it spent are this
+    # turn's too.
+    carried: dict[str, Any] = handoff or {}
+    carried_usage: dict[str, Any] = carried.get("usage") or {}
+    accumulated: list[str] = [carried["text"]] if carried.get("text") else []
+    step_seq_ref = [int(carried.get("step_seq") or 0)]
     coalescer = TokenCoalescer(state)
     run_cb = start_run_callbacks(state, "chat", with_perf=True)
     callbacks = run_cb.handlers
     usage = run_cb.usage
     perf = run_cb.perf
+    if carried_usage:
+        run_cb.budget.carry(carried_usage)
 
     status = "error"
     project_id: str | None = None
@@ -94,10 +102,11 @@ async def _run_agent_task(
         # Measured from `state.started_at`, stamped when the run was registered
         # (before the job was even committed), so queue wait counts too.
         elapsed = (datetime.now(timezone.utc) - state.started_at).total_seconds()
+        has_usage = usage.has_usage or bool(carried_usage.get("llm_calls"))
         await _finalize_message(
             task_id, content, final_status,
-            input_tokens=usage.input_tokens if usage.has_usage else None,
-            output_tokens=usage.output_tokens if usage.has_usage else None,
+            input_tokens=usage.input_tokens + int(carried_usage.get("input_tokens") or 0) if has_usage else None,
+            output_tokens=usage.output_tokens + int(carried_usage.get("output_tokens") or 0) if has_usage else None,
             perf=perf.message_perf(),
             duration_ms=round(elapsed * 1000.0, 1),
         )
@@ -150,7 +159,12 @@ async def _run_agent_task(
         # The explicit id matches the prefetch_retrieval key above, so the
         # loop's retrieval-cache lookup hits the task already in flight.
         stream_input: Any = {"messages": [HumanMessage(content=content, id=user_msg_id)], "todos": []}
-        emit_event(state, "todos_updated", todos=[], source="main")
+        if handoff is not None:
+            # The edge already wrote the prompt and reset the plan; the turn
+            # goes on from its last step.
+            stream_input = {"messages": [], "resume": True, "steps_taken": int(carried.get("steps") or 0)}
+        else:
+            emit_event(state, "todos_updated", todos=[], source="main")
 
         async with aclosing(agent.astream(
             stream_input, config=config, stream_mode=STREAM_MODES, subgraphs=True,
@@ -410,7 +424,9 @@ async def chat_job_handler(job: Job) -> None:
     Convention: ``job.id == Message.id`` (the assistant placeholder Message).
 
     Payload: ``{"query": str, "model": str, "conv_id": str,
-                "attachments": list[dict] | None}``.
+                "attachments": list[dict] | None, "handoff": dict | None}``.
+    ``handoff`` is what the edge's agent loop carried when it handed this
+    turn over mid-run: ``{text, step_seq, steps, usage}``.
 
     On restart the thread (``conv_id``) holds every message the crashed run
     wrote, so the re-claimed job continues from there: its prompt replaces
@@ -423,6 +439,8 @@ async def chat_job_handler(job: Job) -> None:
     conv_id: str = payload["conv_id"]
     raw_atts = payload.get("attachments") or []
     attachments = [AttachmentIn.model_validate(a) for a in raw_atts] if raw_atts else None
+    # Set when the edge's agent loop began this turn and handed it over.
+    handoff: dict[str, Any] | None = payload.get("handoff")
 
     # Re-create the TaskState if the worker is picking up a job whose original
     # trigger is gone (post-restart resume path). Otherwise reuse the entry the
@@ -453,6 +471,7 @@ async def chat_job_handler(job: Job) -> None:
         await _run_agent_task(
             task_id, query, model, conv_id, attachments,
             invocation_context=invocation_context,
+            handoff=handoff,
         )
 
 

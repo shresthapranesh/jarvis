@@ -200,7 +200,7 @@ class Scripted:
             await asyncio.sleep(0.02)
         return "stopped" if state.cancelled else "done"
 
-    async def chat(self, task_id, query, model, conv_id, attachments=None, invocation_context=None):
+    async def chat(self, task_id, query, model, conv_id, attachments=None, invocation_context=None, handoff=None):
         from core.run_scaffold import finish_task_state
         from core.state import _tasks, emit_event
 

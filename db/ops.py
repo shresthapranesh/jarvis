@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import Approval, Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, ConversationEpisode, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
+from db.models import EDGE_RUNTIME, Approval, Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, ConversationEpisode, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -1972,6 +1972,20 @@ async def promote_ready_board_tasks(session: AsyncSession) -> int:
 
 # ── Startup zombie sweep ───────────────────────────────────────────────────────
 
+async def adopt_edge_jobs(session: AsyncSession) -> int:
+    """Take over the jobs the edge's agent loop had, when this process runs
+    without the edge — they would otherwise wait for it forever. Called at
+    startup before the zombie sweep, which then treats a running one as any
+    crashed Python job."""
+    res = await session.execute(
+        update(Job)
+        .where(Job.runtime == EDGE_RUNTIME, Job.status.in_(["pending", "running"]))
+        .values(runtime=None, updated_at=datetime.now(timezone.utc))
+    )
+    await session.commit()
+    return res.rowcount or 0  # type: ignore[attr-defined]
+
+
 async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
     """Flip rows still marked 'running' from a prior process.
 
@@ -1993,32 +2007,39 @@ async def cleanup_zombie_running_rows(session: AsyncSession) -> dict[str, int]:
     # starts Python to claim it (`edge/src/supervisor.rs`). The row id is the
     # job id for all three kinds (a scheduled automation's row is created at
     # claim time, so it has none yet).
-    unclaimed = select(Job.id).where(Job.status == "pending")
+    #
+    # Nor is a row whose job the edge runs (`Job.runtime`): the edge's agent
+    # loop holds it, alive or not, and recovers its own jobs — this process
+    # starting says nothing about it.
+    not_ours = select(Job.id).where(
+        (Job.status == "pending")
+        | ((Job.runtime == EDGE_RUNTIME) & (Job.status == "running"))
+    )
 
     msg_res = await session.execute(
         update(Message)
-        .where(Message.status == "running", Message.id.not_in(unclaimed))
+        .where(Message.status == "running", Message.id.not_in(not_ours))
         .values(status="error")
     )
     counts["messages"] = msg_res.rowcount or 0  # type: ignore[attr-defined]
 
     auto_res = await session.execute(
         update(AutomationRun)
-        .where(AutomationRun.status == "running", AutomationRun.id.not_in(unclaimed))
+        .where(AutomationRun.status == "running", AutomationRun.id.not_in(not_ours))
         .values(status="error", error="interrupted by server restart", finished_at=now)
     )
     counts["automation_runs"] = auto_res.rowcount or 0  # type: ignore[attr-defined]
 
     wf_res = await session.execute(
         update(WorkflowRun)
-        .where(WorkflowRun.status == "running", WorkflowRun.id.not_in(unclaimed))
+        .where(WorkflowRun.status == "running", WorkflowRun.id.not_in(not_ours))
         .values(status="error", error="interrupted by server restart", finished_at=now)
     )
     counts["workflow_runs"] = wf_res.rowcount or 0  # type: ignore[attr-defined]
 
     job_res = await session.execute(
         update(Job)
-        .where(Job.status == "running")
+        .where(Job.status == "running", Job.runtime.is_(None))
         .values(status="pending", locked_by=None, locked_until=None, updated_at=now)
     )
     counts["jobs"] = job_res.rowcount or 0  # type: ignore[attr-defined]

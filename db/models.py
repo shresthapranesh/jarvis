@@ -535,6 +535,10 @@ class Approval(Base):
     )
 
 
+# `Job.runtime` of a job the Rust edge's agent loop claims.
+EDGE_RUNTIME = "edge"
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
@@ -568,6 +572,11 @@ class Job(Base):
     # its thread's lease: no second job on the thread is claimed until this one
     # stops running, whichever process — Python or the edge — claims it.
     thread_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Which runtime claims the job: NULL is a Python worker, EDGE_RUNTIME the Rust
+    # edge's agent loop (`edge/src/agent/`). Python never claims, reaps or
+    # sweeps an edge job; the edge hands one over by clearing this.
+    runtime: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     __table_args__ = (
         Index("ix_jobs_kind_status_run_at", "kind", "status", "run_at"),
