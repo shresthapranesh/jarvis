@@ -37,6 +37,7 @@ GENERATED = ROOT / "frontend" / "src" / "__generated__"
 # Every frontend query whose root fields the edge implements must be listed
 # here, so porting a field can't silently route an operation nobody diffed.
 PARITY_OPERATIONS = {
+    "AgentMemoryQuery",
     "ConversationListQuery",
     "ConversationPageQuery",
     "ConversationPageRefetchQuery",
@@ -407,6 +408,8 @@ async def test_node_resolves_every_type(domains, edge, type_name, raw):
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 _STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(\+00:00)?$")
+# An `isoformat()` stamp inside a longer string — a JSON document's field.
+_EMBEDDED_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00")
 
 
 def _mask(value: Any, since: datetime, dirs: tuple[str, ...]) -> Any:
@@ -425,6 +428,7 @@ def _mask(value: Any, since: datetime, dirs: tuple[str, ...]) -> Any:
         stamp = datetime.fromisoformat(f"{m[1]}T{m[2]}{m[3] or ''}").replace(tzinfo=timezone.utc)
         if stamp >= since:
             return "<now>"
+    value = _EMBEDDED_STAMP.sub(lambda m: "<now>" if datetime.fromisoformat(m[0]) >= since else m[0], value)
     with contextlib.suppress(Exception):
         decoded = base64.b64decode(value, validate=True).decode()
         if ":" in decoded and _UUID.search(decoded):
@@ -827,6 +831,31 @@ async def test_a_decomposition_the_edge_does_not_plan_goes_to_python(domains, ed
     assert done.json()["errors"][0]["message"] == "only waiting (todo/ready/blocked) tasks can be decomposed"
 
 
+async def test_agent_memory_blob(twin):
+    """The free-text `AGENTS.md` blob in `kv_store`: read (a list content
+    joined), the pre-fix `/AGENTS.md` key copied over on first touch, replaced
+    keeping its `created_at`, deleted — after which the legacy copy comes back,
+    as in Python."""
+    fields = "content exists modifiedAt"
+    read = _relay_text("AgentMemoryQuery")
+    update = f"mutation($c: String!) {{ updateMemory(content: $c) {{ {fields} }} }}"
+    delete = f"mutation {{ deleteAgentMemory {{ {fields} }} }}"
+    await twin.run(read)
+    await twin.run(update, {"c": "first"})  # no blob: created now
+    await twin.run(delete)
+    legacy = json.dumps({"content": ["- likes tea", "- café"], "created_at": "2025-01-01T00:00:00+00:00",
+                         "modified_at": "2025-02-01T00:00:00+00:00"})
+    _sql_both(twin, "INSERT INTO kv_store (namespace, key, value, created_at, updated_at) "
+                    "VALUES ('memory', '/AGENTS.md', ?, '2025-01-01 00:00:00', '2025-01-01 00:00:00')", legacy)
+    await twin.run(read)
+    await twin.run(update, {"c": "- likes tea\n- naïve ✓"})
+    await twin.run(read)
+    await twin.run(delete)
+    await twin.run(read)  # the legacy copy, again
+    await twin.run(update, {"c": ""})
+    await twin.run(read)
+
+
 async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     # An agent's delete is approval-gated in Python; a human's isn't.
     for mutation in ("deleteWorkflow", "deleteSkill", "deleteAutomation"):
@@ -847,8 +876,8 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
         "{ conversations { id } settings { key } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
-        # A mutation that isn't ported (the agent's memory blob lives in the store).
-        'mutation { updateMemory(content: "x") { content } }',
+        # A mutation that isn't ported (an LLM consolidates the memories).
+        'mutation { consolidateMemory }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.

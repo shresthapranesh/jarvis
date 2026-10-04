@@ -37,7 +37,7 @@ it's on `main`.
 - [x] Memory and skill writes: `addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill`
 - [x] `decomposeBoardTask` (an LLM call)
 - [x] Automations: `createAutomation`, `updateAutomation`, `deleteAutomation` (a human's; an agent's delete is approval-gated in Python)
-- [ ] Agent memory: `agentMemory`, `updateMemory`, `deleteAgentMemory` — S
+- [x] Agent memory: `agentMemory`, `updateMemory`, `deleteAgentMemory`
 - [ ] Memory consolidation and project memory (the maintenance jobs, `consolidateMemory`, `consolidateProjectMemory`) — M
 - [ ] Settings: `settings`, `setting`, `setSetting`, `deleteSetting` (the `KNOWN_SETTINGS` registry) — M
 - [ ] Models: `addModel`, `updateModel`, `removeModel`, `setDefaultModel`, `addDiscoveredModels`, `setToolPolicy`, endpoints, `modelSync` — M
