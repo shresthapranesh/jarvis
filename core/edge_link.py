@@ -317,8 +317,8 @@ class EdgeLink(RegistryObserver):
 
 
 async def _dispatch(method: str, params: dict[str, Any]) -> Any:
-    """A `call` from the edge: the run-control operations that need this
-    process's in-memory run state, by the functions the resolvers here use."""
+    """A `call` from the edge: the operations that need this process's
+    in-memory state (runs, caches), by the functions the resolvers here use."""
     from core.state import get_queue
     from db import async_session
     from server.chat_runtime import queue_chat_message, unqueue_chat_message
@@ -342,6 +342,11 @@ async def _dispatch(method: str, params: dict[str, Any]) -> Any:
         if method == "resume_workflow_run":
             await resume_workflow_run(session, params["run_id"], params["answer"])
             return True
+        if method == "apply_setting":
+            # The edge wrote a key this process caches (`edge/src/gql/settings.rs`).
+            from core.settings_admin import apply_setting
+
+            return await apply_setting(session, params["key"])
         if method == "resolve_workflow_approval":
             await resolve_workflow_approval(
                 session, params["run_id"], bool(params["approved"]), params.get("answer"),
