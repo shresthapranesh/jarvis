@@ -59,7 +59,7 @@ Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a
 - Without embeddings or a `Document` row (bots, CLI), text is inlined up to 80k and says when it truncated.
 
 ## Config + Maintenance
-- Config writes go through `core/settings_admin.apply_setting` so in-process caches (tool policy, MCP, embedder) update. `scheduler.timezone` can't apply live and says so.
+- Config writes go through `core/settings_admin.apply_setting` so in-process caches (tool policy, MCP, embedder) update. `scheduler.timezone` can't apply live and says so. Behind the edge, `edge/src/gql/settings.rs` serves these (a port — change both) and asks a linked worker to `apply_setting` the keys Python caches.
 - `downloadVoice` writes to `.part` then renames.
 
 ## Bots (`telegram_bot.py`, `discord_bot.py`)

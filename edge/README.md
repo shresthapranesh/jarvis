@@ -527,6 +527,7 @@ Every query that reads only the database and files:
 | task board | `boardTasks`, `boardTask` |
 | workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
 | lists | `notificationChannels`, `skills`, `pendingApprovals` |
+| settings | `settings`, `setting` — the `KNOWN_SETTINGS` registry (`gql/settings.rs`), endpoint API keys redacted |
 | memory | `memories`, `memoryActivities`, `memoryUsage`, `agentMemory` (the `AGENTS.md` blob in `kv_store`, the legacy `/AGENTS.md` copied over on first touch) |
 | chat page | `models` (endpoint names from `models.endpoints` as providers; keys never sent), `todos` (`thread_state`; a thread not yet converted from `checkpoints.db`, read-only, `src/checkpoints.rs`), `browserAvailable` (an http CDP endpoint) |
 | Relay | `node` for every Node type |
@@ -543,6 +544,7 @@ Mutations that only write rows and files:
 | workflows | `createWorkflow`, `updateWorkflow`, `deleteWorkflow` (human callers) |
 | lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `createSkill`, `updateSkill`, `deleteSkill` (human callers) — a skill's description embedded, or saved unembedded if the embedder fails |
 | memory | `addMemory` (merged into a near-duplicate), `updateMemoryItem`, `deleteMemory` — embedded by `agent/embed.rs`; an embedder that fails sends the operation to Python before anything is written; `updateMemory`, `deleteAgentMemory` (the blob) |
+| settings | `setSetting`, `deleteSetting` — a managed key overridden or any `mcp.*` key sent to Python before anything is written; an `embedding.model` change re-read by a linked worker (link `call` `apply_setting`) |
 | runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun`, `stopBoardTask` |
 | starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
 | steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
@@ -593,7 +595,6 @@ moves when the thing it reads moves.
 | `modelSync` | provider APIs | the catalog tooling |
 | `tools` | the bound-tool list, the SDK catalogue, loaded MCP tools | the agent loop |
 | `mcpServers`, `mcpTools` | the live `McpManager` | MCP (Phase 2) |
-| `settings`, `setting` | the `KNOWN_SETTINGS` registry in `core/settings_admin.py` | the registry becoming data |
 | `voiceStatus` | Piper voice file layout in `core/voice.py` | audio |
 
 | Mutations | Touch | Move with |
@@ -602,5 +603,5 @@ moves when the thing it reads moves.
 | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `setToolPolicy` | the catalog cache and compiled agent graphs | the catalog becoming data |
 | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` | the live `McpManager` | MCP |
 | `resolveApproval` for an approved MCP call or a paused workflow; either it or `requestToolApproval` for a worker's run (the edge defers those per call) | `call_mcp_tool`; a future in a running workflow; a worker's run stream | the workflow engine, MCP |
-| `setSetting`, `deleteSetting` | `apply_setting`'s in-process caches | the registry becoming data |
+| `setSetting`, `deleteSetting` for a managed key overridden (`allowManaged: true`) or any `mcp.*` key (the edge defers those per call) | `apply_setting`'s catalog, tool-policy and MCP caches | the catalog becoming data, MCP |
 | `downloadVoice` | the Piper download | audio |

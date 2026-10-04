@@ -57,6 +57,7 @@ PARITY_OPERATIONS = {
     "SkillsQuery",
     "PendingApprovalsQuery",
     "MemoriesQuery",
+    "SettingsQuery",
     # Diffed against live runs in test_edge_runs.py.
     "RunningTasksQuery",
     # tests/test_edge_supervisor.py
@@ -867,6 +868,84 @@ async def test_agent_memory_blob(twin):
     await twin.run(read)
 
 
+async def test_setting_reads_and_writes(twin, monkeypatch):
+    """The generic settings editor: the inventory (known keys unset, a
+    free-form key, endpoint keys redacted), one key, and writes — the row a
+    write returns carries Python's in-memory, UTC-aware stamp."""
+    monkeypatch.setattr("core.doc_index._embedding_model_override", None)
+    endpoints = json.dumps([{"name": "lab", "base_url": "http://x/v1", "api_key": "sk-secret"},
+                            {"name": "local", "base_url": "http://y/v1", "api_key": ""}])
+    for key, value in (("zeta.custom", "1"), ("alpha.custom", "ü"), ("models.endpoints", endpoints),
+                       ("telegram.allowed_users", "42")):
+        _sql_both(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, '2026-01-02 03:04:05.000000')",
+                  key, value)
+    await twin.run(_relay_text("SettingsQuery"))
+    one = "query($k: String!) { setting(key: $k) { id key value updatedAt isSet label kind choices known } }"
+    for key in ("models.endpoints", "browser.cdp_url", "nope", " telegram.allowed_users"):
+        await twin.run(one, {"k": key})
+
+    set_ = _relay_text("SetSettingMutation").replace("note", "note setting { id key value updatedAt isSet }", 1)
+    for key, value in (
+        (" brand.new ", "v"),                     # inserted, key stripped
+        ("telegram.allowed_users", "1,2"),        # updated
+        ("embedding.model", "models/x"),          # applied in Python's process too
+        ("scheduler.timezone", "Europe/Paris"),   # restart required
+        ("", "v"),
+        ("a b", "v"),
+        ("tools.policy", "{}"),                   # managed
+        ("mcp.default_load_mode", "sometimes"),   # refused before the managed check
+    ):
+        await twin.run(set_, {"key": key, "value": value, "allowManaged": False})
+
+    # The mask above hides it: the written row's stamp is aware, the rest naive.
+    body = (await twin.edge.post("/graphql", json={"query": set_, "variables": {
+        "key": "brand.new", "value": "w", "allowManaged": False}})).json()["data"]["setSetting"]
+    assert body["setting"]["updatedAt"].endswith("+00:00")
+    assert not any(r["updatedAt"].endswith("+00:00") for r in body["settings"] if r["isSet"] and r["key"] != "brand.new")
+    await twin.run(set_, {"key": "brand.new", "value": "w", "allowManaged": False})
+
+    delete = _relay_text("DeleteSettingMutation").replace("note", "note setting { id key value updatedAt isSet }", 1)
+    for key in (" zeta.custom ", "zeta.custom", "embedding.model", "models.endpoints"):
+        await twin.run(delete, {"key": key, "allowManaged": False})
+
+
+async def test_settings_python_applies_go_to_python(seeded, edge):
+    """A managed key overridden, any `mcp.*` key, and invalid JSON for a json
+    key are Python's: applying them rehydrates its caches, and the decoder's
+    error is its to word. Nothing is written first."""
+    set_ = "mutation($k: String!, $v: String!, $a: Boolean!) { setSetting(key: $k, value: $v, allowManaged: $a) { note } }"
+    for key, value, allow in (("tools.policy", "{}", True), ("mcp.extra", "x", False), ("tools.policy", "{", False)):
+        assert (await _edge(edge, set_, {"k": key, "v": value, "a": allow})).status_code == 502, key
+    delete = "mutation($k: String!) { deleteSetting(key: $k, allowManaged: true) { note } }"
+    assert (await _edge(edge, delete, {"k": "models.custom"})).status_code == 502
+    assert (await _edge(edge, "mutation { deleteSetting(key: \"mcp.x\") { note } }")).status_code == 502
+    both = 'mutation { setSetting(key: "a", value: "b") { note } deleteSetting(key: "a") { note } }'
+    assert (await _edge(edge, both)).status_code == 502  # a deferring field is owned only alone
+
+
+async def test_an_embedding_model_set_through_the_edge_reaches_a_linked_python(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
+    """Python caches the embedding model in process; a linked one is told."""
+    from core import doc_index, edge_link
+    from core.edge_link import EdgeLink
+    from test_edge_runs import _edge_owns_runs, _until
+
+    monkeypatch.setattr(doc_index, "_embedding_model_override", None)
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
+        link = EdgeLink(f"ws://127.0.0.1:{client.base_url.port}/internal/worker")
+        link.start()
+        monkeypatch.setattr(edge_link, "_link", link)
+        try:
+            await _until(lambda: _edge_owns_runs(client))
+            q = 'mutation { setSetting(key: "embedding.model", value: "models/linked") { note } }'
+            assert (await _edge(client, q)).status_code == 200
+            assert doc_index._effective_model() == "models/linked"
+            q = 'mutation { deleteSetting(key: "embedding.model") { note } }'
+            assert (await _edge(client, q)).json()["data"]["deleteSetting"]["note"].startswith("Deleted. Applied.")
+            assert doc_index._embedding_model_override is None
+        finally:
+            await link.stop()
+
+
 async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     # An agent's delete is approval-gated in Python; a human's isn't.
     for mutation in ("deleteWorkflow", "deleteSkill", "deleteAutomation"):
@@ -882,13 +961,13 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     "query",
     [
         # A root field the edge doesn't implement.
-        "{ settings { key } }",
+        "{ tools { name } }",
         # One owned root field and one not: the whole operation goes to Python.
-        "{ conversations { id } settings { key } }",
+        "{ conversations { id } tools { name } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
         # A mutation that isn't ported.
-        'mutation { deleteSetting(key: "x") }',
+        'mutation { setDefaultModel(id: "x") { default } }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.
