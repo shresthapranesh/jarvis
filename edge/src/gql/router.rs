@@ -52,7 +52,14 @@ const LINKED_FIELDS: &[&str] = &[
     "resumeWorkflowRun",
     "resolveWorkflowApproval",
     "triggerAutomation",
+    "resolveApproval",
+    "requestToolApproval",
 ];
+
+/// Fields whose resolver may defer to Python (`gql::defer`), which runs the
+/// whole operation again: owned only alone in it, so nothing an earlier
+/// root field wrote is written twice.
+const DEFERRING_FIELDS: &[&str] = &["resolveApproval", "requestToolApproval"];
 
 /// Who sent the request. The `jarvis` SDK sends `X-Jarvis-Caller: agent`
 /// (`server/graphql/context.py`); everything else is a human.
@@ -85,6 +92,12 @@ pub fn decide(
         OperationType::Subscription => return Decision::Backend("subscription".into()),
     };
     let walk = Walk { owned: fields, doc: &doc, variables, caller, link_up };
+    let roots = walk.root_fields(&op.selection_set.node);
+    if roots.len() > 1 {
+        if let Some(name) = roots.iter().find(|n| DEFERRING_FIELDS.contains(&n.as_str())) {
+            return Decision::Backend(format!("{name} beside other fields"));
+        }
+    }
     match walk.check(&op.selection_set.node) {
         Ok(()) => Decision::Edge,
         Err(why) => Decision::Backend(why),
@@ -110,6 +123,24 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
+    /// The root field names, through fragments.
+    fn root_fields(&self, set: &SelectionSet) -> Vec<String> {
+        let mut out = vec![];
+        for item in &set.items {
+            match &item.node {
+                Selection::Field(field) if field.node.name.node != "__typename" => out.push(field.node.name.node.to_string()),
+                Selection::Field(_) => {}
+                Selection::InlineFragment(frag) => out.extend(self.root_fields(&frag.node.selection_set.node)),
+                Selection::FragmentSpread(spread) => {
+                    if let Some(frag) = self.doc.fragments.get(&spread.node.fragment_name.node) {
+                        out.extend(self.root_fields(&frag.node.selection_set.node));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     fn check(&self, set: &SelectionSet) -> Result<(), String> {
         for item in &set.items {
             match &item.node {
@@ -153,6 +184,8 @@ impl Walk<'_> {
             "deleteWorkflow" | "deleteSkill" if self.caller == Caller::Agent => {
                 Err(format!("{name} by the agent is approval-gated"))
             }
+            // Python refuses a human's; its error is Python's to word.
+            "requestToolApproval" if self.caller != Caller::Agent => Err("requestToolApproval by a human".into()),
             _ => Ok(()),
         }
     }
@@ -209,6 +242,15 @@ mod tests {
     #[test]
     fn owned_mutation_goes_to_edge() {
         assert_eq!(decide_h("mutation { createProject(input: {name: \"a\"}) { id } }", json!({})), Decision::Edge);
+    }
+
+    #[test]
+    fn a_deferring_field_is_owned_only_alone() {
+        let owned = Owned { query: Default::default(), mutation: ["createProject", "resolveApproval"].map(String::from).into() };
+        let alone = "mutation { resolveApproval(id: \"a\", answer: \"y\") { id } }";
+        let both = "mutation { createProject(input: {name: \"a\"}) { id } resolveApproval(id: \"a\", answer: \"y\") { id } }";
+        assert_eq!(decide(&owned, alone, None, &json!({}), Caller::Human, true), Decision::Edge);
+        assert!(matches!(decide(&owned, both, None, &json!({}), Caller::Human, true), Decision::Backend(_)));
     }
 
     #[test]

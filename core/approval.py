@@ -1,4 +1,6 @@
-"""Reading a free-text approval answer as yes, no, or neither."""
+"""Reading a free-text approval answer as yes, no, or neither.
+
+Ported to the edge (`edge/src/approvals.rs:is_affirmative`): change both."""
 
 from __future__ import annotations
 

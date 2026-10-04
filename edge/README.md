@@ -413,8 +413,20 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   there (`chat_job_handler`), its text, step rows and spend continuing the
   edge's. A turn goes over when its next step needs what only Python has:
   a tool other than the edge's (workers, a workflow),
-  arguments that aren't plainly valid, a tool a human must approve, or a
-  conversation not yet converted from `checkpoints.db`.
+  arguments that aren't plainly valid, or a conversation not yet converted
+  from `checkpoints.db`.
+- **Approvals** (`src/approvals.rs`, a port of `core/tool_gate.py` and
+  `core/approval.py` — change both): a call whose policy needs a human's yes
+  records an `approvals` row, is shown in the chat (`approval_request`), and
+  waits on the row, polled every 1.5 s, for `JARVIS_TOOL_GATE_TIMEOUT` (30
+  minutes) before it expires as denied. Every gate in a batch is answered, in
+  order, before anything runs; a denied call is answered with the denial.
+  The answer comes through `resolveApproval` (`src/gql/approval.rs`), which
+  the edge serves for a gate and a board task's question; a deferred action
+  to execute, a workflow paused on a future, or a gate a worker's run is
+  waiting on is deferred to Python before anything is written — which is
+  why it's owned only alone in an operation. `requestToolApproval`, the
+  SDK's request from a kernel, is the edge's on the same terms.
   Throughput measured before a handover isn't carried.
 - **Recovery**: at start the edge re-queues its jobs a previous edge left
   running; with the loop off, it hands every live edge job to Python. Python
@@ -528,6 +540,7 @@ Mutations that only write rows and files:
 | runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun`, `stopBoardTask` |
 | starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
 | steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
+| approvals (worker linked or owned) | `resolveApproval` (a tool gate, a board question), `requestToolApproval` (the agent's) — see "The agent loop" |
 
 And while a worker is linked, or the edge owns it: every subscription
 (`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`)
@@ -578,6 +591,6 @@ moves when the thing it reads moves.
 | `updateMemory`, `deleteAgentMemory`, `consolidateMemory`, `consolidateProjectMemory` | `kv_store` through `KvStore`; an LLM | the agent loop |
 | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `setToolPolicy` | the catalog cache and compiled agent graphs | the catalog becoming data |
 | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` | the live `McpManager` | MCP |
-| `resolveApproval`, `requestToolApproval` | waiters parked inside running tools | the job queue |
+| `resolveApproval` for a deferred action or a paused workflow; either it or `requestToolApproval` for a worker's run (the edge defers those per call) | a deferred action's executor; a future in a running workflow; a worker's run stream | the workflow engine, MCP |
 | `setSetting`, `deleteSetting` | `apply_setting`'s in-process caches | the registry becoming data |
 | `downloadVoice` | the Piper download | audio |

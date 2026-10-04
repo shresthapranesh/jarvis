@@ -1150,6 +1150,160 @@ def test_the_edge_guesses_file_types_as_python_does(edge_binary):
     assert dict(zip(names, map(json.loads, out))) == {n: mimetypes.guess_type(n)[0] for n in names}
 
 
+# ── approvals ────────────────────────────────────────────────────────────────
+
+RESOLVE = "mutation($id: String!, $a: String!) { resolveApproval(id: $id, answer: $a) { id status result } }"
+REQUEST = ("mutation($k: String!, $t: String!, $a: String!, $c: String) { requestToolApproval(toolKey: $k, "
+           "tool: $t, argsJson: $a, conversationId: $c) { id status } }")
+_APPROVAL_COLS = ("source, kind, status, question, label, tool, args_json, task_id, parent_id, board_task_id, "
+                  "action, action_payload, result, answer")
+
+
+async def _python_gql(query: str, variables: dict, *, caller: str = "human", conversation: str | None = None) -> dict:
+    from db import async_session
+    from server.graphql.extensions import SESSION_LOCK_KEY
+    from server.graphql.schema import schema
+
+    async with async_session() as s:
+        res = await schema.execute(query, variable_values=variables, context_value={
+            "session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": caller, "caller_conversation_id": conversation})
+    out: dict = {"data": res.data}
+    if res.errors:
+        out["errors"] = [e.message for e in res.errors]
+    return out
+
+
+async def _edge_gql(twins: Twins, query: str, variables: dict, headers: dict | None = None) -> dict:
+    resp = await twins.client.post("/graphql", json={"query": query, "variables": variables}, headers=headers or {})
+    assert resp.status_code == 200, f"proxied ({resp.status_code})"
+    body = resp.json()
+    out: dict = {"data": body.get("data")}
+    if body.get("errors"):
+        out["errors"] = [e["message"] for e in body["errors"]]
+    return out
+
+
+def _approvals(db: Path, norm: Normalizer) -> list:
+    return norm.value([list(r) for r in _rows(db, f"SELECT {_APPROVAL_COLS} FROM approvals ORDER BY rowid")])
+
+
+async def _gate_run_cell(twins: Twins) -> None:
+    """`bound:run_cell` needs a human's yes, in both databases."""
+    from core import tool_policy
+    from db import async_session
+
+    async with async_session() as s:
+        await tool_policy.set_tool_policy(s, "bound:run_cell", approval=True)
+    with contextlib.closing(sqlite3.connect(twins.python_db)) as a, contextlib.closing(sqlite3.connect(twins.edge_db)) as b:
+        cur = a.execute("SELECT * FROM config_settings WHERE key = 'tools.policy'")
+        cols = [d[0] for d in cur.description]
+        b.execute(f"INSERT INTO config_settings ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", cur.fetchone())
+        b.commit()
+
+
+async def _answer_when_asked(db: Path, answer: Any) -> None:
+    """Answer the first gate that opens, as the chat prompt would."""
+    async with asyncio.timeout(30):
+        while not (rows := _rows(db, "SELECT id FROM approvals WHERE source = 'tool' AND status = 'pending'")):
+            await asyncio.sleep(0.05)
+    await answer(rows[0][0])
+
+
+async def _both_gated(twins: Twins, query: str, script: list[Reply], answer: str) -> tuple[dict, dict]:
+    async def python_answer(approval_id: str) -> None:
+        out = await _python_gql(RESOLVE, {"id": approval_id, "a": answer})
+        assert "errors" not in out, out
+
+    async def edge_answer(approval_id: str) -> None:
+        out = await _edge_gql(twins, RESOLVE, {"id": approval_id, "a": answer})
+        assert "errors" not in out, out
+
+    records = []
+    for run, db, answerer in ((twins.python, twins.python_db, python_answer), (twins.edge, twins.edge_db, edge_answer)):
+        answering = asyncio.create_task(_answer_when_asked(db, answerer))
+        turn, requests = await run(query, script)
+        await answering
+        norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
+        records.append(({**_record(turn), "approvals": _approvals(db, norm)}, requests))
+    (python, python_requests), (edge, edge_requests) = records
+    _requests(python_requests, edge_requests)
+    [(runtime,)] = _rows(twins.edge_db, "SELECT runtime FROM jobs WHERE kind = 'chat' ORDER BY rowid DESC LIMIT 1")
+    assert runtime == "edge", "the edge handed the turn over"
+    return python, edge
+
+
+async def test_a_gated_call_runs_once_approved(twins):
+    await _gate_run_cell(twins)
+    script = [Reply("Checking. ", [("run_cell", {"code": "6 * 7"})]), Reply("It is 42.")]
+    python, edge = await _both_gated(twins, "what is six times seven", script, "Approve")
+    assert edge == python
+    kinds = [e["kind"] for e in python["events"]]
+    assert "ApprovalRequestEvent" in kinds and "ApprovalResolvedEvent" in kinds
+    [row] = python["approvals"]
+    assert row[:3] == ["tool", "approval", "approved"] and row[7] == "<task>" and row[13] == "Approve"
+    assert any("42" in (s[4] or "") for s in python["steps"])
+
+
+async def test_a_denied_call_is_answered_not_run(twins):
+    await _gate_run_cell(twins)
+    script = [Reply("", [("run_cell", {"code": "open('x', 'w')"})]), Reply("Understood, I won't.")]
+    python, edge = await _both_gated(twins, "make a file", script, "no thanks")
+    assert edge == python
+    denial = [r for r in python["thread"] if r["role"] == "tool"][0]
+    assert denial["status"] == "error" and denial["content"].startswith("Denied by a human (no thanks): `run_cell`")
+
+
+async def test_the_inbox_answers_through_the_edge(twins):
+    """`resolveApproval` on what the edge answers itself — a board task's
+    question, a gate with no run behind it — and its refusals, row for row
+    with Python."""
+    board_slots = [("full-1",), ("full-2",), ("full-3",)]  # no dispatch: the answer is the only change
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.executemany("INSERT INTO jobs (id, kind, payload, status, attempts, max_attempts, cancel_requested, "
+                          "run_at, created_at, updated_at) VALUES (?, 'board_task', '{}', 'pending', 0, 3, 0, "
+                          "'2099-01-01 00:00:00', '2026-01-01 00:00:00', '2026-01-01 00:00:00')", board_slots)
+            c.execute("INSERT INTO board_tasks (id, title, status, priority, created_by, blocked_reason, blocked_kind, "
+                      "failure_count, created_at, updated_at) VALUES ('bt', 'Pick', 'blocked', 0, 'user', 'Which?', "
+                      "'needs_input', 0, '2026-01-01 00:00:00', '2026-01-01 00:00:00')")
+            for aid, extra in (("ap-board", "'board_task', 'input', NULL, 'bt'"), ("ap-gate", "'tool', 'approval', 'run_cell', NULL"),
+                               ("ap-gate2", "'tool', 'approval', 'run_cell', NULL"), ("ap-done", "'tool', 'approval', 'x', NULL")):
+                c.execute(f"INSERT INTO approvals (id, source, kind, tool, board_task_id, status, question, label, "
+                          f"requested_at, updated_at) VALUES ('{aid}', {extra}, 'pending', 'q?', 'l', "
+                          "'2026-01-01 00:00:00', '2026-01-01 00:00:00')")
+            c.execute("UPDATE approvals SET status = 'denied' WHERE id = 'ap-done'")
+            c.commit()
+
+    for aid, answer in (("ap-board", "  Green  "), ("ap-gate", "sure thing"), ("ap-gate2", "what is it?"),
+                        ("ap-done", "yes"), ("nope", "yes"), ("ap-gate", "  ")):
+        python = await _python_gql(RESOLVE, {"id": aid, "a": answer})
+        edge = await _edge_gql(twins, RESOLVE, {"id": aid, "a": answer})
+        assert edge == python, aid
+    for table, cols in (("approvals", _APPROVAL_COLS), ("board_tasks", "status, pending_answer, blocked_reason")):
+        python, edge = (_rows(db, f"SELECT {cols} FROM {table} ORDER BY rowid") for db in (twins.python_db, twins.edge_db))
+        assert edge == python, table
+
+
+async def test_the_sdk_asks_through_the_edge(twins):
+    """`requestToolApproval` as the `jarvis` SDK sends it from a kernel."""
+    agent = {"X-Jarvis-Caller": "agent", "X-Jarvis-Conversation": "c-old"}
+    cases = [
+        {"k": "sdk:delete_file", "t": "delete_file", "a": json.dumps({"path": "a.txt", "n": [1, "b"], "x": "é" * 600}), "c": None},
+        {"k": "mcp:srv/tool", "t": "tool", "a": "", "c": "c-other"},
+        {"k": "nope", "t": "x", "a": "{}", "c": None},
+        {"k": "sdk:x", "t": "x", "a": "[1]", "c": None},
+    ]
+    for case in cases:
+        python = await _python_gql(REQUEST, case, caller="agent", conversation="c-old")
+        edge = await _edge_gql(twins, REQUEST, case, agent)
+        assert Normalizer().value(edge) == Normalizer().value(python), case
+    python, edge = (_approvals(db, Normalizer()) for db in (twins.python_db, twins.edge_db))
+    assert edge == python and len(python) == 2
+    # A human's request is Python's to refuse; the edge doesn't take it.
+    resp = await twins.client.post("/graphql", json={"query": REQUEST, "variables": cases[0]})
+    assert resp.status_code != 200
+
+
 # ── the handover ─────────────────────────────────────────────────────────────
 
 

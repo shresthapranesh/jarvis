@@ -5,6 +5,7 @@
 //! Python server behind it. See `edge/README.md`.
 
 mod agent;
+mod approvals;
 mod bots;
 mod budget;
 mod catalog;

@@ -5,6 +5,7 @@
 //! the schema can't validate falls through to Python — so an un-ported field
 //! means "served by Python", never "broken".
 
+pub mod approval;
 pub mod artifact;
 pub mod automation;
 pub mod board;
@@ -53,6 +54,7 @@ pub struct Mutation(
     conversation::ConversationMutation,
     project::ProjectMutation,
     board::BoardTaskMutation,
+    approval::ApprovalMutation,
     artifact::ArtifactMutation,
     workflow::WorkflowMutation,
     settings_lists::ListsMutation,
@@ -80,12 +82,20 @@ pub struct EdgeData {
     pub kernels: Arc<crate::kernels::Kernels>,
 }
 
+/// Who sent the request, as `get_context` reads it: the `jarvis` SDK says
+/// `X-Jarvis-Caller: agent` and names its conversation in
+/// `X-Jarvis-Conversation`.
+pub struct RequestFrom {
+    pub caller: router::Caller,
+    pub conversation: Option<String>,
+}
+
 /// The error extension that sends an operation to Python after all.
 pub const DEFER: &str = "edgeDefer";
 
 /// An error that makes `graphql::post` answer the operation in Python: the
 /// data is there, but in a shape only Python reads (or rejects) faithfully.
-/// For read-only resolvers only — the operation runs again in Python.
+/// Only before anything is written — the operation runs again in Python.
 pub fn defer(why: String) -> async_graphql::Error {
     use async_graphql::ErrorExtensions;
     async_graphql::Error::new(why).extend_with(|_, e| e.set(DEFER, true))

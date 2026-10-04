@@ -71,6 +71,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - Deferred gating of agent writes (`gate_action`) is off unless `approval.required_actions` is set. Only `caller == "agent"` (the `X-Jarvis-Caller` header) is gated. Gate before any side effect.
 - **Tool policy** (`tools.policy` setting, non-default entries only): disabled tools are unbound (filtered in `_build_agent` and hidden from `jarvis.help()`). Approval-required tools gate in the loop (`tool_gate_node.make_tool_gate`, run before each tool batch) — never by wrapping tools. All tool calls stay in history; a denied one gets its denial as its result.
 - The tool gate uses the Approval row as the rendezvous (event + DB poll in-process, polling from the kernel). `run_cell`'s 60s timeout is suspended while a gate is open (`kernels.py:_hold_for_approval`).
+- The edge gates its own runs the same way and serves `resolveApproval` (gates, board questions) and `requestToolApproval`: `edge/src/approvals.rs` ports `tool_gate.py` + `approval.py`, `edge/src/gql/approval.rs` the two mutations — change both. It defers to Python a deferred action, a paused workflow, and a gate a worker's run waits on.
 
 ## Budget and throughput (`budget.py`, `perf.py`)
 - Each runtime creates a `BudgetTracker` + `BudgetCallbackHandler` per run; limits from `JARVIS_BUDGET_MAX_*` / `RunnerConfig`.

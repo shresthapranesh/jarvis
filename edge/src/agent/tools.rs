@@ -5,11 +5,11 @@
 //! sees the same tool list whichever runtime calls it — and a cached prefix
 //! stays byte-stable when a conversation moves between them.
 //!
-//! The edge runs `run_cell`, `write_artifact`, the todo tools and `remember`.
-//! Any other call — workers, a workflow — or a call whose arguments aren't
-//! plainly valid, or one a human must approve, is Python's: the batch is
-//! handed over (`Plan::Python`) and Python runs it, validating and gating as
-//! it always has.
+//! The edge runs `run_cell`, `write_artifact`, the todo tools and `remember`,
+//! a call a human must approve once they have (`Step::Gated`). Any other
+//! call — workers, a workflow — or a call whose arguments aren't plainly
+//! valid, is Python's: the batch is handed over (`Plan::Python`) and Python
+//! runs it, validating and gating as it always has.
 
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -99,6 +99,10 @@ pub enum Plan {
 #[derive(Debug, PartialEq)]
 pub enum Step {
     Run(Native),
+    /// A call its policy says a human approves first (`bound:<name>`).
+    Gated(Native),
+    /// A gated call a human said no to (or let time out): its answer.
+    Denied(String),
     /// ToolNode's answer to a call naming no bound tool.
     Unknown(String),
 }
@@ -116,10 +120,8 @@ pub fn plan(calls: &[ToolCall], bound: &[Tool], policy: &Policy) -> Plan {
             steps.push(Step::Unknown(unknown_tool(&call.name, bound)));
             continue;
         }
-        if policy.needs_approval(&call.name) {
-            return Plan::Python(format!("{} needs approval", call.name));
-        }
         match native(&call.name, &call.args) {
+            Some(n) if policy.needs_approval(&call.name) => steps.push(Step::Gated(n)),
             Some(n) => steps.push(Step::Run(n)),
             None => return Plan::Python(format!("{} runs in Python", call.name)),
         }
@@ -290,7 +292,8 @@ mod tests {
         .unwrap());
         let tools = bound_for(&policy, false);
         assert!(!tools.iter().any(|t| t.name == "remember"));
-        assert!(matches!(plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy), Plan::Python(_)));
+        let gated = plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy);
+        assert_eq!(gated, Plan::Edge(vec![Step::Gated(Native::RunCell { code: "1".into() })]));
     }
 
     #[test]

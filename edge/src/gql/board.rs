@@ -371,31 +371,7 @@ impl BoardTaskMutation {
     // the answer on the same conversation, so it knows what it asked.
     async fn answer_board_task(&self, ctx: &Context<'_>, id: ID, answer: String) -> Result<BoardTask> {
         let (_, raw) = decode_global_id(&id)?;
-        let (pool, data) = (ctx.data::<SqlitePool>()?, ctx.data::<EdgeData>()?);
-        let answer = answer.trim();
-        if answer.is_empty() {
-            return Err("answer must not be empty".into());
-        }
-        let task = BoardTask::by_id(pool, &raw).await?.ok_or("task not found")?;
-        if task.status != "blocked" {
-            return Err("only blocked tasks can be answered".into());
-        }
-        let mut tx = crate::db::write_tx(pool).await?;
-        // The question is closed as answered first: the update would close it
-        // as cancelled.
-        close_open_approvals(&mut tx, &raw, "answered", "Task resumed.", Some(answer)).await?;
-        let sets = [
-            ("status", Some("ready".to_string())),
-            ("pending_answer", Some(answer.to_string())),
-            ("blocked_reason", None),
-            ("blocked_kind", None),
-            ("finished_at", None),
-        ];
-        update_task(&mut tx, &raw, &sets).await?;
-        tx.commit().await?;
-        let task = BoardTask::by_id(pool, &raw).await?.ok_or("task not found")?;
-        kick_dispatch(data).await;
-        Ok(task)
+        answer_task(ctx.data()?, ctx.data()?, &raw, &answer).await
     }
 
     // A task, its links both ways, and its run's conversation.
@@ -463,6 +439,35 @@ impl BoardTaskMutation {
         }
         Ok(true)
     }
+}
+
+/// `answer_board_task`: shared by the board card and the inbox
+/// (`resolveApproval`), so the two can't disagree on what an answer may be.
+pub async fn answer_task(pool: &SqlitePool, data: &EdgeData, raw: &str, answer: &str) -> Result<BoardTask> {
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return Err("answer must not be empty".into());
+    }
+    let task = BoardTask::by_id(pool, raw).await?.ok_or("task not found")?;
+    if task.status != "blocked" {
+        return Err("only blocked tasks can be answered".into());
+    }
+    let mut tx = crate::db::write_tx(pool).await?;
+    // The question is closed as answered first: the update would close it
+    // as cancelled.
+    close_open_approvals(&mut tx, raw, "answered", "Task resumed.", Some(answer)).await?;
+    let sets = [
+        ("status", Some("ready".to_string())),
+        ("pending_answer", Some(answer.to_string())),
+        ("blocked_reason", None),
+        ("blocked_kind", None),
+        ("finished_at", None),
+    ];
+    update_task(&mut tx, raw, &sets).await?;
+    tx.commit().await?;
+    let task = BoardTask::by_id(pool, raw).await?.ok_or("task not found")?;
+    kick_dispatch(data).await;
+    Ok(task)
 }
 
 /// `replace_board_task_parents`: refuses a missing parent, the task itself
