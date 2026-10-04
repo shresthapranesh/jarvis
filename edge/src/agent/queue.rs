@@ -23,6 +23,8 @@ pub struct Job {
     pub payload: Value,
     /// As stored: the run's clock starts here.
     pub created_at: String,
+    /// A stop reached it before the claim.
+    pub cancel_requested: bool,
 }
 
 /// `now + ttl`, stored as SQLAlchemy stores a datetime.
@@ -42,7 +44,7 @@ pub async fn claim(pool: &SqlitePool, kinds: &[&str], worker: &str) -> sqlx::Res
     let now = now_stored();
     let marks = vec!["?"; kinds.len()].join(", ");
     let sql = format!(
-        "SELECT id, kind, payload, created_at FROM jobs \
+        "SELECT id, kind, payload, created_at, cancel_requested FROM jobs \
          WHERE kind IN ({marks}) AND status = 'pending' AND run_at <= ? AND runtime = ? AND {THREAD_FREE} \
          ORDER BY run_at ASC LIMIT 1"
     );
@@ -78,6 +80,7 @@ pub async fn claim(pool: &SqlitePool, kinds: &[&str], worker: &str) -> sqlx::Res
         kind: row.get("kind"),
         payload: serde_json::from_str(&payload).unwrap_or(Value::Null),
         created_at: row.get("created_at"),
+        cancel_requested: row.get::<Option<bool>, _>("cancel_requested").unwrap_or(false),
     }))
 }
 
@@ -88,6 +91,22 @@ pub async fn extend_lock(pool: &SqlitePool, id: &str, worker: &str) -> sqlx::Res
     )
     .bind(stamp_in(LOCK_TTL))
     .bind(now_stored())
+    .bind(id)
+    .bind(worker)
+    .execute(pool)
+    .await?;
+    Ok(r.rows_affected() == 1)
+}
+
+/// `complete`: the job is done, and its thread's lease free.
+pub async fn complete(pool: &SqlitePool, id: &str, worker: &str) -> sqlx::Result<bool> {
+    let now = now_stored();
+    let r = sqlx::query(
+        "UPDATE jobs SET status = 'done', completed_at = ?, locked_by = NULL, locked_until = NULL, updated_at = ? \
+         WHERE id = ? AND status = 'running' AND locked_by = ?",
+    )
+    .bind(&now)
+    .bind(&now)
     .bind(id)
     .bind(worker)
     .execute(pool)

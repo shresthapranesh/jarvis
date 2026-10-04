@@ -112,7 +112,6 @@ impl Budget {
     }
 
     /// Why the run went over, once it has.
-    #[allow(dead_code, reason = "the Rust agent loop (phase 2d) is its caller")]
     pub fn exceeded(&self) -> Option<&str> {
         self.exceeded.as_deref()
     }
@@ -126,7 +125,6 @@ impl Budget {
         self.changed()
     }
 
-    #[allow(dead_code, reason = "the Rust agent loop (phase 2d) is its caller")]
     pub fn record_tool(&mut self, count: i64) -> Vec<Event> {
         self.tool_calls += count;
         self.changed()

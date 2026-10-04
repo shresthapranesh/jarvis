@@ -17,7 +17,7 @@ from pathlib import Path
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent_harness import ModelCall, tool_call
-from edge_support import _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 from test_agent_golden import GOOGLE, script  # noqa: F401 — the fixture
 
 
@@ -192,9 +192,13 @@ START = """mutation($input: StartTaskInput!) {
 EDGE_ON = {"JARVIS_AGENT_RUNTIME": "edge"}
 
 
+REPO = Path(__file__).resolve().parent.parent
+
+
 def _edge_env(work_dir: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
-    # HOME and the app dir hold no mcp.json, so only what a test sets counts.
-    return {"HOME": str(work_dir), "JARVIS_APP_DIR": str(work_dir), **(extra or {})}
+    # The checkout, for the system prompt; HOME and it hold no mcp.json, so
+    # only an MCP server a test configures counts.
+    return {"HOME": str(work_dir), "JARVIS_APP_DIR": str(REPO), **(extra or {})}
 
 
 async def _job(job_id: str):
@@ -216,6 +220,17 @@ async def _settled(job_id: str, timeout: float = 10.0):
     raise AssertionError(f"job {job_id} never settled: {await _job(job_id)}")
 
 
+async def _finished(job_id: str, timeout: float = 15.0):
+    """The job once it ran to its end."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = await _job(job_id)
+        if job is not None and job.status in ("done", "error", "cancelled"):
+            return job
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"job {job_id} never finished: {await _job(job_id)}")
+
+
 async def _start(client, **input) -> str:
     resp = await client.post("/graphql", json={"query": START, "variables": {"input": input}})
     body = resp.json()
@@ -223,32 +238,32 @@ async def _start(client, **input) -> str:
     return body["data"]["startTask"]["taskId"]
 
 
-async def test_the_edge_claims_the_turns_it_serves_and_hands_them_over(database, work_dir: Path, edge_binary: Path):
-    """For now (2d-1) every turn the edge claims goes straight to Python:
-    claimed once (attempts), then pending with `runtime` cleared and nothing
-    carried — Python runs it from the start."""
+async def test_the_edge_takes_the_turns_it_serves(database, work_dir: Path, edge_binary: Path):
+    """A turn on a provider the edge speaks is the edge's to run (here its
+    model is unreachable, so it fails — in the edge, which records it); one on
+    a provider it doesn't is left for Python, untouched."""
     from db import async_session
-    from db.models import ConfigSetting
+    from db.models import ConfigSetting, Message
 
-    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, EDGE_ON)) as client:
-        served = await _start(client, query="hello", model=GOOGLE)
+    dead = {"OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}"}
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, {**EDGE_ON, **dead})) as client:
+        served = await _start(client, query="hello", model="ollama:llama3.3")
         not_served = await _start(client, query="hello", model="anthropic:claude-sonnet-4-6")
 
-        job = await _settled(served)
-        assert (job.runtime, job.attempts) == (None, 1)
-        assert "handoff" not in json.loads(job.payload)
+        job = await _finished(served)
+        assert (job.runtime, job.attempts, job.status) == ("edge", 1, "done")
+        async with async_session() as s:
+            message = await s.get(Message, served)
+            assert message is not None and message.status == "error"
+            assert message.content.startswith("The run failed before completing:")
         job = await _job(not_served)
         assert job is not None and (job.runtime, job.attempts, job.status) == (None, 0, "pending")
-
-        # The run stays mirrored, waiting for a worker, all along.
-        resp = await client.post("/graphql", json={"query": "{ runningTasks { id done } }"})
-        assert {t["id"] for t in resp.json()["data"]["runningTasks"]} == {served, not_served}
 
         # An MCP server configured anywhere Python looks sends turns to Python.
         async with async_session() as s:
             s.add(ConfigSetting(key="mcp.servers", value=json.dumps({"fs": {"command": "x"}})))
             await s.commit()
-        with_mcp = await _start(client, query="hello", model=GOOGLE)
+        with_mcp = await _start(client, query="hello", model="ollama:llama3.3")
         await asyncio.sleep(0.5)
         job = await _job(with_mcp)
         assert job is not None and (job.runtime, job.attempts) == (None, 0)
@@ -283,11 +298,12 @@ async def test_an_edge_start_recovers_the_jobs_the_last_one_left(database, work_
             job.payload = json.dumps({"query": "hi", "model": GOOGLE, "conv_id": f"c-{job_id}"})
             await s.commit()
 
-    # Serving: the dead edge's job is claimed again — and, for now, handed over.
+    # Serving: the dead edge's job is claimed again, and run here (its
+    # model has no key in a test, so it fails — here).
     await seed("left-running")
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, EDGE_ON)):
-        job = await _settled("left-running")
-        assert (job.runtime, job.attempts) == (None, 2)
+        job = await _finished("left-running")
+        assert (job.runtime, job.attempts, job.status) == ("edge", 2, "done")
 
     # Not serving: every edge job goes to Python untouched.
     await seed("loop-off")

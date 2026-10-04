@@ -22,20 +22,23 @@ impl BrowserQuery {
     /// Never fails, and never launches a browser: a page load must not open
     /// a window.
     async fn browser_available(&self, ctx: &Context<'_>) -> Result<bool> {
-        let url = cdp_url(ctx.data::<SqlitePool>()?).await;
-        // The edge speaks no TLS; Python's probe does.
-        if !url.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://")) {
-            return Err(super::defer(format!("browserAvailable: {url} isn't plain http")));
+        let pool = ctx.data::<SqlitePool>()?;
+        match reachable(pool, &ctx.data::<EdgeData>()?.http).await {
+            Some(up) => Ok(up),
+            None => Err(super::defer(format!("browserAvailable: {} isn't plain http", cdp_url(pool).await))),
         }
-        let probe = ctx
-            .data::<EdgeData>()?
-            .http
-            .get(format!("{}/json/version", url.trim_end_matches('/')))
-            .timeout(PROBE_TIMEOUT)
-            .send()
-            .await;
-        Ok(probe.is_ok_and(|r| r.status() == reqwest::StatusCode::OK))
     }
+}
+
+/// `_endpoint_live(cdp_url())`, or `None` when the endpoint isn't plain
+/// http — the edge speaks no TLS; Python's probe does.
+pub async fn reachable(pool: &SqlitePool, http: &reqwest::Client) -> Option<bool> {
+    let url = cdp_url(pool).await;
+    if !url.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://")) {
+        return None;
+    }
+    let probe = http.get(format!("{}/json/version", url.trim_end_matches('/'))).timeout(PROBE_TIMEOUT).send().await;
+    Some(probe.is_ok_and(|r| r.status() == reqwest::StatusCode::OK))
 }
 
 /// `cdp_url()`: the `browser.cdp_url` setting, else `JARVIS_BROWSER_CDP_URL`,

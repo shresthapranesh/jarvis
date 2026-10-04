@@ -1,0 +1,216 @@
+[
+ {
+  "name": "run_cell",
+  "description": "Run Python in this conversation's stateful IPython kernel; returns its output.\n\nVariables and imports persist across calls, like Jupyter cells. The last\nexpression is echoed (no print needed). 60s timeout; state survives it.\nPreloaded: search(query), read(url), jarvis SDK (`jarvis.help()`).",
+  "parameters": {
+   "properties": {
+    "code": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "code"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "write_artifact",
+  "description": "Save a deliverable the user keeps. Shown in a side panel; auto-versioned.\n\nPass `content` for a markdown document (report, draft, resume), or\n`file_path` for an already-written audio/video/image file. Not for scratch\nwork — use write_file for that.\n\nArgs:\n    title: Short human-readable title.\n    content: Markdown body. Mutually exclusive with file_path.\n    file_path: Path to an existing file to register instead of content.\n    artifact_id: Update this artifact in place; omit to create a new one.\n\nReturns the artifact id and title as JSON.",
+  "parameters": {
+   "properties": {
+    "title": {
+     "type": "string"
+    },
+    "content": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "file_path": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "artifact_id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    }
+   },
+   "required": [
+    "title"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "write_todos",
+  "description": "Replace your entire task list. Plan multi-step work, then update as you go.\n\nShown in your context every turn, and live to the user. New items start\n\"pending\" — use set_todo_status to advance. Empty list clears.",
+  "parameters": {
+   "properties": {
+    "todos": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "todos"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "set_todo_status",
+  "description": "Mark one todo pending/in_progress/done by its 0-based index.\n\nIndices come from the list shown in your context each turn.",
+  "parameters": {
+   "properties": {
+    "index": {
+     "type": "integer"
+    },
+    "status": {
+     "enum": [
+      "pending",
+      "in_progress",
+      "done"
+     ],
+     "type": "string"
+    }
+   },
+   "required": [
+    "index",
+    "status"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "spawn_workers",
+  "description": "Run independent tasks concurrently on worker agents; returns when all finish.\n\nEach task is a dict: \"task\" (required), \"context\" (optional background),\n\"role\" (optional: researcher/coder/writer/general). Workers can't see\nyour kernel variables — put what each needs in its task/context.",
+  "parameters": {
+   "properties": {
+    "tasks": {
+     "items": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "tasks"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "run_workflow",
+  "description": "Run a saved workflow as a sub-agent; returns its final outputs as JSON.\n\nArgs:\n    workflow_id: ID of the workflow to run.\n    inputs_json: JSON object of start-node inputs, e.g. '{\"topic\": \"AI news\"}'.",
+  "parameters": {
+   "properties": {
+    "workflow_id": {
+     "type": "string"
+    },
+    "inputs_json": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    }
+   },
+   "required": [
+    "workflow_id"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "complete_task",
+  "description": "Mark the board task you are currently executing as done.\n\nOnly valid inside a board-task run. Call when the goal is achieved — the\nsummary (and optional metadata) is the handoff dependent tasks receive.\n\nArgs:\n    summary: Concise handoff: what was done, where results live.\n    metadata: Optional JSON object string with structured results,\n              e.g. '{\"artifact\": \"...\", \"files\": [...]}'.",
+  "parameters": {
+   "properties": {
+    "summary": {
+     "type": "string"
+    },
+    "metadata": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    }
+   },
+   "required": [
+    "summary"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "block_task",
+  "description": "Mark the board task you are currently executing as blocked.\n\nOnly valid inside a board-task run. Call when you can't finish — missing\ninput/capability, or a decision only a human can make.\n\nArgs:\n    reason: What is missing and what would unblock it. When asking the\n            user, phrase this as the question itself.\n    needs_input: True when a human answer would unblock the task — the\n                 board shows an answer box, and the answer reaches you on\n                 resume (same conversation, context preserved).",
+  "parameters": {
+   "properties": {
+    "reason": {
+     "type": "string"
+    },
+    "needs_input": {
+     "default": false,
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "remember",
+  "description": "Persist a durable fact, recalled in future conversations.\n\nFor preferences, ongoing projects, lasting facts — not conversation-only detail.\n\nArgs:\n    text: One atomic, self-contained fact.\n    kind: \"core\" for identity/preferences always in context; \"fact\" (default) otherwise.",
+  "parameters": {
+   "properties": {
+    "text": {
+     "type": "string"
+    },
+    "kind": {
+     "default": "fact",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "type": "object"
+  }
+ }
+]
