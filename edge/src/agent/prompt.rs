@@ -4,10 +4,10 @@
 //! catalog, the live browser, the project), and the volatile tail (project
 //! memory, then the todo list or the planning directive).
 //!
-//! What needs embeddings — the memories retrieved for the request, earlier
-//! episodes of the conversation, a ranked skill shortlist — isn't here yet
-//! (2d-3). Where Python would put one in the prompt, the step needs Python
-//! (`NeedsPython`), so a turn the edge serves sees exactly what it would have.
+//! What is retrieved for the request — relevant memories, a ranked skill
+//! shortlist, earlier episodes, the browser — is computed once per user
+//! message (`retrieved`), as Python's retrieval cache does; the project is
+//! re-read on every step.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -43,28 +43,41 @@ pub struct Context {
     pub volatile: String,
 }
 
-/// The step's context. `query` is the newest user turn's text.
-pub async fn build(
+/// `_compute_retrieval`: memory, skills, episodes, then the browser, for the
+/// user message `query` is the text of.
+pub async fn retrieved(
     pool: &SqlitePool,
     http: &reqwest::Client,
     query: &str,
     conversation_id: &str,
+) -> Result<Vec<Segment>, NeedsPython> {
+    let mut parts = memory(pool, http, query).await?;
+    parts.extend(skills(pool, http, query).await?);
+    if let Some(text) = super::retrieve::earlier_episodes(pool, http, conversation_id, query).await {
+        parts.push(seg("earlier_in_conversation", text, false));
+    }
+    if browser_live(pool, http).await? {
+        parts.push(seg("browser", BROWSER, true));
+    }
+    Ok(parts)
+}
+
+/// The step's context around `retrieved`. `query` is the newest user turn's text.
+pub async fn build(
+    pool: &SqlitePool,
+    query: &str,
     project_id: Option<&str>,
     todos: &[Value],
+    retrieved: &[Segment],
 ) -> Result<Context, NeedsPython> {
     let system = std::fs::read_to_string(crate::config::app_dir().join("core").join("system_prompt.md"))
         .map_err(|_| NeedsPython("core/system_prompt.md is not readable here"))?
         .trim()
         .to_string();
 
-    // Retrieved (memory, skills, episodes, MCP, browser), then project — the
-    // order Python concatenates them in before sorting.
-    let mut parts = memory(pool, query).await?;
-    parts.extend(skills(pool, query).await?);
-    episodes(pool, conversation_id, query).await?;
-    if browser_live(pool, http).await? {
-        parts.push(seg("browser", BROWSER, true));
-    }
+    // Retrieved, then project — the order Python concatenates them in
+    // before sorting.
+    let mut parts = retrieved.to_vec();
     parts.extend(project(pool, project_id).await?);
 
     let mut segments: Vec<Segment> = parts.iter().filter(|s| s.cacheable && !s.content.trim().is_empty()).cloned().collect();
@@ -114,7 +127,7 @@ const CORE_MAX_CHARS: usize = 2000;
 
 /// `_memory_volatile_parts`, with an embedder configured — which Python
 /// always has (Gemini with a key, else Ollama's).
-async fn memory(pool: &SqlitePool, query: &str) -> Result<Vec<Segment>, NeedsPython> {
+async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, NeedsPython> {
     let mut parts = vec![seg("memory_howto", MEMORY_HOWTO, true)];
     let core: Vec<String> = db(sqlx::query_scalar(
         "SELECT text FROM memories WHERE kind = 'core' ORDER BY updated_at DESC",
@@ -125,12 +138,14 @@ async fn memory(pool: &SqlitePool, query: &str) -> Result<Vec<Segment>, NeedsPyt
     if !text.is_empty() {
         parts.push(seg("core_memory", format!("## Agent Memory\n\n{text}"), true));
     }
-    if !trivial(query) {
-        let facts: Option<i64> = db(sqlx::query_scalar("SELECT 1 FROM memories WHERE kind = 'fact' LIMIT 1")
-            .fetch_optional(pool)
-            .await)?;
-        if facts.is_some() {
-            return Err(NeedsPython("retrieving memories for the request"));
+    if !query.is_empty() && !trivial(query) {
+        match super::retrieve::search_memory(pool, http, query, 6).await {
+            Ok(hits) if !hits.is_empty() => {
+                // Re-ranked per query: out of the cached prefix.
+                parts.push(seg("relevant_memories", super::retrieve::relevant_memories(&hits), false));
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("memory retrieval failed: {e}"),
         }
     }
     Ok(parts)
@@ -172,8 +187,12 @@ pub fn trivial(query: &str) -> bool {
 /// request.
 const SKILLS_FULL: usize = 8;
 
-/// `_skills_volatile_parts` for a catalog small enough to list whole.
-async fn skills(pool: &SqlitePool, query: &str) -> Result<Vec<Segment>, NeedsPython> {
+/// `_SKILLS_TOPK`: how many a ranked shortlist holds.
+const SKILLS_TOPK: usize = 5;
+
+/// `_skills_volatile_parts`: the whole catalog when it is small (cached),
+/// else a shortlist ranked against the request (not).
+async fn skills(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, NeedsPython> {
     let rows: Vec<(String, String)> =
         db(sqlx::query_as("SELECT name, description FROM skills WHERE enabled = 1 ORDER BY name ASC")
             .fetch_all(pool)
@@ -181,10 +200,15 @@ async fn skills(pool: &SqlitePool, query: &str) -> Result<Vec<Segment>, NeedsPyt
     if rows.is_empty() {
         return Ok(vec![]);
     }
-    if rows.len() > SKILLS_FULL {
-        // Ranked against the request — or, for a greeting, left out.
-        return if trivial(query) { Ok(vec![]) } else { Err(NeedsPython("ranking the skill catalog")) };
-    }
+    let (rows, ranked) = if rows.len() > SKILLS_FULL {
+        if trivial(query) {
+            return Ok(vec![]);
+        }
+        let hits = super::retrieve::search_skills(pool, http, query, SKILLS_TOPK).await;
+        (if hits.is_empty() { rows.into_iter().take(SKILLS_TOPK).collect() } else { hits }, true)
+    } else {
+        (rows, false)
+    };
     let lines: Vec<String> = rows.iter().map(|(n, d)| format!("- **{n}** — {d}")).collect();
     Ok(vec![seg(
         "skills",
@@ -195,23 +219,8 @@ async fn skills(pool: &SqlitePool, query: &str) -> Result<Vec<Segment>, NeedsPyt
              not user commands.\n\n{}",
             lines.join("\n")
         ),
-        true,
+        !ranked,
     )])
-}
-
-/// `_episode_volatile_parts`: compacted-away stretches matching the request.
-async fn episodes(pool: &SqlitePool, conversation_id: &str, query: &str) -> Result<(), NeedsPython> {
-    if trivial(query) {
-        return Ok(());
-    }
-    let any: Option<i64> = db(sqlx::query_scalar("SELECT 1 FROM conversation_episodes WHERE conversation_id = ? LIMIT 1")
-        .bind(conversation_id)
-        .fetch_optional(pool)
-        .await)?;
-    match any {
-        Some(_) => Err(NeedsPython("retrieving earlier episodes")),
-        None => Ok(()),
-    }
 }
 
 // ── the browser ─────────────────────────────────────────────────────────────

@@ -57,10 +57,12 @@ async def _run_edge(edge_binary: Path, work_dir: Path, db: Path, extra_env: dict
     env.pop("ARTIFACTS_DIR", None)
     # No bot connects, no turn is the edge's, and no model call leaves the
     # machine, unless a test says so.
-    for var in ("TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "JARVIS_AGENT_RUNTIME", "JARVIS_MCP_SERVERS", "MCP_SERVERS",
+    for var in ("TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN", "JARVIS_MCP_SERVERS", "MCP_SERVERS",
                 "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "META_API_KEY", "OLLAMA_HOST"):
         if var not in (extra_env or {}):
             env.pop(var, None)
+    # Chat turns are Python's here unless a test hands them to the edge.
+    env["JARVIS_AGENT_RUNTIME"] = (extra_env or {}).get("JARVIS_AGENT_RUNTIME", "python")
     # cwd = work_dir so the edge's .env lookup can't find the repo's .env.
     proc = subprocess.Popen([str(edge_binary)], env=env, cwd=work_dir)
     deadline = time.monotonic() + 10

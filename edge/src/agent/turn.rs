@@ -60,6 +60,10 @@ pub struct Turn<'a> {
     model: String,
     query: String,
     project_id: Option<String>,
+    ephemeral: bool,
+    /// This user message's retrieved context, by the message's id — the
+    /// steps of one request reuse it, as Python's retrieval cache does.
+    retrieved: Option<(Option<String>, Vec<crate::llm::shape::Segment>)>,
     attachments: bool,
     cancel_requested: bool,
     started: chrono::DateTime<chrono::Utc>,
@@ -87,6 +91,8 @@ impl<'a> Turn<'a> {
             query: payload["query"].as_str()?.to_string(),
             conversation_id,
             project_id: None,
+            ephemeral: false,
+            retrieved: None,
             attachments: payload["attachments"].as_array().is_some_and(|a| !a.is_empty()),
             cancel_requested: job.cancel_requested,
             started: parse_stamp(&job.created_at),
@@ -110,7 +116,7 @@ impl<'a> Turn<'a> {
         }
         let (project_id, ephemeral) = self.scope().await;
         self.project_id = project_id;
-        let _ = ephemeral; // Nothing the edge runs writes long-term state.
+        self.ephemeral = ephemeral;
         let mut thread = match Thread::load(self.pool(), &self.conversation_id).await {
             Ok(t) => t,
             Err(e) => {
@@ -203,8 +209,19 @@ impl<'a> Turn<'a> {
         let mut history = thread.messages.clone();
         history.extend(queued.iter().cloned());
         let query = latest_user_text(&history);
+        let message_id = history.iter().rev().find(|m| m.role == Role::User).and_then(|m| m.id.clone());
 
-        let context = prompt::build(self.pool(), &self.agent.http, &query, &self.conversation_id, self.project_id.as_deref(), &thread.todos).await;
+        let retrieved = match &self.retrieved {
+            Some((id, parts)) if *id == message_id => Ok(parts.clone()),
+            _ => prompt::retrieved(self.pool(), &self.agent.http, &query, &self.conversation_id).await,
+        };
+        let context = match retrieved {
+            Ok(parts) => {
+                self.retrieved = Some((message_id, parts.clone()));
+                prompt::build(self.pool(), &query, self.project_id.as_deref(), &thread.todos, &parts).await
+            }
+            Err(e) => Err(e),
+        };
         let context = match context {
             Ok(c) => c,
             Err(prompt::NeedsPython(why)) => {
@@ -331,6 +348,7 @@ impl<'a> Turn<'a> {
                 thread.set_todos(self.pool(), merged).await?;
                 Ok(tools::todos_written(items.len()))
             }
+            Native::Remember { text, kind } => Ok(self.remember(&text, &kind).await),
             Native::SetTodoStatus { index, status } => match tools::set_status(&thread.todos, index, &status) {
                 Ok((todos, answer)) => {
                     self.events.emit("todos_updated", &json!({"todos": todos, "source": "main"}));
@@ -340,6 +358,25 @@ impl<'a> Turn<'a> {
                 }
                 Err(answer) => Ok(answer),
             },
+        }
+    }
+
+    /// `remember`: a durable fact, merged into a near-duplicate. Its answer
+    /// is the model's, failures included.
+    async fn remember(&self, text: &str, kind: &str) -> String {
+        if text.trim().is_empty() {
+            return "Nothing to remember (empty text).".into();
+        }
+        if self.ephemeral {
+            return "Skipped: this is an incognito chat, nothing is saved to long-term memory.".into();
+        }
+        let kind = if kind == "core" || kind == "fact" { kind } else { "fact" };
+        match super::retrieve::upsert_memory(self.pool(), &self.agent.http, text, kind).await {
+            Ok(()) => format!("Remembered ({kind})."),
+            Err(e) => {
+                tracing::warn!("remember failed: {e}");
+                format!("Could not save memory: {e}")
+            }
         }
     }
 
