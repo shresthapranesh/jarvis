@@ -2,7 +2,7 @@
 //! edge and the Python backend always agree on which database they share.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct Config {
     /// Where the edge listens. It takes over the port the Python server used
@@ -95,11 +95,7 @@ impl Config {
             checkpoints_db,
             static_dir,
             worker,
-            kernel_python: env_path("JARVIS_KERNEL_PYTHON").unwrap_or_else(|| {
-                Some(app_dir.join(".venv").join("bin").join("python"))
-                    .filter(|p| p.is_file())
-                    .unwrap_or_else(|| PathBuf::from("python3"))
-            }),
+            kernel_python: python_in(&app_dir),
             app_dir: resolve(app_dir),
         })
     }
@@ -172,6 +168,19 @@ fn work_dir() -> Result<PathBuf, String> {
 }
 
 /// The jarvis checkout: `JARVIS_APP_DIR`, else the working directory.
+/// The interpreter jarvis's Python runs on — kernels, and code
+/// automations (`sys.executable` in Python): `JARVIS_KERNEL_PYTHON`, else the
+/// checkout's `.venv`, else `python3` on the PATH.
+pub fn python() -> PathBuf {
+    python_in(&app_dir())
+}
+
+fn python_in(app_dir: &Path) -> PathBuf {
+    env_path("JARVIS_KERNEL_PYTHON").unwrap_or_else(|| {
+        Some(app_dir.join(".venv").join("bin").join("python")).filter(|p| p.is_file()).unwrap_or_else(|| PathBuf::from("python3"))
+    })
+}
+
 pub fn app_dir() -> PathBuf {
     env_path("JARVIS_APP_DIR").unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }

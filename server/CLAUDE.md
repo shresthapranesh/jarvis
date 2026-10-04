@@ -33,7 +33,7 @@ A message sent while a conversation has a run in flight is queued, not started (
 Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a reply starting with `NO_CHANGE` finishes as `no_change` and sends no notification).
 - Stateful prompt automations and monitors share the conversation/thread `automation_{automation_id}`; overlapping runs are `skipped` (`_has_inflight_sibling`). Stateless runs use `automation_{run_id}`.
 - Behind the edge, the edge fires every schedule (automations, board dispatch, maintenance sweeps via `maintenance` jobs) and owns the kernels and their reaper; APScheduler registers nothing.
-- The edge's agent loop runs prompt and monitor automations itself (`edge/src/agent/automation.rs` + `turn.rs`) — the run row, stateful conversation, monitor gate and notifications (`edge/src/notify.rs`) are ports: change both. A run it hands over mid-run carries `payload.handoff`, which `automation_job_handler` resumes from. Code and webhook runs stay here.
+- The edge's agent loop runs automations itself (`edge/src/agent/automation.rs`; prompt and monitor runs through `turn.rs`) — the run row, stateful conversation, monitor gate, code and webhook runs, and notifications (`edge/src/notify.rs`) are ports: change both. A run it hands over mid-run carries `payload.handoff`, which `automation_job_handler` resumes from.
 
 ## Task board (`task_board_runtime.py`)
 `BoardTask`: `todo → ready → running → blocked/done → archived`, with parent→child `BoardTaskLink`s.

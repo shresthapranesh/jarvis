@@ -308,7 +308,7 @@ made in both.**
 
 ## The agent loop (`src/agent/`)
 
-Phase 2d: chat turns and prompt/monitor automation runs run in the edge, so
+Phase 2d: chat turns and automation runs run in the edge, so
 neither a conversation nor a scheduled automation needs Python at all. On by
 default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 
@@ -350,9 +350,12 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   notifications (`src/notify.rs`, Telegram and Discord as Python sends them).
   Steps are announced but not written as rows, no plan reset, no throughput,
   the automation budget. The prompt's id is derived from the run, so a
-  re-claimed run replaces it (Python gives it a fresh one). Code and webhook
-  automations stay Python's. **A change to `server/automation_runtime.py` or
-  `core/notifications.py` is made in both.**
+  re-claimed run replaces it (Python gives it a fresh one). Code runs are
+  the script on jarvis's interpreter (`JARVIS_KERNEL_PYTHON`, else the
+  checkout's `.venv`) with output streamed by line, 60 s then killed, a stop
+  terminating it; webhook runs are one request, 30 s, no redirects. **A
+  change to `server/automation_runtime.py` or `core/notifications.py` is
+  made in both.**
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
   tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
@@ -367,7 +370,8 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint), with no
   attachments, and no MCP server configured anywhere Python looks (env, the
   first `mcp.json`, the `mcp.servers` setting) is the edge's — for an
-  automation, a prompt or monitor one on such a model: its job gets
+  automation, a code or webhook one, or a prompt or monitor one on such a
+  model: its job gets
   `runtime = 'edge'` and its run is mirrored as the edge's own. Everything
   else is Python's, as before.
 - **Claiming** (`queue.rs`) is `SqliteJobQueue._claim` plus `runtime =

@@ -28,8 +28,8 @@ pub async fn serves_chat(pool: &SqlitePool, model: &str, attachments: bool) -> b
     enabled() && !attachments && serves_model(pool, model).await
 }
 
-/// Whether the edge runs this automation: a prompt or monitor one (code and
-/// webhook runs are Python's), on a model it serves.
+/// Whether the edge runs this automation: a code or webhook one, or a prompt
+/// or monitor one on a model it serves.
 pub async fn serves_automation(pool: &SqlitePool, automation_id: &str) -> bool {
     if !enabled() {
         return false;
@@ -37,6 +37,9 @@ pub async fn serves_automation(pool: &SqlitePool, automation_id: &str) -> bool {
     let row: Option<(String, Option<String>)> =
         sqlx::query_as("SELECT input_type, model FROM automations WHERE id = ?").bind(automation_id).fetch_optional(pool).await.ok().flatten();
     let Some((input_type, model)) = row else { return false };
+    if input_type == "code" || input_type == "webhook" {
+        return true;
+    }
     if input_type != "prompt" && input_type != "monitor" {
         return false;
     }
