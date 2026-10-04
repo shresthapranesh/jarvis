@@ -24,7 +24,8 @@ it's on `main`.
 
 - [x] `write_artifact`: markdown and files, versions, the `artifact` event
 - [x] Approvals: gated tools wait in the edge; `resolveApproval` (gates, board questions), `requestToolApproval`
-- [ ] `resolveApproval` for deferred actions (`delete_*`, `call_mcp_tool`) — S, with automation delete and MCP
+- [x] `resolveApproval` for deferred deletes (`delete_workflow`, `delete_automation`, `delete_skill`) and every denial
+- [ ] `resolveApproval` for an approved `call_mcp_tool` — with MCP
 - [ ] Attachments: text extraction at turn start (PDF, docx, xlsx, …) — M–L
 - [ ] Workers: `spawn_workers` — M
 - [ ] Anthropic client — M
@@ -33,9 +34,9 @@ it's on `main`.
 
 ## B. The remaining API
 
-- [ ] Memory and skill writes: `addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill` — S
-- [ ] `decomposeBoardTask` (an LLM call) — S
-- [ ] Automations: `createAutomation`, `updateAutomation`, `deleteAutomation` (APScheduler's error messages) — S–M
+- [x] Memory and skill writes: `addMemory`, `updateMemoryItem`, `createSkill`, `updateSkill`
+- [x] `decomposeBoardTask` (an LLM call)
+- [x] Automations: `createAutomation`, `updateAutomation`, `deleteAutomation` (a human's; an agent's delete is approval-gated in Python)
 - [ ] Agent memory: `agentMemory`, `updateMemory`, `deleteAgentMemory` — S
 - [ ] Memory consolidation and project memory (the maintenance jobs, `consolidateMemory`, `consolidateProjectMemory`) — M
 - [ ] Settings: `settings`, `setting`, `setSetting`, `deleteSetting` (the `KNOWN_SETTINGS` registry) — M

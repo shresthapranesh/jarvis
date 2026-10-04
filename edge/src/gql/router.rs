@@ -181,7 +181,7 @@ impl Walk<'_> {
             }
             // An agent's delete may need a human's approval first
             // (`core/approvals.py:gate_action`); a human's click is the approval.
-            "deleteWorkflow" | "deleteSkill" if self.caller == Caller::Agent => {
+            "deleteWorkflow" | "deleteSkill" | "deleteAutomation" if self.caller == Caller::Agent => {
                 Err(format!("{name} by the agent is approval-gated"))
             }
             // Python refuses a human's; its error is Python's to word.

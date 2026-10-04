@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 
 use sqlx::{Row, SqlitePool};
 
-use super::embed::{self, Embedder, Space};
+use super::embed::{self, Embedder};
 use crate::gql::codec::{new_id, now_stored};
 
 fn env_float(name: &str, default: f64) -> f64 {
@@ -196,12 +196,11 @@ async fn touch(pool: &SqlitePool, hits: &[(&str, f64)], query: &str) {
 const DEDUP: f64 = 0.88;
 
 /// `upsert_memory`: embed `text` in document space, then merge it into a
-/// near-duplicate of the same kind or insert it.
-pub async fn upsert_memory(pool: &SqlitePool, http: &reqwest::Client, text: &str, kind: &str) -> Result<(), String> {
+/// near-duplicate of the same kind or insert it. The id it landed on.
+pub async fn upsert_memory(pool: &SqlitePool, http: &reqwest::Client, text: &str, kind: &str) -> Result<String, String> {
     let text = text.trim();
-    let embedder = Embedder::resolve(pool).await;
-    let vec = embedder.embed(http, text, Space::Document).await?;
-    let blob = embed::to_blob(&vec);
+    let blob = embed::for_storage(pool, http, text).await?;
+    let vec = embed::from_blob(&blob);
     let rows = sqlx::query("SELECT id, embedding FROM memories WHERE kind = ? ORDER BY updated_at DESC")
         .bind(kind)
         .fetch_all(pool)
@@ -220,10 +219,12 @@ pub async fn upsert_memory(pool: &SqlitePool, http: &reqwest::Client, text: &str
                 .await
                 .map_err(|e| e.to_string())?;
             tracing::info!("memory: merged into {id} (cosine={score:.3})");
+            Ok(id.clone())
         }
         _ => {
+            let id = new_id();
             sqlx::query("INSERT INTO memories (id, kind, text, embedding, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-                .bind(new_id())
+                .bind(&id)
                 .bind(kind)
                 .bind(text)
                 .bind(&blob)
@@ -232,9 +233,9 @@ pub async fn upsert_memory(pool: &SqlitePool, http: &reqwest::Client, text: &str
                 .execute(pool)
                 .await
                 .map_err(|e| e.to_string())?;
+            Ok(id)
         }
     }
-    Ok(())
 }
 
 // ── skills ──────────────────────────────────────────────────────────────────

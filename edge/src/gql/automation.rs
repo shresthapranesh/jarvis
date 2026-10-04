@@ -1,5 +1,7 @@
-//! Automation and AutomationRun — `server/graphql/types/automation.py` and
-//! `queries/automation.py`.
+//! Automation and AutomationRun — `server/graphql/types/automation.py`,
+//! `queries/automation.py`, and `mutations/automation.py`'s create, update
+//! and delete (with `db/ops.py`'s automation CRUD). A change to any of those
+//! is made here too.
 //!
 //! `nextRunAt` is the scheduler's answer, and the scheduler is the edge's
 //! now (`schedule.rs`): the same cron engine that fires the job reports when
@@ -7,11 +9,12 @@
 
 use std::collections::HashMap;
 
-use async_graphql::{ComplexObject, Context, ID, Object, Result, SimpleObject};
+use async_graphql::{ComplexObject, Context, ID, InputObject, Object, Result, SimpleObject};
 use sqlx::SqlitePool;
 
 use super::EdgeData;
-use super::codec::{DateTime, decode_global_id, global_id, iso_from_db};
+use super::codec::{DateTime, decode_global_id, global_id, iso_from_db, new_id, now_stored};
+use super::conversation::{delete_conversation, unknown_model};
 
 #[derive(SimpleObject, sqlx::FromRow, Clone)]
 #[graphql(complex)]
@@ -172,4 +175,133 @@ impl AutomationQuery {
         .fetch_all(ctx.data::<SqlitePool>()?)
         .await?)
     }
+}
+
+#[derive(InputObject)]
+pub struct AutomationInput {
+    name: String,
+    /// "prompt" | "code" | "webhook" | "monitor"
+    input_type: String,
+    description: Option<String>,
+    prompt_text: Option<String>,
+    model: Option<String>,
+    code_text: Option<String>,
+    webhook_url: Option<String>,
+    webhook_method: Option<String>,
+    /// JSON string
+    webhook_headers: Option<String>,
+    webhook_body: Option<String>,
+    /// cron expression
+    schedule: Option<String>,
+    #[graphql(default = true)]
+    enabled: bool,
+    /// prompt type only: share one thread across runs
+    #[graphql(default = false)]
+    stateful: bool,
+    /// JSON string
+    notifications: Option<String>,
+}
+
+/// `_validate_input`: a known model, and a schedule the scheduler can build.
+async fn validate(ctx: &Context<'_>, input: &AutomationInput) -> Result<()> {
+    if let Some(m) = &input.model {
+        if !crate::catalog::is_valid_model(ctx.data()?, m).await? {
+            return Err(unknown_model(m).into());
+        }
+    }
+    if let Some(expr) = input.schedule.as_deref().filter(|s| !s.is_empty()) {
+        // Through `Trigger::parse` (= `_cron`), so validation accepts exactly
+        // what the scheduler fires.
+        if crate::cron::Trigger::parse(expr, ctx.data::<EdgeData>()?.tz).is_err() {
+            return Err("invalid cron expression".into());
+        }
+    }
+    Ok(())
+}
+
+/// The columns an input writes, in `AUTOMATION_COLUMNS` order after `id`.
+const INPUT_COLUMNS: [&str; 14] = [
+    "name", "description", "input_type", "prompt_text", "model", "code_text", "webhook_url", "webhook_method",
+    "webhook_headers", "webhook_body", "schedule", "enabled", "stateful", "notifications",
+];
+
+fn bind_input<'q>(
+    mut q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    input: &'q AutomationInput,
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+    q = q.bind(&input.name).bind(&input.description).bind(&input.input_type).bind(&input.prompt_text);
+    q = q.bind(&input.model).bind(&input.code_text).bind(&input.webhook_url).bind(&input.webhook_method);
+    q = q.bind(&input.webhook_headers).bind(&input.webhook_body).bind(&input.schedule);
+    q.bind(input.enabled).bind(input.stateful).bind(&input.notifications)
+}
+
+#[derive(Default)]
+pub struct AutomationMutation;
+
+#[Object]
+impl AutomationMutation {
+    async fn create_automation(&self, ctx: &Context<'_>, input: AutomationInput) -> Result<Automation> {
+        validate(ctx, &input).await?;
+        let pool: &SqlitePool = ctx.data()?;
+        let (id, now) = (new_id(), now_stored());
+        let sql = format!(
+            "INSERT INTO automations (id, {}, created_at, updated_at) VALUES (?, {}?, ?)",
+            INPUT_COLUMNS.join(", "),
+            "?, ".repeat(INPUT_COLUMNS.len()),
+        );
+        bind_input(sqlx::query(&sql).bind(&id), &input).bind(&now).bind(&now).execute(pool).await?;
+        if input.enabled && input.schedule.as_deref().is_some_and(|s| !s.is_empty()) {
+            ctx.data::<EdgeData>()?.scheduler.schedules_changed();
+        }
+        Automation::by_id(pool, &id).await?.ok_or_else(|| "automation vanished".into())
+    }
+
+    // Every field is written, as Python's setattr loop writes them: one left
+    // out of the input is cleared, not kept.
+    async fn update_automation(&self, ctx: &Context<'_>, id: ID, input: AutomationInput) -> Result<Automation> {
+        let (_, raw) = decode_global_id(&id)?;
+        validate(ctx, &input).await?;
+        let pool: &SqlitePool = ctx.data()?;
+        let sets: String = INPUT_COLUMNS.iter().map(|c| format!("{c} = ?, ")).collect();
+        let sql = format!("UPDATE automations SET {sets}updated_at = ? WHERE id = ?");
+        let updated = bind_input(sqlx::query(&sql), &input).bind(now_stored()).bind(&raw).execute(pool).await?;
+        if updated.rows_affected() == 0 {
+            return Err("automation not found".into());
+        }
+        // Its old schedule goes either way.
+        ctx.data::<EdgeData>()?.scheduler.schedules_changed();
+        Automation::by_id(pool, &raw).await?.ok_or_else(|| "automation not found".into())
+    }
+
+    // The human path only: an agent's delete is approval-gated, and the
+    // router sends it to Python (`router.rs`). Its runs go with it, as the
+    // ORM cascade takes them, and so does a stateful automation's
+    // conversation.
+    async fn delete_automation(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        let (_, raw) = decode_global_id(&id)?;
+        if !delete_automation(ctx.data()?, &raw, ctx.data()?).await? {
+            return Err("automation not found".into());
+        }
+        Ok(true)
+    }
+}
+
+/// `db/ops.py:delete_automation` and the scheduler's `_remove_scheduler_job`:
+/// false when there's no such automation.
+pub async fn delete_automation(pool: &SqlitePool, raw_id: &str, data: &EdgeData) -> sqlx::Result<bool> {
+    let mut tx = crate::db::write_tx(pool).await?;
+    let exists: Option<String> =
+        sqlx::query_scalar("SELECT id FROM automations WHERE id = ?").bind(raw_id).fetch_optional(&mut *tx).await?;
+    if exists.is_none() {
+        return Ok(false);
+    }
+    let teardown = delete_conversation(&mut tx, &format!("automation_{raw_id}"), &data.artifacts_dir).await?;
+    sqlx::query("DELETE FROM automation_runs WHERE automation_id = ?").bind(raw_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM automations WHERE id = ?").bind(raw_id).execute(&mut *tx).await?;
+    tx.commit().await?;
+    data.scheduler.schedules_changed();
+    if let Some(t) = teardown {
+        t.finish(data).await;
+    }
+    Ok(true)
 }

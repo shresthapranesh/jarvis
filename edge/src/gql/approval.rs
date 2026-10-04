@@ -3,10 +3,11 @@
 //! to either is made in both.
 //!
 //! The edge answers what lives in rows: a tool gate (the waiter polls the
-//! row) and a board task's question. A request whose answer needs Python's
-//! memory — a deferred action to execute, a workflow paused on a future, a
-//! gate whose run a worker has — is deferred to Python, before anything is
-//! written.
+//! row), a board task's question, and a deferred action — a denial, or an
+//! approved delete of a workflow, automation or skill (`ACTIONS`' executors).
+//! A request whose answer needs Python's memory — an approved MCP call, a
+//! workflow paused on a future, a gate whose run a worker has — is deferred to
+//! Python, before anything is written.
 
 use std::sync::Arc;
 
@@ -41,6 +42,7 @@ struct Row {
     kind: String,
     source: String,
     action: Option<String>,
+    action_payload: Option<String>,
     board_task_id: Option<String>,
     task_id: Option<String>,
     parent_id: Option<String>,
@@ -50,7 +52,7 @@ struct Row {
 
 async fn row(pool: &SqlitePool, id: &str) -> sqlx::Result<Option<Row>> {
     sqlx::query_as(
-        "SELECT status, kind, source, action, board_task_id, task_id, parent_id, tool, result FROM approvals WHERE id = ?",
+        "SELECT status, kind, source, action, action_payload, board_task_id, task_id, parent_id, tool, result FROM approvals WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -80,6 +82,53 @@ fn emit(run: Option<&Arc<Run>>, event: &str, data: &Value) {
     }
 }
 
+/// `resolve_approval_row`: out of `pending`, unless it was answered a moment
+/// ago from elsewhere.
+async fn close(pool: &SqlitePool, id: &str, status: &str, answer: &str, result: &str) -> Result<()> {
+    let now = now_stored();
+    let done = sqlx::query(
+        "UPDATE approvals SET status = ?, answer = ?, result = ?, resolved_at = ?, updated_at = ? \
+         WHERE id = ? AND status = 'pending'",
+    )
+    .bind(status)
+    .bind(answer)
+    .bind(result)
+    .bind(&now)
+    .bind(&now)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    if done.rows_affected() == 0 {
+        let now_status = row(pool, id).await?.map_or_else(|| "gone".into(), |r| r.status);
+        return Err(format!("approval already {now_status}").into());
+    }
+    Ok(())
+}
+
+/// `core/approvals.py:ACTIONS[action].execute` for an approved deferred
+/// action — run before the row is closed, so a failure leaves it pending
+/// and answerable. An MCP call, or a payload only Python would read (or fail
+/// on) faithfully, goes to Python.
+async fn execute(ctx: &Context<'_>, action: &str, payload: Option<&str>) -> Result<String> {
+    let payload: Value = serde_json::from_str(payload.unwrap_or("{}")).map_err(|_| defer("unreadable payload".into()))?;
+    let id = |key: &str| -> Result<String> {
+        payload.get(key).and_then(Value::as_str).map(str::to_string).ok_or_else(|| defer(format!("payload without {key}")))
+    };
+    let pool: &SqlitePool = ctx.data()?;
+    let (deleted, gone) = match action {
+        "delete_workflow" => (super::workflow::delete_workflow(pool, &id("workflow_id")?).await?, "Workflow"),
+        "delete_automation" => {
+            (super::automation::delete_automation(pool, &id("automation_id")?, ctx.data()?).await?, "Automation")
+        }
+        "delete_skill" => (super::settings_lists::delete_skill(pool, &id("skill_id")?).await?, "Skill"),
+        "call_mcp_tool" => return Err(defer("an MCP call runs in Python".into())),
+        other => {
+            return Err(format!("approval references unknown action {}", crate::pyjson::repr_str(other)).into());
+        }
+    };
+    Ok(if deleted { "Deleted.".into() } else { format!("{gone} no longer exists.") })
+}
+
 #[derive(Default)]
 pub struct ApprovalMutation;
 
@@ -100,8 +149,15 @@ impl ApprovalMutation {
         }
         let approved = row.kind != "approval" || approvals::is_affirmative(answer) == Some(true);
 
-        if row.action.is_some() {
-            return Err(defer("a deferred action runs in Python".into()));
+        if let Some(action) = &row.action {
+            let result = if approved {
+                execute(ctx, action, row.action_payload.as_deref()).await?
+            } else {
+                "Not executed.".into()
+            };
+            let status = if approved { "approved" } else { "denied" };
+            close(pool, &id, status, answer, &result).await?;
+            return Ok(ResolveApprovalPayload { id, status: status.into(), result: Some(result) });
         }
         if row.source == approvals::GATE_SOURCE {
             let run = run_of(registry, row.task_id.as_deref(), row.parent_id.as_deref());
@@ -110,24 +166,7 @@ impl ApprovalMutation {
             }
             let (status, result) =
                 if approved { ("approved", "Released the waiting call.") } else { ("denied", "The call was not run.") };
-            let now = now_stored();
-            let done = sqlx::query(
-                "UPDATE approvals SET status = ?, answer = ?, result = ?, resolved_at = ?, updated_at = ? \
-                 WHERE id = ? AND status = 'pending'",
-            )
-            .bind(status)
-            .bind(answer)
-            .bind(result)
-            .bind(&now)
-            .bind(&now)
-            .bind(&id)
-            .execute(pool)
-            .await?;
-            if done.rows_affected() == 0 {
-                // Answered a moment ago from elsewhere.
-                let now_status = self::row(pool, &id).await?.map_or_else(|| "gone".into(), |r| r.status);
-                return Err(format!("approval already {now_status}").into());
-            }
+            close(pool, &id, status, answer, result).await?;
             // The answer usually comes from the inbox; the chat showing the
             // prompt is told to stop showing it.
             emit(run.as_ref(), "approval_resolved", &approvals::resolved_event(row.tool.as_deref().unwrap_or(""), approved, answer));

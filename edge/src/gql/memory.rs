@@ -1,11 +1,13 @@
-//! Discrete memory items and their access log — `server/graphql/types/memory.py`
-//! and the SQL-backed half of `queries/memory.py`. (`agentMemory`, the legacy
-//! blob, lives in the LangGraph store and stays in Python.)
+//! Discrete memory items and their access log — `server/graphql/types/memory.py`,
+//! the SQL-backed half of `queries/memory.py`, and `mutations/memory.py`'s
+//! item writes (`addMemory`, `updateMemoryItem`, `deleteMemory`). (`agentMemory`,
+//! the legacy blob, lives in the store and stays in Python.)
 
 use async_graphql::{ComplexObject, Context, Object, Result, SimpleObject};
 use sqlx::SqlitePool;
 
-use super::codec::DateTime;
+use super::codec::{DateTime, now_stored};
+use super::{EdgeData, defer};
 
 /// One discrete memory (kind = core | fact). Raw DB id; `updatedAt` is a
 /// plain string here, not the `DateTime` scalar, as in the Python type.
@@ -86,6 +88,12 @@ impl MemoryActivity {
     }
 }
 
+impl MemoryItem {
+    async fn by_id(pool: &SqlitePool, id: &str) -> Result<Option<Self>> {
+        Ok(sqlx::query_as("SELECT id, kind, text, updated_at FROM memories WHERE id = ?").bind(id).fetch_optional(pool).await?)
+    }
+}
+
 async fn list_memories(pool: &SqlitePool, kind: Option<&str>) -> Result<Vec<MemoryItem>> {
     let mut sql = String::from("SELECT id, kind, text, updated_at FROM memories");
     if kind.is_some() {
@@ -130,6 +138,55 @@ pub struct MemoryMutation;
 
 #[Object]
 impl MemoryMutation {
+    // Embedded and merged into a near-duplicate of its kind, as the agent's
+    // `remember` does. An embedder that fails is Python's to report: the
+    // operation goes there before anything is written.
+    async fn add_memory(
+        &self,
+        ctx: &Context<'_>,
+        text: String,
+        #[graphql(default_with = "\"fact\".to_string()")] kind: String,
+    ) -> Result<MemoryItem> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("memory text is empty".into());
+        }
+        let kind = if kind == "core" || kind == "fact" { kind.as_str() } else { "fact" };
+        let pool: &SqlitePool = ctx.data()?;
+        let id = crate::agent::retrieve::upsert_memory(pool, &ctx.data::<EdgeData>()?.http, text, kind)
+            .await
+            .map_err(|e| defer(format!("embedding failed: {e}")))?;
+        MemoryItem::by_id(pool, &id).await?.ok_or_else(|| "memory vanished".into())
+    }
+
+    // Re-embedded before the row is looked up, as Python does; a kind other
+    // than core/fact leaves the kind alone.
+    async fn update_memory_item(&self, ctx: &Context<'_>, id: String, text: String, kind: Option<String>) -> Result<MemoryItem> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("memory text is empty".into());
+        }
+        let pool: &SqlitePool = ctx.data()?;
+        let blob = crate::agent::embed::for_storage(pool, &ctx.data::<EdgeData>()?.http, text)
+            .await
+            .map_err(|e| defer(format!("embedding failed: {e}")))?;
+        let kind = kind.filter(|k| k == "core" || k == "fact");
+        let updated = sqlx::query(
+            "UPDATE memories SET text = ?, kind = COALESCE(?, kind), embedding = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(text)
+        .bind(&kind)
+        .bind(&blob)
+        .bind(now_stored())
+        .bind(&id)
+        .execute(pool)
+        .await?;
+        if updated.rows_affected() == 0 {
+            return Err("memory not found".into());
+        }
+        MemoryItem::by_id(pool, &id).await?.ok_or_else(|| "memory not found".into())
+    }
+
     // False when there was nothing to delete. The item's access log is left
     // behind, as Python leaves it: there's no ORM relationship and foreign
     // keys are off, so its `ON DELETE CASCADE` never fires there either.

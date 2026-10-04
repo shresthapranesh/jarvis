@@ -576,7 +576,7 @@ impl<'a> Turn<'a> {
         }
         let kind = if kind == "core" || kind == "fact" { kind } else { "fact" };
         match super::retrieve::upsert_memory(self.pool(), &self.agent.http, text, kind).await {
-            Ok(()) => format!("Remembered ({kind})."),
+            Ok(_) => format!("Remembered ({kind})."),
             Err(e) => {
                 tracing::warn!("remember failed: {e}");
                 format!("Could not save memory: {e}")

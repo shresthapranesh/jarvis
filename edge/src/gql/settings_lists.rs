@@ -1,5 +1,6 @@
 //! The small list pages: NotificationChannel (`types/notification.py`), Skill
-//! (`types/skill.py`) and PendingApproval (`types/approval.py`).
+//! (`types/skill.py`, with `mutations/skill.py` and `core/skill_store.py`'s
+//! writes — change both) and PendingApproval (`types/approval.py`).
 
 use async_graphql::{ComplexObject, Context, ID, InputObject, Object, Result, SimpleObject};
 use sqlx::SqlitePool;
@@ -68,6 +69,49 @@ impl Skill {
 impl Skill {
     pub async fn id(&self) -> ID {
         global_id("Skill", &self.raw_id)
+    }
+}
+
+#[derive(InputObject)]
+pub struct SkillCreateInput {
+    name: String,
+    description: String,
+    body: String,
+    #[graphql(default = true)]
+    enabled: bool,
+}
+
+#[derive(InputObject)]
+pub struct SkillUpdateInput {
+    name: Option<String>,
+    description: Option<String>,
+    body: Option<String>,
+    enabled: Option<bool>,
+}
+
+/// `embed_description`: the routing key in document space — or none, when
+/// it's empty or the embedder fails: a skill saves unembedded rather than
+/// not at all.
+async fn embed_description(ctx: &Context<'_>, description: &str) -> Result<Option<Vec<u8>>> {
+    let description = description.trim();
+    if description.is_empty() {
+        return Ok(None);
+    }
+    match crate::agent::embed::for_storage(ctx.data()?, &ctx.data::<super::EdgeData>()?.http, description).await {
+        Ok(blob) => Ok(Some(blob)),
+        Err(e) => {
+            tracing::warn!("skill description embedding failed; storing unembedded: {e}");
+            Ok(None)
+        }
+    }
+}
+
+/// Another skill already named `name`, worded as Python refuses it.
+async fn name_taken(pool: &SqlitePool, name: &str, except: Option<&str>) -> Result<()> {
+    let clash: Option<String> = sqlx::query_scalar("SELECT id FROM skills WHERE name = ?").bind(name).fetch_optional(pool).await?;
+    match clash {
+        Some(id) if Some(id.as_str()) != except => Err(format!("a skill named '{name}' already exists").into()),
+        _ => Ok(()),
     }
 }
 
@@ -249,14 +293,91 @@ impl ListsMutation {
         Ok(true)
     }
 
+    async fn create_skill(&self, ctx: &Context<'_>, input: SkillCreateInput) -> Result<Skill> {
+        let name = input.name.trim();
+        if name.is_empty() {
+            return Err("name required".into());
+        }
+        if input.description.trim().is_empty() {
+            return Err("description required".into());
+        }
+        if input.body.trim().is_empty() {
+            return Err("body required".into());
+        }
+        let pool: &SqlitePool = ctx.data()?;
+        name_taken(pool, name, None).await?;
+        let description = input.description.trim();
+        let embedding = embed_description(ctx, description).await?;
+        let (id, now) = (new_id(), now_stored());
+        sqlx::query(
+            "INSERT INTO skills (id, name, description, body, embedding, enabled, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(name)
+        .bind(description)
+        .bind(&input.body)
+        .bind(&embedding)
+        .bind(input.enabled)
+        .bind(&now)
+        .bind(&now)
+        .execute(pool)
+        .await?;
+        Skill::by_id(pool, &id).await?.ok_or_else(|| "skill vanished".into())
+    }
+
+    // Null fields are left alone, and `updated_at` is bumped regardless. The
+    // description is re-embedded only when it's given: it's the routing key.
+    async fn update_skill(&self, ctx: &Context<'_>, id: ID, input: SkillUpdateInput) -> Result<Skill> {
+        let (_, raw) = decode_global_id(&id)?;
+        let pool: &SqlitePool = ctx.data()?;
+        if Skill::by_id(pool, &raw).await?.is_none() {
+            return Err("skill not found".into());
+        }
+        let name = input.name.as_deref().map(str::trim);
+        if let Some(name) = name {
+            if name.is_empty() {
+                return Err("name required".into());
+            }
+            name_taken(pool, name, Some(&raw)).await?;
+        }
+        let description = input.description.as_deref().map(str::trim);
+        if description == Some("") {
+            return Err("description required".into());
+        }
+        let embedding = match description {
+            Some(d) => embed_description(ctx, d).await?,
+            None => None,
+        };
+        sqlx::query(
+            "UPDATE skills SET name = COALESCE(?, name), description = COALESCE(?, description), \
+             body = COALESCE(?, body), enabled = COALESCE(?, enabled), embedding = COALESCE(?, embedding), \
+             updated_at = ? WHERE id = ?",
+        )
+        .bind(name)
+        .bind(description)
+        .bind(&input.body)
+        .bind(input.enabled)
+        .bind(&embedding)
+        .bind(now_stored())
+        .bind(&raw)
+        .execute(pool)
+        .await?;
+        Skill::by_id(pool, &raw).await?.ok_or_else(|| "skill not found".into())
+    }
+
     // The human path only: an agent's delete is approval-gated, and the
     // router sends `X-Jarvis-Caller: agent` requests for it to Python.
     async fn delete_skill(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
-        let deleted = sqlx::query("DELETE FROM skills WHERE id = ?").bind(&raw).execute(ctx.data::<SqlitePool>()?).await?;
-        if deleted.rows_affected() == 0 {
+        if !delete_skill(ctx.data()?, &raw).await? {
             return Err("skill not found".into());
         }
         Ok(true)
     }
+}
+
+/// `db/ops.py:delete_skill`: false when there's no such skill.
+pub async fn delete_skill(pool: &SqlitePool, raw_id: &str) -> sqlx::Result<bool> {
+    Ok(sqlx::query("DELETE FROM skills WHERE id = ?").bind(raw_id).execute(pool).await?.rows_affected() > 0)
 }

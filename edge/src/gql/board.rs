@@ -1,16 +1,16 @@
 //! BoardTask — `server/graphql/types/board_task.py`, `queries/board_task.py`
 //! and `mutations/board_task.py` (with `db/ops.py`'s board CRUD and
-//! `server/task_board_runtime.py`'s `answer_board_task` / `stop_board_task`).
-//! A change to any of those is made here too.
+//! `server/task_board_runtime.py`'s `answer_board_task` / `stop_board_task` /
+//! `decompose_board_task`). A change to any of those is made here too.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_graphql::{ComplexObject, Context, ID, InputObject, Object, Result, SimpleObject};
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use super::EdgeData;
+use super::{EdgeData, defer};
 use super::codec::{DateTime, decode_global_id, global_id, new_id, now_stored};
 use super::conversation::{delete_conversation, unknown_model};
 use crate::runs::Registry;
@@ -248,6 +248,164 @@ async fn kick_dispatch(data: &EdgeData) {
     }
 }
 
+async fn insert_link(tx: &mut Transaction<'_, Sqlite>, parent: &str, child: &str) -> sqlx::Result<()> {
+    sqlx::query("INSERT INTO board_task_links (id, parent_id, child_id, created_at) VALUES (?, ?, ?, ?)")
+        .bind(new_id())
+        .bind(parent)
+        .bind(child)
+        .bind(now_stored())
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+// ── auto-decompose ───────────────────────────────────────────────────────────
+
+const MAX_SUBTASKS: usize = 8;
+
+const DECOMPOSE_SYSTEM: &str =
+    "You are a planner for a multi-agent task board. Respond ONLY with a JSON object — no prose, no code fences.";
+
+/// `_DECOMPOSE_PROMPT`, filled in.
+fn decompose_prompt(title: &str, body: &str) -> String {
+    format!(
+        "Break the following task into 2-{MAX_SUBTASKS} smaller subtasks that together accomplish it.
+
+# Task: {title}
+{body}
+
+Rules:
+- Each subtask needs a short imperative \"title\" and a self-contained \"body\" an \
+agent can execute without seeing the other subtasks (dependency results are \
+handed to it automatically).
+- \"depends_on\" lists the 0-based indexes of other subtasks whose output this \
+one needs; it may only reference EARLIER subtasks (smaller index). Prefer no \
+dependencies so subtasks run in parallel.
+- Do NOT add a final \"combine the results\" subtask — the original task runs \
+last automatically with every subtask's summary as context.
+
+JSON shape: {{\"subtasks\": [{{\"title\": \"...\", \"body\": \"...\", \"depends_on\": []}}]}}"
+    )
+}
+
+/// The planner call: no tools, nothing streamed, the reply's text blocks —
+/// joined by a space, as Python joins a reasoning model's list.
+async fn plan(pool: &SqlitePool, http: &reqwest::Client, model: &str, task: &BoardTask) -> Result<String> {
+    use crate::llm::shape::SystemBlock;
+    use crate::llm::transcript::{Content, Part, Role, Typed};
+
+    let user = crate::llm::Message::new(
+        Role::User,
+        Content::Text(decompose_prompt(&task.title, task.body.as_deref().unwrap_or(""))),
+    );
+    let prompt = crate::llm::Prompt {
+        system: vec![SystemBlock { text: DECOMPOSE_SYSTEM.into(), breakpoint: false }],
+        messages: vec![user],
+        history_breakpoint: None,
+        cached: false,
+    };
+    let ends = crate::llm::Endpoints {
+        compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(),
+        ..crate::llm::Endpoints::from_env()
+    };
+    let req = crate::llm::Request { model, prompt: &prompt, tools: &[], blobs: &Default::default() };
+    let reply = crate::llm::complete(http, &ends, &req, &mut |_| {}).await.map_err(|e| e.message)?;
+    Ok(match reply.message.content {
+        Content::Text(s) => s,
+        Content::Parts(parts) => parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Typed(Typed::Text { text, .. }) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    })
+}
+
+#[derive(Debug, PartialEq)]
+struct SubtaskSpec {
+    title: String,
+    body: String,
+    /// Earlier subtasks' indexes, sorted, no repeats.
+    depends_on: Vec<usize>,
+}
+
+/// Python's type name, for the error its `.get` on a non-dict raises.
+fn py_type(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "NoneType",
+        Value::Bool(_) => "bool",
+        Value::Number(n) if n.is_f64() => "float",
+        Value::Number(_) => "int",
+        Value::String(_) => "str",
+        Value::Array(_) => "list",
+        Value::Object(_) => "dict",
+    }
+}
+
+/// `_parse_decomposition`: the planner's text → validated subtask specs, or
+/// Python's refusal. One departure: an unparseable object's error detail is
+/// serde's, not Python's `json` module's.
+fn parse_decomposition(text: &str) -> Result<Vec<SubtaskSpec>, String> {
+    let text = text.trim();
+    let (start, end) = (text.find('{'), text.rfind('}'));
+    let (Some(start), Some(end)) = (start, end) else { return Err("decomposer returned no JSON object".into()) };
+    if end <= start {
+        return Err("decomposer returned no JSON object".into());
+    }
+    let data: Value =
+        serde_json::from_str(&text[start..=end]).map_err(|e| format!("decomposer returned invalid JSON: {e}"))?;
+    let subtasks = match data.get("subtasks") {
+        Some(Value::Array(items)) if (2..=MAX_SUBTASKS).contains(&items.len()) => items,
+        other => {
+            let got = match other {
+                Some(Value::Array(items)) => items.len().to_string(),
+                _ => "none".into(),
+            };
+            return Err(format!("decomposer must return 2-{MAX_SUBTASKS} subtasks (got {got})"));
+        }
+    };
+    let mut specs = vec![];
+    for (i, s) in subtasks.iter().enumerate() {
+        let Value::Object(fields) = s else {
+            return Err(format!("'{}' object has no attribute 'get'", py_type(s)));
+        };
+        let field = |key: &str| match fields.get(key) {
+            Some(v) if crate::pyjson::truthy(v) => crate::pyjson::py_str(v).trim().to_string(),
+            _ => String::new(),
+        };
+        let (title, body) = (field("title"), field("body"));
+        if title.is_empty() || body.is_empty() {
+            return Err(format!("subtask {i} is missing a title or body"));
+        }
+        let invalid = || format!("subtask {i} has invalid depends_on (must be earlier indexes)");
+        let mut deps = vec![];
+        match fields.get("depends_on") {
+            Some(v) if crate::pyjson::truthy(v) => {
+                let Value::Array(items) = v else { return Err(invalid()) };
+                for d in items {
+                    // `isinstance(d, int)`: a bool is one too.
+                    let d = match d {
+                        Value::Bool(b) => *b as i64,
+                        Value::Number(n) if !n.is_f64() => n.as_i64().ok_or_else(invalid)?,
+                        _ => return Err(invalid()),
+                    };
+                    if d < 0 || d as usize >= i {
+                        return Err(invalid());
+                    }
+                    deps.push(d as usize);
+                }
+            }
+            _ => {}
+        }
+        deps.sort_unstable();
+        deps.dedup();
+        specs.push(SubtaskSpec { title, body, depends_on: deps });
+    }
+    Ok(specs)
+}
+
 #[derive(Default)]
 pub struct BoardTaskMutation;
 
@@ -302,6 +460,78 @@ impl BoardTaskMutation {
             kick_dispatch(data).await;
         }
         Ok(task)
+    }
+
+    // Split a standalone waiting task into planner-made subtasks, which
+    // become its parents: the original runs last as the synthesis step.
+    // Returns the subtasks as created. A model the edge doesn't call goes to
+    // Python before anything is written.
+    async fn decompose_board_task(&self, ctx: &Context<'_>, id: ID) -> Result<Vec<BoardTask>> {
+        let (_, raw) = decode_global_id(&id)?;
+        let (pool, data) = (ctx.data::<SqlitePool>()?, ctx.data::<EdgeData>()?);
+        let task = BoardTask::by_id(pool, &raw).await?.ok_or("task not found")?;
+        if !["todo", "ready", "blocked"].contains(&task.status.as_str()) {
+            return Err("only waiting (todo/ready/blocked) tasks can be decomposed".into());
+        }
+        let has_parents: Option<String> = sqlx::query_scalar("SELECT id FROM board_task_links WHERE child_id = ? LIMIT 1")
+            .bind(&raw)
+            .fetch_optional(pool)
+            .await?;
+        if has_parents.is_some() {
+            return Err("task already has dependencies — decompose only standalone tasks".into());
+        }
+        if !crate::agent::route::serves_board(pool, task.model.as_deref()).await {
+            return Err(defer("the planner's model is called from Python".into()));
+        }
+        let model = crate::catalog::resolve_model(pool, task.model.as_deref()).await?;
+        let specs = parse_decomposition(&plan(pool, &data.http, &model, &task).await?)?;
+
+        // Park the original first, so no dispatch pass starts it while the
+        // subtasks that gate it are being written.
+        sqlx::query(
+            "UPDATE board_tasks SET status = 'todo', blocked_reason = NULL, blocked_kind = NULL, finished_at = NULL, \
+             updated_at = ? WHERE id = ?",
+        )
+        .bind(now_stored())
+        .bind(&raw)
+        .execute(pool)
+        .await?;
+        let mut tx = crate::db::write_tx(pool).await?;
+        let mut created: Vec<String> = vec![];
+        for spec in &specs {
+            let (sub, now) = (new_id(), now_stored());
+            // `create_board_task(status="ready")`: a subtask with parents waits.
+            let status = if spec.depends_on.is_empty() { "ready" } else { "todo" };
+            sqlx::query(
+                "INSERT INTO board_tasks (id, title, body, status, priority, created_by, model, failure_count, \
+                 created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'agent', ?, 0, ?, ?)",
+            )
+            .bind(&sub)
+            .bind(&spec.title)
+            .bind(&spec.body)
+            .bind(status)
+            .bind(task.priority)
+            .bind(&task.model)
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await?;
+            for &d in &spec.depends_on {
+                insert_link(&mut tx, &created[d], &sub).await?;
+            }
+            created.push(sub);
+        }
+        for sub in &created {
+            insert_link(&mut tx, sub, &raw).await?;
+        }
+        tx.commit().await?;
+        tracing::info!("board decompose: task {raw} split into {} subtasks", created.len());
+        let mut out = vec![];
+        for sub in &created {
+            out.push(BoardTask::by_id(pool, sub).await?.ok_or("task vanished")?);
+        }
+        kick_dispatch(data).await;
+        Ok(out)
     }
 
     async fn update_board_task(&self, ctx: &Context<'_>, id: ID, input: BoardTaskUpdateInput) -> Result<BoardTask> {
@@ -543,4 +773,38 @@ async fn descendants(tx: &mut Transaction<'_, Sqlite>, task_id: &str) -> sqlx::R
         }
     }
     Ok(seen)
+}
+
+#[cfg(test)]
+mod decompose_tests {
+    use super::*;
+
+    fn spec(title: &str, body: &str, deps: &[usize]) -> SubtaskSpec {
+        SubtaskSpec { title: title.into(), body: body.into(), depends_on: deps.to_vec() }
+    }
+
+    #[test]
+    fn a_plan_is_read_from_around_prose() {
+        let text = r#"Sure! {"subtasks": [{"title": 7, "body": " b ", "depends_on": null},
+            {"title": "t", "body": "u", "depends_on": [0, false, 0]}]} done"#;
+        assert_eq!(parse_decomposition(text).unwrap(), vec![spec("7", "b", &[]), spec("t", "u", &[0])]);
+    }
+
+    #[test]
+    fn refusals_are_worded_as_pythons() {
+        let cases = [
+            ("}{", "decomposer returned no JSON object"),
+            (r#"{"subtasks": 3}"#, "decomposer must return 2-8 subtasks (got none)"),
+            (r#"{"subtasks": [1, 2]}"#, "'int' object has no attribute 'get'"),
+            (r#"{"subtasks": [{"title": "a", "body": "b", "depends_on": "0"}, {"title": "a", "body": "b"}]}"#,
+             "subtask 0 has invalid depends_on (must be earlier indexes)"),
+            (r#"{"subtasks": [{"title": "a", "body": "b"}, {"title": "a", "body": "b", "depends_on": [0.0]}]}"#,
+             "subtask 1 has invalid depends_on (must be earlier indexes)"),
+        ];
+        for (text, error) in cases {
+            assert_eq!(parse_decomposition(text).unwrap_err(), error, "{text}");
+        }
+        // The one departure: the detail of a JSON error is serde's.
+        assert!(parse_decomposition("{nope}").unwrap_err().starts_with("decomposer returned invalid JSON: "));
+    }
 }
