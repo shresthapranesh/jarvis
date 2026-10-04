@@ -57,20 +57,42 @@ impl Thread {
     /// `apply_messages` for what the agent loop writes — replies, results,
     /// prompts: a message whose id is already live replaces it in place,
     /// anything else is appended. Each gets an id if it has none.
-    pub async fn apply(&mut self, pool: &SqlitePool, mut incoming: Vec<Message>) -> Result<(), String> {
+    pub async fn apply(&mut self, pool: &SqlitePool, incoming: Vec<Message>) -> Result<(), String> {
+        self.update(pool, &[], incoming).await
+    }
+
+    /// `apply` after evicting `removed` (compaction's `RemoveMessage`s) — in
+    /// one transaction, so a thread is never left with the old stretch gone
+    /// and its summary missing. A removal naming no live message fails the
+    /// whole update before anything is written, as `add_messages` does.
+    pub async fn update(&mut self, pool: &SqlitePool, removed: &[String], mut incoming: Vec<Message>) -> Result<(), String> {
         for m in &mut incoming {
             if m.id.is_none() {
                 m.id = Some(new_id());
             }
         }
         let mut tx = crate::db::write_tx(pool).await.map_err(|e| e.to_string())?;
+        let now = now_stored();
+        for id in removed {
+            let gone = sqlx::query(
+                "UPDATE thread_messages SET evicted_at = ? WHERE thread_id = ? AND message_id = ? AND evicted_at IS NULL",
+            )
+            .bind(&now)
+            .bind(&self.id)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+            if gone.rows_affected() == 0 {
+                return Err(format!("Attempting to delete a message with an ID that doesn't exist ('{id}')"));
+            }
+        }
         let top: Option<i64> = sqlx::query_scalar("SELECT MAX(seq) FROM thread_messages WHERE thread_id = ?")
             .bind(&self.id)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
         let mut next = top.map_or(0, |t| t + 1);
-        let now = now_stored();
         for m in &incoming {
             let id = m.id.as_deref().expect("given above");
             let data = pyjson::dumps_unicode(&serde_json::to_value(m).map_err(|e| e.to_string())?);
@@ -106,6 +128,7 @@ impl Thread {
             }
         }
         tx.commit().await.map_err(|e| e.to_string())?;
+        self.messages.retain(|m| !m.id.as_ref().is_some_and(|id| removed.contains(id)));
         for m in incoming {
             match self.messages.iter_mut().find(|have| have.id == m.id) {
                 Some(have) => *have = m,

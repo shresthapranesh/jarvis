@@ -25,6 +25,7 @@ mod prompt;
 mod queue;
 mod retrieve;
 pub mod route;
+mod summarize;
 mod thread;
 mod tools;
 mod turn;

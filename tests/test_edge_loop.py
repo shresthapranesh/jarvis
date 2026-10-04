@@ -165,15 +165,19 @@ class Turn:
 
 
 @pytest.fixture
-async def twins(jarvis, work_dir: Path, tmp_path_factory, fake: FakeOllama, monkeypatch, edge_binary: Path):
+async def twins(request, jarvis, work_dir: Path, tmp_path_factory, fake: FakeOllama, monkeypatch, edge_binary: Path):
     """Python in this process over `work_dir`, and an edge over a copy, both
-    pointed at `fake` and at a CDP port nothing listens on."""
+    pointed at `fake` and at a CDP port nothing listens on. Parametrized
+    indirectly, it sets those environment variables in both."""
     from core import agents, doc_index, memory_store
     from db import async_session
     from db.models import ConfigSetting, Conversation, ConversationEpisode, Memory, Project, Skill
     from db.ops import hydrate_catalog
 
     dead = f"http://127.0.0.1:{_free_port()}"
+    extra: dict[str, str] = getattr(request, "param", None) or {}
+    for key, value in extra.items():
+        monkeypatch.setenv(key, value)
     monkeypatch.setenv("OLLAMA_HOST", fake.url)
     # Python's embedder is Ollama's — the fake — as the edge's is.
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
@@ -203,7 +207,7 @@ async def twins(jarvis, work_dir: Path, tmp_path_factory, fake: FakeOllama, monk
             contextlib.closing(sqlite3.connect(edge_dir / "database.db")) as dst:
         src.backup(dst)
     env = {"JARVIS_AGENT_RUNTIME": "edge", "OLLAMA_HOST": fake.url, "JARVIS_BROWSER_CDP_URL": dead,
-           "HOME": str(edge_dir), "JARVIS_APP_DIR": str(REPO)}
+           "HOME": str(edge_dir), "JARVIS_APP_DIR": str(REPO), **extra}
     async with _run_edge(edge_binary, edge_dir, edge_dir / "database.db", env) as client:
         yield Twins(jarvis, client, work_dir / "database.db", edge_dir / "database.db", fake)
     agents.invalidate_agent_cache()
@@ -338,6 +342,8 @@ def _record(turn: Turn) -> dict[str, Any]:
     for rec in thread:
         if rec["role"] == "assistant":
             rec["id"] = "<ai>"
+        elif rec["role"] == "system":
+            rec["id"] = "<summary>"
         elif rec["role"] == "tool":
             rec.pop("id", None)
     return norm.value({
@@ -514,6 +520,43 @@ async def test_an_earlier_episode_is_recalled(twins):
                                conversation_id="c-old")
     assert edge == python
     assert "## Earlier in this conversation" in twins.fake.requests[0]["messages"][0]["content"]
+
+
+# ── summarizing ──────────────────────────────────────────────────────────────
+
+
+def _note(n: int) -> Reply:
+    """A step that says a lot (600 characters, ~150 tokens by the
+    heuristic) and keeps the turn going."""
+    return Reply(f"Note {n}: " + "lorem " * 98, [("write_todos", {"todos": [f"note {n}"]})])
+
+
+@pytest.mark.parametrize("twins", [{"JARVIS_COMPACT_TOKEN_THRESHOLD": "300"}], indirect=True)
+async def test_a_long_turn_is_summarized_as_it_goes(twins):
+    """At 300 tokens the fourth step summarizes the first call away, and the
+    fifth the second, merging it into the summary — each summarizer call
+    to the turn's own model (requests 4, 6 and 7), each evicted stretch
+    kept as an episode."""
+    script = [_note(1), _note(2), _note(3), Reply("Earlier: note one."), _note(4),
+              Reply("Then: note two."), Reply("Notes one and two."), Reply("All noted.")]
+    python, edge = await _both(twins, "take notes as you go", script)
+    assert edge == python
+
+    requests = twins.fake.requests
+    assert [r["messages"][0]["content"].split(".")[0] for r in (requests[3], requests[5], requests[6])] == [
+        "Summarize the following conversation history concisely",
+        "Summarize the following conversation history concisely",
+        "You have an existing conversation summary and a new chunk summary"]
+    assert "tools" not in requests[3]
+    # The last call sees the merged summary, and only the newest calls.
+    assert "[Conversation summary]\nNotes one and two." in requests[7]["messages"][0]["content"]
+    assert "Note 1:" not in json.dumps(requests[7]) and "Note 2:" not in json.dumps(requests[7])
+    [summary] = [r for r in python["thread"] if r["role"] == "system"]
+    assert summary["content"] == "[Conversation summary]\nNotes one and two."
+
+    episodes = "SELECT text, embedding FROM conversation_episodes WHERE conversation_id != 'c-old' ORDER BY text"
+    assert _rows(twins.edge_db, episodes) == _rows(twins.python_db, episodes)
+    assert [t for t, _ in _rows(twins.edge_db, episodes)] == ["Earlier: note one.", "Then: note two."]
 
 
 # ── the handover ─────────────────────────────────────────────────────────────
