@@ -629,13 +629,126 @@ async def test_artifact_and_document_mutations(twin):
     await twin.run("mutation($id: ID!) { deleteDocument(id: $id) }", {"id": _gid("Document", "d1")})
 
 
+def _sql_both(twin: Twin, sql: str, *args: Any) -> None:
+    """The same write to both databases — set-up the mutations then diff."""
+    import sqlite3
+
+    for d in (twin.a_dir, twin.b_dir):
+        with contextlib.closing(sqlite3.connect(d / "database.db")) as conn:
+            conn.execute(sql, args)
+            conn.commit()
+
+
+BUILTIN = "google_genai:gemma-4-31b-it"
+BOARD_FIELDS = (
+    "id title body status priority createdBy model skill blockedReason blockedKind failureCount summary "
+    "resultMetadata conversationId runId parentIds childIds createdAt updatedAt startedAt finishedAt"
+)
+
+
+@pytest.fixture
+def board_queue(monkeypatch):
+    """Python's dispatcher enqueues through the process queue, as the server's does."""
+    from core.queue import SqliteJobQueue
+
+    monkeypatch.setattr("core.state._queue", SqliteJobQueue())
+
+
+async def test_board_task_mutations(twin, board_queue):
+    """Every board write the UI makes, including the dispatch pass a ready
+    card starts and the inbox question a status change closes."""
+    gid = lambda raw: _gid("BoardTask", raw)  # noqa: E731
+    # b-b's question in the inbox, and a conversation from b-a's run.
+    _sql_both(twin, "INSERT INTO approvals (id, source, kind, status, question, label, board_task_id, parent_id, "
+                    "requested_at, updated_at) VALUES ('ap-b', 'board_task', 'input', 'pending', '?', 'Answer', "
+                    "'b-b', 'boardtask_b-b', '2026-03-02 00:00:00.000000', '2026-03-02 00:00:00.000000')")
+    _sql_both(twin, "INSERT INTO approvals (id, source, kind, status, question, label, board_task_id, "
+                    "requested_at, updated_at) VALUES ('ap-arch', 'board_task', 'input', 'pending', '?', 'Answer', "
+                    "'b-arch', '2026-03-02 00:00:00.000000', '2026-03-02 00:00:00.000000')")
+    _sql_both(twin, "INSERT INTO conversations (id, title, model, surface, pinned, ephemeral, created_at) "
+                    "VALUES ('boardtask_b-a', 'part a', 'm', 'task', 0, 0, '2026-03-01 01:00:00.000000')")
+    _sql_both(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
+                    "VALUES ('bm1', 'boardtask_b-a', 'user', 'do a', 'done', '2026-03-01 01:00:00.000000')")
+
+    create = f"mutation($input: BoardTaskInput!) {{ createBoardTask(input: $input) {{ {BOARD_FIELDS} }} }}"
+    await twin.run(create, {"input": {"title": "parked", "start": False}})
+    await twin.run(create, {"input": {"title": "go", "body": "b", "priority": 3, "model": BUILTIN, "skill": "s"}})
+    await twin.run(create, {"input": {"title": "child", "parentIds": [gid("b-a"), gid("b-b")]}})
+    await twin.run(create, {"input": {"title": "orphan", "parentIds": [gid("zz"), gid("b-a"), gid("aa")]}})
+    await twin.run(create, {"input": {"title": "bad", "model": "nope:x"}})
+
+    update = f"mutation($id: ID!, $input: BoardTaskUpdateInput!) {{ updateBoardTask(id: $id, input: $input) {{ {BOARD_FIELDS} }} }}"
+    await twin.run(update, {"id": gid("b-root"), "input": {"title": "ship it", "parentIds": [gid("b-a"), gid("b-a")]}})
+    await twin.run(update, {"id": gid("b-root"), "input": {"priority": 7, "parentIds": [gid("b-root")]}})
+    await twin.run(update, {"id": gid("b-a"), "input": {"parentIds": [gid("b-root")]}})  # a cycle
+    await twin.run(update, {"id": gid("b-a"), "input": {"parentIds": [gid("nope")]}})
+    await twin.run(update, {"id": gid("b-b"), "input": {"model": BUILTIN}})  # still asking: the question stays
+    await twin.run(update, {"id": gid("b-arch"), "input": {"body": None}})   # no fields: still a bump
+    await twin.run(update, {"id": gid("b-root"), "input": {"model": "nope:x"}})
+    await twin.run(update, {"id": gid("nope"), "input": {"title": "x"}})
+
+    move = f"mutation($id: ID!, $s: String!) {{ setBoardTaskStatus(id: $id, status: $s) {{ {BOARD_FIELDS} }} }}"
+    await twin.run(move, {"id": gid("b-root"), "s": "running"})
+    await twin.run(move, {"id": gid("nope"), "s": "done"})
+    await twin.run(move, {"id": gid("b-arch"), "s": "todo"})   # its question closes
+    await twin.run(move, {"id": gid("b-root"), "s": "ready"})  # dispatched
+    _sql_both(twin, "UPDATE board_tasks SET status = 'running' WHERE id = 'b-arch'")
+    await twin.run(move, {"id": gid("b-arch"), "s": "done"})
+
+    answer = f"mutation($id: ID!, $a: String!) {{ answerBoardTask(id: $id, answer: $a) {{ {BOARD_FIELDS} }} }}"
+    await twin.run(answer, {"id": gid("b-b"), "a": "   "})
+    await twin.run(answer, {"id": gid("b-a"), "a": "x"})
+    await twin.run(answer, {"id": gid("nope"), "a": "x"})
+    await twin.run(answer, {"id": gid("b-b"), "a": "  Green  "})  # answered, ready, dispatched
+
+    delete = "mutation($id: ID!) { deleteBoardTask(id: $id) }"
+    await twin.run(delete, {"id": gid("b-arch")})  # running
+    await twin.run(delete, {"id": gid("b-a")})     # links both ways and its conversation go
+    await twin.run(delete, {"id": gid("b-a")})
+
+
+async def test_conversation_deletes_and_model_change(twin):
+    """A conversation goes with everything it owns: messages and steps,
+    artifacts with their versions and files, documents with their chunks,
+    episodes, and its transcript — a blob another thread still names stays."""
+    shared, own = "sha256:" + "a" * 64, "sha256:" + "b" * 64
+    _sql_both(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
+                    "VALUES ('cm1', 'c1', 'assistant', 'x', 'done', '2026-02-01 00:00:00.000000')")
+    _sql_both(twin, "INSERT INTO steps (id, message_id, conversation_id, node, source, seq, created_at) "
+                    "VALUES ('cs1', 'cm1', 'c1', 'model', 'main', 0, '2026-02-01 00:00:00.000000')")
+    _sql_both(twin, "INSERT INTO conversation_episodes (id, conversation_id, text, created_at) "
+                    "VALUES ('ep1', 'c1', 'earlier', '2026-02-01 00:00:00.000000')")
+    for tid, seq, blob in (("c1", 0, shared), ("c1", 1, own), ("c-old", 0, shared)):
+        data = json.dumps({"v": 1, "role": "user", "content": [{"type": "image", "blob": blob}]})
+        _sql_both(twin, "INSERT INTO thread_messages (id, thread_id, seq, message_id, role, data, created_at) "
+                        "VALUES (?, ?, ?, ?, 'user', ?, '2026-02-01 00:00:00.000000')",
+                  f"t-{tid}-{seq}", tid, seq, f"m-{seq}", data)
+    for blob in (shared, own):
+        _sql_both(twin, "INSERT INTO transcript_blobs (hash, mime_type, size, data, created_at) "
+                        "VALUES (?, 'image/png', 1, x'00', '2026-02-01 00:00:00.000000')", blob)
+    _sql_both(twin, "INSERT INTO thread_state (thread_id, todos, updated_at) VALUES ('c1', '[]', '2026-02-01 00:00:00.000000')")
+    # A version file no row names: swept by its name.
+    for d in (twin.a_dir, twin.b_dir):
+        (d / "artifacts" / "a-crlf_v9.md").write_text("stray")
+
+    delete = "mutation($id: ID!) { deleteConversation(id: $id) }"
+    await twin.run(delete, {"id": _gid("Conversation", "c1")})
+    await twin.run(delete, {"id": _gid("Conversation", "c1")})
+
+    discard = "mutation($id: ID!) { discardConversation(id: $id) }"
+    await twin.run(discard, {"id": _gid("Conversation", "c-old")})   # not incognito: kept
+    await twin.run(discard, {"id": _gid("Conversation", "c-ghost")})
+    await twin.run(discard, {"id": _gid("Conversation", "c-ghost")})
+
+    update = "mutation($id: ID!, $m: String, $t: String) { updateConversation(id: $id, model: $m, title: $t) { id title model } }"
+    c = _gid("Conversation", "c-old")
+    await twin.run(update, {"id": c, "m": BUILTIN})
+    await twin.run(update, {"id": c, "m": "nope:x", "t": "x"})
+    await twin.run(update, {"id": c, "m": ""})
+    await twin.run(update, {"id": _gid("Conversation", "nope"), "m": BUILTIN})
+
+
 async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
-    # A model change needs the catalog, which is in Python.
-    resp = await edge.post("/graphql", json={
-        "query": "mutation($id: ID!, $m: String) { updateConversation(id: $id, model: $m) { id } }",
-        "variables": {"id": _gid("Conversation", "c-old"), "m": "google_genai:x"},
-    })
-    assert resp.status_code == 502
     # An agent's delete is approval-gated in Python; a human's isn't.
     for mutation in ("deleteWorkflow", "deleteSkill"):
         q = f'mutation {{ {mutation}(id: "{_gid("Workflow", "nope")}") }}'
@@ -655,8 +768,10 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
         "{ conversations { id } settings { key } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
-        # Mutations always go to Python in this phase.
-        'mutation { deleteConversation(id: "x") }',
+        # A mutation that isn't ported (an LLM plans the subtasks).
+        'mutation { decomposeBoardTask(id: "x") { id } }',
+        # The run mirror isn't current without a worker.
+        'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.
         '{ node(id: "UnVubmluZ1Rhc2s6YWJj") { id } }',
     ],

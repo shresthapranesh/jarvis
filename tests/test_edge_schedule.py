@@ -217,6 +217,44 @@ async def test_dispatch_matches_python(jarvis, work_dir: Path, tmp_path_factory,
         )
 
 
+async def test_a_queued_board_run_stopped_matches_python(jarvis, work_dir: Path, tmp_path_factory, edge_binary: Path):
+    """stopBoardTask on a run no worker has claimed: the job is cancelled
+    and the card blocked as stopped — the end no handler is left to write.
+    The edge's run ends for whoever watches it."""
+    from edge_support import _gid
+    from server.task_board_runtime import dispatch_board_tasks, stop_board_task
+    from test_edge_runs import _until
+
+    async with _board_twin(work_dir, tmp_path_factory, edge_binary) as (client, ws, b_dir):
+        since = datetime.now(timezone.utc).replace(microsecond=0)
+        await dispatch_board_tasks()
+        await ws.send(json.dumps({"type": "dispatch"}))
+        async def same_jobs() -> bool:
+            return _jobs(b_dir / "database.db") == _jobs(work_dir / "database.db")
+
+        await _until(same_jobs)
+        await asyncio.sleep(0.1)
+
+        assert await stop_board_task("high-old") is True
+        q = "mutation($id: ID!) { stopBoardTask(id: $id) }"
+        resp = await client.post("/graphql", json={"query": q, "variables": {"id": _gid("BoardTask", "high-old")}})
+        assert resp.json() == {"data": {"stopBoardTask": True}}
+        for task in ("parked", "nope"):
+            resp = await client.post("/graphql", json={"query": q, "variables": {"id": _gid("BoardTask", task)}})
+            assert resp.json()["errors"][0]["message"] == "task is not running"
+
+        a, b = _dump(work_dir / "database.db"), _dump(b_dir / "database.db")
+        dirs = (str(work_dir), str(b_dir))
+        for table in ("board_tasks", "jobs"):
+            assert _mask(b[table], since, dirs) == _mask(a[table], since, dirs), table
+        [run] = [t for t in b["board_tasks"] if t["id"] == "high-old"]
+        assert (run["status"], run["blocked_kind"]) == ("blocked", "stopped")
+        # Finished in the mirror (it lingers a moment, as Python's does).
+        q = "{ runningTasks { label cancelled done } }"
+        running = (await client.post("/graphql", json={"query": q})).json()["data"]["runningTasks"]
+        assert {"label": "Task high-old", "cancelled": True, "done": True} in running
+
+
 async def test_python_behind_the_edge_asks_it_to_dispatch(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
     from core import edge_link, scheduler
     from core.edge_link import EdgeLink

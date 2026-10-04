@@ -72,6 +72,12 @@ async fn main() {
             tz: chrono_tz::Tz::UTC,
             checkpoints: checkpoints::Checkpoints::open("".as_ref()),
             http: reqwest::Client::new(),
+            scheduler: schedule::Scheduler::new(pool.clone(), Default::default(), chrono_tz::Tz::UTC, Default::default()),
+            kernels: kernels::Kernels::new(
+                kernels::Launch { python: Default::default(), dir: Default::default(), env: vec![] },
+                ".".as_ref(),
+                pool.clone(),
+            ),
         };
         print!("{}", gql::build(pool, data, Default::default()).sdl());
         return;
@@ -146,6 +152,21 @@ async fn main() {
         .build()
         .expect("http client");
     let checkpoints = checkpoints::Checkpoints::open(&config.checkpoints_db);
+    let runs: Arc<runs::Registry> = Default::default();
+    let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
+    let kernels = kernels::Kernels::new(
+        kernels::Launch {
+            python: config.kernel_python.clone(),
+            dir: config.app_dir.clone(),
+            // The SDK in a kernel talks to this edge, wherever it listens.
+            env: match std::env::var("JARVIS_API_URL") {
+                Ok(v) if !v.is_empty() => vec![],
+                _ => vec![("JARVIS_API_URL".into(), format!("http://127.0.0.1:{}/graphql", config.bind.port()))],
+            },
+        },
+        &config.app_dir,
+        pool.clone(),
+    );
     let data = gql::EdgeData {
         artifacts_dir: config.artifacts_dir.clone(),
         documents_dir: config.documents_dir.clone(),
@@ -153,10 +174,10 @@ async fn main() {
         tz,
         checkpoints: checkpoints.clone(),
         http: http.clone(),
+        scheduler: scheduler.clone(),
+        kernels: kernels.clone(),
     };
-    let runs: Arc<runs::Registry> = Default::default();
     let schema = gql::build(pool.clone(), data, runs.clone());
-    let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
     tokio::spawn(scheduler.clone().run());
     tokio::spawn(sweep_pending_runs(runs.clone(), pool.clone()));
 
@@ -177,19 +198,6 @@ async fn main() {
         config.backend.clone(),
     );
     let owned = gql::owned_root_fields(&schema);
-    let kernels = kernels::Kernels::new(
-        kernels::Launch {
-            python: config.kernel_python.clone(),
-            dir: config.app_dir.clone(),
-            // The SDK in a kernel talks to this edge, wherever it listens.
-            env: match std::env::var("JARVIS_API_URL") {
-                Ok(v) if !v.is_empty() => vec![],
-                _ => vec![("JARVIS_API_URL".into(), format!("http://127.0.0.1:{}/graphql", config.bind.port()))],
-            },
-        },
-        &config.app_dir,
-        pool.clone(),
-    );
     tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
     // The chat turns the edge runs itself (`agent/`), and the recovery of any
     // a previous edge left running.

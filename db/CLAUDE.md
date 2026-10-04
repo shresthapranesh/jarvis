@@ -12,7 +12,7 @@
 Artifacts (row + `.md` under `artifacts_dir`, plus `ArtifactVersion` files) and documents (row + bytes under `documents_dir`). To add one:
 - `conversation_id` FK with `index=True`, and a `Conversation` relationship with `cascade="all, delete-orphan"`.
 - On-disk bytes: add a `*_dir` field to `core/config.py:AppConfig` and write `{dir}/{id}{ext}`.
-- Extend `ops.delete_conversation`: collect file paths **before** the cascade, unlink after commit. It also deletes the conversation's thread (`delete_thread`).
+- Extend `ops.delete_conversation`: collect file paths **before** the cascade, unlink after commit. It also deletes the conversation's thread (`delete_thread`). The edge ports it (`edge/src/gql/conversation.rs:delete_conversation`, used by `deleteConversation` and `deleteBoardTask`) — change both.
 
 Todos live in `thread_state` (below), not on `conversations`.
 

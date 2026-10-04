@@ -144,6 +144,37 @@ pub fn py_str(value: &Value) -> String {
     }
 }
 
+/// `repr(s)`: single-quoted unless only double quotes avoid an escape;
+/// unprintable characters escaped as Python does.
+pub fn repr_str(s: &str) -> String {
+    let quote = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push(quote);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c == quote => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if c.is_control() => {
+                let n = c as u32;
+                out.push_str(&match n {
+                    0..=0xff => format!("\\x{n:02x}"),
+                    0x100..=0xffff => format!("\\u{n:04x}"),
+                    _ => format!("\\U{n:08x}"),
+                });
+            }
+            c => out.push(c),
+        }
+    }
+    out.push(quote);
+    out
+}
+
 /// Python truthiness.
 pub fn truthy(value: &Value) -> bool {
     match value {
@@ -246,5 +277,13 @@ mod tests {
         assert_eq!(py_int(&json!(3.7)), Some(3));
         assert_eq!(py_int(&json!(" 12 ")), Some(12));
         assert_eq!(py_int(&json!("x")), None);
+    }
+
+    #[test]
+    fn repr_of_a_string() {
+        assert_eq!(repr_str("google_genai:x"), "'google_genai:x'");
+        assert_eq!(repr_str("it's"), "\"it's\"");
+        assert_eq!(repr_str("both ' and \""), "'both \\' and \"'");
+        assert_eq!(repr_str("a\\b\n\u{1}\u{e9}"), "'a\\\\b\\n\\x01\u{e9}'");
     }
 }

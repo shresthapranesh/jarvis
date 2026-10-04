@@ -52,6 +52,7 @@ pub struct Query(
 pub struct Mutation(
     conversation::ConversationMutation,
     project::ProjectMutation,
+    board::BoardTaskMutation,
     artifact::ArtifactMutation,
     workflow::WorkflowMutation,
     settings_lists::ListsMutation,
@@ -73,6 +74,10 @@ pub struct EdgeData {
     pub checkpoints: crate::checkpoints::Checkpoints,
     /// For `browserAvailable`'s probe.
     pub http: reqwest::Client,
+    /// A board mutation that readies a card runs a dispatch pass at once.
+    pub scheduler: Arc<crate::schedule::Scheduler>,
+    /// A deleted conversation's notebook goes with it.
+    pub kernels: Arc<crate::kernels::Kernels>,
 }
 
 /// The error extension that sends an operation to Python after all.

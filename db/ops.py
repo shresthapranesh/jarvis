@@ -1896,6 +1896,9 @@ async def replace_board_task_parents(
         select(BoardTaskLink).where(BoardTaskLink.child_id == task_id)
     )).scalars().all():
         await session.delete(link)
+    # The unit of work inserts before it deletes: without this, keeping an
+    # existing parent collides with its own old link on the unique index.
+    await session.flush()
     for pid in parent_ids:
         session.add(BoardTaskLink(id=str(uuid4()), parent_id=pid, child_id=task_id))
     if task.status in ("todo", "ready") and parent_ids:

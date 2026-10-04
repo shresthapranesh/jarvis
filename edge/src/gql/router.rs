@@ -44,6 +44,7 @@ const LINKED_FIELDS: &[&str] = &[
     "stopTask",
     "stopAutomationRun",
     "stopWorkflowRun",
+    "stopBoardTask",
     "startTask",
     "queueMessage",
     "unqueueMessage",
@@ -147,9 +148,6 @@ impl Walk<'_> {
                     Err(e) => Err(e),
                 }
             }
-            // A model change is checked against the model catalog, which
-            // lives in Python.
-            "updateConversation" if self.is_set(field, "model") => Err("model change".into()),
             // An agent's delete may need a human's approval first
             // (`core/approvals.py:gate_action`); a human's click is the approval.
             "deleteWorkflow" | "deleteSkill" if self.caller == Caller::Agent => {
@@ -165,10 +163,6 @@ impl Walk<'_> {
             Value::Variable(var) => self.variables.get(var.as_str()).cloned(),
             other => other.clone().into_const().and_then(|v| v.into_json().ok()),
         }
-    }
-
-    fn is_set(&self, field: &Field, name: &str) -> bool {
-        !matches!(self.argument(field, name), None | Some(serde_json::Value::Null))
     }
 }
 
@@ -215,16 +209,6 @@ mod tests {
     #[test]
     fn owned_mutation_goes_to_edge() {
         assert_eq!(decide_h("mutation { createProject(input: {name: \"a\"}) { id } }", json!({})), Decision::Edge);
-    }
-
-    #[test]
-    fn model_change_goes_to_backend() {
-        let q = "mutation U($id: ID!, $model: String, $pinned: Boolean) { updateConversation(id: $id, model: $model, pinned: $pinned) { id } }";
-        assert_eq!(decide_h(q, json!({"id": "x", "pinned": true})), Decision::Edge);
-        assert_eq!(decide_h(q, json!({"id": "x", "model": null, "pinned": true})), Decision::Edge);
-        assert_eq!(decide_h(q, json!({"id": "x", "model": "m"})), Decision::Backend("model change".into()));
-        let literal = "mutation { updateConversation(id: \"x\", model: \"m\") { id } }";
-        assert_eq!(decide_h(literal, json!({})), Decision::Backend("model change".into()));
     }
 
     #[test]

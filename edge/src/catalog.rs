@@ -219,7 +219,9 @@ async fn custom_ids(pool: &SqlitePool) -> sqlx::Result<Vec<String>> {
         .collect())
 }
 
-async fn exists(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
+/// `is_valid_model`: whether the catalog has `id` — checked where a model id
+/// is written (a board task, a conversation's model), so a bad one is refused.
+pub async fn is_valid_model(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
     Ok(builtin_ids().contains(&id) || custom_ids(pool).await?.iter().any(|c| c == id))
 }
 
@@ -229,14 +231,14 @@ async fn exists(pool: &SqlitePool, id: &str) -> sqlx::Result<bool> {
 pub async fn resolve_model(pool: &SqlitePool, explicit: Option<&str>) -> sqlx::Result<String> {
     let explicit = explicit.filter(|m| !m.is_empty());
     if let Some(model) = explicit {
-        if exists(pool, model).await? {
+        if is_valid_model(pool, model).await? {
             return Ok(model.to_string());
         }
         tracing::warn!("model {model:?} is not in the catalog (removed?) — falling back to the default");
     }
     let default = setting(pool, "default.model").await?.filter(|d| !d.is_empty());
     let default = default.as_deref().unwrap_or(seed_model());
-    if Some(default) != explicit && exists(pool, default).await? {
+    if Some(default) != explicit && is_valid_model(pool, default).await? {
         return Ok(default.to_string());
     }
     if default != seed_model() {
