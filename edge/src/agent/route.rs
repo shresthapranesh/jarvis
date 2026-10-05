@@ -75,7 +75,7 @@ pub async fn calls_model(pool: &SqlitePool, model: &str) -> bool {
 /// Whether Python would find any MCP server configured — env, the first
 /// config file, or the `mcp.servers` setting (`core/mcp.py`). Unsure means
 /// yes: the turn then goes to Python, which is always right.
-async fn mcp_configured(pool: &SqlitePool, app_dir: &Path) -> bool {
+pub async fn mcp_configured(pool: &SqlitePool, app_dir: &Path) -> bool {
     let env = std::env::var("JARVIS_MCP_SERVERS").ok().filter(|v| !v.is_empty()).or_else(|| std::env::var("MCP_SERVERS").ok());
     if env.is_some_and(|raw| configures(&raw)) {
         return true;

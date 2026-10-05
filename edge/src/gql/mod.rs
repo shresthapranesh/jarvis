@@ -22,6 +22,7 @@ pub mod runs;
 pub mod settings;
 pub mod settings_lists;
 pub mod start;
+pub mod tools;
 pub mod workflow;
 pub mod write;
 
@@ -47,6 +48,7 @@ pub struct Query(
     memory::MemoryQuery,
     runs::RunQuery,
     models::ModelsQuery,
+    tools::ToolQuery,
     browser::BrowserQuery,
     node::NodeQuery,
 );
@@ -62,6 +64,8 @@ pub struct Mutation(
     workflow::WorkflowMutation,
     settings_lists::ListsMutation,
     settings::SettingMutation,
+    models::ModelsMutation,
+    tools::ToolPolicyMutation,
     memory::MemoryMutation,
     runs::RunMutation,
     start::StartMutation,

@@ -58,6 +58,7 @@ PARITY_OPERATIONS = {
     "PendingApprovalsQuery",
     "MemoriesQuery",
     "SettingsQuery",
+    "ToolsQuery",
     # Diffed against live runs in test_edge_runs.py.
     "RunningTasksQuery",
     # tests/test_edge_supervisor.py
@@ -924,7 +925,8 @@ async def test_settings_python_applies_go_to_python(seeded, edge):
 
 
 async def test_an_embedding_model_set_through_the_edge_reaches_a_linked_python(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
-    """Python caches the embedding model in process; a linked one is told."""
+    """Python caches the embedding model, the catalog and the tool policy in
+    process; a linked one is told."""
     from core import doc_index, edge_link
     from core.edge_link import EdgeLink
     from test_edge_runs import _edge_owns_runs, _until
@@ -942,8 +944,164 @@ async def test_an_embedding_model_set_through_the_edge_reaches_a_linked_python(j
             q = 'mutation { deleteSetting(key: "embedding.model") { note } }'
             assert (await _edge(client, q)).json()["data"]["deleteSetting"]["note"].startswith("Deleted. Applied.")
             assert doc_index._embedding_model_override is None
+            # The catalog and the tool policy, which Python caches too.
+            from core import model_catalog, tool_policy
+
+            monkeypatch.setattr(model_catalog, "_custom_models", ())
+            q = 'mutation { addModel(id: "ollama:linked", label: "L") { default } }'
+            assert (await _edge(client, q)).status_code == 200
+            assert model_catalog.is_valid_model("ollama:linked")
+            tool_policy.invalidate_cache({})
+            q = 'mutation { setToolPolicy(key: "bound:run_cell", enabled: false) { key } }'
+            assert (await _edge(client, q)).status_code == 200
+            assert not tool_policy.is_enabled("bound:run_cell")
         finally:
             await link.stop()
+
+
+CATALOG = "{ default providers discoverableProviders available { id label provider builtin contextWindow } endpoints { name baseUrl hasKey } }"
+
+
+async def test_model_catalog_writes(twin, monkeypatch):
+    """Custom models and endpoints: the `models.custom` / `models.endpoints`
+    rows rewritten as Python's `json.dumps` writes them (junk rows dropped, an
+    upsert moved last, a window kept or converted), and every refusal."""
+    from core import model_catalog
+
+    # Python's caches are hydrated per write; leave them as found.
+    monkeypatch.setattr(model_catalog, "_custom_models", ())
+    monkeypatch.setattr(model_catalog, "_endpoints", ())
+    custom = json.dumps([
+        {"id": "ollama:kept", "label": "Kept", "provider": "ollama", "context_window": "8000"},
+        "junk",
+        {"id": "lab:served", "label": "On lab"},
+        {"id": "ollama:café", "label": "Café ✓", "provider": "ollama", "extra": [1.5, None]},
+    ])
+    endpoints = json.dumps([{"name": "lab", "base_url": "http://lab/v1/", "api_key": "sk-1"}, {"name": "Bad"}])
+    for key, value in (("models.custom", custom), ("models.endpoints", endpoints)):
+        _sql_both(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, '2026-01-02 03:04:05.000000')",
+                  key, value)
+
+    add = f"mutation($id: String!, $label: String!, $provider: String) {{ addModel(id: $id, label: $label, provider: $provider) {CATALOG} }}"
+    update = add.replace("addModel", "updateModel")
+    for vars_ in (
+        {"id": " ollama:new ", "label": "  "},          # label falls back to the id
+        {"id": "x:on-lab", "label": "L", "provider": " lab "},
+        {"id": "nocolon", "label": "x"},
+        {"id": "ollama:", "label": "x"},
+        {"id": "zzz:m", "label": "x"},
+        {"id": BUILTIN, "label": "x"},
+        {"id": "ollama:kept", "label": "x"},
+    ):
+        await twin.run(add, vars_)
+    for vars_ in ({"id": "ollama:kept", "label": "Renamed"}, {"id": BUILTIN, "label": "x"}, {"id": "ollama:nope", "label": "x"}):
+        await twin.run(update, vars_)
+
+    discovered = f"mutation($m: [DiscoveredModelInput!]!) {{ addDiscoveredModels(models: $m) {CATALOG} }}"
+    for batch in (
+        [],
+        [{"id": "ollama:a", "label": "A", "contextWindow": 4096}, {"id": "ollama:new", "label": "", "provider": None}],
+        [{"id": "ollama:b", "label": "B"}, {"id": "ollama:c", "label": "C", "contextWindow": 0}],
+        [{"id": "ollama:b", "label": "B"}, {"id": BUILTIN, "label": "x"}],
+        [{"id": "ollama:café", "label": "Café", "contextWindow": 9000}],
+    ):
+        await twin.run(discovered, {"m": batch})
+
+    default = f"mutation($id: String!) {{ setDefaultModel(id: $id) {CATALOG} }}"
+    remove = f"mutation($id: String!) {{ removeModel(id: $id) {CATALOG} }}"
+    await twin.run(default, {"id": "ollama:a"})
+    await twin.run(default, {"id": "ollama:gone"})
+    await twin.run(remove, {"id": "ollama:a"})  # the default goes back to the seed
+    for id_ in (BUILTIN, "ollama:a", " ollama:new"):
+        await twin.run(remove, {"id": id_})
+
+    add_ep = f"mutation($n: String!, $u: String!, $k: String) {{ addEndpoint(name: $n, baseUrl: $u, apiKey: $k) {CATALOG} }}"
+    for vars_ in (
+        {"n": " grp ", "u": " https://grp/v1// ", "k": " sk-ü "},
+        {"n": "keyless", "u": "http://local:1234/v1", "k": "  "},
+        {"n": "Bad", "u": "http://x"},
+        {"n": "ollama", "u": "http://x"},
+        {"n": "lab", "u": "http://x"},
+        {"n": "ftp", "u": "ftp://x"},
+    ):
+        await twin.run(add_ep, vars_)
+    update_ep = (f"mutation($n: String!, $u: String!, $k: String, $c: Boolean!) "
+                 f"{{ updateEndpoint(name: $n, baseUrl: $u, apiKey: $k, clearKey: $c) {CATALOG} }}")
+    for vars_ in (
+        {"n": "lab", "u": "https://lab2/v1/", "k": None, "c": False},   # key kept
+        {"n": "lab", "u": "https://lab2/v1", "k": "new", "c": True},    # cleared wins
+        {"n": "keyless", "u": "http://local:1234/v1", "k": " k ", "c": False},
+        {"n": "nope", "u": "http://x", "c": False},
+        {"n": "lab", "u": "x", "c": False},
+    ):
+        await twin.run(update_ep, vars_)
+    remove_ep = f"mutation($n: String!) {{ removeEndpoint(name: $n) {CATALOG} }}"
+    await twin.run(remove_ep, {"n": "lab"})  # lab:served and x:on-lab use it
+    await twin.run(remove, {"id": "lab:served"})
+    await twin.run(remove, {"id": "x:on-lab"})
+    await twin.run(remove_ep, {"n": "lab"})
+    await twin.run(remove_ep, {"n": "lab"})
+
+
+def test_the_edge_lists_pythons_sdk_catalogue():
+    """`edge/src/gql/sdk_tools.json` is the `jarvis` SDK as the tool inventory
+    lists it. Re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
+    tests/test_edge_parity.py -k catalogue` after changing an SDK function's
+    name, category or docstring, then rebuild the edge."""
+    import os
+
+    from core.tool_policy import _sdk_inventory
+
+    python = [{"name": t.key.partition(":")[2], "description": t.description, "group": t.group} for t in _sdk_inventory({})]
+    path = ROOT / "edge" / "src" / "gql" / "sdk_tools.json"
+    if os.environ.get("JARVIS_UPDATE_GOLDEN") == "1":
+        path.write_text(json.dumps(python, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    assert json.loads(path.read_text(encoding="utf-8")) == python
+
+
+async def test_tool_inventory_and_policy(twin):
+    """The Tools page: the inventory with its policy, and `setToolPolicy`
+    keeping only non-default entries, in the stored order."""
+    stored = json.dumps({"sdk:zzz": {"enabled": False, "extra": 1.0}, "bound:remember": {"approval": "yes"}, "weird": 3})
+    _sql_both(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES ('tools.policy', ?, '2026-01-02 03:04:05.000000')",
+              stored)
+    await twin.run(_relay_text("ToolsQuery"))
+    policy = _relay_text("SetToolPolicyMutation")
+    for vars_ in (
+        {"key": "sdk:list_artifacts", "enabled": False},
+        {"key": "bound:run_cell", "requiresApproval": True},
+        {"key": "bound:remember", "requiresApproval": False},  # back to the default: dropped
+        {"key": "sdk:list_artifacts", "enabled": None, "requiresApproval": True},
+        {"key": "mcp:srv/tool", "enabled": False},
+        {"key": "nope"},
+        {"key": "bound:"},
+    ):
+        await twin.run(policy, vars_)
+
+
+async def test_catalog_and_tool_writes_python_must_answer(seeded, edge, work_dir: Path):
+    """MCP tools are Python's MCP client's to list; a catalog row Python
+    would fail to load, or a stored window it would fail to convert, is its
+    error to word. Each goes to Python before anything is written."""
+    import sqlite3
+
+    def put(key: str, value: str) -> None:
+        with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
+            c.execute("INSERT OR REPLACE INTO config_settings (key, value, updated_at) VALUES (?, ?, '2026-01-01 00:00:00')",
+                      (key, value))
+            c.commit()
+
+    put("models.custom", json.dumps([{"id": "ollama:w", "label": "W", "context_window": "lots"}]))
+    q = 'mutation { updateModel(id: "ollama:w", label: "x") { default } }'
+    assert (await _edge(edge, q)).status_code == 502
+    put("models.custom", json.dumps([{"id": "ollama:w", "label": 5}]))
+    assert (await _edge(edge, 'mutation { addModel(id: "ollama:y", label: "y") { default } }')).status_code == 502
+    put("mcp.servers", json.dumps({"gh": {"command": "gh-mcp"}}))
+    assert (await _edge(edge, "{ tools { key } }")).status_code == 502
+    q = 'mutation { setToolPolicy(key: "bound:run_cell", enabled: false) { key } }'
+    assert (await _edge(edge, q)).status_code == 502
+    with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
+        assert c.execute("SELECT count(*) FROM config_settings WHERE key = 'tools.policy'").fetchone() == (0,)
 
 
 async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
@@ -961,13 +1119,13 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     "query",
     [
         # A root field the edge doesn't implement.
-        "{ tools { name } }",
+        "{ modelSync { provider } }",
         # One owned root field and one not: the whole operation goes to Python.
-        "{ conversations { id } tools { name } }",
+        "{ conversations { id } modelSync { provider } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
         # A mutation that isn't ported.
-        'mutation { setDefaultModel(id: "x") { default } }',
+        'mutation { browserActivity(url: "x") }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.
