@@ -66,6 +66,7 @@ pub struct Mutation(
     settings::SettingMutation,
     models::ModelsMutation,
     tools::ToolPolicyMutation,
+    browser::BrowserMutation,
     memory::MemoryMutation,
     runs::RunMutation,
     start::StartMutation,

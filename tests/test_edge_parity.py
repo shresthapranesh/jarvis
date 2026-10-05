@@ -1125,7 +1125,7 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
         # A mutation that isn't ported.
-        'mutation { browserActivity(url: "x") }',
+        'mutation { reloadMcpServers { name } }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.

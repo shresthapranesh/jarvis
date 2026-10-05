@@ -54,6 +54,7 @@ const LINKED_FIELDS: &[&str] = &[
     "triggerAutomation",
     "resolveApproval",
     "requestToolApproval",
+    "browserActivity",
 ];
 
 /// Fields whose resolver may defer to Python (`gql::defer`), which runs the
@@ -73,6 +74,7 @@ const DEFERRING_FIELDS: &[&str] = &[
     "updateEndpoint",
     "removeEndpoint",
     "setToolPolicy",
+    "browserActivity",
 ];
 
 /// Who sent the request. The `jarvis` SDK sends `X-Jarvis-Caller: agent`
@@ -199,7 +201,7 @@ impl Walk<'_> {
                 Err(format!("{name} by the agent is approval-gated"))
             }
             // Python refuses a human's; its error is Python's to word.
-            "requestToolApproval" if self.caller != Caller::Agent => Err("requestToolApproval by a human".into()),
+            "requestToolApproval" | "browserActivity" if self.caller != Caller::Agent => Err(format!("{name} by a human")),
             _ => Ok(()),
         }
     }
