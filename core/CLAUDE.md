@@ -61,6 +61,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - Load modes per server: `always` (bound) or `lazy` (reached via `jarvis.mcp_call`, advertised by name in the `mcp_servers` segment). Stored as `"x-jarvis-load"` in the connection dict plus a separate `mcp.load_modes` override map. `strip_jarvis_keys()` must remove it before the client sees it (otherwise `TypeError` on connect).
 - `call_tool` invokes with a ToolCall payload so `ToolMessage.status` distinguishes MCP errors from success.
 - Tests: `tests/test_mcp_integration.py` spawns real stdio servers — keep it that way.
+- **Behind the edge the MCP client is the edge's** (`edge/src/mcp/`, a port of this module and of the adapter's result/schema handling — change both): `get_mcp_manager()` returns `EdgeMcp`, which keeps a copy of the edge's loaded state (re-read on `initialize`/`reload`; the edge asks for a reload after each change) and runs every call there. Bound tools are `StructuredTool`s shaped as the adapter's. `tests/test_edge_mcp.py` diffs the two against real servers.
 
 ## Approvals and tool gating (`approval.py` = answer parsing, `approvals.py`, `tool_gate.py`, `tool_gate_node.py`, `tool_policy.py`)
 - Every approval is a durable `Approval` row. **Blocking** (`action IS NULL`): a run is suspended now. **Deferred** (`action` set): the operation was recorded instead of performed; approving executes it (`ACTIONS`).

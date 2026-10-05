@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import json
 import sqlite3
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -1253,6 +1254,82 @@ async def test_a_denied_call_is_answered_not_run(twins):
     assert denial["status"] == "error" and denial["content"].startswith("Denied by a human (no thanks): `run_cell`")
 
 
+FIXTURES = Path(__file__).parent / "fixtures"
+MCP_SERVERS = {
+    "echo": {"command": sys.executable, "args": [str(FIXTURES / "echo_mcp_server.py")], "transport": "stdio"},
+    "other": {"command": sys.executable, "args": [str(FIXTURES / "other_mcp_server.py")], "transport": "stdio",
+              "x-jarvis-load": "lazy"},
+}
+
+
+async def _mcp(twins: Twins, monkeypatch) -> None:
+    """`echo` bound (`always`), `other` advertised (`lazy`), on both sides."""
+    from core import agents
+    from core.mcp import McpManager
+
+    value = json.dumps(MCP_SERVERS)
+    for db in (twins.python_db, twins.edge_db):
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.execute("INSERT INTO config_settings (key, value, updated_at) VALUES ('mcp.servers', ?, "
+                      "'2026-01-01 00:00:00')", (value,))
+            c.commit()
+    mgr = McpManager(connections=MCP_SERVERS)
+    await mgr.initialize(MCP_SERVERS)
+    monkeypatch.setattr("core.mcp._mcp_manager", mgr)
+    agents.invalidate_agent_cache()
+    agents._retrieval_cache.clear()
+    loaded = await _edge_gql(twins, "mutation { reloadMcpServers { name toolCount } }", {})
+    assert loaded["data"]["reloadMcpServers"] == [{"name": "echo", "toolCount": 3}, {"name": "other", "toolCount": 1}]
+
+
+def _unid(record: Any) -> Any:
+    """Without the random ids the adapter gives each content block."""
+    import re
+
+    return json.loads(re.sub(r"lc_[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", "lc_<id>", json.dumps(record)))
+
+
+async def test_mcp_tools_bound_and_advertised(twins, monkeypatch):
+    """An `always` server's tools are bound — called, failing on the server,
+    answered with the adapter's blocks and structured content — and a `lazy`
+    one's are named in the prompt, not callable as tools."""
+    await _mcp(twins, monkeypatch)
+    script = [
+        Reply("Trying. ", [("echo", {"text": "hi"}), ("add", {"a": 2, "b": 3}), ("explode", {})]),
+        Reply("", [("ping", {})]),
+        Reply("Done."),
+    ]
+    python, edge = await _both(twins, "use the tools", script)
+    assert _unid(edge) == _unid(python)
+    results = [r for r in python["thread"] if r["role"] == "tool"]
+    assert [r["status"] for r in results] == ["success", "success", "error", "error"]
+    assert results[1]["artifact"] == {"structured_content": {"result": 5}}
+    [(runtime,)] = _rows(twins.edge_db, "SELECT runtime FROM jobs WHERE kind = 'chat' ORDER BY rowid DESC LIMIT 1")
+    assert runtime == "edge", "the edge handed the turn over"
+    prompt = twins.fake.requests[0]["messages"][0]["content"]
+    assert "## MCP Servers (on demand)" in prompt and "- **other** (1 tools): ping" in prompt
+
+
+async def test_a_gated_mcp_tool_runs_once_approved(twins, monkeypatch):
+    from core import tool_policy
+    from db import async_session
+
+    await _mcp(twins, monkeypatch)
+    async with async_session() as s:
+        await tool_policy.set_tool_policy(s, "mcp:echo/echo", approval=True)
+    [(policy,)] = _rows(twins.python_db, "SELECT value FROM config_settings WHERE key = 'tools.policy'")
+    with contextlib.closing(sqlite3.connect(twins.edge_db)) as c:
+        c.execute("INSERT INTO config_settings (key, value, updated_at) VALUES ('tools.policy', ?, '2026-01-01 00:00:00')",
+                  (policy,))
+        c.commit()
+    script = [Reply("", [("echo", {"text": "gated"})]), Reply("Echoed.")]
+    python, edge = await _both_gated(twins, "echo it", script, "approve")
+    assert _unid(edge) == _unid(python)
+    [row] = python["approvals"]
+    assert row[:3] == ["tool", "approval", "approved"]
+    assert '{"tool_key": "mcp:echo/echo"}' in row
+
+
 async def test_the_inbox_answers_through_the_edge(twins):
     """`resolveApproval` on what the edge answers itself — a board task's
     question, a gate with no run behind it — and its refusals, row for row
@@ -1289,7 +1366,8 @@ async def test_deferred_actions_run_through_the_edge(twins):
     approving runs it, in the edge — workflow with its runs, automation with
     its runs and conversation, a skill already gone — and a denial of any
     action, an MCP call's included, only closes the row. An approved MCP call
-    is still Python's."""
+    runs on the edge's MCP client (`test_edge_mcp.py`); one naming no server
+    fails as Python's does, leaving the row pending."""
     ts = "'2026-01-01 00:00:00'"
     for db in (twins.python_db, twins.edge_db):
         with contextlib.closing(sqlite3.connect(db)) as c:
@@ -1330,9 +1408,11 @@ async def test_deferred_actions_run_through_the_edge(twins):
         assert edge == python, table
     assert not _rows(twins.edge_db, "SELECT id FROM automations") and _rows(twins.edge_db, "SELECT id FROM skills")
 
-    resp = await twins.client.post("/graphql", json={"query": RESOLVE, "variables": {"id": "ap-mcp2", "a": "yes"}})
-    assert resp.status_code != 200  # deferred to Python
-    assert _rows(twins.edge_db, "SELECT status FROM approvals WHERE id = 'ap-mcp2'") == [("pending",)]
+    python = await _python_gql(RESOLVE, {"id": "ap-mcp2", "a": "yes"})
+    assert await _edge_gql(twins, RESOLVE, {"id": "ap-mcp2", "a": "yes"}) == python
+    assert "Unknown MCP server 's'" in json.dumps(python)
+    for db in (twins.python_db, twins.edge_db):
+        assert _rows(db, "SELECT status FROM approvals WHERE id = 'ap-mcp2'") == [("pending",)]
 
 
 async def test_memory_and_skill_writes_through_the_edge(twins):

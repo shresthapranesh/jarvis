@@ -264,11 +264,13 @@ impl<'a> Turn<'a> {
     // ── the loop ────────────────────────────────────────────────────────────
 
     async fn turn(&mut self, thread: &mut Thread) -> Result<(), Stop> {
-        let policy = Policy::load(self.pool()).await;
-        let bound = tools::bound_for(&policy, matches!(self.kind, Kind::Board(_)));
+        // What is bound is fixed for the run, as Python's built agent is.
+        let mcp = self.agent.mcp.snapshot().await;
+        let policy = Policy::load(self.pool(), &mcp).await;
+        let bound = tools::bound_for(&policy, matches!(self.kind, Kind::Board(_)), &mcp);
         loop {
             self.take_step()?;
-            let reply = self.model_step(thread, &bound).await?;
+            let reply = self.model_step(thread, &bound.schemas, &mcp).await?;
             if reply.tool_calls.is_empty() {
                 return Ok(());
             }
@@ -278,7 +280,7 @@ impl<'a> Turn<'a> {
                 Plan::Python(why) => return Err(Stop::Python(why)),
             };
             self.take_step()?;
-            self.tool_step(thread, &reply.tool_calls, steps).await?;
+            self.tool_step(thread, &reply.tool_calls, steps, &policy).await?;
         }
     }
 
@@ -298,7 +300,7 @@ impl<'a> Turn<'a> {
     }
 
 
-    async fn model_step(&mut self, thread: &mut Thread, bound: &[llm::Tool]) -> Result<Message, Stop> {
+    async fn model_step(&mut self, thread: &mut Thread, bound: &[llm::Tool], mcp: &crate::mcp::Snapshot) -> Result<Message, Stop> {
         // Mid-run messages are a chat's; nothing queues behind other runs.
         let queued = match self.kind {
             Kind::Chat => self.drain_queued().await.map_err(Stop::Failed)?,
@@ -311,7 +313,7 @@ impl<'a> Turn<'a> {
 
         let retrieved = match &self.retrieved {
             Some((id, parts)) if *id == message_id => Ok(parts.clone()),
-            _ => prompt::retrieved(self.pool(), &self.agent.http, &query, &self.thread_id).await,
+            _ => prompt::retrieved(self.pool(), &self.agent.http, &query, &self.thread_id, mcp).await,
         };
         let context = match retrieved {
             Ok(parts) => {
@@ -418,12 +420,12 @@ impl<'a> Turn<'a> {
         Ok(message)
     }
 
-    async fn tool_step(&mut self, thread: &mut Thread, calls: &[ToolCall], steps: Vec<Step>) -> Result<(), Stop> {
+    async fn tool_step(&mut self, thread: &mut Thread, calls: &[ToolCall], steps: Vec<Step>, policy: &Policy) -> Result<(), Stop> {
         // Every gate is answered, in call order, before anything runs.
         let mut ready = Vec::with_capacity(steps.len());
         for (call, step) in calls.iter().zip(steps) {
             ready.push(match step {
-                Step::Gated(native) => self.gate(call, native).await?,
+                Step::Gated(native) => self.gate(call, native, &policy.key_for(&call.name)).await?,
                 other => other,
             });
         }
@@ -432,9 +434,21 @@ impl<'a> Turn<'a> {
             if self.cancelled() {
                 return Err(Stop::Cancelled);
             }
-            let (content, status) = match step {
-                Step::Unknown(error) | Step::Denied(error) => (error, "error"),
+            let (content, status, artifact) = match step {
+                Step::Unknown(error) | Step::Denied(error) => (Content::Text(error), "error", None),
                 Step::Gated(_) => unreachable!("gates are answered first"),
+                Step::Run(Native::Mcp { server, tool, args }) => {
+                    self.budget.record_tool(1).into_iter().for_each(|(e, d)| self.events.emit(e, &d));
+                    self.sync_fields();
+                    let run = self.run.clone();
+                    // No timeout: Python's bound MCP tools have none.
+                    let ran = tokio::select! {
+                        r = self.agent.mcp.call(&server, &tool, &args, None) => r,
+                        () = until_stopped(run) => return Err(Stop::Cancelled),
+                    };
+                    let r = ran.map_err(Stop::Failed)?;
+                    (mcp_content(&r.blocks), if r.is_error { "error" } else { "success" }, r.artifact)
+                }
                 Step::Run(native) => {
                     self.budget.record_tool(1).into_iter().for_each(|(e, d)| self.events.emit(e, &d));
                     self.sync_fields();
@@ -443,14 +457,15 @@ impl<'a> Turn<'a> {
                         r = self.run_native(thread, native) => r,
                         () = until_stopped(run) => return Err(Stop::Cancelled),
                     };
-                    (ran.map_err(Stop::Failed)?, "success")
+                    (Content::Text(ran.map_err(Stop::Failed)?), "success", None)
                 }
             };
             let result = Message {
                 name: Some(call.name.clone()),
                 tool_call_id: call.id.clone(),
                 status: Some(status.into()),
-                ..Message::new(Role::Tool, Content::Text(content))
+                artifact,
+                ..Message::new(Role::Tool, content)
             };
             thread.apply(self.pool(), vec![result.clone()]).await.map_err(Stop::Failed)?;
             results.push(result);
@@ -465,13 +480,13 @@ impl<'a> Turn<'a> {
     /// `make_tool_gate`'s wait for one call: the request recorded (and shown
     /// in a chat), then the row polled until a human answers or it times
     /// out. A stop while waiting stops the run.
-    async fn gate(&mut self, call: &ToolCall, native: Native) -> Result<Step, Stop> {
+    async fn gate(&mut self, call: &ToolCall, native: Native, key: &str) -> Result<Step, Stop> {
         // `live_task_id(conversation_id)`: only a chat run is its
         // conversation's, so only a chat's request names its run and is shown.
         let task_id = matches!(self.kind, Kind::Chat).then(|| self.task_id.clone());
         let request = crate::approvals::create(
             self.pool(),
-            &format!("bound:{}", call.name),
+            key,
             &call.name,
             &call.args,
             self.conversation.as_deref(),
@@ -562,6 +577,7 @@ impl<'a> Turn<'a> {
                 }
                 Err(answer) => Ok(answer),
             },
+            Native::Mcp { .. } => unreachable!("an MCP call runs in tool_step"),
         }
     }
 
@@ -920,13 +936,57 @@ fn model_step_data(m: &Message) -> String {
 }
 
 /// `_extract_step_data` for a tool batch: one result, or the list.
+/// An MCP result's LangChain blocks as the transcript records them
+/// (`core/transcript.py:_encode_part`): a text block's id rides in its
+/// extras; an image or file block is kept whole.
+fn mcp_content(blocks: &[Value]) -> Content {
+    Content::Parts(
+        blocks
+            .iter()
+            .map(|b| match (b.get("type").and_then(Value::as_str), b.get("text")) {
+                (Some("text"), Some(Value::String(text))) => {
+                    let extras = b.as_object().into_iter().flatten().filter(|(k, _)| *k != "type" && *k != "text");
+                    Part::Typed(Typed::Text {
+                        text: text.clone(),
+                        signature: None,
+                        extras: extras.map(|(k, v)| (k.clone(), v.clone())).collect(),
+                    })
+                }
+                _ => Part::Typed(Typed::Opaque { data: b.clone(), extras: Default::default() }),
+            })
+            .collect(),
+    )
+}
+
+/// Parts back as the LangChain blocks a `ToolMessage` held them as.
+fn lc_blocks(parts: &[Part]) -> Value {
+    Value::Array(
+        parts
+            .iter()
+            .map(|p| match p {
+                Part::Str(s) => Value::String(s.clone()),
+                Part::Typed(Typed::Text { text, extras, .. }) => {
+                    let mut m = serde_json::Map::new();
+                    m.insert("type".into(), "text".into());
+                    m.insert("text".into(), text.clone().into());
+                    m.extend(extras.clone());
+                    Value::Object(m)
+                }
+                Part::Typed(Typed::Opaque { data, .. }) => data.clone(),
+                other => serde_json::to_value(other).unwrap_or_default(),
+            })
+            .collect(),
+    )
+}
+
 fn tools_step_data(results: &[Message]) -> String {
     let entries: Vec<Value> = results
         .iter()
         .map(|m| {
+            // `str(msg.content)[:400]`.
             let output = match &m.content {
                 Content::Text(s) => s.chars().take(400).collect::<String>(),
-                other => serde_json::to_string(other).unwrap_or_default().chars().take(400).collect(),
+                Content::Parts(parts) => pyjson::py_repr(&lc_blocks(parts)).chars().take(400).collect(),
             };
             json!({"tool": m.name.clone().unwrap_or_default(), "output": output})
         })

@@ -83,7 +83,7 @@ fn sdk_http() -> &'static reqwest::Client {
 
 /// `str(exc)` for an httpx transport error, where it can be known: a socket
 /// error is `[Errno 61] Connection refused`, a timeout `timed out`.
-fn httpx_error(e: &reqwest::Error) -> Option<String> {
+pub(crate) fn httpx_error(e: &reqwest::Error) -> Option<String> {
     if e.is_timeout() {
         return Some("timed out".into());
     }
@@ -101,7 +101,7 @@ fn httpx_error(e: &reqwest::Error) -> Option<String> {
 }
 
 /// `str(HTTPStatusError)` from `raise_for_status()`.
-fn httpx_status_error(resp: &reqwest::Response) -> String {
+pub(crate) fn httpx_status_error(resp: &reqwest::Response) -> String {
     let status = resp.status();
     let code = status.as_u16();
     let kind = match code / 100 {

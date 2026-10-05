@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from langchain_core.tools import ToolException
+
 logger = logging.getLogger(__name__)
 
 # ── Load modes ────────────────────────────────────────────────────────────────
@@ -612,15 +614,192 @@ class McpManager:
             self._initialized = False
 
 
+class _EdgeToolError(ToolException):
+    """An MCP `isError` result from the edge, carrying its content blocks.
+
+    A `ToolException`, so the tool's `handle_tool_error` turns it into a
+    `status="error"` ToolMessage, as the adapter's `_MCPToolExecutionError`
+    does.
+    """
+
+    def __init__(self, blocks: list[dict[str, Any]]) -> None:
+        texts = [b["text"] for b in blocks if b.get("type") == "text"]
+        super().__init__("\n".join(texts))
+        self.blocks = blocks
+
+
+def _edge_tool_error(error: Exception) -> list[dict[str, Any]]:
+    if isinstance(error, _EdgeToolError):
+        return error.blocks
+    raise error
+
+
+class EdgeMcp:
+    """The edge's MCP manager, through its loopback `/internal/mcp/*`.
+
+    Same calls as `McpManager`. The servers, their listings and every call
+    are the edge's (`edge/src/mcp/`); this process keeps a copy of what the
+    edge has loaded — re-read on `initialize` and on `reload`, which the edge
+    asks for after each change (`apply_setting` on an `mcp.*` key) — so
+    binding and the prompt can read it synchronously.
+    """
+
+    def __init__(self, base_url: str) -> None:
+        import httpx
+
+        # No client timeout: a bound MCP tool runs as long as it runs.
+        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=None)
+        self.connections: dict[str, dict[str, Any]] = {}
+        self._modes: dict[str, str] = {}
+        self._tools_by_server: dict[str, list[Any]] = {}
+        self._initialized = False
+        self._lock = asyncio.Lock()
+
+    async def _post(self, path: str, body: dict) -> dict:
+        r = await self._client.post(f"/internal/mcp/{path}", json=body)
+        if r.status_code != 200:
+            try:
+                error = r.json().get("error") or r.text
+            except ValueError:
+                error = r.text
+            raise RuntimeError(error)
+        return r.json()
+
+    def _tool(self, server: str, spec: dict[str, Any]) -> Any:
+        """A bound tool shaped as the adapter's: the server's schema as given,
+        content blocks plus the structured content back."""
+        from langchain_core.tools import StructuredTool
+
+        name = spec["name"]
+
+        async def call_tool(**arguments: Any) -> tuple[Any, Any]:
+            result = await self._post("call", {"server": server, "tool": name, "args": arguments})
+            if result["is_error"]:
+                raise _EdgeToolError(result["blocks"])
+            return result["blocks"], result["artifact"]
+
+        return StructuredTool(
+            name=name,
+            description=spec.get("description") or "",
+            args_schema=spec.get("input_schema") or {},
+            coroutine=call_tool,
+            response_format="content_and_artifact",
+            handle_tool_error=_edge_tool_error,  # type: ignore[arg-type]
+        )
+
+    async def _fetch(self) -> list[Any]:
+        state = await self._post("state", {})
+        set_default_load_mode(state.get("default_load_mode"))
+        connections: dict[str, dict[str, Any]] = {}
+        modes: dict[str, str] = {}
+        by_server: dict[str, list[Any]] = {}
+        for server in state.get("servers", []):
+            name = server["name"]
+            connections[name] = server["config"]
+            modes[name] = server["load_mode"]
+            if server.get("loaded"):
+                by_server[name] = [self._tool(name, t) for t in server.get("tools", [])]
+        self.connections, self._modes, self._tools_by_server = connections, modes, by_server
+        self._initialized = True
+        return self.get_tools_sync()
+
+    async def initialize(self, connections: dict[str, dict[str, Any]] | None = None) -> list[Any]:
+        """The edge's state, read once. `connections` is the edge's to merge."""
+        async with self._lock:
+            if self._initialized:
+                return self.get_tools_sync()
+            return await self._fetch()
+
+    async def reload(self, connections: dict[str, dict[str, Any]] | None = None) -> list[Any]:
+        """Re-read the edge's state — it has already reconnected."""
+        async with self._lock:
+            tools = await self._fetch()
+        _invalidate_agent_graphs()
+        return tools
+
+    def get_tools_sync(self) -> list[Any]:
+        return [t for tools in self._tools_by_server.values() for t in tools]
+
+    def get_bound_tools_sync(self) -> list[Any]:
+        return [
+            t for name, tools in self._tools_by_server.items()
+            if self.load_mode(name) == LOAD_ALWAYS for t in tools
+        ]
+
+    async def get_tools(self) -> list[Any]:
+        if not self._initialized:
+            await self.initialize()
+        return self.get_tools_sync()
+
+    def load_mode(self, name: str) -> str:
+        return self._modes.get(name) or load_mode_for(self.connections.get(name))
+
+    def tools_for_server(self, name: str) -> list[Any]:
+        return list(self._tools_by_server.get(name, []))
+
+    def set_load_mode(self, name: str, mode: str) -> str:
+        """Only this copy: the edge owns the mode (`setMcpServerLoadMode`)."""
+        if name not in self.connections:
+            raise ValueError(f"MCP server {name!r} is not configured")
+        normalized = normalize_load_mode(mode, server=name)
+        if normalized is None:
+            raise ValueError(f"mode must be one of {', '.join(LOAD_MODES)}")
+        self._modes[name] = normalized
+        self.connections[name] = with_load_mode(self.connections[name], normalized)
+        _invalidate_agent_graphs()
+        return normalized
+
+    def server_summaries(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for name, cfg in self.connections.items():
+            tools = self._tools_by_server.get(name, [])
+            out.append({
+                "name": name,
+                "config": cfg,
+                "load_mode": self.load_mode(name),
+                "tool_count": len(tools),
+                "tools": [getattr(t, "name", "?") for t in tools],
+                "loaded": name in self._tools_by_server,
+            })
+        return out
+
+    def find_tool(self, server: str, tool: str) -> Any:
+        if server not in self.connections:
+            raise ValueError(
+                f"Unknown MCP server {server!r}. Configured: {', '.join(self.connections) or '(none)'}"
+            )
+        tools = self._tools_by_server.get(server)
+        if tools is None:
+            raise ValueError(f"MCP server {server!r} is not loaded — reload MCP servers and retry")
+        for t in tools:
+            if getattr(t, "name", None) == tool:
+                return t
+        available = ", ".join(getattr(t, "name", "?") for t in tools) or "(none)"
+        raise ValueError(f"MCP server {server!r} has no tool {tool!r}. Available: {available}")
+
+    async def call_tool(
+        self, server: str, tool: str, args: dict[str, Any] | None = None, *, timeout: float = 120.0
+    ) -> tuple[str, bool]:
+        """Run on the edge; a timeout is an error result there too."""
+        result = await self._post(
+            "call", {"server": server, "tool": tool, "args": args or {}, "timeout": timeout}
+        )
+        return (result["text"], bool(result["is_error"]))
+
+    async def close(self) -> None:
+        """Nothing: the servers are the edge's."""
+
+
 # ── Global singleton ──────────────────────────────────────────────────────────
 
-_mcp_manager: McpManager | None = None
+_mcp_manager: McpManager | EdgeMcp | None = None
 
 
-def get_mcp_manager() -> McpManager:
+def get_mcp_manager() -> McpManager | EdgeMcp:
     global _mcp_manager
     if _mcp_manager is None:
-        _mcp_manager = McpManager(connections=load_mcp_server_configs())
+        edge = os.environ.get("JARVIS_EDGE_URL", "").strip()
+        _mcp_manager = EdgeMcp(edge) if edge else McpManager(connections=load_mcp_server_configs())
     return _mcp_manager
 
 

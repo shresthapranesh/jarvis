@@ -13,6 +13,7 @@ pub mod browser;
 pub mod codec;
 pub mod conversation;
 pub mod events;
+pub mod mcp;
 pub mod memory;
 pub mod model_sync;
 pub mod models;
@@ -51,6 +52,7 @@ pub struct Query(
     models::ModelsQuery,
     model_sync::ModelSyncQuery,
     tools::ToolQuery,
+    mcp::McpQuery,
     browser::BrowserQuery,
     node::NodeQuery,
 );
@@ -68,6 +70,7 @@ pub struct Mutation(
     settings::SettingMutation,
     models::ModelsMutation,
     tools::ToolPolicyMutation,
+    mcp::McpMutation,
     browser::BrowserMutation,
     memory::MemoryMutation,
     runs::RunMutation,
@@ -91,6 +94,8 @@ pub struct EdgeData {
     pub scheduler: Arc<crate::schedule::Scheduler>,
     /// A deleted conversation's notebook goes with it.
     pub kernels: Arc<crate::kernels::Kernels>,
+    /// The MCP servers and their tools.
+    pub mcp: Arc<crate::mcp::Mcp>,
 }
 
 /// Who sent the request, as `get_context` reads it: the `jarvis` SDK says

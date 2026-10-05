@@ -3,10 +3,9 @@
 //! `redact`, `apply_setting`'s notes), `server/graphql/types/setting.py`,
 //! `queries/setting.py` and `mutations/setting.py`. Change both.
 //!
-//! The edge writes the keys it can apply. A managed key (another tab's
-//! serialized state, `allowManaged: true`) and any `mcp.*` key go to Python:
-//! applying those rehydrates Python's catalog and agent caches or reconnects
-//! its MCP servers.
+//! The edge writes and applies every key: an `mcp.*` key reconnects the MCP
+//! servers (`crate::mcp`), and a linked Python is told about the keys it
+//! caches (the embedding model, the catalog, the tool policy).
 
 use std::sync::Arc;
 
@@ -325,7 +324,7 @@ fn validate(key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// The managed-key refusal, and the keys only Python can apply.
+/// The managed-key refusal.
 fn owner_check(key: &str, allow_managed: bool) -> Result<()> {
     if is_managed(key) && !allow_managed {
         return Err(format!(
@@ -333,20 +332,32 @@ fn owner_check(key: &str, allow_managed: bool) -> Result<()> {
         )
         .into());
     }
-    if is_managed(key) || key.starts_with("mcp.") {
-        return Err(defer(format!("{key} is applied in Python")));
-    }
     Ok(())
 }
 
-/// `apply_setting` for the keys the edge writes. Everything the edge reads
-/// it reads from the table at the point of use; a linked Python caches the
-/// embedding model, so it is told to re-read it.
+/// `apply_setting`. Everything the edge reads it reads from the table at the
+/// point of use, except the MCP servers, which are reconnected; a linked
+/// Python caches the embedding model, the catalog and the tool policy, so it
+/// is told to re-read them.
 async fn apply(ctx: &Context<'_>, key: &str) -> Result<String> {
+    if key.starts_with("mcp.") {
+        // The reload tells a linked Python itself.
+        let mcp = &ctx.data::<super::EdgeData>()?.mcp;
+        let merged = mcp.reload().await;
+        return Ok(format!("Applied. Reconnected {} MCP server(s).", merged.connections.len()));
+    }
     match key {
         "embedding.model" => {
             tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
             Ok("Applied. New embeddings use this model; existing vectors are unchanged.".into())
+        }
+        "models.custom" | "models.endpoints" | "default.model" => {
+            tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
+            Ok("Applied.".into())
+        }
+        "tools.policy" => {
+            tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
+            Ok("Applied. New runs use the updated policy.".into())
         }
         // The scheduler's zone is read once at startup, here as in Python.
         "scheduler.timezone" => Ok("Saved. Takes effect when the server restarts.".into()),

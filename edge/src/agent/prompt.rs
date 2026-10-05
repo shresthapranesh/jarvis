@@ -1,13 +1,14 @@
 //! What the model sees around the history on each step — a port of
 //! `model_request_node`'s context assembly in `core/agents.py`: the system
 //! prompt, the cacheable segments (memory how-to and core memory, the skill
-//! catalog, the live browser, the project), and the volatile tail (project
-//! memory, then the todo list or the planning directive).
+//! catalog, the on-demand MCP servers, the live browser, the project), and
+//! the volatile tail (project memory, then the todo list or the planning
+//! directive).
 //!
 //! What is retrieved for the request — relevant memories, a ranked skill
-//! shortlist, earlier episodes, the browser — is computed once per user
-//! message (`retrieved`), as Python's retrieval cache does; the project is
-//! re-read on every step.
+//! shortlist, earlier episodes, the lazy MCP servers, the browser — is
+//! computed once per user message (`retrieved`), as Python's retrieval cache
+//! does; the project is re-read on every step.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -43,19 +44,21 @@ pub struct Context {
     pub volatile: String,
 }
 
-/// `_compute_retrieval`: memory, skills, episodes, then the browser, for the
-/// user message `query` is the text of.
+/// `_compute_retrieval`: memory, skills, episodes, the lazy MCP servers,
+/// then the browser, for the user message `query` is the text of.
 pub async fn retrieved(
     pool: &SqlitePool,
     http: &reqwest::Client,
     query: &str,
     conversation_id: &str,
+    mcp: &crate::mcp::Snapshot,
 ) -> Result<Vec<Segment>, NeedsPython> {
     let mut parts = memory(pool, http, query).await?;
     parts.extend(skills(pool, http, query).await?);
     if let Some(text) = super::retrieve::earlier_episodes(pool, http, conversation_id, query).await {
         parts.push(seg("earlier_in_conversation", text, false));
     }
+    parts.extend(mcp_servers(mcp));
     if browser_live(pool, http).await? {
         parts.push(seg("browser", BROWSER, true));
     }
@@ -221,6 +224,41 @@ async fn skills(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Resul
         ),
         !ranked,
     )])
+}
+
+// ── MCP servers ─────────────────────────────────────────────────────────────
+
+/// `_MCP_NAMES_SHOWN`.
+const MCP_NAMES_SHOWN: usize = 12;
+
+/// `_mcp_volatile_parts`: the `lazy` servers with tools, by name — their
+/// schemas stay behind `jarvis.mcp_help`. Nothing when every server is
+/// `always` (their tools are bound and describe themselves).
+fn mcp_servers(s: &crate::mcp::Snapshot) -> Option<Segment> {
+    let lines: Vec<String> = s
+        .connections
+        .keys()
+        .filter(|name| s.mode(name) == crate::mcp::config::LAZY && !s.tools_for(name).is_empty())
+        .map(|name| {
+            let tools = s.tools_for(name);
+            let names: Vec<&str> = tools.iter().take(MCP_NAMES_SHOWN).map(|t| t.name.as_str()).collect();
+            let extra = tools.len() - names.len();
+            let more = if extra > 0 { format!(", +{extra} more") } else { String::new() };
+            format!("- **{name}** ({} tools): {}{more}", tools.len(), names.join(", "))
+        })
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let content = format!(
+        "## MCP Servers (on demand)\n\n\
+         External tool servers that are connected but NOT loaded as tools. Reach them from run_cell:\n\
+         `jarvis.mcp_help(\"<server>\", \"<tool>\")` for the argument schema, then \
+         `jarvis.mcp_call(\"<server>\", \"<tool>\", {{...}})` to run it. Check the schema before the first call \
+         to a tool — don't guess argument names.\n\n{}",
+        lines.join("\n")
+    );
+    Some(seg("mcp_servers", content, true))
 }
 
 // ── the browser ─────────────────────────────────────────────────────────────

@@ -58,6 +58,8 @@ pub struct Agent {
     pool: SqlitePool,
     runs: Arc<Registry>,
     kernels: Arc<Kernels>,
+    /// The MCP servers whose tools a turn binds.
+    mcp: Arc<crate::mcp::Mcp>,
     http: reqwest::Client,
     /// `locked_by` on the jobs this process claims.
     worker: String,
@@ -82,6 +84,7 @@ impl Agent {
         pool: SqlitePool,
         runs: Arc<Registry>,
         kernels: Arc<Kernels>,
+        mcp: Arc<crate::mcp::Mcp>,
         scheduler: Option<Arc<crate::schedule::Scheduler>>,
         artifacts_dir: std::path::PathBuf,
     ) -> Arc<Self> {
@@ -91,6 +94,7 @@ impl Agent {
             pool,
             runs,
             kernels,
+            mcp,
             // Model calls stream for as long as the reply takes; no overall timeout.
             http: reqwest::Client::new(),
             worker: format!("edge-{}", std::process::id()),

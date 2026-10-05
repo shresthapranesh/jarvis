@@ -25,12 +25,12 @@ it's on `main`.
 - [x] `write_artifact`: markdown and files, versions, the `artifact` event
 - [x] Approvals: gated tools wait in the edge; `resolveApproval` (gates, board questions), `requestToolApproval`
 - [x] `resolveApproval` for deferred deletes (`delete_workflow`, `delete_automation`, `delete_skill`) and every denial
-- [ ] `resolveApproval` for an approved `call_mcp_tool` — with MCP
+- [x] `resolveApproval` for an approved `call_mcp_tool`
 - [ ] Attachments: text extraction at turn start (PDF, docx, xlsx, …) — M–L
 - [ ] Workers: `spawn_workers` — M
 - [ ] Anthropic client — M
 - [ ] Bedrock client — M
-- [ ] MCP via `rmcp`: servers, `mcpServers`/`mcpTools`, `callMcpTool`, `jarvis.mcp_call` — L
+- [x] MCP: our own client (stdio, Streamable HTTP, HTTP+SSE, websocket), servers, `mcpServers`/`mcpTools`, the server mutations, `callMcpTool`, bound `always` tools, `mcp.*` settings; Python behind the edge calls through it
 
 ## B. The remaining API
 
@@ -39,9 +39,9 @@ it's on `main`.
 - [x] Automations: `createAutomation`, `updateAutomation`, `deleteAutomation` (a human's; an agent's delete is approval-gated in Python)
 - [x] Agent memory: `agentMemory`, `updateMemory`, `deleteAgentMemory`
 - [x] Memory consolidation and project memory (the maintenance sweeps, `consolidateMemory`, `consolidateProjectMemory`)
-- [x] Settings: `settings`, `setting`, `setSetting`, `deleteSetting` (a managed key overridden, or an `mcp.*` key, is applied in Python until Models and MCP move)
+- [x] Settings: `settings`, `setting`, `setSetting`, `deleteSetting`, managed keys and `mcp.*` included
 - [x] Models: `addModel`, `updateModel`, `removeModel`, `setDefaultModel`, `addDiscoveredModels`, endpoints
-- [x] Tools: `tools`, `setToolPolicy` (Python's while an MCP server is configured — with MCP)
+- [x] Tools: `tools`, `setToolPolicy`
 - [x] `modelSync`: provider model listings (Gemini, Anthropic, Bedrock, Ollama, OpenRouter, endpoints) and the probe calls (an AWS credential source only boto3 reads goes to Python)
 - [x] `browserActivity` (an edge run's stream; a worker's run is Python's)
 - [x] REST: `/uploads`, `/artifacts/{id}/raw`, `/documents/{id}/raw`, `/server-logs` (+ `/stream`, the edge's and a linked worker's records)

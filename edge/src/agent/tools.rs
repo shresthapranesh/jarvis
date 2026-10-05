@@ -5,12 +5,15 @@
 //! sees the same tool list whichever runtime calls it — and a cached prefix
 //! stays byte-stable when a conversation moves between them.
 //!
-//! The edge runs `run_cell`, `write_artifact`, the todo tools and `remember`,
-//! a call a human must approve once they have (`Step::Gated`). Any other
-//! call — workers, a workflow — or a call whose arguments aren't plainly
-//! valid, is Python's: the batch is handed over (`Plan::Python`) and Python
-//! runs it, validating and gating as it always has.
+//! The edge runs `run_cell`, `write_artifact`, the todo tools, `remember`
+//! and the `always` MCP servers' tools (whose schemas are converted as
+//! `convert_to_openai_tool` converts them, `mcp::llm_tool`), a call a human
+//! must approve once they have (`Step::Gated`). Any other call — workers, a
+//! workflow — or a call whose arguments aren't plainly valid, is Python's: the
+//! batch is handed over (`Plan::Python`) and Python runs it, validating and
+//! gating as it always has.
 
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -28,22 +31,37 @@ fn schema(name: &str) -> Tool {
     SCHEMAS.iter().find(|t| t.name == name).cloned().unwrap_or_else(|| panic!("tools.json has no {name}"))
 }
 
-/// The policy a human set for a bound tool (`tools.policy`, `bound:<name>`);
-/// absent entries are enabled and ungated.
+/// The policy a human set for a bound tool (`tools.policy`); absent entries
+/// are enabled and ungated. A tool is keyed as `tool_key_for` keys it: an
+/// MCP server's (`mcp:<server>/<name>`) if one lists that name, else
+/// `bound:<name>`.
 #[derive(Default)]
-pub struct Policy(serde_json::Map<String, Value>);
+pub struct Policy {
+    entries: serde_json::Map<String, Value>,
+    /// `_mcp_owner_map`.
+    owners: HashMap<String, String>,
+}
 
 impl Policy {
-    pub async fn load(pool: &SqlitePool) -> Self {
+    pub async fn load(pool: &SqlitePool, mcp: &crate::mcp::Snapshot) -> Self {
         let raw = crate::catalog::setting(pool, "tools.policy").await.ok().flatten();
-        match raw.as_deref().map(serde_json::from_str::<Value>) {
-            Some(Ok(Value::Object(map))) => Policy(map),
-            _ => Policy::default(),
+        let entries = match raw.as_deref().map(serde_json::from_str::<Value>) {
+            Some(Ok(Value::Object(map))) => map,
+            _ => Default::default(),
+        };
+        Policy { entries, owners: mcp.owners() }
+    }
+
+    /// `tool_key_for`.
+    pub fn key_for(&self, name: &str) -> String {
+        match self.owners.get(name) {
+            Some(server) => format!("mcp:{server}/{name}"),
+            None => format!("bound:{name}"),
         }
     }
 
     fn entry(&self, name: &str, field: &str, default: bool) -> bool {
-        match self.0.get(&format!("bound:{name}")) {
+        match self.entries.get(&self.key_for(name)) {
             Some(Value::Object(e)) => e.get(field).map_or(default, crate::pyjson::truthy),
             _ => default,
         }
@@ -58,20 +76,45 @@ impl Policy {
     }
 }
 
+/// What a turn is bound to: the schemas the model is sent, and which of
+/// them are MCP tools (by name, the last one bound winning, as
+/// `tools_by_name` has it).
+#[derive(Default)]
+pub struct Toolset {
+    pub schemas: Vec<Tool>,
+    mcp: HashMap<String, String>,
+}
+
 /// The main agent's tools in `_build_agent`'s order, without the ones a
 /// human switched off. A board run (`board=True`) also gets `complete_task`
 /// and `block_task`, before `remember`; with an embedder — which Python
-/// always has — `remember` is bound too.
-pub fn bound_for(policy: &Policy, board: bool) -> Vec<Tool> {
+/// always has — `remember` is bound too; then the `always` MCP servers'.
+pub fn bound_for(policy: &Policy, board: bool, mcp: &crate::mcp::Snapshot) -> Toolset {
     let board_tools: &[&str] = if board { &["complete_task", "block_task"] } else { &[] };
-    ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow"]
-        .iter()
-        .chain(board_tools)
-        .chain(&["remember"])
-        .copied()
-        .filter(|n| policy.enabled(n))
-        .map(schema)
-        .collect()
+    let mut set = Toolset {
+        schemas: ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow"]
+            .iter()
+            .chain(board_tools)
+            .chain(&["remember"])
+            .copied()
+            .filter(|n| policy.enabled(n))
+            .map(schema)
+            .collect(),
+        mcp: HashMap::new(),
+    };
+    for (server, tool) in mcp.bound() {
+        if !policy.enabled(&tool.name) {
+            continue;
+        }
+        match crate::mcp::llm_tool(tool) {
+            Ok(t) => {
+                set.schemas.push(t);
+                set.mcp.insert(tool.name.clone(), server.to_string());
+            }
+            Err(e) => tracing::warn!("MCP tool {server}.{} has a schema that doesn't convert ({e}) — not binding it", tool.name),
+        }
+    }
+    set
 }
 
 /// A call the edge runs itself, its arguments checked.
@@ -84,6 +127,8 @@ pub enum Native {
     WriteArtifact { title: String, content: Option<String>, file_path: Option<String>, artifact_id: Option<String> },
     CompleteTask { summary: String, metadata: Option<String> },
     BlockTask { reason: String, needs_input: bool },
+    /// A bound MCP server's tool; the server checks the arguments.
+    Mcp { server: String, tool: String, args: Value },
 }
 
 /// How a batch of calls will run.
@@ -107,20 +152,33 @@ pub enum Step {
     Unknown(String),
 }
 
-/// `_UNKNOWN_TOOL`.
+/// `_UNKNOWN_TOOL`, naming each bound tool once.
 pub fn unknown_tool(name: &str, bound: &[Tool]) -> String {
-    let names: Vec<&str> = bound.iter().map(|t| t.name.as_str()).collect();
+    let mut names: Vec<&str> = vec![];
+    for t in bound {
+        if !names.contains(&t.name.as_str()) {
+            names.push(&t.name);
+        }
+    }
     format!("Error: {name} is not a valid tool, try one of [{}].", names.join(", "))
 }
 
-pub fn plan(calls: &[ToolCall], bound: &[Tool], policy: &Policy) -> Plan {
+pub fn plan(calls: &[ToolCall], bound: &Toolset, policy: &Policy) -> Plan {
     let mut steps = vec![];
     for call in calls {
-        if !bound.iter().any(|t| t.name == call.name) {
-            steps.push(Step::Unknown(unknown_tool(&call.name, bound)));
+        if !bound.schemas.iter().any(|t| t.name == call.name) {
+            steps.push(Step::Unknown(unknown_tool(&call.name, &bound.schemas)));
             continue;
         }
-        match native(&call.name, &call.args) {
+        let found = match bound.mcp.get(&call.name) {
+            Some(server) => call.args.is_object().then(|| Native::Mcp {
+                server: server.clone(),
+                tool: call.name.clone(),
+                args: call.args.clone(),
+            }),
+            None => native(&call.name, &call.args),
+        };
+        match found {
             Some(n) if policy.needs_approval(&call.name) => steps.push(Step::Gated(n)),
             Some(n) => steps.push(Step::Run(n)),
             None => return Plan::Python(format!("{} runs in Python", call.name)),
@@ -250,10 +308,14 @@ mod tests {
         ToolCall { id: Some("c".into()), name: name.into(), args, signature: None }
     }
 
+    fn no_mcp() -> crate::mcp::Snapshot {
+        crate::mcp::Snapshot { default_mode: crate::mcp::config::ALWAYS, ..Default::default() }
+    }
+
     #[test]
     fn a_batch_is_the_edges_only_if_every_call_is() {
         let policy = Policy::default();
-        let tools = bound_for(&policy, false);
+        let tools = bound_for(&policy, false, &no_mcp());
         let plan = plan(
             &[call("run_cell", json!({"code": "1"})), call("nope", json!({})), call("write_todos", json!({"todos": ["a"]}))],
             &tools,
@@ -279,21 +341,52 @@ mod tests {
         }
     }
 
-    fn plan_one(c: ToolCall, tools: &[Tool], policy: &Policy) -> Plan {
+    fn plan_one(c: ToolCall, tools: &Toolset, policy: &Policy) -> Plan {
         plan(&[c], tools, policy)
     }
 
     #[test]
     fn policy_unbinds_and_gates() {
-        let policy = Policy(serde_json::from_value(json!({
-            "bound:remember": {"enabled": false},
-            "bound:run_cell": {"approval": true},
-        }))
-        .unwrap());
-        let tools = bound_for(&policy, false);
-        assert!(!tools.iter().any(|t| t.name == "remember"));
+        let policy = Policy {
+            entries: serde_json::from_value(json!({
+                "bound:remember": {"enabled": false},
+                "bound:run_cell": {"approval": true},
+            }))
+            .unwrap(),
+            ..Default::default()
+        };
+        let tools = bound_for(&policy, false, &no_mcp());
+        assert!(!tools.schemas.iter().any(|t| t.name == "remember"));
         let gated = plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy);
         assert_eq!(gated, Plan::Edge(vec![Step::Gated(Native::RunCell { code: "1".into() })]));
+    }
+
+    #[test]
+    fn always_servers_are_bound_and_keyed_as_mcp() {
+        let mut mcp = no_mcp();
+        let tool = |name: &str| crate::mcp::Tool { name: name.into(), description: "d".into(), input_schema: json!({"type": "object"}) };
+        let lazy: serde_json::Map<String, Value> = serde_json::from_value(json!({"x-jarvis-load": "lazy"})).unwrap();
+        mcp.connections.insert("gh".into(), Default::default());
+        mcp.connections.insert("off".into(), lazy);
+        mcp.tools.insert("gh".into(), vec![tool("issue"), tool("pr")]);
+        mcp.tools.insert("off".into(), vec![tool("hidden")]);
+        let mut policy = Policy {
+            entries: serde_json::from_value(json!({"mcp:gh/pr": {"enabled": false}, "mcp:gh/issue": {"approval": true}})).unwrap(),
+            ..Default::default()
+        };
+        policy.owners = mcp.owners();
+        let tools = bound_for(&policy, false, &mcp);
+        let names: Vec<&str> = tools.schemas.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names.last(), Some(&"issue"));
+        assert!(!names.contains(&"pr") && !names.contains(&"hidden"));
+        assert_eq!(policy.key_for("issue"), "mcp:gh/issue");
+        assert_eq!(policy.key_for("run_cell"), "bound:run_cell");
+        let args = json!({"title": "t"});
+        assert_eq!(
+            plan_one(call("issue", args.clone()), &tools, &policy),
+            Plan::Edge(vec![Step::Gated(Native::Mcp { server: "gh".into(), tool: "issue".into(), args })])
+        );
+        assert!(matches!(plan_one(call("issue", json!("x")), &tools, &policy), Plan::Python(_)));
     }
 
     #[test]
