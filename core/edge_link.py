@@ -5,7 +5,7 @@ The edge (`edge/`) serves every subscription and the run registry
 process reports to it over one loopback WebSocket, `/internal/worker`:
 
     worker → edge   hello, snapshot, register, events, state, unregister, reply,
-                    dispatch, schedules, holds
+                    dispatch, schedules, holds, log
     edge → worker   cancel, wake, adopt_queued, call
 
 The edge also *starts* runs (`startTask`, `runWorkflow`, `triggerAutomation`):
@@ -129,6 +129,8 @@ class EdgeLink(RegistryObserver):
         self._pending: set[asyncio.Task] = set()
         self.connected = asyncio.Event()
         self._sent_holds: list[str] | None = None
+        # This process's log records, for the edge's log viewer (`edge/src/logs.rs`).
+        self._logs: asyncio.Queue[dict[str, Any]] | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -136,10 +138,30 @@ class EdgeLink(RegistryObserver):
         for task_id, state in _tasks.items():
             self._ids[id(state)] = task_id
         set_registry_observer(self)
+        self._subscribe_logs()
         self._task = asyncio.create_task(self._run(), name="edge-link")
+
+    def _subscribe_logs(self) -> None:
+        """Queue this process's log records for the edge, starting with what
+        it logged before the link came up. The queue drops its oldest when
+        the edge is away for long."""
+        from core.log_setup import get_broadcast_handler
+
+        try:
+            handler = get_broadcast_handler()
+        except RuntimeError:  # logging not set up (tests, the CLI)
+            return
+        self._logs = handler.subscribe()
+        for record in handler.snapshot()[-self._logs.maxsize:]:
+            with contextlib.suppress(asyncio.QueueFull):
+                self._logs.put_nowait(record)
 
     async def stop(self) -> None:
         set_registry_observer(None)
+        if self._logs is not None:
+            from core.log_setup import get_broadcast_handler
+
+            get_broadcast_handler().unsubscribe(self._logs)
         for task in list(self._pending):
             task.cancel()
         if self._task is not None:
@@ -179,17 +201,22 @@ class EdgeLink(RegistryObserver):
         self.connected.set()
         logger.info("edge link up: %s (%d live runs)", self.url, len(_tasks))
 
-        writer = asyncio.create_task(self._write(ws))
-        sweeper = asyncio.create_task(self._sweep())
+        tasks = [asyncio.create_task(self._write(ws)), asyncio.create_task(self._sweep())]
+        if self._logs is not None:
+            tasks.append(asyncio.create_task(self._forward_logs(self._logs)))
         try:
             async for raw in ws:
                 self._handle(json.loads(raw))
         finally:
-            for t in (writer, sweeper):
+            for t in tasks:
                 t.cancel()
-            for t in (writer, sweeper):
+            for t in tasks:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await t
+
+    async def _forward_logs(self, logs: asyncio.Queue[dict[str, Any]]) -> None:
+        while True:
+            self._send({"type": "log", "record": await logs.get()})
 
     async def _write(self, ws: Any) -> None:
         while True:

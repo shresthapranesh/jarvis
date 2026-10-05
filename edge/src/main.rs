@@ -20,11 +20,13 @@ mod jobs;
 mod kernels;
 mod link;
 mod llm;
+mod logs;
 mod mimetypes;
 mod notify;
 mod proxy;
 mod pyjson;
 mod pystr;
+mod rest;
 mod runs;
 mod schedule;
 mod supervisor;
@@ -41,6 +43,8 @@ use crate::config::Config;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
+    /// For the REST routes the edge serves (`rest.rs`).
+    pub pool: sqlx::SqlitePool,
     pub schema: gql::EdgeSchema,
     pub owned: Arc<gql::router::Owned>,
     pub http: reqwest::Client,
@@ -124,6 +128,8 @@ async fn main() {
     use tracing_subscriber::util::SubscriberInitExt;
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_target(false))
+        // The in-app log viewer (`logs.rs`).
+        .with(logs::Capture)
         .with(
             tracing_subscriber::filter::Targets::new()
                 .with_target("jarvis_edge", level)
@@ -244,6 +250,7 @@ async fn main() {
     }
     let state = AppState {
         config: Arc::new(config),
+        pool: pool.clone(),
         schema,
         owned: Arc::new(owned),
         http,

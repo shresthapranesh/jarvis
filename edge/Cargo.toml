@@ -13,7 +13,8 @@ async-graphql = { version = "7", default-features = false }
 async-graphql-value = "7"
 # The subscription WebSocket (graphql-ws and graphql-transport-ws).
 async-graphql-axum = "7"
-axum = { version = "0.8", features = ["ws"] }
+# multipart: `POST /uploads` (`rest.rs`).
+axum = { version = "0.8", features = ["ws", "multipart"] }
 async-stream = "0.3"
 base64 = "0.22"
 # The chunks of a streamed model reply (`llm/lines.rs`).
@@ -52,6 +53,8 @@ zeromq = { version = "0.6", default-features = false, features = ["tokio-runtime
 # Signing kernel messages (HMAC-SHA256 over each part).
 hmac = "0.12"
 sha2 = "0.10"
+# Starlette's FileResponse ETag is an MD5 (`rest.rs`).
+md-5 = "0.10"
 hex = "0.4.3"
 
 [profile.release]
