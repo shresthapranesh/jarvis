@@ -359,14 +359,13 @@ async def test_the_edge_takes_the_turns_it_serves(database, work_dir: Path, edge
         job = await _job(not_served)
         assert job is not None and (job.runtime, job.attempts, job.status) == (None, 0, "pending")
 
-        # An MCP server configured anywhere Python looks sends turns to Python.
+        # A configured MCP server is the edge's too: the turn stays here.
         async with async_session() as s:
             s.add(ConfigSetting(key="mcp.servers", value=json.dumps({"fs": {"command": "x"}})))
             await s.commit()
         with_mcp = await _start(client, query="hello", model="ollama:llama3.3")
-        await asyncio.sleep(0.5)
-        job = await _job(with_mcp)
-        assert job is not None and (job.runtime, job.attempts) == (None, 0)
+        job = await _finished(with_mcp)
+        assert (job.runtime, job.status) == ("edge", "done")
 
     # With the agent loop off, no turn is the edge's.
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir)) as client:

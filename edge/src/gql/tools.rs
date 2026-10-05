@@ -4,8 +4,7 @@
 //!
 //! Bound tools are listed here as Python lists them; the `jarvis` SDK's are
 //! Python's own catalogue (`sdk_tools.json`, exported and diffed by the
-//! tests). MCP tools are what Python's live MCP client has loaded, so with any
-//! MCP server configured both fields are Python's.
+//! tests); MCP tools are what the edge's MCP manager has loaded.
 
 use std::sync::{Arc, LazyLock};
 
@@ -14,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sqlx::SqlitePool;
 
-use super::defer;
+use super::EdgeData;
 use super::settings::{tell_worker, upsert};
 use crate::pyjson;
 use crate::runs::Registry;
@@ -88,16 +87,8 @@ fn known_key(key: &str) -> bool {
     key.split_once(':').is_some_and(|(kind, rest)| ["bound", "sdk", "mcp"].contains(&kind) && !rest.is_empty())
 }
 
-/// MCP tools are Python's to list.
-async fn no_mcp(pool: &SqlitePool) -> Result<()> {
-    if crate::agent::route::mcp_configured(pool, &crate::config::app_dir()).await {
-        return Err(defer("MCP tools are listed by Python's MCP client".into()));
-    }
-    Ok(())
-}
-
-/// `tool_inventory`, without MCP servers.
-async fn inventory(pool: &SqlitePool) -> Result<Vec<AgentTool>> {
+/// `tool_inventory`: bound, SDK, then each loaded MCP server's tools.
+async fn inventory(pool: &SqlitePool, mcp: &crate::mcp::Mcp) -> Result<Vec<AgentTool>> {
     let policies = parse(crate::catalog::setting(pool, CONFIG_KEY).await?.as_deref());
     let row = |key: String, kind: &str, name: String, description: &str, group: &str, in_prompt: bool, detail: &str| {
         let (enabled, requires_approval) = coerce(policies.get(&key));
@@ -120,7 +111,19 @@ async fn inventory(pool: &SqlitePool) -> Result<Vec<AgentTool>> {
         row(format!("bound:{name}"), "bound", name.to_string(), description, "agent", true, detail)
     });
     let sdk = SDK.iter().map(|t| row(format!("sdk:{}", t.name), "sdk", format!("jarvis.{}", t.name), &t.description, &t.group, false, ""));
-    Ok(bound.chain(sdk).collect())
+    let mut out: Vec<AgentTool> = bound.chain(sdk).collect();
+    // `_mcp_inventory`: a server that listed nothing has no rows; one that
+    // listed tools is loaded, so every row is available.
+    let s = mcp.snapshot().await;
+    for server in s.connections.keys() {
+        let in_prompt = s.mode(server) != crate::mcp::config::LAZY;
+        for t in s.tools_for(server) {
+            let description = crate::pystr::strip(&t.description);
+            let first = crate::pystr::splitlines(description).first().copied().unwrap_or("");
+            out.push(row(format!("mcp:{server}/{}", t.name), "mcp", t.name.clone(), first, server, in_prompt, ""));
+        }
+    }
+    Ok(out)
 }
 
 #[derive(Default)]
@@ -130,9 +133,7 @@ pub struct ToolQuery;
 impl ToolQuery {
     /// Bound tools, `jarvis` SDK functions and MCP tools, with their policy.
     async fn tools(&self, ctx: &Context<'_>) -> Result<Vec<AgentTool>> {
-        let pool = ctx.data::<SqlitePool>()?;
-        no_mcp(pool).await?;
-        inventory(pool).await
+        inventory(ctx.data::<SqlitePool>()?, &ctx.data::<EdgeData>()?.mcp).await
     }
 }
 
@@ -154,7 +155,6 @@ impl ToolPolicyMutation {
             return Err(format!("unknown tool key {}", pyjson::repr_str(&key)).into());
         }
         let pool = ctx.data::<SqlitePool>()?;
-        no_mcp(pool).await?;
         let mut tx = crate::db::write_tx(pool).await?;
         let raw: Option<String> = sqlx::query_scalar("SELECT value FROM config_settings WHERE key = ?")
             .bind(CONFIG_KEY)
@@ -172,7 +172,7 @@ impl ToolPolicyMutation {
         upsert(&mut tx, CONFIG_KEY, &pyjson::dumps(&Value::Object(stored))).await?;
         tx.commit().await?;
         tell_worker(ctx.data::<Arc<Registry>>()?, CONFIG_KEY).await;
-        inventory(pool).await
+        inventory(pool, &ctx.data::<EdgeData>()?.mcp).await
     }
 }
 

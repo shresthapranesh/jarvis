@@ -217,7 +217,8 @@ mod tests {
     #[test]
     fn schema_tokens_match_python() {
         // core.agents._schema_tokens over the main agent's tools
-        let tools = crate::agent::tools::bound_for(&crate::agent::tools::Policy::default(), false);
-        assert_eq!(schema_tokens(&tools), 952);
+        let none = crate::mcp::Snapshot { default_mode: crate::mcp::config::ALWAYS, ..Default::default() };
+        let tools = crate::agent::tools::bound_for(&crate::agent::tools::Policy::default(), false, &none);
+        assert_eq!(schema_tokens(&tools.schemas), 952);
     }
 }

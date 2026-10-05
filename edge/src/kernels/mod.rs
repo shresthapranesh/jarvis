@@ -14,7 +14,7 @@
 //! Python behind the edge runs `run_cell` here (`http.rs`), so a live kernel
 //! no longer keeps the Python worker up.
 
-mod http;
+pub(crate) mod http;
 mod kernel;
 mod wire;
 

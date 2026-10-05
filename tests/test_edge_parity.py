@@ -58,6 +58,8 @@ PARITY_OPERATIONS = {
     "MemoriesQuery",
     "SettingsQuery",
     "ToolsQuery",
+    # tests/test_edge_mcp.py
+    "McpServersQuery",
     # Diffed against live runs in test_edge_runs.py.
     "RunningTasksQuery",
     # tests/test_edge_supervisor.py
@@ -904,16 +906,22 @@ async def test_setting_reads_and_writes(twin, monkeypatch):
         await twin.run(delete, {"key": key, "allowManaged": False})
 
 
-async def test_settings_python_applies_go_to_python(seeded, edge):
-    """A managed key overridden, any `mcp.*` key, and invalid JSON for a json
-    key are Python's: applying them rehydrates its caches, and the decoder's
-    error is its to word. Nothing is written first."""
-    set_ = "mutation($k: String!, $v: String!, $a: Boolean!) { setSetting(key: $k, value: $v, allowManaged: $a) { note } }"
-    for key, value, allow in (("tools.policy", "{}", True), ("mcp.extra", "x", False), ("tools.policy", "{", False)):
-        assert (await _edge(edge, set_, {"k": key, "v": value, "a": allow})).status_code == 502, key
+async def test_managed_settings_overridden(twin):
+    """`allowManaged: true` writes another tab's key; applying it is the
+    edge's, and a linked Python is told (`mcp.*` keys: `test_edge_mcp.py`)."""
+    set_ = "mutation($k: String!, $v: String!) { setSetting(key: $k, value: $v, allowManaged: true) { note setting { key value } } }"
+    for key, value in (("tools.policy", "{}"), ("models.custom", "[]"), ("default.model", "ollama:x")):
+        await twin.run(set_, {"k": key, "v": value})
     delete = "mutation($k: String!) { deleteSetting(key: $k, allowManaged: true) { note } }"
-    assert (await _edge(edge, delete, {"k": "models.custom"})).status_code == 502
-    assert (await _edge(edge, "mutation { deleteSetting(key: \"mcp.x\") { note } }")).status_code == 502
+    for key in ("models.custom", "default.model"):
+        await twin.run(delete, {"k": key})
+
+
+async def test_settings_python_words_go_to_python(seeded, edge):
+    """Invalid JSON for a json key is Python's: the decoder's error is its to
+    word. Nothing is written first."""
+    set_ = "mutation($k: String!, $v: String!, $a: Boolean!) { setSetting(key: $k, value: $v, allowManaged: $a) { note } }"
+    assert (await _edge(edge, set_, {"k": "tools.policy", "v": "{", "a": True})).status_code == 502
     both = 'mutation { setSetting(key: "a", value: "b") { note } deleteSetting(key: "a") { note } }'
     assert (await _edge(edge, both)).status_code == 502  # a deferring field is owned only alone
 
@@ -1073,10 +1081,10 @@ async def test_tool_inventory_and_policy(twin):
         await twin.run(policy, vars_)
 
 
-async def test_catalog_and_tool_writes_python_must_answer(seeded, edge, work_dir: Path):
-    """MCP tools are Python's MCP client's to list; a catalog row Python
-    would fail to load, or a stored window it would fail to convert, is its
-    error to word. Each goes to Python before anything is written."""
+async def test_catalog_writes_python_must_answer(seeded, edge, work_dir: Path):
+    """A catalog row Python would fail to load, or a stored window it would
+    fail to convert, is its error to word. Each goes to Python before
+    anything is written."""
     import sqlite3
 
     def put(key: str, value: str) -> None:
@@ -1090,12 +1098,9 @@ async def test_catalog_and_tool_writes_python_must_answer(seeded, edge, work_dir
     assert (await _edge(edge, q)).status_code == 502
     put("models.custom", json.dumps([{"id": "ollama:w", "label": 5}]))
     assert (await _edge(edge, 'mutation { addModel(id: "ollama:y", label: "y") { default } }')).status_code == 502
-    put("mcp.servers", json.dumps({"gh": {"command": "gh-mcp"}}))
-    assert (await _edge(edge, "{ tools { key } }")).status_code == 502
-    q = 'mutation { setToolPolicy(key: "bound:run_cell", enabled: false) { key } }'
-    assert (await _edge(edge, q)).status_code == 502
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
-        assert c.execute("SELECT count(*) FROM config_settings WHERE key = 'tools.policy'").fetchone() == (0,)
+        stored = c.execute("SELECT value FROM config_settings WHERE key = 'models.custom'").fetchone()
+    assert json.loads(stored[0]) == [{"id": "ollama:w", "label": 5}]
 
 
 async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
@@ -1113,15 +1118,15 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     "query",
     [
         # A root field the edge doesn't implement.
-        "{ mcpServers { name } }",
+        "{ voiceStatus { ready } }",
         # One owned root field and one not: the whole operation goes to Python.
-        "{ conversations { id } mcpServers { name } }",
+        "{ conversations { id } voiceStatus { ready } }",
         # A field that may defer, beside another.
         "{ models { default } modelSync { provider } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
         # A mutation that isn't ported.
-        'mutation { reloadMcpServers { name } }',
+        'mutation { downloadVoice { ready } }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.

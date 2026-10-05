@@ -23,6 +23,7 @@ mod kernels;
 mod link;
 mod llm;
 mod logs;
+mod mcp;
 mod mimetypes;
 mod notify;
 mod proxy;
@@ -58,6 +59,8 @@ pub struct AppState {
     pub supervisor: Arc<supervisor::Supervisor>,
     /// The agent's notebooks (`kernels/`).
     pub kernels: Arc<kernels::Kernels>,
+    /// MCP servers (`mcp/`), which Python behind the edge calls through.
+    pub mcp: Arc<mcp::Mcp>,
 }
 
 impl AppState {
@@ -88,6 +91,7 @@ async fn main() {
                 ".".as_ref(),
                 pool.clone(),
             ),
+            mcp: mcp::Mcp::new(pool.clone(), Default::default(), Default::default()),
         };
         print!("{}", gql::build(pool, data, Default::default()).sdl());
         return;
@@ -200,6 +204,14 @@ async fn main() {
         &config.app_dir,
         pool.clone(),
     );
+    let mcp = mcp::Mcp::new(pool.clone(), config.app_dir.clone(), runs.clone());
+    // Each server listed once, in the background, before anything asks.
+    tokio::spawn({
+        let mcp = mcp.clone();
+        async move {
+            mcp.snapshot().await;
+        }
+    });
     let data = gql::EdgeData {
         artifacts_dir: config.artifacts_dir.clone(),
         documents_dir: config.documents_dir.clone(),
@@ -209,6 +221,7 @@ async fn main() {
         http: http.clone(),
         scheduler: scheduler.clone(),
         kernels: kernels.clone(),
+        mcp: mcp.clone(),
     };
     let schema = gql::build(pool.clone(), data, runs.clone());
     tokio::spawn(scheduler.clone().run());
@@ -234,7 +247,7 @@ async fn main() {
     tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
     // The chat turns the edge runs itself (`agent/`), and the recovery of any
     // a previous edge left running.
-    tokio::spawn(agent::Agent::new(pool.clone(), runs.clone(), kernels.clone(), Some(scheduler.clone()), config.artifacts_dir.clone()).run());
+    tokio::spawn(agent::Agent::new(pool.clone(), runs.clone(), kernels.clone(), mcp.clone(), Some(scheduler.clone()), config.artifacts_dir.clone()).run());
 
     let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
     fields.sort();
@@ -260,6 +273,7 @@ async fn main() {
         scheduler,
         supervisor: supervisor.clone(),
         kernels: kernels.clone(),
+        mcp,
     };
     let app = Router::new()
         // GET /graphql (the subscription WebSocket) falls through to the proxy.
@@ -267,6 +281,8 @@ async fn main() {
         .route("/internal/worker", get(link::upgrade))
         .route("/internal/kernels/run", post(kernels::http_run))
         .route("/internal/kernels/shutdown", post(kernels::http_shutdown))
+        .route("/internal/mcp/state", post(mcp::internal::state))
+        .route("/internal/mcp/call", post(mcp::internal::call))
         .fallback(proxy::any)
         // Python sets no request-size limit on /graphql; neither does the edge.
         .layer(DefaultBodyLimit::disable())

@@ -308,6 +308,57 @@ made in both.**
   offered, so `input()` raises at once (Python's client offered it with nobody
   to answer, and the cell hung until its timeout).
 
+## MCP (`src/mcp/`)
+
+The MCP servers are the edge's, so a configured server no longer sends turns
+to Python, and Python behind the edge launches none. A port of `core/mcp.py`
+and of what `langchain_mcp_adapters` does for it; **a change to either is made
+in both.**
+
+- **Config** (`config.rs`): `JARVIS_MCP_SERVERS` < the first `mcp.json` that
+  names a server (`~/.jarvis/`, then the checkout) < the `mcp.servers`
+  setting, then the `mcp.load_modes` overrides; the default mode is the
+  `mcp.default_load_mode` setting, else `JARVIS_MCP_DEFAULT_LOAD`, else
+  `always`. The shapes and the `transport` guess are `_normalize_servers`'.
+- **The client** (`session.rs`, `stdio.rs`, `http.rs`, `ws.rs`) is our own —
+  `rmcp` would bring a second `reqwest` and has dropped the HTTP+SSE
+  transport. One session per listing and per call, as the adapter opens them:
+  `initialize`, `tools/list` (every page) or `tools/call`, close — so a stdio
+  server only runs while it is being asked something. stdio runs the server
+  in its own process group with `get_default_environment()` plus the config's
+  `env` (`${VAR}` expanded), closes stdin, then SIGTERMs the group after 2 s
+  and SIGKILLs after 2 more; a session dropped mid-call (a stopped run) kills
+  the group. Streamable HTTP POSTs each message and reads a JSON or
+  event-stream answer, carries the session id and protocol version, resumes a
+  stream that broke off from its last event id, and DELETEs the session on
+  close; it opens no standalone GET stream. HTTP+SSE and websocket (the `mcp`
+  subprotocol) as Python's SDK speaks them. A key the transport doesn't take
+  fails the server, as the `TypeError` does in Python.
+- **The manager** (`mod.rs`) lists every server at start (in the background)
+  and on each reload, concurrently, a failed one with no tools, five minutes
+  at most each (Python waits forever); readers see the old listing until the
+  new one is complete. A result becomes the adapter's LangChain blocks
+  (`lc_` ids, image/file blocks, `{"structured_content": …}` as the artifact,
+  an `isError` as a failed result); `llm_tool` converts a schema as
+  `convert_to_openai_tool` does (refs inlined, `$defs` and titles dropped).
+- **Bound** (`agent/tools.rs`): an `always` server's tools follow the edge's
+  own, keyed for policy as `tool_key_for` keys them (`mcp:<server>/<tool>`),
+  gated like any bound tool, run with no timeout; a `lazy` server is named in
+  the `mcp_servers` prompt segment (`agent/prompt.rs`).
+- **`POST /internal/mcp/state`** → `{default_load_mode, servers: [{name,
+  config, load_mode, loaded, tools: [{name, description, input_schema}]}]}`;
+  **`/call`** `{server, tool, args, timeout?}` → `{blocks, artifact,
+  is_error, text}` or a 500 `{error}`. Guarded as the kernel endpoints are.
+  Python's side is `core/mcp.py:EdgeMcp`, what `get_mcp_manager()` returns
+  when `JARVIS_EDGE_URL` is set: it keeps a copy of the state for binding and
+  the prompt, re-read when the edge tells it (`apply_setting` on
+  `mcp.servers`) after a reload or a mode change.
+- **Departures**, named in `tests/test_edge_mcp.py`: a deleted
+  `mcp.default_load_mode` falls back at once (Python kept the last one it
+  synced until a restart); a tool's structured output isn't validated against
+  its output schema (Python's SDK lists the tools again on every call to do
+  it).
+
 ## The agent loop (`src/agent/`)
 
 Phase 2d: chat turns, automation runs and board tasks run in the edge, so
@@ -394,8 +445,7 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   (`startTask`, `triggerAutomation`, a schedule firing): unless
   `JARVIS_AGENT_RUNTIME=python`, a turn on a provider the LLM layer speaks
   (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint), with no
-  attachments, and no MCP server configured anywhere Python looks (env, the
-  first `mcp.json`, the `mcp.servers` setting) is the edge's — for an
+  attachments, is the edge's — for an
   automation, a code or webhook one, or a prompt or monitor one on such a
   model; for a board task (at dispatch), one on such a model: its job gets
   `runtime = 'edge'` and its run is mirrored as the edge's own. Everything
@@ -427,9 +477,9 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   the edge serves for a gate, a board task's question, and a deferred action
   (`core/approvals.py:ACTIONS` — a denial closes the row; an approved delete
   of a workflow, automation or skill runs here before the row closes, so a
-  failure leaves it answerable). An approved MCP call, a workflow paused on
-  a future, or a gate a worker's run is waiting on is deferred to Python
-  before anything is written — which is
+  failure leaves it answerable; so does an approved MCP call, through the
+  edge's MCP client). A workflow paused on a future, or a gate a worker's run
+  is waiting on, is deferred to Python before anything is written — which is
   why it's owned only alone in an operation. `requestToolApproval`, the
   SDK's request from a kernel, is the edge's on the same terms.
   Throughput measured before a handover isn't carried.
@@ -538,7 +588,8 @@ Every query that reads only the database and files:
 | task board | `boardTasks`, `boardTask` |
 | workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
 | lists | `notificationChannels`, `skills`, `pendingApprovals` |
-| tools | `tools` — bound tools as `core/tool_policy.py` lists them, the SDK from `gql/sdk_tools.json` (Python's catalogue, golden-tested); Python's while any MCP server is configured |
+| tools | `tools` — bound tools as `core/tool_policy.py` lists them, the SDK from `gql/sdk_tools.json` (Python's catalogue, golden-tested), and each MCP server's loaded tools |
+| MCP | `mcpServers`, `mcpTools` — the configured servers (env, the first `mcp.json`, the `mcp.servers` setting, the load-mode overrides) and what the edge's MCP client loaded from them (`src/mcp/`, see "MCP") |
 | settings | `settings`, `setting` — the `KNOWN_SETTINGS` registry (`gql/settings.rs`), endpoint API keys redacted |
 | memory | `memories`, `memoryActivities`, `memoryUsage`, `agentMemory` (the `AGENTS.md` blob in `kv_store`, the legacy `/AGENTS.md` copied over on first touch) |
 | chat page | `models` (endpoint names from `models.endpoints` as providers; keys never sent), `todos` (`thread_state`; a thread not yet converted from `checkpoints.db`, read-only, `src/checkpoints.rs`), `browserAvailable` (an http CDP endpoint) |
@@ -558,8 +609,9 @@ Mutations that only write rows and files:
 | lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `createSkill`, `updateSkill`, `deleteSkill` (human callers) — a skill's description embedded, or saved unembedded if the embedder fails |
 | memory | `addMemory` (merged into a near-duplicate), `updateMemoryItem`, `deleteMemory` — embedded by `agent/embed.rs`; an embedder that fails sends the operation to Python before anything is written; `updateMemory`, `deleteAgentMemory` (the blob) |
 | models | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `addEndpoint`, `updateEndpoint`, `removeEndpoint` (`gql/models.rs`) — `models.custom` / `models.endpoints` rewritten as Python's `json.dumps` writes them; a catalog Python would fail to load, or a stored window it would fail to convert, sent to Python before anything is written; a linked worker re-reads the catalog (`apply_setting`) |
-| tools | `setToolPolicy` — only non-default entries stored; Python's while any MCP server is configured; a linked worker drops its policy and agent caches |
-| settings | `setSetting`, `deleteSetting` — a managed key overridden or any `mcp.*` key sent to Python before anything is written; an `embedding.model` change re-read by a linked worker (link `call` `apply_setting`) |
+| tools | `setToolPolicy` — only non-default entries stored; a linked worker drops its policy and agent caches |
+| MCP | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode` — the `mcp.*` settings written as Python writes them, the servers reconnected, a linked worker told; `callMcpTool` — an agent's call checked against its tool policy and, if gated, waiting on a human; a config or arguments that aren't JSON, an agent's call while `call_mcp_tool` is an approval-required action, or a gate a worker's run would show sent to Python before anything is written |
+| settings | `setSetting`, `deleteSetting` — every key applied here: an `mcp.*` key reconnects the MCP servers; the embedding model, the catalog and the tool policy re-read by a linked worker (link `call` `apply_setting`); invalid JSON for a json key sent to Python before anything is written |
 | runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun`, `stopBoardTask` |
 | starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
 | steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
@@ -608,14 +660,10 @@ moves when the thing it reads moves.
 | Root field | Reads | Moves with |
 |---|---|---|
 | `modelSync` with an AWS credential source the edge doesn't read (the edge defers those per call) | boto3's credential chain | the Bedrock client |
-| `tools` while an MCP server is configured | loaded MCP tools | MCP |
-| `mcpServers`, `mcpTools` | the live `McpManager` | MCP (Phase 2) |
 | `voiceStatus` | Piper voice file layout in `core/voice.py` | audio |
 
 | Mutations | Touch | Move with |
 |---|---|---|
-| `setToolPolicy` while an MCP server is configured | the inventory's loaded MCP tools | MCP |
-| `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` | the live `McpManager` | MCP |
-| `resolveApproval` for an approved MCP call or a paused workflow; either it or `requestToolApproval` for a worker's run (the edge defers those per call) | `call_mcp_tool`; a future in a running workflow; a worker's run stream | the workflow engine, MCP |
-| `setSetting`, `deleteSetting` for a managed key overridden (`allowManaged: true`) or any `mcp.*` key (the edge defers those per call) | `apply_setting`'s catalog, tool-policy and MCP caches | the catalog becoming data, MCP |
+| `resolveApproval` for a paused workflow; either it or `requestToolApproval` (or a gated `callMcpTool`) for a worker's run (the edge defers those per call) | a future in a running workflow; a worker's run stream | the workflow engine |
+| `callMcpTool` by the agent while `call_mcp_tool` is in `approval.required_actions` (deferred per call) | `gate_action`'s deferred request | the deferred-action gate |
 | `downloadVoice` | the Piper download | audio |

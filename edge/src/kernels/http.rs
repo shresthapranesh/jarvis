@@ -41,12 +41,17 @@ pub struct KeyBody {
 }
 
 fn refuse(peer: SocketAddr, headers: &HeaderMap) -> Option<Response> {
+    refuse_for(peer, headers, "kernels are for the local worker")
+}
+
+/// The guard every `/internal/*` endpoint the worker calls shares.
+pub(crate) fn refuse_for(peer: SocketAddr, headers: &HeaderMap, why: &'static str) -> Option<Response> {
     let json = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.split(';').next().is_some_and(|t| t.trim().eq_ignore_ascii_case("application/json")));
     if !peer.ip().is_loopback() || headers.contains_key(header::ORIGIN) || !json {
-        return Some((StatusCode::FORBIDDEN, "kernels are for the local worker").into_response());
+        return Some((StatusCode::FORBIDDEN, why).into_response());
     }
     None
 }

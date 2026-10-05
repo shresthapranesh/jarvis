@@ -4,8 +4,8 @@
 //!
 //! The edge answers what lives in rows: a tool gate (the waiter polls the
 //! row), a board task's question, and a deferred action — a denial, or an
-//! approved delete of a workflow, automation or skill (`ACTIONS`' executors).
-//! A request whose answer needs Python's memory — an approved MCP call, a
+//! approved delete of a workflow, automation or skill, or MCP call
+//! (`ACTIONS`' executors). A request whose answer needs Python's memory — a
 //! workflow paused on a future, a gate whose run a worker has — is deferred to
 //! Python, before anything is written.
 
@@ -107,8 +107,8 @@ async fn close(pool: &SqlitePool, id: &str, status: &str, answer: &str, result: 
 
 /// `core/approvals.py:ACTIONS[action].execute` for an approved deferred
 /// action — run before the row is closed, so a failure leaves it pending
-/// and answerable. An MCP call, or a payload only Python would read (or fail
-/// on) faithfully, goes to Python.
+/// and answerable. A payload only Python would read (or fail on) faithfully
+/// goes to Python.
 async fn execute(ctx: &Context<'_>, action: &str, payload: Option<&str>) -> Result<String> {
     let payload: Value = serde_json::from_str(payload.unwrap_or("{}")).map_err(|_| defer("unreadable payload".into()))?;
     let id = |key: &str| -> Result<String> {
@@ -121,7 +121,7 @@ async fn execute(ctx: &Context<'_>, action: &str, payload: Option<&str>) -> Resu
             (super::automation::delete_automation(pool, &id("automation_id")?, ctx.data()?).await?, "Automation")
         }
         "delete_skill" => (super::settings_lists::delete_skill(pool, &id("skill_id")?).await?, "Skill"),
-        "call_mcp_tool" => return Err(defer("an MCP call runs in Python".into())),
+        "call_mcp_tool" => return super::mcp::execute_approved(&ctx.data::<EdgeData>()?.mcp, &payload).await,
         other => {
             return Err(format!("approval references unknown action {}", crate::pyjson::repr_str(other)).into());
         }
