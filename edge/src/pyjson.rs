@@ -24,6 +24,49 @@ pub fn dumps_unicode(value: &Value) -> String {
     out
 }
 
+/// `json.dumps(value, indent=n)`: one item per line, `","` / `": "`.
+pub fn dumps_indent(value: &Value, indent: usize) -> String {
+    let mut out = String::new();
+    write_indented(&mut out, value, indent, 0);
+    out
+}
+
+fn write_indented(out: &mut String, value: &Value, indent: usize, level: usize) {
+    let pad = |out: &mut String, level: usize| {
+        out.push('\n');
+        out.push_str(&" ".repeat(indent * level));
+    };
+    match value {
+        Value::Array(items) if !items.is_empty() => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                pad(out, level + 1);
+                write_indented(out, item, indent, level + 1);
+            }
+            pad(out, level);
+            out.push(']');
+        }
+        Value::Object(map) if !map.is_empty() => {
+            out.push('{');
+            for (i, (k, v)) in map.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                pad(out, level + 1);
+                write_string(out, k, true);
+                out.push_str(": ");
+                write_indented(out, v, indent, level + 1);
+            }
+            pad(out, level);
+            out.push('}');
+        }
+        other => write_value(out, other, true),
+    }
+}
+
 fn write_value(out: &mut String, value: &Value, ascii: bool) {
     match value {
         Value::Null => out.push_str("null"),
@@ -242,6 +285,13 @@ mod tests {
     fn dumps_unicode_matches_python() {
         let v = json!({"a": "é\u{0}\u{7f}\n😀", "b": [1, 2.5]});
         assert_eq!(dumps_unicode(&v), "{\"a\": \"é\\u0000\u{7f}\\n😀\", \"b\": [1, 2.5]}");
+    }
+
+    #[test]
+    fn dumps_indent_matches_python() {
+        // json.dumps({"a": [1, {}], "b": {"c": "é"}, "d": []}, indent=2)
+        let v = json!({"a": [1, {}], "b": {"c": "é"}, "d": []});
+        assert_eq!(dumps_indent(&v, 2), "{\n  \"a\": [\n    1,\n    {}\n  ],\n  \"b\": {\n    \"c\": \"\\u00e9\"\n  },\n  \"d\": []\n}");
     }
 
     #[test]

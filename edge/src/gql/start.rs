@@ -586,6 +586,8 @@ impl StartMutation {
             _ => json!({}),
         };
         let run_id = new_id();
+        // Decided before the write lock is taken: it reads the catalog.
+        let edge = crate::agent::workflow::served(pool, &workflow_id).await;
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO workflow_runs (id, workflow_id, status, inputs, outputs, node_results, error, started_at, \
@@ -598,8 +600,8 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"workflow_id": workflow_id, "inputs": inputs});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload, None, false).await?;
-        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at, false).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload, None, edge).await?;
+        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at, edge).await?;
         Ok(run_id)
     }
 
@@ -607,6 +609,13 @@ impl StartMutation {
     async fn resume_workflow_run(&self, ctx: &Context<'_>, run_id: String, answer: String) -> Result<bool> {
         let registry: &Arc<Registry> = ctx.data()?;
         let run = registry.get(&run_id).ok_or("run not found or not running")?;
+        if run.edge_owned() {
+            // The paused node reads the answer off its request (`agent::workflow`).
+            if run.fields().done || !crate::agent::workflow::answer(ctx.data()?, &run, "answered", &answer).await? {
+                return Err("no pending human input for this run".into());
+            }
+            return Ok(true);
+        }
         if !run.claimed() {
             return Err("no pending human input for this run".into());
         }
@@ -624,6 +633,14 @@ impl StartMutation {
     ) -> Result<bool> {
         let registry: &Arc<Registry> = ctx.data()?;
         let run = registry.get(&run_id).ok_or("run not found or not running")?;
+        if run.edge_owned() {
+            let (status, default) = if approved { ("approved", "approved") } else { ("denied", "denied") };
+            let answer = answer.filter(|a| !a.is_empty()).unwrap_or_else(|| default.into());
+            if run.fields().done || !crate::agent::workflow::answer(ctx.data()?, &run, status, &answer).await? {
+                return Err("no pending approval for this run".into());
+            }
+            return Ok(true);
+        }
         if !run.claimed() {
             return Err("no pending approval for this run".into());
         }

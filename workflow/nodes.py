@@ -1,5 +1,8 @@
 """Workflow node classes.
 
+Ported to the Rust edge (`edge/src/agent/workflow/nodes.rs`, `agent.rs`) — a
+change here is made in both.
+
 Each node type encapsulates its own execution logic. Nodes communicate
 through a shared outputs dict keyed by (node_id, port_name) — the engine
 resolves each node's inputs by following incoming edges.

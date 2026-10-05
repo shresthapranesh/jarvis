@@ -181,7 +181,7 @@ async fn one(ctx: &Ctx<'_>, spec: Task, idx: usize) -> String {
     // A kernel of its own, so concurrent workers' cells don't collide on the
     // conversation's; freed as soon as the worker is done.
     let key = format!("{}::w{idx}::{}", ctx.conversation.as_deref().unwrap_or("worker"), &uuid::Uuid::new_v4().simple().to_string()[..8]);
-    let kernel = Kernel { kernels: ctx.agent.kernels.clone(), key: Some(key.clone()) };
+    let kernel = Kernel::new(ctx.agent.kernels.clone(), key.clone());
     let outcome = match spec.task {
         None => Err("'task'".to_string()),
         Some(task) => {
@@ -211,13 +211,17 @@ async fn one(ctx: &Ctx<'_>, spec: Task, idx: usize) -> String {
 
 /// A worker's kernel, shut down when it's done — or, if the run is stopped
 /// mid-worker, when the worker is dropped.
-struct Kernel {
+pub(super) struct Kernel {
     kernels: Arc<crate::kernels::Kernels>,
     key: Option<String>,
 }
 
 impl Kernel {
-    async fn shutdown(mut self) {
+    pub(super) fn new(kernels: Arc<crate::kernels::Kernels>, key: String) -> Self {
+        Kernel { kernels, key: Some(key) }
+    }
+
+    pub(super) async fn shutdown(mut self) {
         if let Some(key) = self.key.take() {
             self.kernels.shutdown(&key).await;
         }

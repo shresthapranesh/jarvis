@@ -14,6 +14,9 @@
 //! own at start (`queue::recover`), and Python running without the edge
 //! adopts them (`db/ops.py:adopt_edge_jobs`).
 //!
+//! Workflow runs are claimed here too, and run by the edge's port of the
+//! workflow engine (`workflow/`).
+//!
 //! The turn itself (`turn.rs`) runs the model and the tools the edge has
 //! (`tools.rs`) against the transcript tables (`thread.rs`), with the
 //! prompt built as Python builds it (`prompt.rs`) and its events and step
@@ -35,6 +38,7 @@ mod thread;
 mod tools;
 mod turn;
 mod workers;
+pub mod workflow;
 
 pub use queue::EDGE as EDGE_RUNTIME;
 
@@ -125,7 +129,7 @@ impl Agent {
         loop {
             // A slot before the claim: a claimed job's lock is ticking.
             let Ok(slot) = self.slots.clone().acquire_owned().await else { return };
-            match queue::claim(&self.pool, &["chat", "automation", "board_task"], &self.worker).await {
+            match queue::claim(&self.pool, &["chat", "automation", "board_task", "workflow"], &self.worker).await {
                 Ok(Some(job)) => {
                     let me = self.clone();
                     tokio::spawn(async move {
@@ -177,6 +181,7 @@ impl Agent {
         match job.kind.as_str() {
             "automation" => return self.serve_automation(job, run).await,
             "board_task" => return self.serve_board(job, run).await,
+            "workflow" => return self.serve_workflow(job, run).await,
             _ => {}
         }
         match turn::Turn::chat(self, job, run.clone()) {
@@ -325,6 +330,15 @@ impl Agent {
                 .ok()
                 .flatten();
             (title.unwrap_or_default(), Some(id))
+        } else if job.kind == "workflow" {
+            let id = job.payload["workflow_id"].as_str().unwrap_or_default().to_string();
+            let name: Option<String> = sqlx::query_scalar("SELECT name FROM workflows WHERE id = ?")
+                .bind(&id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
+            (name.unwrap_or_default(), Some(id))
         } else if job.kind == "automation" {
             let id = job.payload["automation_id"].as_str().unwrap_or_default().to_string();
             let name: Option<String> = sqlx::query_scalar("SELECT name FROM automations WHERE id = ?")

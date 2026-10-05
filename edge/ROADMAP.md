@@ -48,7 +48,7 @@ it's on `main`.
 
 ## C. The big pieces
 
-- [ ] Workflow engine: `workflow/engine.py` and the node types, workflow runs — L
+- [x] Workflow engine: `workflow/engine.py` and the node types, workflow runs, `run_workflow`
 - [ ] Voice: Whisper transcription, Piper TTS, `downloadVoice`, `voiceStatus`, `/ws/live` — L (Whisper alone is ~245 MB in Python)
 - [ ] `/ws/browser` — M
 - [ ] CLI: `main.py` → a Rust binary — M

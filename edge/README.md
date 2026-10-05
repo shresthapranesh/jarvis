@@ -361,7 +361,7 @@ in both.**
 
 ## The agent loop (`src/agent/`)
 
-Phase 2d: chat turns, automation runs and board tasks run in the edge, so
+Phase 2d: chat turns, automation runs, board tasks and workflow runs run in the edge, so
 none of them needs Python at all. On by
 default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 
@@ -464,7 +464,6 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   runs the tool calls the edge recorded but didn't run, and goes on from
   there (`chat_job_handler`), its text, step rows and spend continuing the
   edge's. A turn goes over when its next step needs what only Python has:
-  a tool other than the edge's (a workflow),
   arguments that aren't plainly valid, or a conversation not yet converted
   from `checkpoints.db`.
 - **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
@@ -491,11 +490,38 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   (`core/approvals.py:ACTIONS` — a denial closes the row; an approved delete
   of a workflow, automation or skill runs here before the row closes, so a
   failure leaves it answerable; so does an approved MCP call, through the
-  edge's MCP client). A workflow paused on a future, or a gate a worker's run
+  edge's MCP client), and a request a workflow the edge runs is paused on. A
+  workflow Python runs, paused on a future, or a gate a worker's run
   is waiting on, is deferred to Python before anything is written — which is
   why it's owned only alone in an operation. `requestToolApproval`, the
   SDK's request from a kernel, is the edge's on the same terms.
   Throughput measured before a handover isn't carried.
+- **Workflows** (`src/agent/workflow/`, ports of `workflow/engine.py`,
+  `workflow/nodes.py`, `core/workflow_template.py`,
+  `server/workflow_runtime.py` and `tools/workflows.py:run_workflow` — change
+  both): `runWorkflow` queues an edge job when the loop is on and every model
+  the graph can call (each node's, the default, a map's saved workflow's) is
+  one the edge calls (`workflow::served`). The engine runs the graph in
+  frontiers, prunes a conditional's or router's unchosen branches, and gives
+  each node its retries, timeout and `on_error`; templates are Jinja
+  (minijinja, printing values as Python's `str()` does, with Python's
+  `tojson`/`fromjson`), Python's regex renderer when Jinja refuses. An agent
+  node is the main agent (`agent.rs`): its prompt, retrieval, tools and
+  policy, on a history and a kernel of its own, its text streamed as
+  `node_token`, its calls counted against the workflow's budget. An approval
+  or input node files its `approvals` row (under the run, so the inbox shows
+  it) and polls it; `resumeWorkflowRun`, `resolveWorkflowApproval` and
+  `resolveApproval` close it with the answer (`workflow::answer`). The
+  chat's `run_workflow` runs its workflow inside the call, shown as a worker
+  starting and finishing. Named departures: a stop ends the nodes at once
+  (Python lets an in-flight model call finish); `output_schema` is not
+  checked with `jsonschema` (no `_schema_error`); an agent node's bad tool
+  arguments get a plainer error than Pydantic's, and its history is only
+  trimmed per call, never summarized; a map item's paused node is filed
+  under the run (Python's is nobody's, so unanswerable); a timed-out or
+  orphaned request is expired, not left pending; an edge naming no node
+  fails the run at once. Tested in `tests/test_edge_workflow.py` (edge only,
+  not diffed).
 - **Recovery**: at start the edge re-queues its jobs a previous edge left
   running; with the loop off, it hands every live edge job to Python. Python
   running without the edge adopts them (`db/ops.py:adopt_edge_jobs`).
@@ -677,6 +703,6 @@ moves when the thing it reads moves.
 
 | Mutations | Touch | Move with |
 |---|---|---|
-| `resolveApproval` for a paused workflow; either it or `requestToolApproval` (or a gated `callMcpTool`) for a worker's run (the edge defers those per call) | a future in a running workflow; a worker's run stream | the workflow engine |
+| `resolveApproval`, `resumeWorkflowRun`, `resolveWorkflowApproval` for a workflow Python runs; `resolveApproval` or `requestToolApproval` (or a gated `callMcpTool`) for a worker's run (the edge defers those per call) | a future in a running workflow; a worker's run stream | Python's workflow runs |
 | `callMcpTool` by the agent while `call_mcp_tool` is in `approval.required_actions` (deferred per call) | `gate_action`'s deferred request | the deferred-action gate |
 | `downloadVoice` | the Piper download | audio |

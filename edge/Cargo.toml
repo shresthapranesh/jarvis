@@ -56,6 +56,7 @@ sha2 = "0.10"
 # Starlette's FileResponse ETag is an MD5 (`rest.rs`).
 md-5 = "0.10"
 hex = "0.4.3"
+minijinja = { version = "2.24.0", default-features = false, features = ["builtins", "serde", "preserve_order", "std_collections"] }
 
 [profile.release]
 opt-level = "s"

@@ -407,7 +407,7 @@ async fn upload(staging: &Path, req: Request) -> Result<Response, Request> {
 }
 
 /// `datetime.now(timezone.utc).isoformat()`.
-fn isoformat_utc_now() -> String {
+pub(crate) fn isoformat_utc_now() -> String {
     let now = chrono::Utc::now();
     let micros = now.timestamp_subsec_micros();
     if micros == 0 {

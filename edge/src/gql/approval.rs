@@ -45,6 +45,7 @@ struct Row {
     action_payload: Option<String>,
     board_task_id: Option<String>,
     task_id: Option<String>,
+    interrupt_id: Option<String>,
     parent_id: Option<String>,
     tool: Option<String>,
     result: Option<String>,
@@ -52,7 +53,7 @@ struct Row {
 
 async fn row(pool: &SqlitePool, id: &str) -> sqlx::Result<Option<Row>> {
     sqlx::query_as(
-        "SELECT status, kind, source, action, action_payload, board_task_id, task_id, parent_id, tool, result FROM approvals WHERE id = ?",
+        "SELECT status, kind, source, action, action_payload, board_task_id, task_id, interrupt_id, parent_id, tool, result FROM approvals WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -176,6 +177,13 @@ impl ApprovalMutation {
             super::board::answer_task(pool, ctx.data::<EdgeData>()?, task, answer).await?;
             let after = self::row(pool, &id).await?.ok_or("approval not found")?;
             return Ok(ResolveApprovalPayload { id, status: after.status, result: after.result });
+        }
+        // A workflow the edge runs: its paused node reads the answer off the row.
+        if let Some(run) = row.task_id.as_deref().and_then(|t| registry.get(t)).filter(|r| r.edge_owned() && !r.fields().done) {
+            let status = if row.kind == "input" { "answered" } else if approved { "approved" } else { "denied" };
+            close(pool, &id, status, answer, "Delivered to the run.").await?;
+            run.emit_local("interrupt_resolved", &json!({"interrupt_id": row.interrupt_id}));
+            return Ok(ResolveApprovalPayload { id, status: status.into(), result: Some("Delivered to the run.".into()) });
         }
         Err(defer("a paused run waits in Python".into()))
     }
