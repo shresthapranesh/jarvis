@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -20,6 +22,15 @@ import httpx
 import pytest
 
 EDGE_DIR = Path(__file__).resolve().parent.parent / "edge"
+GENERATED = EDGE_DIR.parent / "frontend" / "src" / "__generated__"
+
+
+def _relay_text(operation: str) -> str:
+    """The query text Relay compiled for a frontend operation."""
+    src = (GENERATED / f"{operation}.graphql.ts").read_text()
+    match = re.search(r'"text": (".*?(?<!\\)")', src, re.S)
+    assert match, f"no query text in {operation}"
+    return json.loads(match.group(1))
 
 
 @pytest.fixture(scope="session")

@@ -542,6 +542,7 @@ Every query that reads only the database and files:
 | settings | `settings`, `setting` — the `KNOWN_SETTINGS` registry (`gql/settings.rs`), endpoint API keys redacted |
 | memory | `memories`, `memoryActivities`, `memoryUsage`, `agentMemory` (the `AGENTS.md` blob in `kv_store`, the legacy `/AGENTS.md` copied over on first touch) |
 | chat page | `models` (endpoint names from `models.endpoints` as providers; keys never sent), `todos` (`thread_state`; a thread not yet converted from `checkpoints.db`, read-only, `src/checkpoints.rs`), `browserAvailable` (an http CDP endpoint) |
+| model sync | `modelSync` — each provider's listing and, with `probe`, a one-token call per catalog model (`src/discovery.rs`, a port of `core/model_discovery.py`; Bedrock signed with SigV4 by `src/aws.rs`, credentials from the environment, the shared files' static keys or the instance role). Listings run at once; skip reasons are Python's word for word. An AWS credential source boto3 alone reads (assume-role, SSO, web identity, `credential_process`, a container role), or a reply Python would fail on, sends the query to Python |
 | Relay | `node` for every Node type |
 
 Mutations that only write rows and files:
@@ -606,7 +607,7 @@ moves when the thing it reads moves.
 
 | Root field | Reads | Moves with |
 |---|---|---|
-| `modelSync` | provider APIs | the catalog tooling |
+| `modelSync` with an AWS credential source the edge doesn't read (the edge defers those per call) | boto3's credential chain | the Bedrock client |
 | `tools` while an MCP server is configured | loaded MCP tools | MCP |
 | `mcpServers`, `mcpTools` | the live `McpManager` | MCP (Phase 2) |
 | `voiceStatus` | Piper voice file layout in `core/voice.py` | audio |

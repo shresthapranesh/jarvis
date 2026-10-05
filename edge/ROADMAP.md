@@ -42,7 +42,7 @@ it's on `main`.
 - [x] Settings: `settings`, `setting`, `setSetting`, `deleteSetting` (a managed key overridden, or an `mcp.*` key, is applied in Python until Models and MCP move)
 - [x] Models: `addModel`, `updateModel`, `removeModel`, `setDefaultModel`, `addDiscoveredModels`, endpoints
 - [x] Tools: `tools`, `setToolPolicy` (Python's while an MCP server is configured — with MCP)
-- [ ] `modelSync`: provider model listings (Gemini, Anthropic, Bedrock, Ollama, OpenRouter, endpoints) and the probe calls — M
+- [x] `modelSync`: provider model listings (Gemini, Anthropic, Bedrock, Ollama, OpenRouter, endpoints) and the probe calls (an AWS credential source only boto3 reads goes to Python)
 - [x] `browserActivity` (an edge run's stream; a worker's run is Python's)
 - [x] REST: `/uploads`, `/artifacts/{id}/raw`, `/documents/{id}/raw`, `/server-logs` (+ `/stream`, the edge's and a linked worker's records)
 
