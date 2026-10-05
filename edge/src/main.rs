@@ -6,6 +6,7 @@
 
 mod agent;
 mod approvals;
+mod aws;
 mod bots;
 mod budget;
 mod catalog;
@@ -14,6 +15,7 @@ mod config;
 mod consolidate;
 mod cron;
 mod db;
+mod discovery;
 mod gql;
 mod graphql;
 mod jobs;

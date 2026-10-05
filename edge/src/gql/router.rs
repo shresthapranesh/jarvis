@@ -75,6 +75,7 @@ const DEFERRING_FIELDS: &[&str] = &[
     "removeEndpoint",
     "setToolPolicy",
     "browserActivity",
+    "modelSync",
 ];
 
 /// Who sent the request. The `jarvis` SDK sends `X-Jarvis-Caller: agent`

@@ -29,10 +29,9 @@ from typing import Any
 import httpx
 import pytest
 
-from edge_support import _gid, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from edge_support import GENERATED, _gid, _relay_text, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 
 ROOT = Path(__file__).resolve().parent.parent
-GENERATED = ROOT / "frontend" / "src" / "__generated__"
 
 # Every frontend query whose root fields the edge implements must be listed
 # here, so porting a field can't silently route an operation nobody diffed.
@@ -66,6 +65,8 @@ PARITY_OPERATIONS = {
     "useModelsQuery",
     "TodoListQuery",
     "BrowserAvailableQuery",
+    # tests/test_edge_model_sync.py
+    "ModelSyncQuery",
 }
 
 
@@ -134,13 +135,6 @@ async def seeded(database) -> dict[str, str]:
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-
-
-def _relay_text(operation: str) -> str:
-    src = (GENERATED / f"{operation}.graphql.ts").read_text()
-    match = re.search(r'"text": (".*?(?<!\\)")', src, re.S)
-    assert match, f"no query text in {operation}"
-    return json.loads(match.group(1))
 
 
 async def _python(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1119,9 +1113,11 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
     "query",
     [
         # A root field the edge doesn't implement.
-        "{ modelSync { provider } }",
+        "{ mcpServers { name } }",
         # One owned root field and one not: the whole operation goes to Python.
-        "{ conversations { id } modelSync { provider } }",
+        "{ conversations { id } mcpServers { name } }",
+        # A field that may defer, beside another.
+        "{ models { default } modelSync { provider } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
         # A mutation that isn't ported.

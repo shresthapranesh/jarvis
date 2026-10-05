@@ -14,6 +14,7 @@ pub mod codec;
 pub mod conversation;
 pub mod events;
 pub mod memory;
+pub mod model_sync;
 pub mod models;
 pub mod node;
 pub mod project;
@@ -48,6 +49,7 @@ pub struct Query(
     memory::MemoryQuery,
     runs::RunQuery,
     models::ModelsQuery,
+    model_sync::ModelSyncQuery,
     tools::ToolQuery,
     browser::BrowserQuery,
     node::NodeQuery,

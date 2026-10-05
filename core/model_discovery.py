@@ -36,6 +36,12 @@ DISCOVERABLE: frozenset[str] = frozenset(
 _TIMEOUT = 30.0
 
 
+def _base(env: str, default: str) -> str:
+    """A provider's base URL; the env names are the Rust edge's (its
+    `llm::Endpoints`), so one override points both at the same server."""
+    return (os.environ.get(env) or default).rstrip("/")
+
+
 def discoverable() -> frozenset[str]:
     """`DISCOVERABLE` and every endpoint: each lists its models at `/models`.
     Reads the endpoint cache, so hydrate the catalog first."""
@@ -103,7 +109,7 @@ def _discover_google() -> list[DiscoveredModel]:
             if page:
                 params["pageToken"] = page
             r = client.get(
-                "https://generativelanguage.googleapis.com/v1beta/models",
+                f"{_base('JARVIS_GOOGLE_BASE_URL', 'https://generativelanguage.googleapis.com')}/v1beta/models",
                 headers={"x-goog-api-key": key}, params=params,
             )
             if r.status_code != 200:
@@ -218,7 +224,7 @@ def _discover_openrouter() -> list[DiscoveredModel]:
     # separate question (some routes need your own upstream key or a credit
     # balance), which only --probe answers.
     try:
-        r = httpx.get(f"{OPENROUTER_BASE_URL}/models", timeout=_TIMEOUT)
+        r = httpx.get(f"{_base('JARVIS_OPENROUTER_BASE_URL', OPENROUTER_BASE_URL)}/models", timeout=_TIMEOUT)
         r.raise_for_status()
     except Exception as exc:
         raise DiscoveryError(f"could not reach OpenRouter: {exc}") from exc
