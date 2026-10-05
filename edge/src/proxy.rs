@@ -1,6 +1,6 @@
 //! Reverse proxy to the Python server for everything the edge doesn't serve
-//! itself: un-ported GraphQL operations, subscriptions, REST, the live-audio
-//! and browser WebSockets, and the SPA.
+//! itself: un-ported GraphQL operations, subscriptions, the REST routes
+//! `rest.rs` doesn't take, the live-audio and browser WebSockets, and the SPA.
 //!
 //! Bodies are streamed both ways, never buffered: uploads are up to 100 MiB
 //! and `/server-logs/stream` is a response that never ends.
@@ -59,6 +59,10 @@ pub async fn any(
     if is_websocket_upgrade(req.headers()) {
         return websocket(state, req).await;
     }
+    let req = match crate::rest::serve(&state, req).await {
+        Ok(response) => return response,
+        Err(req) => req,
+    };
     if matches!(*req.method(), Method::GET | Method::HEAD) {
         let path = req.uri().path();
         let head = *req.method() == Method::HEAD;

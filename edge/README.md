@@ -230,8 +230,8 @@ command (in its own process group, with `JARVIS_EDGE_URL` and
 `JARVIS_BACKEND_PORT` set) when there is work, and stops it when there has
 been none for `JARVIS_WORKER_IDLE` seconds. Idle, jarvis is the edge alone.
 
-**What starts it**: a request the edge proxies (REST, the other WebSockets,
-GraphQL it hasn't ported) — which waits for it, 2–3 s on a laptop; a job a
+**What starts it**: a request the edge proxies (TTS/transcription, the other
+WebSockets, GraphQL it hasn't ported) — which waits for it, 2–3 s on a laptop; a job a
 worker could claim now, or one a dead worker left `running` — not one the
 edge's own agent loop runs (`jobs.runtime`); a voice note a
 bot needs transcribed (Whisper is Python's); and the edge's own start, so the
@@ -499,6 +499,17 @@ to it when adding a provider.
   - message cursors are urlsafe `base64("{iso}|{id}")`
 - **`/server-logs` peer check.** Python's localhost-only check sees every
   proxied request as 127.0.0.1, so the edge enforces it on the real peer.
+- **REST the edge serves** (`src/rest.rs`, `src/logs.rs` — ports of
+  `routes_artifacts.py`, `routes_documents.py`, `routes_uploads.py`,
+  `routes_logs.py`; change both). Downloads answer as Starlette's
+  `FileResponse`: its headers (ETag = md5 of `"{st_mtime}-{size}"`), one byte
+  range, `HEAD` left to Python (FastAPI's 405); several ranges, a range number
+  only `int()` reads, or a path that isn't a file are proxied. `/uploads`
+  streams the `file` part to the staging directory (last one wins, 100 MiB
+  cap, FastAPI's 422 bodies); an urlencoded body is proxied. The log viewer is
+  one buffer: the edge's `tracing` events plus the records a linked worker
+  sends over the link (`type: "log"`), its pre-link backfill included — so
+  opening it never starts Python. Diffed in `tests/test_edge_rest.py`.
 
 ## Porting a domain
 

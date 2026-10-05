@@ -9,7 +9,7 @@
 6. If the edge already serves this type, update the Rust port and its parity test (see `edge/README.md`).
 
 ## Adding a REST endpoint (only when GraphQL doesn't fit)
-`routes_*.py` with `Annotated[AsyncSession, Depends(get_session)]` → `app.include_router` in `entrypoint.py` → proxy entry in `frontend/vite.config.ts` (`ws: true` for sockets) → helper in `frontend/src/lib/api.ts`.
+`routes_*.py` with `Annotated[AsyncSession, Depends(get_session)]` → `app.include_router` in `entrypoint.py` → proxy entry in `frontend/vite.config.ts` (`ws: true` for sockets) → helper in `frontend/src/lib/api.ts`. The edge serves the downloads, `/uploads` and `/server-logs` itself (`edge/src/rest.rs`, `logs.rs`) — change both.
 
 ## Runs: job queue + live streaming
 All run kinds (chat, automation, workflow, board, maintenance) share one pattern:

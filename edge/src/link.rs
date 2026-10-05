@@ -52,6 +52,10 @@ enum FromWorker {
     Dispatch,
     /// An automation's schedule changed; re-read them.
     Schedules,
+    /// A record for the log viewer (`logs.rs`).
+    Log {
+        record: Value,
+    },
     /// Why the worker must not be stopped for being idle (`supervisor.rs`).
     Holds {
         holds: Vec<String>,
@@ -138,6 +142,7 @@ async fn serve(
             }
             Ok(FromWorker::Schedules) => scheduler.schedules_changed(),
             Ok(FromWorker::Holds { holds }) => supervisor.set_holds(holds),
+            Ok(FromWorker::Log { record }) => crate::logs::push(record),
             Ok(FromWorker::Hello { .. }) => tracing::warn!("worker link: repeated hello ignored"),
             Err(e) => tracing::warn!("worker link: bad message: {e}"),
         }
