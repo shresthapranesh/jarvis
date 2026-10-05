@@ -22,8 +22,10 @@
 mod artifacts;
 mod automation;
 mod board;
+mod documents;
 pub mod embed;
 mod events;
+mod files;
 mod prompt;
 mod queue;
 pub mod retrieve;
@@ -32,6 +34,7 @@ mod summarize;
 mod thread;
 mod tools;
 mod turn;
+mod workers;
 
 pub use queue::EDGE as EDGE_RUNTIME;
 

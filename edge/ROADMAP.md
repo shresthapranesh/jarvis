@@ -27,7 +27,7 @@ it's on `main`.
 - [x] `resolveApproval` for deferred deletes (`delete_workflow`, `delete_automation`, `delete_skill`) and every denial
 - [x] `resolveApproval` for an approved `call_mcp_tool`
 - [ ] Attachments: text extraction at turn start (PDF, docx, xlsx, …) — M–L
-- [ ] Workers: `spawn_workers` — M
+- [x] Workers: `spawn_workers`, its roles and their tools (files, artifact reads, document search)
 - [ ] Anthropic client — M
 - [ ] Bedrock client — M
 - [x] MCP: our own client (stdio, Streamable HTTP, HTTP+SSE, websocket), servers, `mcpServers`/`mcpTools`, the server mutations, `callMcpTool`, bound `always` tools, `mcp.*` settings; Python behind the edge calls through it

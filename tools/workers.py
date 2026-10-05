@@ -10,6 +10,10 @@ The tool is built per agent via `make_spawn_workers(role_factories)` in
 a process-global registry here would make whichever model built its agent
 last own the workers of every conversation.
 
+The Rust edge runs `spawn_workers` itself (`edge/src/agent/workers.rs`), a
+port of this module and the roles in `core/agents.py`: a change to either is
+made in both.
+
 Each worker surfaces live progress to the parent stream via the ToolContext
 event sink: `worker_start` when it spins up, `worker_step` per node
 transition, coalesced `worker_token` text, and `worker_done` (status

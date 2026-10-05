@@ -5,6 +5,10 @@ instead of being pasted into the message; the message carries a stub with the
 document_id. These tools let the agent query that index. Both are scoped to
 the current conversation via the same `conversation_id` configurable the
 artifact tools use.
+
+The Rust edge runs these for its workers (`edge/src/agent/documents.rs`), a
+port of this module and of `search_chunks` / `read_chunks`: a change to either
+is made in both.
 """
 
 from __future__ import annotations

@@ -2,6 +2,9 @@
 
 Paths under memory/ are transparently routed to the key-value store so
 agent memory persists in the database rather than as loose files on disk.
+
+The Rust edge runs these for its workers (`edge/src/agent/files.rs`), a port
+of this module: a change to either is made in both.
 """
 
 from __future__ import annotations

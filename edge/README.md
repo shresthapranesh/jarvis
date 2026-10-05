@@ -464,9 +464,22 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   runs the tool calls the edge recorded but didn't run, and goes on from
   there (`chat_job_handler`), its text, step rows and spend continuing the
   edge's. A turn goes over when its next step needs what only Python has:
-  a tool other than the edge's (workers, a workflow),
+  a tool other than the edge's (a workflow),
   arguments that aren't plainly valid, or a conversation not yet converted
   from `checkpoints.db`.
+- **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
+  roles in `core/agents.py` — change both): `spawn_workers` runs its tasks at
+  once, each on the run's model with its role's prompt and tools (the files,
+  artifact and document tools are `files.rs`, `artifacts.rs`, `documents.rs`,
+  ports of `tools/files.py`, `tools/artifacts.py`, `tools/documents.py`), a
+  history in memory and a kernel of its own. A worker can't be handed over,
+  so it answers unknown tools, bad arguments (worded as `invoke_tool` words
+  them) and gates itself. Its events reach the turn as notes, written and
+  announced in order — all but `worker_token` as `subagent` steps of
+  `<role>:<idx>` — and its model and tool calls count against the run's
+  budget and usage. A stop drops the workers at once (Python lets an
+  in-flight worker call finish and counts it); a batch's calls run in order
+  (Python runs them at once).
 - **Approvals** (`src/approvals.rs`, a port of `core/tool_gate.py` and
   `core/approval.py` — change both): a call whose policy needs a human's yes
   records an `approvals` row, is shown in the chat (`approval_request`), and
