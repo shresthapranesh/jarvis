@@ -14,7 +14,7 @@ use sqlx::{Row, SqlitePool};
 use super::embed::{self, Embedder};
 use crate::gql::codec::{new_id, now_stored};
 
-fn env_float(name: &str, default: f64) -> f64 {
+pub(super) fn env_float(name: &str, default: f64) -> f64 {
     match std::env::var(name).ok().filter(|v| !v.is_empty()) {
         Some(raw) => raw.trim().parse().unwrap_or_else(|_| {
             tracing::warn!("ignoring non-numeric {name}={raw:?}");
@@ -110,7 +110,7 @@ pub fn select_hybrid(dense: &[(String, f64)], sparse: &[String], k: usize, min_s
     survivors
 }
 
-async fn lexical(pool: &SqlitePool, sql: &str, binds: &[&str]) -> Vec<String> {
+pub(super) async fn lexical(pool: &SqlitePool, sql: &str, binds: &[&str]) -> Vec<String> {
     let mut q = sqlx::query_scalar::<_, String>(sql);
     for b in binds {
         q = q.bind(*b);

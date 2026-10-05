@@ -15,6 +15,8 @@ use crate::runs::Run;
 /// `TokenCoalescer` defaults: flush at 64 characters or 50 ms, whichever first.
 const MAX_CHARS: usize = 64;
 const MAX_DELAY: Duration = Duration::from_millis(50);
+/// `WORKER_RESULT_PERSIST_CAP`: how much of a worker's result its step keeps.
+const WORKER_RESULT_CAP: usize = 2000;
 
 /// One event kind's buffer (`_Bucket`), for the main agent only.
 struct Bucket {
@@ -135,6 +137,59 @@ impl Emitter {
         .map_err(|e| e.to_string())?;
         self.step_seq += 1;
         self.raw("step", &json!({"node": node, "source": "main", "subagent": null, "data": data}));
+        Ok(())
+    }
+
+    /// One of `spawn_workers`' events. A worker's progress (all but its
+    /// tokens) is first written as a `subagent` step of its group,
+    /// `<role>:<idx>`, which the transcript rebuilds its card from.
+    pub async fn worker(&mut self, event: &str, data: &Value) -> Result<(), String> {
+        if !event.starts_with("worker_") {
+            self.emit(event, data);
+            return Ok(());
+        }
+        if event == "worker_token" {
+            // Coalesced at the source already, and never beside main text.
+            self.raw(event, data);
+            return Ok(());
+        }
+        self.flush();
+        if self.rows {
+            let field = |k: &str| data.get(k).cloned().unwrap_or(Value::Null);
+            let or = |k: &str, default: &str| match data.get(k) {
+                Some(v) => crate::pyjson::py_str(v),
+                None => default.to_string(),
+            };
+            let group = format!("{}:{}", or("role", "worker"), or("idx", "?"));
+            let (node, step) = if event == "worker_step" {
+                (or("node", "worker"), data.get("data").and_then(Value::as_str).map(str::to_string))
+            } else {
+                let mut record = json!({"idx": field("idx"), "role": field("role"), "task": field("task")});
+                if event == "worker_done" {
+                    record["status"] = data.get("status").cloned().unwrap_or_else(|| json!("done"));
+                    let result = data.get("result").filter(|v| crate::pyjson::truthy(v)).map(crate::pyjson::py_str).unwrap_or_default();
+                    record["result"] = json!(crate::pystr::prefix(&result, WORKER_RESULT_CAP));
+                }
+                (event.to_string(), Some(crate::pyjson::dumps(&record)))
+            };
+            sqlx::query(
+                "INSERT INTO steps (id, message_id, conversation_id, node, source, subagent, data, seq, created_at) \
+                 VALUES (?, ?, ?, ?, 'subagent', ?, ?, ?, ?)",
+            )
+            .bind(new_id())
+            .bind(&self.task_id)
+            .bind(&self.conversation_id)
+            .bind(&node)
+            .bind(&group)
+            .bind(&step)
+            .bind(self.step_seq)
+            .bind(now_stored())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            self.step_seq += 1;
+        }
+        self.raw(event, data);
         Ok(())
     }
 }

@@ -255,6 +255,81 @@ async fn file(scope: &Scope<'_>, title: &str, file_path: &str, artifact_id: Opti
     })
 }
 
+/// `read_artifact(artifact_id, version)`: a markdown artifact's text, live
+/// or a version's; a file artifact only described. `cwd` resolves a stored
+/// relative filename, as the Python server's working directory does.
+pub async fn read(pool: &SqlitePool, dir: &Path, cwd: &Path, id: &str, version: Option<i64>) -> Result<String, String> {
+    let row: Option<(String, String, Option<String>)> =
+        sqlx::query_as("SELECT kind, filename, mime_type FROM artifacts WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    let Some((kind, filename, mime)) = row else { return Ok(format!("Artifact not found: {id}")) };
+    if kind != "markdown" {
+        let size = std::fs::metadata(cwd.join(&filename)).map_or(0, |m| m.len());
+        let mime = mime.filter(|m| !m.is_empty()).unwrap_or_else(|| "unknown mime type".into());
+        return Ok(format!(
+            "Artifact {id} is a {kind} file ({mime}, {size} bytes) — binary, not text-readable; download it via the \
+             raw artifact endpoint."
+        ));
+    }
+    if let Some(v) = version {
+        let found: Option<String> =
+            sqlx::query_scalar("SELECT filename FROM artifact_versions WHERE artifact_id = ? AND version = ?")
+                .bind(id)
+                .bind(v)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        let Some(filename) = found else { return Ok(format!("Artifact version {v} not found for {id}")) };
+        let mut path = cwd.join(&filename);
+        if !path.exists() {
+            path = dir.join(format!("{id}_v{v}.md"));
+        }
+        if !path.exists() {
+            return Ok(format!("Artifact version file missing: {id} v{v}"));
+        }
+        return super::files::read_text(&path, &path.to_string_lossy());
+    }
+    let path = dir.join(format!("{id}.md"));
+    if !path.exists() {
+        return Ok(format!("Artifact file missing on disk: {id}"));
+    }
+    super::files::read_text(&path, &path.to_string_lossy())
+}
+
+/// `list_artifacts(all_conversations)`: newest first, with version counts.
+/// Without a conversation to scope to, every artifact is listed.
+pub async fn list(pool: &SqlitePool, conversation_id: Option<&str>, all_conversations: bool) -> Result<String, String> {
+    let scope = if all_conversations { None } else { conversation_id };
+    let mut sql = "SELECT id, title, conversation_id, updated_at FROM artifacts".to_string();
+    if scope.is_some() {
+        sql.push_str(" WHERE conversation_id = ?");
+    }
+    sql.push_str(" ORDER BY updated_at DESC");
+    let mut q = sqlx::query_as::<_, (String, String, Option<String>, String)>(&sql);
+    if let Some(c) = scope {
+        q = q.bind(c);
+    }
+    let rows = q.fetch_all(pool).await.map_err(|e| e.to_string())?;
+    if rows.is_empty() {
+        return Ok(if all_conversations { "No artifacts found." } else { "No artifacts in this conversation." }.into());
+    }
+    let mut out = vec![];
+    for (id, title, conversation_id, updated_at) in rows {
+        let versions = latest_version(pool, &id).await.unwrap_or(0);
+        out.push(json!({
+            "id": id,
+            "title": title,
+            "conversation_id": conversation_id,
+            "updated_at": crate::gql::codec::iso_from_db(&updated_at).0,
+            "versions": versions,
+        }));
+    }
+    Ok(crate::pyjson::dumps(&Value::Array(out)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,7 +8,8 @@
 //! Python, or re-claimed after a crash, goes on from the rows.
 //!
 //! A history that outgrows the model's threshold is summarized before the
-//! call (`summarize.rs`). A step that needs Python (`prompt::NeedsPython`,
+//! call (`summarize.rs`). `spawn_workers` runs its workers here too
+//! (`workers.rs`), their events written and announced as they come. A step that needs Python (`prompt::NeedsPython`,
 //! `tools::Plan::Python`) hands the turn over with what it carried
 //! (`Outcome::HandOver`); Python runs the recorded calls and goes on.
 
@@ -25,7 +26,7 @@ use super::queue::Job;
 use super::summarize::{self, Summarizer};
 use super::thread::Thread;
 use super::tools::{self, Native, Plan, Policy, Step};
-use super::{Agent, Outcome, prompt};
+use super::{Agent, Outcome, prompt, workers};
 use crate::budget::{Budget, Limits};
 use crate::gql::codec::now_stored;
 use crate::llm::perf::PerfTracker;
@@ -280,7 +281,7 @@ impl<'a> Turn<'a> {
                 Plan::Python(why) => return Err(Stop::Python(why)),
             };
             self.take_step()?;
-            self.tool_step(thread, &reply.tool_calls, steps, &policy).await?;
+            self.tool_step(thread, &reply.tool_calls, steps, &policy, &mcp).await?;
         }
     }
 
@@ -388,21 +389,7 @@ impl<'a> Turn<'a> {
         let reply = reply.map_err(|e| Stop::Failed(e.message))?;
 
         let usage = reply.message.usage.clone().unwrap_or_default();
-        if usage.input.is_some() || usage.output.is_some() {
-            self.has_usage = true;
-            self.input_tokens += usage.input.unwrap_or(0);
-            self.output_tokens += usage.output.unwrap_or(0);
-        }
-        let mut emitted = self.budget.record_llm(usage.input, usage.output);
-        // Only a chat run tracks throughput (`start_run_callbacks(with_perf=…)`).
-        if matches!(self.kind, Kind::Chat) {
-            emitted.push(("perf_update", self.perf.record(reply.perf)));
-        }
-        emitted.extend(self.budget.check());
-        for (event, data) in emitted {
-            self.events.emit(event, &data);
-        }
-        self.sync_fields();
+        self.count_call(usage.input, usage.output, reply.perf);
 
         let message = reply.message;
         // The compaction lands with the reply, as Python's step returns it.
@@ -420,7 +407,39 @@ impl<'a> Turn<'a> {
         Ok(message)
     }
 
-    async fn tool_step(&mut self, thread: &mut Thread, calls: &[ToolCall], steps: Vec<Step>, policy: &Policy) -> Result<(), Stop> {
+    /// A model call's usage and throughput — the turn's own, or a worker's,
+    /// which the run's callbacks counted too in Python.
+    fn count_call(&mut self, input: Option<i64>, output: Option<i64>, perf: crate::llm::perf::CallPerf) {
+        if input.is_some() || output.is_some() {
+            self.has_usage = true;
+            self.input_tokens += input.unwrap_or(0);
+            self.output_tokens += output.unwrap_or(0);
+        }
+        let mut emitted = self.budget.record_llm(input, output);
+        // Only a chat run tracks throughput (`start_run_callbacks(with_perf=…)`).
+        if matches!(self.kind, Kind::Chat) {
+            emitted.push(("perf_update", self.perf.record(perf)));
+        }
+        emitted.extend(self.budget.check());
+        for (event, data) in emitted {
+            self.events.emit(event, &data);
+        }
+        self.sync_fields();
+    }
+
+    fn count_tool(&mut self) {
+        self.budget.record_tool(1).into_iter().for_each(|(e, d)| self.events.emit(e, &d));
+        self.sync_fields();
+    }
+
+    async fn tool_step(
+        &mut self,
+        thread: &mut Thread,
+        calls: &[ToolCall],
+        steps: Vec<Step>,
+        policy: &Policy,
+        mcp: &crate::mcp::Snapshot,
+    ) -> Result<(), Stop> {
         // Every gate is answered, in call order, before anything runs.
         let mut ready = Vec::with_capacity(steps.len());
         for (call, step) in calls.iter().zip(steps) {
@@ -437,9 +456,12 @@ impl<'a> Turn<'a> {
             let (content, status, artifact) = match step {
                 Step::Unknown(error) | Step::Denied(error) => (Content::Text(error), "error", None),
                 Step::Gated(_) => unreachable!("gates are answered first"),
+                Step::Run(Native::SpawnWorkers { tasks }) => {
+                    self.count_tool();
+                    (Content::Text(self.spawn_workers(tasks, policy, mcp).await?), "success", None)
+                }
                 Step::Run(Native::Mcp { server, tool, args }) => {
-                    self.budget.record_tool(1).into_iter().for_each(|(e, d)| self.events.emit(e, &d));
-                    self.sync_fields();
+                    self.count_tool();
                     let run = self.run.clone();
                     // No timeout: Python's bound MCP tools have none.
                     let ran = tokio::select! {
@@ -450,8 +472,7 @@ impl<'a> Turn<'a> {
                     (mcp_content(&r.blocks), if r.is_error { "error" } else { "success" }, r.artifact)
                 }
                 Step::Run(native) => {
-                    self.budget.record_tool(1).into_iter().for_each(|(e, d)| self.events.emit(e, &d));
-                    self.sync_fields();
+                    self.count_tool();
                     let run = self.run.clone();
                     let ran = tokio::select! {
                         r = self.run_native(thread, native) => r,
@@ -474,6 +495,53 @@ impl<'a> Turn<'a> {
             return Err(Stop::Cancelled);
         }
         self.events.step("tools", tools_step_data(&results)).await.map_err(Stop::Failed)?;
+        Ok(())
+    }
+
+    /// `spawn_workers`: the workers run while what they tell the run is
+    /// written and announced as it comes, in order; a stop drops them all.
+    async fn spawn_workers(&mut self, tasks: Vec<workers::Task>, policy: &Policy, mcp: &crate::mcp::Snapshot) -> Result<String, Stop> {
+        let (notes, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let chat = matches!(self.kind, Kind::Chat);
+        let ctx = workers::Ctx {
+            agent: self.agent,
+            policy,
+            mcp,
+            model: self.model.clone(),
+            ends: Endpoints { compatible: crate::catalog::endpoints(self.pool()).await.unwrap_or_default(), ..Endpoints::from_env() },
+            cache: honors_cache_control(&self.model),
+            conversation: self.conversation.clone(),
+            project_id: self.project_id.clone(),
+            message_id: chat.then(|| self.task_id.clone()),
+            announce_to: chat.then(|| self.task_id.clone()),
+            notes,
+        };
+        let all = workers::spawn(&ctx, tasks);
+        tokio::pin!(all);
+        let stopped = until_stopped(self.run.clone());
+        tokio::pin!(stopped);
+        let answer = loop {
+            tokio::select! {
+                biased;
+                // A stop drops the workers there and then, mid-call or not.
+                () = &mut stopped => return Err(Stop::Cancelled),
+                Some(note) = rx.recv() => self.note(note).await?,
+                answer = &mut all => break answer,
+            }
+        };
+        // What the last of them said as they finished.
+        while let Ok(note) = rx.try_recv() {
+            self.note(note).await?;
+        }
+        Ok(answer)
+    }
+
+    async fn note(&mut self, note: workers::Note) -> Result<(), Stop> {
+        match note {
+            workers::Note::Event(event, data) => self.events.worker(event, &data).await.map_err(Stop::Failed)?,
+            workers::Note::Llm { input, output, perf } => self.count_call(input, output, perf),
+            workers::Note::Tool => self.count_tool(),
+        }
         Ok(())
     }
 
@@ -577,7 +645,7 @@ impl<'a> Turn<'a> {
                 }
                 Err(answer) => Ok(answer),
             },
-            Native::Mcp { .. } => unreachable!("an MCP call runs in tool_step"),
+            Native::Mcp { .. } | Native::SpawnWorkers { .. } => unreachable!("runs in tool_step"),
         }
     }
 
@@ -906,7 +974,7 @@ async fn compact_threshold(pool: &SqlitePool, model: &str) -> i64 {
 }
 
 /// `_extract_step_data` for a model step: its calls, else its text.
-fn model_step_data(m: &Message) -> String {
+pub(super) fn model_step_data(m: &Message) -> String {
     if !m.tool_calls.is_empty() {
         let calls: Vec<Value> = m.tool_calls.iter().map(|c| json!({"name": c.name, "args": c.args})).collect();
         return pyjson::dumps(&json!({"tool_calls": calls}));
@@ -939,7 +1007,7 @@ fn model_step_data(m: &Message) -> String {
 /// An MCP result's LangChain blocks as the transcript records them
 /// (`core/transcript.py:_encode_part`): a text block's id rides in its
 /// extras; an image or file block is kept whole.
-fn mcp_content(blocks: &[Value]) -> Content {
+pub(super) fn mcp_content(blocks: &[Value]) -> Content {
     Content::Parts(
         blocks
             .iter()
@@ -959,7 +1027,7 @@ fn mcp_content(blocks: &[Value]) -> Content {
 }
 
 /// Parts back as the LangChain blocks a `ToolMessage` held them as.
-fn lc_blocks(parts: &[Part]) -> Value {
+pub(super) fn lc_blocks(parts: &[Part]) -> Value {
     Value::Array(
         parts
             .iter()
@@ -979,7 +1047,7 @@ fn lc_blocks(parts: &[Part]) -> Value {
     )
 }
 
-fn tools_step_data(results: &[Message]) -> String {
+pub(super) fn tools_step_data(results: &[Message]) -> String {
     let entries: Vec<Value> = results
         .iter()
         .map(|m| {

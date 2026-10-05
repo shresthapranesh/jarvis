@@ -129,7 +129,10 @@ class FakeOllama:
                 if n in fake.gates:
                     fake.arrived[n].set()
                     fake.gates[n].wait(30)
-                reply = fake.script[n] if n < len(fake.script) else Reply("(unscripted)")
+                if callable(fake.script):
+                    reply = fake.script(n, body)
+                else:
+                    reply = fake.script[n] if n < len(fake.script) else Reply("(unscripted)")
                 self.send_response(200)
                 self.send_header("content-type", "application/x-ndjson")
                 self.end_headers()
@@ -159,9 +162,13 @@ class FakeOllama:
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
-    def reset(self, script: list[Reply], hold: int | None = None) -> None:
-        """A new script; with `hold`, that request waits for `release()`."""
-        self.script, self.requests, self.telegram, self.hooks = list(script), [], [], []
+    def reset(self, script: Any, hold: int | None = None) -> None:
+        """A new script — replies in request order, or a `ByRole`; with
+        `hold`, that request waits for `release()`."""
+        if isinstance(script, ByRole):
+            script.restart()
+        script = script if callable(script) else list(script)
+        self.script, self.requests, self.telegram, self.hooks = script, [], [], []
         self.gates = {hold: threading.Event()} if hold is not None else {}
         self.arrived = {hold: threading.Event()} if hold is not None else {}
 
@@ -173,6 +180,40 @@ class FakeOllama:
     def release(self) -> None:
         for gate in self.gates.values():
             gate.set()
+
+
+# How each worker role's prompt begins (`core/agents.py:_ROLE_PROMPTS`).
+ROLE_PROMPTS = {
+    "general": "You are a focused worker agent.",
+    "researcher": "You are a research worker.",
+    "coder": "You are a code worker.",
+    "writer": "You are a writing worker.",
+}
+
+
+class ByRole:
+    """Replies for the main agent and for each worker role, each in its own
+    order: workers run at once, so which request comes first is timing. A
+    reply may be a function of the request (to read an id back)."""
+
+    def __init__(self, main: list[Any], **roles: list[Any]) -> None:
+        self.lists: dict[str, list[Any]] = {"main": main, **roles}
+        self.lock = threading.Lock()
+        self.restart()
+
+    def restart(self) -> None:
+        self.next = dict.fromkeys(self.lists, 0)
+
+    def __call__(self, n: int, body: dict) -> Reply:
+        first = body["messages"][0] if body["messages"] else {}
+        system = first.get("content", "") if first.get("role") == "system" else ""
+        who = next((r for r, p in ROLE_PROMPTS.items() if system.startswith(p)), "main")
+        with self.lock:
+            i = self.next[who]
+            self.next[who] += 1
+        replies = self.lists[who]
+        reply = replies[i] if i < len(replies) else Reply("(unscripted)")
+        return reply(body) if callable(reply) else reply
 
 
 @pytest.fixture
@@ -848,7 +889,7 @@ async def test_an_automation_hands_over_a_call_only_python_runs(twins):
     from edge_support import _gid
 
     auto = await twins.automation(input_type="prompt", prompt_text="delegate it", stateful=True)
-    twins.fake.reset([Reply("On it. ", [("spawn_workers", {"tasks": [{"task": "x"}]})])])
+    twins.fake.reset([Reply("On it. ", [("run_workflow", {"workflow_id": "w1"})])])
     resp = await twins.client.post("/graphql", json={"query": TRIGGER, "variables": {"id": _gid("Automation", auto)}})
     run_id = resp.json()["data"]["triggerAutomation"]
     for _ in range(200):
@@ -1785,14 +1826,197 @@ async def test_a_browse_is_announced_on_the_live_run(twins):
     assert resp.status_code != 200
 
 
+# ── workers ──────────────────────────────────────────────────────────────────
+
+
+def _spawn(*tasks: dict) -> Reply:
+    return Reply("", [("spawn_workers", {"tasks": list(tasks)})])
+
+
+def _by_worker(record: dict) -> dict:
+    """The record with each worker's events and steps apart, in their own
+    order: workers run at once, so how theirs interleave is timing."""
+    events: dict[Any, list] = {"main": []}
+    for e in record["events"]:
+        events.setdefault(e["idx"] if e["kind"].startswith("Worker") else "main", []).append(e)
+    steps: dict[str, list] = {}
+    for _seq, node, source, subagent, data in record["steps"]:
+        steps.setdefault(subagent or "main", []).append([node, source, data])
+    return {**record, "events": events, "steps": steps}
+
+
+async def _both_workers(twins: Twins, query: str, script: ByRole, *, hold: int | None = None,
+                        python_during: Any = None, edge_during: Any = None) -> tuple[dict, dict]:
+    """Both runtimes, the requests matched up in any order and ids minted
+    on each side normalized; the edge must not have handed the turn over."""
+    python, python_requests = await twins.python(query, script, hold=hold, during=python_during)
+    edge, edge_requests = await twins.edge(query, script, hold=hold, during=edge_during)
+
+    def key(r: dict) -> str:
+        return json.dumps(r["messages"], sort_keys=True)
+
+    _requests(sorted(Normalizer().value(python_requests), key=key), sorted(Normalizer().value(edge_requests), key=key))
+    [(runtime,)] = _rows(twins.edge_db, "SELECT runtime FROM jobs WHERE id = ?", edge.task_id)
+    assert runtime == "edge", "the edge handed the turn over"
+    out = []
+    for turn in (python, edge):
+        norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
+        out.append({**_record(turn), **_artifacts(turn.db, Normalizer(dict(norm._map)))})
+    return out[0], out[1]
+
+
+async def test_a_worker(twins):
+    script = ByRole([_spawn({"task": "Summarise the thing", "role": "writer"}), Reply("Workers finished.")],
+                    writer=[Reply("The worker's answer.")])
+    python, edge = await _both_workers(twins, "delegate", script)
+    assert edge == python
+    kinds = [e["kind"] for e in python["events"]]
+    assert kinds[kinds.index("WorkerStartEvent"):kinds.index("WorkerDoneEvent") + 1] == [
+        "WorkerStartEvent", "WorkerTokenEvent", "WorkerStepEvent", "WorkerDoneEvent"]
+    assert [s[1:4] for s in python["steps"] if s[2] == "subagent"] == [
+        ["worker_start", "subagent", "writer:1"], ["model_request", "subagent", "writer:1"],
+        ["worker_done", "subagent", "writer:1"]]
+    assert python["thread"][2]["content"] == "Task (writer): Summarise the thing\nThe worker's answer."
+
+
+async def test_workers_at_once(twins):
+    """A coder with a notebook of its own, a researcher whose long answer
+    streams in pieces, a role nobody has and a spec without a task."""
+    long = "The Nile runs north through eleven countries before it reaches the Mediterranean, " * 3
+    script = ByRole(
+        [_spawn({"task": "Compute it", "role": "coder"}, {"task": "Look it up", "role": "researcher", "context": "Rivers"},
+                {"task": "Cook", "role": "chef"}, {"role": "writer"}),
+         Reply("All in.")],
+        coder=[Reply("", [("run_cell", {"code": "x = 6 * 7\nx"})]), Reply("It is 42.")],
+        researcher=[Reply(long.strip())],
+    )
+    python, edge = await _both_workers(twins, "split it up", script)
+    assert _by_worker(edge) == _by_worker(python)
+    workers = _by_worker(python)["events"]
+    assert sum(e["kind"] == "WorkerTokenEvent" for e in workers[2]) > 1
+    assert workers[3] == [{"kind": "WorkerDoneEvent", "idx": 3, "role": "chef", "task": "Cook", "status": "error",
+                           "result": "ERROR: Unknown role 'chef' (available: coder, general, researcher, writer)"}]
+    assert workers[4][-1]["result"] == "ERROR: 'task'"
+    answer = python["thread"][2]["content"]
+    assert "Task (coder): Compute it\nIt is 42." in answer
+    assert "Task (chef): Cook\nUnknown role 'chef'" in answer and answer.endswith("Task (writer): \nERROR: 'task'")
+    assert any("42" in (s[2] or "") for s in _by_worker(python)["steps"]["coder:1"])
+
+
+async def test_a_workers_tools(twins, tmp_path):
+    """A general worker's files, artifacts and documents, a tool it isn't
+    bound to and arguments it got wrong."""
+    for db in (twins.python_db, twins.edge_db):
+        art_dir = (db.parent / "artifacts").resolve()
+        art_dir.mkdir(exist_ok=True)
+        (art_dir / "a-seed.md").write_bytes(b"seed\r\nlive")
+        (art_dir / "a-seed_v1.md").write_bytes(b"seed v1")
+        with contextlib.closing(sqlite3.connect(db)) as c:
+            c.execute("INSERT INTO artifacts (id, title, filename, kind, mime_type, conversation_id, created_at, "
+                      "updated_at) VALUES ('a-seed', 'Seed', ?, 'markdown', 'text/markdown', 'c-old', "
+                      "'2026-10-01 00:00:00.000000', '2026-10-01 12:00:00.500000')", (str(art_dir / "a-seed.md"),))
+            c.execute("INSERT INTO artifact_versions (id, artifact_id, version, title, filename, created_at) VALUES "
+                      "('v-seed', 'a-seed', 1, 'Seed', ?, '2026-10-01 00:00:00.000000')", (str(art_dir / "a-seed_v1.md"),))
+            c.commit()
+    notes = tmp_path / "notes"
+
+    def read_back(body: dict) -> Reply:
+        [written] = [json.loads(m["content"]) for m in body["messages"]
+                     if m["role"] == "tool" and m["content"].startswith('{"id": ')]
+        return Reply("", [("read_artifact", {"artifact_id": written["id"]}),
+                          ("read_artifact", {"artifact_id": written["id"], "version": 2})])
+
+    script = ByRole(
+        [_spawn({"task": "Take notes"}), Reply("Noted.")],
+        general=[
+            # Python runs a batch's calls at once, the edge in order: what
+            # one call needs of another goes in the next batch.
+            Reply("Filing. ", [("write_file", {"filepath": f"{notes}/a.txt", "content": "line one\r\nline two"})]),
+            Reply("", [
+                ("list_files", {"directory": f"{notes}/"}),
+                ("read_file", {"filepath": f"{notes}//a.txt"}),
+                ("read_file", {"filepath": "memory/AGENTS.md"}),
+                ("read_file", {"filepath": 5}),
+                ("run_workflow", {"workflow_id": "w"}),
+            ]),
+            Reply("", [
+                ("list_artifacts", {"all_conversations": True}),
+                ("list_artifacts", {"all_conversations": "maybe"}),
+                ("read_artifact", {"artifact_id": "a-seed"}),
+                ("read_artifact", {"artifact_id": "a-seed", "version": "1"}),
+                ("read_artifact", {"artifact_id": "a-seed", "version": 7}),
+                ("read_artifact", {"artifact_id": "nope"}),
+                ("search_documents", {"query": "rivers"}),
+                ("read_document", {"document_id": "nope"}),
+            ]),
+            Reply("", [("write_artifact", {"title": "Notes", "content": "# Notes"})]),
+            read_back,
+            Reply("Done with the files."),
+        ],
+    )
+    python, edge = await _both_workers(twins, "take notes for me", script)
+    assert edge == python
+    [event] = [e for e in python["events"] if "artifactId" in e]
+    assert event["action"] == "created"
+    assert python["thread"][2]["content"] == "Task (general): Take notes\nDone with the files."
+    assert (notes / "a.txt").read_bytes() == b"line one\r\nline two"
+    worker_tools = [json.loads(s[4]) for s in python["steps"] if s[1] == "tools" and s[3] == "general:1"]
+    outputs = [r["output"] for batch in worker_tools for r in (batch if isinstance(batch, list) else [batch])]
+    assert "line one\nline two" in outputs and "seed\nlive" in outputs and "seed v1" in outputs
+    assert "Memory store unavailable in this context." in outputs
+    assert any(o.startswith("Error invoking tool 'read_file' with kwargs {'filepath': 5}") for o in outputs)
+    assert any(o.startswith("Error: run_workflow is not a valid tool, try one of [run_cell, read_file,") for o in outputs)
+
+
+async def test_a_worker_asks_before_its_gated_tool(twins):
+    await _gate_run_cell(twins)
+    script = ByRole([_spawn({"task": "Compute it", "role": "coder"}), Reply("Done.")],
+                    coder=[Reply("", [("run_cell", {"code": "6 * 7"})]), Reply("It is 42.")])
+    python, edge = await _both_gated(twins, "compute", script, "Approve")
+    # Python announces the gate straight onto the run while the worker's
+    # step before it may still be queued in its stream, so the two land in
+    # either order there; the edge's step always comes first.
+    asked = [{**r, "events": [e for e in r["events"] if e["kind"] != "ApprovalRequestEvent"]} for r in (python, edge)]
+    assert asked[1] == asked[0]
+    for record in (python, edge):
+        kinds = [e["kind"] for e in record["events"]]
+        assert kinds.count("ApprovalRequestEvent") == 1
+        assert kinds.index("WorkerStartEvent") < kinds.index("ApprovalRequestEvent") < kinds.index("ApprovalResolvedEvent")
+    kinds = [e["kind"] for e in edge["events"]]
+    assert kinds[kinds.index("ApprovalRequestEvent") - 1] == "WorkerStepEvent"
+    [row] = python["approvals"]
+    assert row[2] == "approved" and row[7] == "<task>"
+
+
+async def test_a_stop_while_a_worker_is_answering(twins):
+    from test_edge_runs import _python
+
+    async def python_stop(task_id: str) -> None:
+        assert (await _python(STOP, {"id": task_id}))["data"] == {"stopTask": True}
+
+    async def edge_stop(task_id: str) -> None:
+        resp = await twins.client.post("/graphql", json={"query": STOP, "variables": {"id": task_id}})
+        assert resp.json()["data"] == {"stopTask": True}
+
+    script = ByRole([_spawn({"task": "Take ages", "role": "writer"})], writer=[Reply("Never sent.")])
+    python, edge = await _both_workers(twins, "a long job", script, hold=1, python_during=python_stop,
+                                       edge_during=edge_stop)
+    # Departure: the edge drops the workers at the stop. Python's stop lands
+    # at the next chunk its stream sees, so the held worker call finishes
+    # first and its tokens count; nothing of it is shown or kept.
+    assert edge["message"] == ["", "stopped", 100, 7] and python["message"] == ["", "stopped", 201, 14]
+    assert {**edge, "message": None} == {**python, "message": None}
+    assert [e["kind"] for e in python["events"]][-2:] == ["WorkerStartEvent", "StoppedEvent"]
+
+
 # ── the handover ─────────────────────────────────────────────────────────────
 
 
 async def test_a_call_only_python_runs_hands_the_turn_over(twins):
-    """`spawn_workers` is Python's: the edge records the call, then releases
+    """`run_workflow` is Python's: the edge records the call, then releases
     the job with what the turn carried — for a worker, which this test has
     none of, to go on from."""
-    script = [Reply("On it. ", [("spawn_workers", {"tasks": [{"task": "x"}]})])]
+    script = [Reply("On it. ", [("run_workflow", {"workflow_id": "w1"})])]
     edge, _ = await twins.edge_started("delegate it", script)
     [(status, runtime, payload)] = _rows(twins.edge_db, "SELECT status, runtime, payload FROM jobs WHERE id = ?",
                                          edge.task_id)
@@ -1802,7 +2026,7 @@ async def test_a_call_only_python_runs_hands_the_turn_over(twins):
     assert handoff["usage"] == {"input_tokens": 100, "output_tokens": 7, "llm_calls": 1, "tool_calls": 0}
     thread = _thread(edge)
     assert [r["role"] for r in thread] == ["user", "assistant"]
-    assert thread[1]["tool_calls"][0]["name"] == "spawn_workers"
+    assert thread[1]["tool_calls"][0]["name"] == "run_workflow"
     [(msg_status,)] = _rows(twins.edge_db, "SELECT status FROM messages WHERE id = ?", edge.task_id)
     assert msg_status == "running"
 
@@ -1814,7 +2038,8 @@ TOOLS_JSON = REPO / "edge" / "src" / "agent" / "tools.json"
 
 def test_the_edge_binds_pythons_tool_schemas(monkeypatch):
     """`edge/src/agent/tools.json` is Python's own `convert_to_openai_tool`
-    output for every tool the main agent can be bound to. Re-export with
+    output for every tool the main agent can be bound to, then the ones
+    only its workers' roles are bound to. Re-export with
     `JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_loop.py -k schemas`
     after changing a bound tool's signature or docstring, then rebuild the edge."""
     import os
@@ -1831,7 +2056,15 @@ def test_the_edge_binds_pythons_tool_schemas(monkeypatch):
         board = agents._build_agent("google_genai:gemma-4-31b-it", None, board=True)
     finally:
         agents.invalidate_agent_cache()
-    python = [convert_to_openai_tool(t)["function"] for t in board.tools]
+    from tools.artifacts import list_artifacts, read_artifact
+    from tools.documents import read_document, search_documents
+    from tools.files import list_files, read_file, write_file
+
+    names = {t.name for t in board.tools}
+    workers = [t for t in (read_file, write_file, list_files, read_artifact, list_artifacts, search_documents,
+                           read_document) if t.name not in names]
+    python = [convert_to_openai_tool(t)["function"] for t in [*board.tools, *workers]]
     if os.environ.get("JARVIS_UPDATE_GOLDEN") == "1":
         TOOLS_JSON.write_text(json.dumps(python, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     assert json.loads(TOOLS_JSON.read_text(encoding="utf-8")) == python
+

@@ -165,6 +165,7 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding
 
 # ── Worker-role prompts ───────────────────────────────────────────────────────
 # Each role gets a tuned prompt and (inside _build_agent) a tool subset.
+# `edge/src/agent/workers.rs` ports both (ROLES, role_tools): change both.
 
 _ROLE_PROMPTS = {
     "general": (

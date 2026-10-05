@@ -5,13 +5,14 @@
 //! sees the same tool list whichever runtime calls it — and a cached prefix
 //! stays byte-stable when a conversation moves between them.
 //!
-//! The edge runs `run_cell`, `write_artifact`, the todo tools, `remember`
+//! The edge runs `run_cell`, `write_artifact`, the todo tools, `remember`,
+//! `spawn_workers` (`workers.rs`, whose roles' tools are in `tools.json` too)
 //! and the `always` MCP servers' tools (whose schemas are converted as
 //! `convert_to_openai_tool` converts them, `mcp::llm_tool`), a call a human
-//! must approve once they have (`Step::Gated`). Any other call — workers, a
-//! workflow — or a call whose arguments aren't plainly valid, is Python's: the
-//! batch is handed over (`Plan::Python`) and Python runs it, validating and
-//! gating as it always has.
+//! must approve once they have (`Step::Gated`). Any other call — a workflow —
+//! or a call whose arguments aren't plainly valid, is Python's: the batch is
+//! handed over (`Plan::Python`) and Python runs it, validating and gating as
+//! it always has.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -91,18 +92,23 @@ pub struct Toolset {
 /// always has — `remember` is bound too; then the `always` MCP servers'.
 pub fn bound_for(policy: &Policy, board: bool, mcp: &crate::mcp::Snapshot) -> Toolset {
     let board_tools: &[&str] = if board { &["complete_task", "block_task"] } else { &[] };
+    let names: Vec<&str> = ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow"]
+        .iter()
+        .chain(board_tools)
+        .chain(&["remember"])
+        .copied()
+        .collect();
+    bound_named(policy, &names, Some(mcp))
+}
+
+/// `_allowed(tools)`: the named tools, in order, then the `always` MCP
+/// servers' (when given), without the switched-off ones.
+pub fn bound_named(policy: &Policy, names: &[&str], mcp: Option<&crate::mcp::Snapshot>) -> Toolset {
     let mut set = Toolset {
-        schemas: ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow"]
-            .iter()
-            .chain(board_tools)
-            .chain(&["remember"])
-            .copied()
-            .filter(|n| policy.enabled(n))
-            .map(schema)
-            .collect(),
+        schemas: names.iter().copied().filter(|n| policy.enabled(n)).map(schema).collect(),
         mcp: HashMap::new(),
     };
-    for (server, tool) in mcp.bound() {
+    for (server, tool) in mcp.map(crate::mcp::Snapshot::bound).unwrap_or_default() {
         if !policy.enabled(&tool.name) {
             continue;
         }
@@ -117,6 +123,13 @@ pub fn bound_for(policy: &Policy, board: bool, mcp: &crate::mcp::Snapshot) -> To
     set
 }
 
+impl Toolset {
+    /// The server a bound MCP tool is called on.
+    pub fn mcp_server(&self, name: &str) -> Option<&str> {
+        self.mcp.get(name).map(String::as_str)
+    }
+}
+
 /// A call the edge runs itself, its arguments checked.
 #[derive(Debug, PartialEq)]
 pub enum Native {
@@ -127,6 +140,7 @@ pub enum Native {
     WriteArtifact { title: String, content: Option<String>, file_path: Option<String>, artifact_id: Option<String> },
     CompleteTask { summary: String, metadata: Option<String> },
     BlockTask { reason: String, needs_input: bool },
+    SpawnWorkers { tasks: Vec<super::workers::Task> },
     /// A bound MCP server's tool; the server checks the arguments.
     Mcp { server: String, tool: String, args: Value },
 }
@@ -243,6 +257,7 @@ fn native(name: &str, args: &Value) -> Option<Native> {
             };
             Some(Native::BlockTask { reason, needs_input })
         }
+        "spawn_workers" if only(&["tasks"]) => Some(Native::SpawnWorkers { tasks: super::workers::tasks(obj.get("tasks")?)? }),
         _ => None,
     }
 }
@@ -331,8 +346,12 @@ mod tests {
                     .into()
             )
         );
+        assert_eq!(plan_one(call("spawn_workers", json!({"tasks": []})), &tools, &policy), Plan::Edge(vec![Step::Run(
+            Native::SpawnWorkers { tasks: vec![] }
+        )]));
         for python in [
-            call("spawn_workers", json!({"tasks": []})),
+            call("spawn_workers", json!({"tasks": [{"task": 1}]})),
+            call("run_workflow", json!({"workflow_id": "w"})),
             call("set_todo_status", json!({"index": "first", "status": "done"})),
             call("set_todo_status", json!({"index": 0, "status": "finished"})),
             call("run_cell", json!({"code": "1", "extra": true})),
