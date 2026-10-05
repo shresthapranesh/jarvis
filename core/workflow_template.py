@@ -1,4 +1,8 @@
-"""Workflow template rendering."""
+"""Workflow template rendering.
+
+Ported to the Rust edge (`edge/src/agent/workflow/template.rs`) — a change
+here is made in both.
+"""
 
 from __future__ import annotations
 

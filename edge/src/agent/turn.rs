@@ -9,7 +9,8 @@
 //!
 //! A history that outgrows the model's threshold is summarized before the
 //! call (`summarize.rs`). `spawn_workers` runs its workers here too
-//! (`workers.rs`), their events written and announced as they come. A step that needs Python (`prompt::NeedsPython`,
+//! (`workers.rs`), their events written and announced as they come, and
+//! `run_workflow` its workflow (`workflow/`). A step that needs Python (`prompt::NeedsPython`,
 //! `tools::Plan::Python`) hands the turn over with what it carried
 //! (`Outcome::HandOver`); Python runs the recorded calls and goes on.
 
@@ -460,6 +461,10 @@ impl<'a> Turn<'a> {
                     self.count_tool();
                     (Content::Text(self.spawn_workers(tasks, policy, mcp).await?), "success", None)
                 }
+                Step::Run(Native::RunWorkflow { workflow_id, inputs_json }) => {
+                    self.count_tool();
+                    (Content::Text(self.run_workflow(&workflow_id, inputs_json.as_deref()).await?), "success", None)
+                }
                 Step::Run(Native::Mcp { server, tool, args }) => {
                     self.count_tool();
                     let run = self.run.clone();
@@ -534,6 +539,23 @@ impl<'a> Turn<'a> {
             self.note(note).await?;
         }
         Ok(answer)
+    }
+
+    /// `run_workflow`: the workflow runs inside the call, shown on the run as
+    /// a worker starting and finishing; a stop drops it.
+    async fn run_workflow(&mut self, workflow_id: &str, inputs_json: Option<&str>) -> Result<String, Stop> {
+        let call = match super::workflow::Call::prepare(self.pool(), 0, workflow_id, inputs_json).await {
+            Ok(call) => call,
+            Err(answer) => return Ok(answer),
+        };
+        self.events.worker("worker_start", &call.start()).await.map_err(Stop::Failed)?;
+        let run = self.run.clone();
+        let ran = tokio::select! {
+            r = call.run(self.agent, 1) => r,
+            () = until_stopped(run) => return Err(Stop::Cancelled),
+        };
+        self.events.worker("worker_done", &call.done(&ran)).await.map_err(Stop::Failed)?;
+        Ok(call.answer(ran))
     }
 
     async fn note(&mut self, note: workers::Note) -> Result<(), Stop> {
@@ -645,7 +667,7 @@ impl<'a> Turn<'a> {
                 }
                 Err(answer) => Ok(answer),
             },
-            Native::Mcp { .. } | Native::SpawnWorkers { .. } => unreachable!("runs in tool_step"),
+            Native::Mcp { .. } | Native::SpawnWorkers { .. } | Native::RunWorkflow { .. } => unreachable!("runs in tool_step"),
         }
     }
 
@@ -945,7 +967,7 @@ fn latest_user_text(history: &[Message]) -> String {
 
 /// `honors_cache_control` with the default providers: of the edge's, only an
 /// OpenRouter route to Anthropic.
-fn honors_cache_control(model: &str) -> bool {
+pub(super) fn honors_cache_control(model: &str) -> bool {
     match model.split_once(':') {
         Some(("openrouter", name)) => name.to_lowercase().trim_start_matches('~').starts_with("anthropic/"),
         _ => false,

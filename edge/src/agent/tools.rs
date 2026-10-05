@@ -9,8 +9,8 @@
 //! `spawn_workers` (`workers.rs`, whose roles' tools are in `tools.json` too)
 //! and the `always` MCP servers' tools (whose schemas are converted as
 //! `convert_to_openai_tool` converts them, `mcp::llm_tool`), a call a human
-//! must approve once they have (`Step::Gated`). Any other call — a workflow —
-//! or a call whose arguments aren't plainly valid, is Python's: the batch is
+//! must approve once they have (`Step::Gated`), and `run_workflow`
+//! (`workflow/`). A call whose arguments aren't plainly valid is Python's: the batch is
 //! handed over (`Plan::Python`) and Python runs it, validating and gating as
 //! it always has.
 
@@ -141,6 +141,8 @@ pub enum Native {
     CompleteTask { summary: String, metadata: Option<String> },
     BlockTask { reason: String, needs_input: bool },
     SpawnWorkers { tasks: Vec<super::workers::Task> },
+    /// A saved workflow, run to its outputs (`workflow/mod.rs`).
+    RunWorkflow { workflow_id: String, inputs_json: Option<String> },
     /// A bound MCP server's tool; the server checks the arguments.
     Mcp { server: String, tool: String, args: Value },
 }
@@ -258,6 +260,13 @@ fn native(name: &str, args: &Value) -> Option<Native> {
             Some(Native::BlockTask { reason, needs_input })
         }
         "spawn_workers" if only(&["tasks"]) => Some(Native::SpawnWorkers { tasks: super::workers::tasks(obj.get("tasks")?)? }),
+        "run_workflow" if only(&["workflow_id", "inputs_json"]) => {
+            let inputs_json = match obj.get("inputs_json") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(v.as_str()?.to_string()),
+            };
+            Some(Native::RunWorkflow { workflow_id: obj.get("workflow_id")?.as_str()?.to_string(), inputs_json })
+        }
         _ => None,
     }
 }
@@ -349,9 +358,12 @@ mod tests {
         assert_eq!(plan_one(call("spawn_workers", json!({"tasks": []})), &tools, &policy), Plan::Edge(vec![Step::Run(
             Native::SpawnWorkers { tasks: vec![] }
         )]));
+        assert_eq!(plan_one(call("run_workflow", json!({"workflow_id": "w"})), &tools, &policy), Plan::Edge(vec![Step::Run(
+            Native::RunWorkflow { workflow_id: "w".into(), inputs_json: None }
+        )]));
         for python in [
             call("spawn_workers", json!({"tasks": [{"task": 1}]})),
-            call("run_workflow", json!({"workflow_id": "w"})),
+            call("run_workflow", json!({"workflow_id": "w", "inputs_json": {"a": 1}})),
             call("set_todo_status", json!({"index": "first", "status": "done"})),
             call("set_todo_status", json!({"index": 0, "status": "finished"})),
             call("run_cell", json!({"code": "1", "extra": true})),

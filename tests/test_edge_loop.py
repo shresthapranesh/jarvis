@@ -889,7 +889,7 @@ async def test_an_automation_hands_over_a_call_only_python_runs(twins):
     from edge_support import _gid
 
     auto = await twins.automation(input_type="prompt", prompt_text="delegate it", stateful=True)
-    twins.fake.reset([Reply("On it. ", [("run_workflow", {"workflow_id": "w1"})])])
+    twins.fake.reset([Reply("On it. ", [("set_todo_status", {"index": "first", "status": "done"})])])
     resp = await twins.client.post("/graphql", json={"query": TRIGGER, "variables": {"id": _gid("Automation", auto)}})
     run_id = resp.json()["data"]["triggerAutomation"]
     for _ in range(200):
@@ -2013,10 +2013,10 @@ async def test_a_stop_while_a_worker_is_answering(twins):
 
 
 async def test_a_call_only_python_runs_hands_the_turn_over(twins):
-    """`run_workflow` is Python's: the edge records the call, then releases
-    the job with what the turn carried — for a worker, which this test has
-    none of, to go on from."""
-    script = [Reply("On it. ", [("run_workflow", {"workflow_id": "w1"})])]
+    """Arguments Pydantic would reject are Python's to word: the edge records
+    the call, then releases the job with what the turn carried — for a
+    worker, which this test has none of, to go on from."""
+    script = [Reply("On it. ", [("set_todo_status", {"index": "first", "status": "done"})])]
     edge, _ = await twins.edge_started("delegate it", script)
     [(status, runtime, payload)] = _rows(twins.edge_db, "SELECT status, runtime, payload FROM jobs WHERE id = ?",
                                          edge.task_id)
@@ -2026,7 +2026,7 @@ async def test_a_call_only_python_runs_hands_the_turn_over(twins):
     assert handoff["usage"] == {"input_tokens": 100, "output_tokens": 7, "llm_calls": 1, "tool_calls": 0}
     thread = _thread(edge)
     assert [r["role"] for r in thread] == ["user", "assistant"]
-    assert thread[1]["tool_calls"][0]["name"] == "run_workflow"
+    assert thread[1]["tool_calls"][0]["name"] == "set_todo_status"
     [(msg_status,)] = _rows(twins.edge_db, "SELECT status FROM messages WHERE id = ?", edge.task_id)
     assert msg_status == "running"
 

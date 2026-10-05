@@ -1,5 +1,8 @@
 """Workflow execution engine.
 
+Ported to the Rust edge (`edge/src/agent/workflow/engine.rs`) — a change here
+is made in both.
+
 Traverses a workflow graph in dependency order, running each ready frontier
 of mutually-independent nodes concurrently, and streams SSE events through a
 TaskState. Supports conditional branching via ConditionalNode's
