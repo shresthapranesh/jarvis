@@ -1655,6 +1655,56 @@ async def test_the_sdk_asks_through_the_edge(twins):
     assert resp.status_code != 200
 
 
+BROWSE = "mutation($u: String!, $p: String!, $c: String) { browserActivity(url: $u, phase: $p, conversationId: $c) }"
+
+
+async def test_a_browse_is_announced_on_the_live_run(twins):
+    """`browserActivity` as `tools/browser.py` sends it from a kernel, while
+    the run is live (here: waiting on a gate): a `browser_step` in its
+    stream, as Python appends one. With no live run it says so; a bad phase
+    is refused."""
+    await _gate_run_cell(twins)
+    # Not a real `read(...)`: the edge's kernel would announce it too, and
+    # the Python twin's kernel has no server to announce to.
+    script = [Reply("Looking. ", [("run_cell", {"code": "6 * 7"})]), Reply("Done.")]
+    url = "https://example.com/" + "é" * 600
+
+    async def announce(db: Path, ask) -> None:
+        async with asyncio.timeout(30):
+            while not (rows := _rows(db, "SELECT id, parent_id FROM approvals WHERE source = 'tool' AND status = 'pending'")):
+                await asyncio.sleep(0.05)
+        [(approval_id, conversation)] = rows
+        for phase in ("start", "done"):
+            assert await ask(BROWSE, {"u": url, "p": phase, "c": None}, conversation) == {"data": {"browserActivity": True}}
+        assert (await ask(RESOLVE, {"id": approval_id, "a": "Approve"}, None)).get("errors") is None
+
+    async def python_ask(query: str, variables: dict, conversation: str | None) -> dict:
+        return await _python_gql(query, variables, caller="agent" if conversation else "human", conversation=conversation)
+
+    async def edge_ask(query: str, variables: dict, conversation: str | None) -> dict:
+        headers = {"X-Jarvis-Caller": "agent", "X-Jarvis-Conversation": conversation} if conversation else {}
+        return await _edge_gql(twins, query, variables, headers)
+
+    records = []
+    for run, db, ask in ((twins.python, twins.python_db, python_ask), (twins.edge, twins.edge_db, edge_ask)):
+        announcing = asyncio.create_task(announce(db, ask))
+        turn, _ = await run("read it", script)
+        await announcing
+        norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
+        records.append(norm.value(_record(turn)["events"]))
+        # The run is over: nothing to announce onto.
+        assert await ask(BROWSE, {"u": url, "p": "start", "c": None}, turn.conversation_id) == {"data": {"browserActivity": False}}
+        refused = await ask(BROWSE, {"u": url, "p": "later", "c": None}, turn.conversation_id)
+        assert refused["errors"] == ["phase must be one of: start, done, error"]
+    python, edge = records
+    assert edge == python
+    steps = [e for e in python if e["kind"] == "BrowserStepEvent"]
+    assert [(e["phase"], len(e["url"])) for e in steps] == [("start", 500), ("done", 500)]
+    # A human's is Python's to refuse.
+    resp = await twins.client.post("/graphql", json={"query": BROWSE, "variables": {"u": "x", "p": "start"}})
+    assert resp.status_code != 200
+
+
 # ── the handover ─────────────────────────────────────────────────────────────
 
 

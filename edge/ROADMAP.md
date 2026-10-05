@@ -43,7 +43,7 @@ it's on `main`.
 - [x] Models: `addModel`, `updateModel`, `removeModel`, `setDefaultModel`, `addDiscoveredModels`, endpoints
 - [x] Tools: `tools`, `setToolPolicy` (Python's while an MCP server is configured — with MCP)
 - [ ] `modelSync`: provider model listings (Gemini, Anthropic, Bedrock, Ollama, OpenRouter, endpoints) and the probe calls — M
-- [ ] `browserActivity` — S
+- [x] `browserActivity` (an edge run's stream; a worker's run is Python's)
 - [ ] REST: file upload/download, log tailing — M
 
 ## C. The big pieces

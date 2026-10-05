@@ -61,3 +61,40 @@ async fn cdp_url(pool: &SqlitePool) -> String {
         .find(|v| !v.is_empty())
         .unwrap_or_else(|| DEFAULT_CDP_URL.to_string())
 }
+
+/// `browserActivity` (`mutations/browser.py` — change both): the kernel's
+/// "I am in the browser right now", as a `browser_step` on the
+/// conversation's live run. A worker's run is Python's to append to.
+#[derive(Default)]
+pub struct BrowserMutation;
+
+#[Object]
+impl BrowserMutation {
+    /// Whether it reached a run; false (no live run) is normal, not an error.
+    async fn browser_activity(
+        &self,
+        ctx: &Context<'_>,
+        url: String,
+        #[graphql(default_with = "\"start\".to_string()")] phase: String,
+        conversation_id: Option<String>,
+    ) -> Result<bool> {
+        let from = ctx.data::<super::RequestFrom>()?;
+        if from.caller != super::router::Caller::Agent {
+            return Err("browserActivity is only for agent-initiated calls".into());
+        }
+        if !["start", "done", "error"].contains(&phase.as_str()) {
+            return Err("phase must be one of: start, done, error".into());
+        }
+        let conversation = conversation_id.filter(|c| !c.is_empty()).or_else(|| from.conversation.clone());
+        let Some(run) = super::approval::live_run(ctx.data::<std::sync::Arc<crate::runs::Registry>>()?, conversation.as_deref())
+        else {
+            return Ok(false);
+        };
+        if run.claimed() {
+            return Err(super::defer("the browsing run is a worker's".into()));
+        }
+        let url = crate::pystr::prefix(&url, 500);
+        run.emit_local("browser_step", &serde_json::json!({"url": url, "phase": phase, "source": "main"}));
+        Ok(true)
+    }
+}

@@ -60,7 +60,7 @@ async fn row(pool: &SqlitePool, id: &str) -> sqlx::Result<Option<Row>> {
 }
 
 /// `live_task_id`: the first unfinished run whose parent is the conversation.
-fn live_run(registry: &Registry, conversation: Option<&str>) -> Option<Arc<Run>> {
+pub(super) fn live_run(registry: &Registry, conversation: Option<&str>) -> Option<Arc<Run>> {
     let conversation = conversation?;
     registry.all().into_iter().find(|run| !run.fields().done && run.meta.parent_id.as_deref() == Some(conversation))
 }

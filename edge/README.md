@@ -551,7 +551,7 @@ Mutations that only write rows and files:
 | runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun`, `stopBoardTask` |
 | starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
 | steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
-| approvals (worker linked or owned) | `resolveApproval` (a tool gate, a board question, a deferred delete), `requestToolApproval` (the agent's) — see "The agent loop" |
+| approvals (worker linked or owned) | `resolveApproval` (a tool gate, a board question, a deferred delete), `requestToolApproval` (the agent's) — see "The agent loop"; `browserActivity` (the agent's kernel announcing a browse: a `browser_step` on the conversation's live run, the operation sent to Python when a worker has that run) |
 
 And while a worker is linked, or the edge owns it: every subscription
 (`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`)
@@ -602,7 +602,6 @@ moves when the thing it reads moves.
 
 | Mutations | Touch | Move with |
 |---|---|---|
-| `browserActivity` | a running handler's `TaskState`; the agent's kernel is the only caller | the agent loop |
 | `setToolPolicy` while an MCP server is configured | the inventory's loaded MCP tools | MCP |
 | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode`, `callMcpTool` | the live `McpManager` | MCP |
 | `resolveApproval` for an approved MCP call or a paused workflow; either it or `requestToolApproval` for a worker's run (the edge defers those per call) | `call_mcp_tool`; a future in a running workflow; a worker's run stream | the workflow engine, MCP |
