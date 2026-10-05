@@ -40,8 +40,10 @@ it's on `main`.
 - [x] Agent memory: `agentMemory`, `updateMemory`, `deleteAgentMemory`
 - [x] Memory consolidation and project memory (the maintenance sweeps, `consolidateMemory`, `consolidateProjectMemory`)
 - [x] Settings: `settings`, `setting`, `setSetting`, `deleteSetting` (a managed key overridden, or an `mcp.*` key, is applied in Python until Models and MCP move)
-- [ ] Models: `addModel`, `updateModel`, `removeModel`, `setDefaultModel`, `addDiscoveredModels`, `setToolPolicy`, endpoints, `modelSync` — M
-- [ ] `tools` query, `browserActivity` — S
+- [x] Models: `addModel`, `updateModel`, `removeModel`, `setDefaultModel`, `addDiscoveredModels`, endpoints
+- [x] Tools: `tools`, `setToolPolicy` (Python's while an MCP server is configured — with MCP)
+- [ ] `modelSync`: provider model listings (Gemini, Anthropic, Bedrock, Ollama, OpenRouter, endpoints) and the probe calls — M
+- [ ] `browserActivity` — S
 - [ ] REST: file upload/download, log tailing — M
 
 ## C. The big pieces

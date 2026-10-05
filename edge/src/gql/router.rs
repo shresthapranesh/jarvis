@@ -59,7 +59,21 @@ const LINKED_FIELDS: &[&str] = &[
 /// Fields whose resolver may defer to Python (`gql::defer`), which runs the
 /// whole operation again: owned only alone in it, so nothing an earlier
 /// root field wrote is written twice.
-const DEFERRING_FIELDS: &[&str] = &["resolveApproval", "requestToolApproval", "setSetting", "deleteSetting"];
+const DEFERRING_FIELDS: &[&str] = &[
+    "resolveApproval",
+    "requestToolApproval",
+    "setSetting",
+    "deleteSetting",
+    "addModel",
+    "updateModel",
+    "addDiscoveredModels",
+    "removeModel",
+    "setDefaultModel",
+    "addEndpoint",
+    "updateEndpoint",
+    "removeEndpoint",
+    "setToolPolicy",
+];
 
 /// Who sent the request. The `jarvis` SDK sends `X-Jarvis-Caller: agent`
 /// (`server/graphql/context.py`); everything else is a human.

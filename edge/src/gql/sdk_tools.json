@@ -1,0 +1,167 @@
+[
+ {
+  "name": "list_artifacts",
+  "description": "Saved artifacts, newest first — current conversation unless all_conversations.",
+  "group": "artifacts"
+ },
+ {
+  "name": "read_artifact",
+  "description": "Markdown content of an artifact — latest, or a specific version.",
+  "group": "artifacts"
+ },
+ {
+  "name": "list_artifact_versions",
+  "description": "Version history for an artifact, oldest first.",
+  "group": "artifacts"
+ },
+ {
+  "name": "list_documents",
+  "description": "Files attached to this conversation: id, filename, size, on-disk path, index state.",
+  "group": "documents"
+ },
+ {
+  "name": "document_path",
+  "description": "The on-disk path of an attached file, for opening it with code.",
+  "group": "documents"
+ },
+ {
+  "name": "search_documents",
+  "description": "Top-k passages from this conversation's indexed attachments.",
+  "group": "documents"
+ },
+ {
+  "name": "read_document",
+  "description": "Sequential window of an indexed document; continue with offset=next_offset.",
+  "group": "documents"
+ },
+ {
+  "name": "search_conversations",
+  "description": "Past conversations that mention `query`, best match first.",
+  "group": "conversations"
+ },
+ {
+  "name": "read_conversation",
+  "description": "The last `limit` messages of a conversation, oldest first.",
+  "group": "conversations"
+ },
+ {
+  "name": "list_conversations",
+  "description": "The other conversations in this project, most recently active first.",
+  "group": "conversations"
+ },
+ {
+  "name": "list_automations",
+  "description": "All automations with id, name, input_type, schedule, enabled.",
+  "group": "automations"
+ },
+ {
+  "name": "create_automation",
+  "description": "Create an automation — a task that runs on a cron schedule or on demand.",
+  "group": "automations"
+ },
+ {
+  "name": "update_automation",
+  "description": "Update an automation. Pass only the fields to change.",
+  "group": "automations"
+ },
+ {
+  "name": "delete_automation",
+  "description": "Delete an automation by id.",
+  "group": "automations"
+ },
+ {
+  "name": "list_tasks",
+  "description": "Board tasks (durable background work items), highest priority first.",
+  "group": "board"
+ },
+ {
+  "name": "create_task",
+  "description": "Create a durable board task that runs in the background on its own agent.",
+  "group": "board"
+ },
+ {
+  "name": "list_workflows",
+  "description": "All saved workflows with id, name, description.",
+  "group": "workflows"
+ },
+ {
+  "name": "read_workflow",
+  "description": "A workflow including its full `definition` JSON (nodes + edges).",
+  "group": "workflows"
+ },
+ {
+  "name": "create_workflow",
+  "description": "Create a workflow — a graph of nodes for multi-step pipelines.",
+  "group": "workflows"
+ },
+ {
+  "name": "update_workflow",
+  "description": "Update a workflow. Pass only what changes: name, description, definition.",
+  "group": "workflows"
+ },
+ {
+  "name": "delete_workflow",
+  "description": "Delete a workflow by id.",
+  "group": "workflows"
+ },
+ {
+  "name": "list_skills",
+  "description": "All skills with id, name, description, enabled (bodies not included).",
+  "group": "skills"
+ },
+ {
+  "name": "use_skill",
+  "description": "Load a saved skill's full body — the procedure to follow.",
+  "group": "skills"
+ },
+ {
+  "name": "create_skill",
+  "description": "Save a reusable procedure you can reload later with use_skill(name).",
+  "group": "skills"
+ },
+ {
+  "name": "update_skill",
+  "description": "Update a skill. Pass only what changes: name, description, body, enabled.",
+  "group": "skills"
+ },
+ {
+  "name": "delete_skill",
+  "description": "Delete a skill by id.",
+  "group": "skills"
+ },
+ {
+  "name": "search_memory",
+  "description": "Top-k long-term memory facts for `query` by cosine similarity.",
+  "group": "memory"
+ },
+ {
+  "name": "project_memory",
+  "description": "Read or update the shared memory of this conversation's project.",
+  "group": "memory"
+ },
+ {
+  "name": "mcp_servers",
+  "description": "List connected MCP servers: name, load mode, and tool count.",
+  "group": "mcp"
+ },
+ {
+  "name": "mcp_tools",
+  "description": "Tool names + descriptions for one MCP server (or all of them).",
+  "group": "mcp"
+ },
+ {
+  "name": "mcp_help",
+  "description": "Full description + JSON argument schema for one MCP tool.",
+  "group": "mcp"
+ },
+ {
+  "name": "mcp_call",
+  "description": "Call one MCP tool and return its output as text.",
+  "group": "mcp"
+ },
+ {
+  "name": "text_to_speech",
+  "description": "Synthesize speech from text using the local Piper TTS voice.",
+  "group": "media"
+ }
+]

@@ -163,13 +163,24 @@ pub struct Endpoint {
     pub api_key: Option<String>,
 }
 
-/// `ENDPOINT_NAME`: 1-32 of `a-z0-9_-`, starting with a letter or digit.
-fn endpoint_name_ok(name: &str) -> bool {
+/// `endpoint_name_error`: why `name` can't name an endpoint — `ENDPOINT_NAME`
+/// is 1-32 of `a-z0-9_-`, starting with a letter or digit, and not a
+/// built-in provider.
+pub fn endpoint_name_error(name: &str) -> Option<String> {
     let ok = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
-    name.len() <= 32
+    let shaped = name.len() <= 32
         && name.chars().next().is_some_and(ok)
-        && name.chars().all(|c| ok(c) || c == '_' || c == '-')
-        && !KNOWN_PROVIDERS.contains(&name)
+        && name.chars().all(|c| ok(c) || c == '_' || c == '-');
+    if !shaped {
+        return Some(format!(
+            "Invalid endpoint name '{name}' — 1-32 characters of a-z, 0-9, '-' or '_', starting with a letter or digit"
+        ));
+    }
+    KNOWN_PROVIDERS.contains(&name).then(|| format!("'{name}' is a built-in provider"))
+}
+
+fn endpoint_name_ok(name: &str) -> bool {
+    endpoint_name_error(name).is_none()
 }
 
 /// `parse_endpoints`: the usable rows, in order — skipping what isn't an

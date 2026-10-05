@@ -345,19 +345,37 @@ fn owner_check(key: &str, allow_managed: bool) -> Result<()> {
 async fn apply(ctx: &Context<'_>, key: &str) -> Result<String> {
     match key {
         "embedding.model" => {
-            let registry = ctx.data::<Arc<Registry>>()?;
-            // No worker linked: one started later reads it at startup.
-            if let Err(e) = registry.call("apply_setting", serde_json::json!({"key": key})).await {
-                if e != "no worker is linked" {
-                    tracing::warn!("applying {key} in the worker failed: {e}");
-                }
-            }
+            tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
             Ok("Applied. New embeddings use this model; existing vectors are unchanged.".into())
         }
         // The scheduler's zone is read once at startup, here as in Python.
         "scheduler.timezone" => Ok("Saved. Takes effect when the server restarts.".into()),
         _ => Ok("Applied.".into()),
     }
+}
+
+/// Have a linked Python re-read `key` into the caches it holds
+/// (`apply_setting`). No worker linked: one started later reads it at startup.
+pub async fn tell_worker(registry: &Registry, key: &str) {
+    if let Err(e) = registry.call("apply_setting", serde_json::json!({"key": key})).await {
+        if e != "no worker is linked" {
+            tracing::warn!("applying {key} in the worker failed: {e}");
+        }
+    }
+}
+
+/// `set_setting`: insert, or replace the value and stamp `updated_at`.
+pub async fn upsert(tx: &mut sqlx::SqliteConnection, key: &str, value: &str) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, ?) \
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(value)
+    .bind(now_stored())
+    .execute(tx)
+    .await?;
+    Ok(())
 }
 
 /// The written row, the refreshed list, and what applying it actually did.
@@ -416,15 +434,7 @@ impl SettingMutation {
         owner_check(key, allow_managed)?;
         let pool = ctx.data::<SqlitePool>()?;
         let mut tx = crate::db::write_tx(pool).await?;
-        sqlx::query(
-            "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, ?) \
-             ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        )
-        .bind(key)
-        .bind(&value)
-        .bind(now_stored())
-        .execute(&mut *tx)
-        .await?;
+        upsert(&mut tx, key, &value).await?;
         tx.commit().await?;
         let note = apply(ctx, key).await?;
         result(pool, key, true, note).await
