@@ -33,6 +33,14 @@ use engine::{Env, Halt, Meter, Pause};
 /// `_MAX_WORKFLOW_DEPTH`: `run_workflow` calls inside one another.
 const MAX_DEPTH: u32 = 3;
 
+/// The main agent on one prompt, outside any run — `main.py run`. Its last
+/// reply, or why it failed. A `run_workflow` it calls runs nested, as a
+/// node's would.
+pub async fn run_once(agent: &Agent, model: &str, query: String) -> Result<crate::llm::transcript::Message, String> {
+    let env = Env { agent, run: None, pause: None, meter: None, depth: 0 };
+    agent::run_reply(&env, model, query).await
+}
+
 /// Whether the edge runs this workflow: the agent loop is on and every
 /// model its graph can call — the ones its nodes name, the default for the
 /// ones that name none, and those of the saved workflows its maps run — is

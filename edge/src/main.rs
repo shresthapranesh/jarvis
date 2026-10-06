@@ -12,6 +12,7 @@ mod browser;
 mod budget;
 mod catalog;
 mod checkpoints;
+mod cli;
 mod config;
 mod consolidate;
 mod cron;
@@ -76,8 +77,29 @@ impl AppState {
     }
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
-async fn main() {
+/// The test hooks below keep their raw flags; anything else is the command
+/// line (`cli/`).
+const HOOKS: &[&str] = &[
+    "--print-schema",
+    "--cron-next",
+    "--guess-type",
+    "--llm-shape",
+    "--llm-call",
+    "--maintenance-due",
+    "--maintenance-run",
+];
+
+fn main() {
+    let mode = if std::env::args().any(|a| HOOKS.contains(&a.as_str())) { cli::Mode::Serve } else { cli::parse() };
+    let runtime =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("the tokio runtime");
+    match mode {
+        cli::Mode::Cli(command) => runtime.block_on(cli::main(command)),
+        cli::Mode::Serve => runtime.block_on(serve()),
+    }
+}
+
+async fn serve() {
     // The parity tests diff this against the Python schema's SDL.
     if std::env::args().any(|a| a == "--print-schema") {
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");

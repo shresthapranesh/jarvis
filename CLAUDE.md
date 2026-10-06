@@ -44,6 +44,7 @@ uv run uvicorn server.entrypoint:app --reload
 uv run python main.py run "<query>"          # one-shot CLI query
 uv run python main.py config set|get|list|delete <key> [value]
 uv run python main.py model list|add|remove|set-default|sync
+edge/target/debug/jarvis-edge run|config|model|memory …   # the same CLI in Rust (edge/src/cli/)
 uv add <package>                             # dependency (pyproject.toml + uv.lock)
 
 uv run pytest                                # tests; `-m llm` for real-model tests (need GOOGLE_API_KEY)

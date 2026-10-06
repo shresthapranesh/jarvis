@@ -1,3 +1,9 @@
+"""The command line.
+
+`jarvis-edge` (`edge/src/cli/`) ports `run`, `start`, `config *`, `model *`
+and `memory *`: a change to one of those is made in both.
+"""
+
 import datetime
 import logging
 import pathlib
@@ -378,7 +384,8 @@ def model_add(
         raise typer.Exit(code=1)
     _run_db(lambda s: add_custom_model(s, model_id, label, prov, context_window))
     win = f" [{context_window:,} ctx]" if context_window else ""
-    rprint(f"[green]✓[/green] Added model: {model_id} ({label}) [{prov}]{win}")
+    # `\[` — a bare `[{prov}]` is a markup tag to Rich, and the provider vanished.
+    rprint(f"[green]✓[/green] Added model: {model_id} ({label}) \\[{prov}]{win}")
     rprint("[dim]Web UI picks it up on the next 'models' query; a running server validates it after that.[/dim]")
 
 

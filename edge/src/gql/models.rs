@@ -102,7 +102,7 @@ async fn get(conn: &mut SqliteConnection, key: &str) -> sqlx::Result<Option<Stri
 }
 
 /// `get_custom_models`: the row's objects, or none for anything but a list.
-async fn custom_rows(conn: &mut SqliteConnection) -> sqlx::Result<Vec<Map<String, Value>>> {
+pub(crate) async fn custom_rows(conn: &mut SqliteConnection) -> sqlx::Result<Vec<Map<String, Value>>> {
     let raw = get(conn, CUSTOM).await?.unwrap_or_default();
     Ok(match serde_json::from_str::<Value>(&raw) {
         Ok(Value::Array(rows)) => rows.into_iter().filter_map(|r| if let Value::Object(m) = r { Some(m) } else { None }).collect(),
@@ -110,7 +110,7 @@ async fn custom_rows(conn: &mut SqliteConnection) -> sqlx::Result<Vec<Map<String
     })
 }
 
-async fn put_custom(conn: &mut SqliteConnection, rows: Vec<Map<String, Value>>) -> sqlx::Result<()> {
+pub(crate) async fn put_custom(conn: &mut SqliteConnection, rows: Vec<Map<String, Value>>) -> sqlx::Result<()> {
     upsert(conn, CUSTOM, &pyjson::dumps(&Value::Array(rows.into_iter().map(Value::Object).collect()))).await
 }
 
@@ -134,7 +134,7 @@ async fn endpoint_rows(conn: &mut SqliteConnection) -> sqlx::Result<Vec<Map<Stri
         .collect())
 }
 
-fn has_id(row: &Map<String, Value>, id: &str) -> bool {
+pub(crate) fn has_id(row: &Map<String, Value>, id: &str) -> bool {
     row.get("id").and_then(Value::as_str) == Some(id)
 }
 
@@ -185,7 +185,7 @@ fn py_int(v: &Value) -> Result<i64> {
 
 /// `add_custom_model`: upsert by id, moved to the end. No window keeps the
 /// one the existing row had.
-fn add_custom(rows: &mut Vec<Map<String, Value>>, id: &str, label: &str, provider: &str, window: Option<i64>) -> Result<()> {
+pub(crate) fn add_custom(rows: &mut Vec<Map<String, Value>>, id: &str, label: &str, provider: &str, window: Option<i64>) -> Result<()> {
     let window = match window {
         Some(w) => Some(json!(w)),
         None => rows.iter().find(|m| has_id(m, id)).and_then(|m| m.get("context_window")).cloned(),

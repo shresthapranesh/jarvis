@@ -51,7 +51,7 @@ it's on `main`.
 - [x] Workflow engine: `workflow/engine.py` and the node types, workflow runs, `run_workflow`
 - [ ] Voice: Whisper transcription, Piper TTS, `downloadVoice`, `voiceStatus`, `/ws/live` — L (Whisper alone is ~245 MB in Python)
 - [x] `/ws/browser`: the live view, the browser launched when none is up
-- [ ] CLI: `main.py` → a Rust binary — M
+- [x] CLI: `jarvis-edge run|config|model|memory|start` (`main.py`'s `download-voice` and `maintenance` go with voice and 2a step 11)
 
 ## D. Switch Python off
 
