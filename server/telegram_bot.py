@@ -43,6 +43,7 @@ async def _check_and_get_model(user_id: int | None, chat_id: int) -> str | None:
 # one conversation, so the alternative is two runs racing the same LangGraph
 # thread — and the reply already in flight will answer this too.
 _QUEUED_NOTE = "📥 Added to what I'm working on — it'll be picked up in a moment."
+VOICE_UNSUPPORTED = "Voice notes aren't supported — send text instead."
 
 
 async def _route_or_none(session, conv_id: str, text: str, attachments) -> str | None:
@@ -97,51 +98,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from server.routes_media import transcribe_bytes
-
     if not update.message:
         return
-    voice = update.message.voice or update.message.audio
-    if not voice:
-        return
-
     user_id = update.effective_user.id if update.effective_user else None
     chat_id = update.message.chat_id
-    model = await _check_and_get_model(user_id, chat_id)
-    if model is None:
+    if await _check_and_get_model(user_id, chat_id) is None:
         return
-
-    sent = await context.bot.send_message(chat_id=chat_id, text="⏳ Transcribing...")
-    placeholder_id = sent.message_id
-
-    tg_file = await voice.get_file()
-    buf = await tg_file.download_as_bytearray()
-    suffix = ".ogg" if update.message.voice else ".mp3"
-    text = await transcribe_bytes(bytes(buf), suffix=suffix)
-    if not text:
-        await context.bot.edit_message_text(
-            chat_id=chat_id, message_id=placeholder_id, text="(could not transcribe audio)"
-        )
-        return
-
-    loading_task = asyncio.create_task(_loading_animation(context.bot, chat_id))
-    conv_id = f"telegram_{chat_id}"
-    async with async_session() as session:
-        await get_or_create_conversation(session, conv_id, model, text[:60], surface="telegram")
-        note = await _route_or_none(session, conv_id, text, None)
-        if note is not None:
-            loading_task.cancel()
-            await context.bot.edit_message_text(
-                chat_id=chat_id, message_id=placeholder_id, text=note,
-            )
-            return
-        await add_message(session, conv_id, "user", f"[Voice] {text}")
-        task_id = await enqueue_chat_task(
-            session, text, model, conv_id, source="telegram",
-        )
-
-    task_state = _tasks[task_id]
-    asyncio.create_task(_stream_to_telegram(context.bot, chat_id, placeholder_id, task_state, loading_task=loading_task))
+    await context.bot.send_message(chat_id=chat_id, text=VOICE_UNSUPPORTED)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

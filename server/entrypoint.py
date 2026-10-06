@@ -31,7 +31,6 @@ from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
 from .routes_documents import router as documents_router
 from .routes_browser import router as browser_router
-from .routes_live import router as live_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
 from .routes_uploads import router as uploads_router
@@ -400,7 +399,6 @@ app.add_middleware(
 )
 
 app.include_router(media_router)
-app.include_router(live_router)
 app.include_router(browser_router)
 app.include_router(artifacts_router)
 app.include_router(documents_router)

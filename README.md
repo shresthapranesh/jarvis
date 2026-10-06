@@ -1,6 +1,6 @@
 # Jarvis
 
-A multi-agent AI research assistant with a web UI. Submit queries and specialized agents collaborate in real-time to produce research, analysis, and reports. Results stream live. Also supports voice input/output, scheduled automations, and visual workflow graphs.
+A multi-agent AI research assistant with a web UI. Submit queries and specialized agents collaborate in real-time to produce research, analysis, and reports. Results stream live. Also supports scheduled automations and visual workflow graphs.
 
 ## Prerequisites
 
@@ -59,25 +59,6 @@ Open [http://localhost:8000](http://localhost:8000) in your browser.
 ### Chat
 Send messages in the web UI. Agents can search the web, run Python code, read files, and fetch financial data. Responses stream in real-time.
 
-### Voice Input (Dictate)
-Click the microphone button in the input bar to dictate. Audio is transcribed via Whisper locally. No API key needed.
-
-On Apple Silicon, Whisper runs via MLX (fast). On other platforms it uses `faster-whisper` with CPU int8.
-
-### Read Aloud (TTS)
-Click the speaker button on any assistant message to hear it read aloud.
-
-Requires the Piper voice model (download once):
-
-```bash
-uv run main.py download-voice
-```
-
-Without the voice model, the browser's built-in speech synthesis is used as fallback.
-
-### Live Voice Mode
-Go to **Live** in the sidebar for a hands-free conversation: the agent listens continuously, responds with speech, and auto-cycles back to listening.
-
 ### Automations
 Schedule recurring tasks with a cron expression (e.g. `0 9 * * 1-5` for weekday mornings). Three input types:
 - **Prompt** — runs the agent on a fixed query
@@ -103,9 +84,6 @@ uv run main.py reports
 
 # View a saved report
 uv run main.py view report-name
-
-# Download the TTS voice model
-uv run main.py download-voice
 ```
 
 The Rust edge binary carries the same commands without starting Python —
@@ -133,8 +111,6 @@ All settings can be set via environment variables or a `.env` file:
 |----------|---------|-------------|
 | `WORK_DIR` | `~/.jarvis` | Directory for databases and memory files |
 | `DATABASE_URL` | `sqlite:///$WORK_DIR/database.db` | SQLite database path |
-| `PIPER_VOICE` | `voices/en_US-hfc_female-medium.onnx` | Path to Piper TTS voice model |
-| `WHISPER_MODEL` | `base` | Whisper model size (`tiny`, `base`, `small`, `medium`, `large`) |
 
 ---
 

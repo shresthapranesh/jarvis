@@ -217,9 +217,8 @@ configuration, as with the timers.
 - **Discord** is the v10 gateway (heartbeat, zombie detection, resume, and a
   stop on a close no retry fixes, such as 4014 — Message Content Intent off)
   plus REST, retried on 429. Replies never ping anyone.
-- **A voice note** is transcribed by Python's `/transcribe`, which starts the
-  worker; Telegram shows "⏳ Transcribing…" meanwhile, Discord its typing
-  indicator.
+- **A voice note** is answered "Voice notes aren't supported — send text
+  instead." (as Python's bots answer it); nothing transcribes audio.
 - **Notifications** (automation and workflow results) still go out from
   Python, now as plain Bot API / REST calls with the same tokens — no
   connected bot needed.
@@ -233,11 +232,10 @@ command (in its own process group, with `JARVIS_EDGE_URL` and
 `JARVIS_BACKEND_PORT` set) when there is work, and stops it when there has
 been none for `JARVIS_WORKER_IDLE` seconds. Idle, jarvis is the edge alone.
 
-**What starts it**: a request the edge proxies (TTS/transcription, the other
-WebSockets, GraphQL it hasn't ported) — which waits for it, 2–3 s on a laptop; a job a
-worker could claim now, or one a dead worker left `running` — not one the
-edge's own agent loop runs (`jobs.runtime`); a voice note a
-bot needs transcribed (Whisper is Python's); and the edge's own start, so the
+**What starts it**: a request the edge proxies (REST it hasn't ported, GraphQL
+it defers) — which waits for it, 2–3 s on a laptop; a job a worker could claim
+now, or one a dead worker left `running` — not one the edge's own agent loop
+runs (`jobs.runtime`); and the edge's own start, so the
 startup sweeps run and a broken command shows up at once. A run the edge
 starts itself needs nothing more: its job kicks the supervisor, and the run is
 pending in the mirror until the new worker claims it.
@@ -611,8 +609,9 @@ their raw flags and skip it.
   `[y/N]` as `typer.confirm` does.
 - **Departures.** Rich wraps at the console width and swallows `[text]` it reads as
   markup; the edge does neither. Not ported: `reports`/`view` (nothing writes
-  `reports/` any more), `download-voice` (moves with voice). `maintenance *`
-  is gone from both: its commands converted `checkpoints.db`.
+  `reports/` any more). `download-voice` and `maintenance *` are gone from
+  both: voice was removed, and the maintenance commands converted
+  `checkpoints.db`.
 - Diffed against `main.py` — output, exit codes and rows — in
   `tests/test_edge_cli.py`, with `run` on the fake Ollama of
   `test_edge_loop.py` and `model sync` on the fake providers of
@@ -761,10 +760,8 @@ moves when the thing it reads moves.
 | Root field | Reads | Moves with |
 |---|---|---|
 | `modelSync` with an AWS credential source the edge doesn't read (the edge defers those per call) | boto3's credential chain | the Bedrock client |
-| `voiceStatus` | Piper voice file layout in `core/voice.py` | audio |
 
 | Mutations | Touch | Move with |
 |---|---|---|
 | `resolveApproval`, `resumeWorkflowRun`, `resolveWorkflowApproval` for a workflow Python runs; `resolveApproval` or `requestToolApproval` (or a gated `callMcpTool`) for a worker's run (the edge defers those per call) | a future in a running workflow; a worker's run stream | Python's workflow runs |
 | `callMcpTool` by the agent while `call_mcp_tool` is in `approval.required_actions` (deferred per call) | `gate_action`'s deferred request | the deferred-action gate |
-| `downloadVoice` | the Piper download | audio |

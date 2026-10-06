@@ -137,6 +137,7 @@ def _strip_bot_mention(content: str, bot_user: discord.ClientUser | None) -> str
 # one conversation, so the alternative is two runs racing the same LangGraph
 # thread — and the reply already in flight will answer this too.
 _QUEUED_NOTE = "📥 Added to what I'm working on — it'll be picked up in a moment."
+VOICE_UNSUPPORTED = "Voice notes aren't supported — send text instead."
 
 
 async def _route_or_none(session, conv_id: str, text: str, attachments) -> str | None:
@@ -236,46 +237,9 @@ async def _stream_to_discord(
         logger.debug("discord final edit: %s", exc)
 
 
-async def _handle_voice(
-    message: discord.Message, attachment: discord.Attachment, model: str,
-) -> None:
-    from server.routes_media import transcribe_bytes
-
-    buf = await attachment.read()
-    ctype = (attachment.content_type or "").lower()
-    suffix = ".ogg" if "ogg" in ctype else (".mp3" if "mp" in ctype else ".ogg")
-    transcribed = await transcribe_bytes(bytes(buf), suffix=suffix)
-    if not transcribed:
-        with contextlib.suppress(Exception):
-            await message.channel.send("(could not transcribe audio)")
-        return
-
-    target = await _resolve_target_channel(message, transcribed)
-    placeholder: discord.Message | None = None
+async def _handle_voice(message: discord.Message) -> None:
     with contextlib.suppress(Exception):
-        placeholder = await _send_reply(target, "⏳ Transcribing...", message)
-
-    loading_task = asyncio.create_task(_loading_animation(target))
-    conv_id = f"discord_{target.id}"
-    async with async_session() as session:
-        await get_or_create_conversation(session, conv_id, model, transcribed[:60], surface="discord")
-        note = await _route_or_none(session, conv_id, transcribed, None)
-        if note is not None:
-            loading_task.cancel()
-            with contextlib.suppress(Exception):
-                if placeholder is not None:
-                    await placeholder.edit(content=note)
-                else:
-                    await _send_reply(target, note, message)
-            return
-        await add_message(session, conv_id, "user", f"[Voice] {transcribed}")
-        task_id = await enqueue_chat_task(
-            session, transcribed, model, conv_id, source="discord",
-        )
-
-    task_state = _tasks[task_id]
-
-    asyncio.create_task(_stream_to_discord(target, placeholder, task_state, loading_task=loading_task, reply_to=message))
+        await message.channel.send(VOICE_UNSUPPORTED)
 
 
 async def _handle_message(client: discord.Client, message: discord.Message) -> None:
@@ -302,7 +266,7 @@ async def _handle_message(client: discord.Client, message: discord.Message) -> N
             image_attachments.append(att)
 
     if voice_attachment is not None:
-        await _handle_voice(message, voice_attachment, model)
+        await _handle_voice(message)
         return
 
     if image_attachments:

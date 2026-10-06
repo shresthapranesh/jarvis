@@ -16,7 +16,6 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as MemoryRouteImport } from './routes/memory'
 import { Route as LogsRouteImport } from './routes/logs'
-import { Route as LiveRouteImport } from './routes/live'
 import { Route as BoardRouteImport } from './routes/board'
 import { Route as AutomationRouteImport } from './routes/automation'
 import { Route as ArtifactsRouteImport } from './routes/artifacts'
@@ -30,7 +29,6 @@ import { Route as SettingsToolsRouteImport } from './routes/settings.tools'
 import { Route as SettingsNotificationsRouteImport } from './routes/settings.notifications'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
 import { Route as SettingsMcpRouteImport } from './routes/settings.mcp'
-import { Route as SettingsMaintenanceRouteImport } from './routes/settings.maintenance'
 import { Route as SettingsConfigRouteImport } from './routes/settings.config'
 import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
 import { Route as CIdRouteImport } from './routes/c.$id'
@@ -70,11 +68,6 @@ const MemoryRoute = MemoryRouteImport.update({
 const LogsRoute = LogsRouteImport.update({
   id: '/logs',
   path: '/logs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LiveRoute = LiveRouteImport.update({
-  id: '/live',
-  path: '/live',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BoardRoute = BoardRouteImport.update({
@@ -142,11 +135,6 @@ const SettingsMcpRoute = SettingsMcpRouteImport.update({
   path: '/mcp',
   getParentRoute: () => SettingsRoute,
 } as any)
-const SettingsMaintenanceRoute = SettingsMaintenanceRouteImport.update({
-  id: '/maintenance',
-  path: '/maintenance',
-  getParentRoute: () => SettingsRoute,
-} as any)
 const SettingsConfigRoute = SettingsConfigRouteImport.update({
   id: '/config',
   path: '/config',
@@ -179,7 +167,6 @@ export interface FileRoutesByFullPath {
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/board': typeof BoardRoute
-  '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/projects': typeof ProjectsRouteWithChildren
@@ -190,7 +177,6 @@ export interface FileRoutesByFullPath {
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/settings/config': typeof SettingsConfigRoute
-  '/settings/maintenance': typeof SettingsMaintenanceRoute
   '/settings/mcp': typeof SettingsMcpRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -208,7 +194,6 @@ export interface FileRoutesByTo {
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/board': typeof BoardRoute
-  '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/skills': typeof SkillsRoute
@@ -216,7 +201,6 @@ export interface FileRoutesByTo {
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/settings/config': typeof SettingsConfigRoute
-  '/settings/maintenance': typeof SettingsMaintenanceRoute
   '/settings/mcp': typeof SettingsMcpRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -234,7 +218,6 @@ export interface FileRoutesById {
   '/artifacts': typeof ArtifactsRoute
   '/automation': typeof AutomationRoute
   '/board': typeof BoardRoute
-  '/live': typeof LiveRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
   '/projects': typeof ProjectsRouteWithChildren
@@ -245,7 +228,6 @@ export interface FileRoutesById {
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/settings/config': typeof SettingsConfigRoute
-  '/settings/maintenance': typeof SettingsMaintenanceRoute
   '/settings/mcp': typeof SettingsMcpRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -265,7 +247,6 @@ export interface FileRouteTypes {
     | '/artifacts'
     | '/automation'
     | '/board'
-    | '/live'
     | '/logs'
     | '/memory'
     | '/projects'
@@ -276,7 +257,6 @@ export interface FileRouteTypes {
     | '/c/$id'
     | '/projects/$id'
     | '/settings/config'
-    | '/settings/maintenance'
     | '/settings/mcp'
     | '/settings/models'
     | '/settings/notifications'
@@ -294,7 +274,6 @@ export interface FileRouteTypes {
     | '/artifacts'
     | '/automation'
     | '/board'
-    | '/live'
     | '/logs'
     | '/memory'
     | '/skills'
@@ -302,7 +281,6 @@ export interface FileRouteTypes {
     | '/c/$id'
     | '/projects/$id'
     | '/settings/config'
-    | '/settings/maintenance'
     | '/settings/mcp'
     | '/settings/models'
     | '/settings/notifications'
@@ -319,7 +297,6 @@ export interface FileRouteTypes {
     | '/artifacts'
     | '/automation'
     | '/board'
-    | '/live'
     | '/logs'
     | '/memory'
     | '/projects'
@@ -330,7 +307,6 @@ export interface FileRouteTypes {
     | '/c/$id'
     | '/projects/$id'
     | '/settings/config'
-    | '/settings/maintenance'
     | '/settings/mcp'
     | '/settings/models'
     | '/settings/notifications'
@@ -349,7 +325,6 @@ export interface RootRouteChildren {
   ArtifactsRoute: typeof ArtifactsRoute
   AutomationRoute: typeof AutomationRoute
   BoardRoute: typeof BoardRoute
-  LiveRoute: typeof LiveRoute
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
   ProjectsRoute: typeof ProjectsRouteWithChildren
@@ -409,13 +384,6 @@ declare module '@tanstack/react-router' {
       path: '/logs'
       fullPath: '/logs'
       preLoaderRoute: typeof LogsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/live': {
-      id: '/live'
-      path: '/live'
-      fullPath: '/live'
-      preLoaderRoute: typeof LiveRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/board': {
@@ -509,13 +477,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsMcpRouteImport
       parentRoute: typeof SettingsRoute
     }
-    '/settings/maintenance': {
-      id: '/settings/maintenance'
-      path: '/maintenance'
-      fullPath: '/settings/maintenance'
-      preLoaderRoute: typeof SettingsMaintenanceRouteImport
-      parentRoute: typeof SettingsRoute
-    }
     '/settings/config': {
       id: '/settings/config'
       path: '/config'
@@ -570,7 +531,6 @@ const ProjectsRouteWithChildren = ProjectsRoute._addFileChildren(
 
 interface SettingsRouteChildren {
   SettingsConfigRoute: typeof SettingsConfigRoute
-  SettingsMaintenanceRoute: typeof SettingsMaintenanceRoute
   SettingsMcpRoute: typeof SettingsMcpRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsNotificationsRoute: typeof SettingsNotificationsRoute
@@ -580,7 +540,6 @@ interface SettingsRouteChildren {
 
 const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsConfigRoute: SettingsConfigRoute,
-  SettingsMaintenanceRoute: SettingsMaintenanceRoute,
   SettingsMcpRoute: SettingsMcpRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsNotificationsRoute: SettingsNotificationsRoute,
@@ -626,7 +585,6 @@ const rootRouteChildren: RootRouteChildren = {
   ArtifactsRoute: ArtifactsRoute,
   AutomationRoute: AutomationRoute,
   BoardRoute: BoardRoute,
-  LiveRoute: LiveRoute,
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
   ProjectsRoute: ProjectsRouteWithChildren,

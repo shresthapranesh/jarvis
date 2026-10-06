@@ -436,7 +436,6 @@ type Mutation {
   browserActivity(url: String!, phase: String! = "start", conversationId: String = null): Boolean!
   setSetting(key: String!, value: String!, allowManaged: Boolean! = false): SettingWriteResult!
   deleteSetting(key: String!, allowManaged: Boolean! = false): SettingWriteResult!
-  downloadVoice(force: Boolean! = false): VoiceStatus!
 }
 
 """An object with a Globally Unique ID"""
@@ -570,7 +569,6 @@ type Query {
   browserAvailable: Boolean!
   settings: [Setting!]!
   setting(key: String!): Setting!
-  voiceStatus: VoiceStatus!
 }
 
 type QueueMessagePayload {
@@ -746,23 +744,6 @@ type UnreachableModel {
 
 input UploadReferenceInput {
   uploadId: String!
-}
-
-type VoiceFile {
-  name: String!
-  path: String!
-  url: String!
-  exists: Boolean!
-  sizeBytes: Int!
-  downloaded: Boolean!
-}
-
-type VoiceStatus {
-  voice: String!
-  directory: String!
-  ready: Boolean!
-  files: [VoiceFile!]!
-  error: String!
 }
 
 type WindowFinding {

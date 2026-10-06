@@ -2,59 +2,6 @@ import * as stylex from '@stylexjs/stylex';
 import {marked} from 'marked';
 import {useEffect, useMemo, useRef, useState} from 'react';
 
-function SpeakerIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    </svg>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </svg>
-  );
-}
-
-function SpinnerIcon() {
-  return (
-    <svg
-      {...stylex.props(stream.spinner)}
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-    </svg>
-  );
-}
-
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep, getStepPreview} from '../lib/steps';
 import {messageAnchorId} from '../lib/thread';
@@ -536,66 +483,11 @@ export function MessageBubble({
   openArtifactId,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
-  const [ttsState, setTtsState] = useState<'idle' | 'loading' | 'playing'>('idle');
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(
-    () => () => {
-      abortRef.current?.abort();
-      audioRef.current?.pause();
-      window.speechSynthesis?.cancel();
-    },
-    [],
-  );
 
   function copyText(text: string) {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
-  }
-
-  async function readAloud() {
-    if (ttsState === 'playing' || ttsState === 'loading') {
-      abortRef.current?.abort();
-      audioRef.current?.pause();
-      audioRef.current = null;
-      window.speechSynthesis?.cancel();
-      setTtsState('idle');
-      return;
-    }
-    setTtsState('loading');
-    abortRef.current = new AbortController();
-    try {
-      const resp = await fetch('/tts', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({text: message.content}),
-        signal: abortRef.current.signal,
-      });
-      if (!resp.ok) throw new Error('tts unavailable');
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        setTtsState('idle');
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        setTtsState('idle');
-      };
-      audio.play();
-      setTtsState('playing');
-    } catch (e) {
-      if ((e as Error).name === 'AbortError') {
-        setTtsState('idle');
-        return;
-      }
-      window.speechSynthesis?.speak(new SpeechSynthesisUtterance(message.content));
-      setTtsState('idle');
-    }
   }
 
   if (message.role === 'user') {
@@ -645,7 +537,7 @@ export function MessageBubble({
           selectedId={openArtifactId}
         />
       )}
-      <div {...stylex.props(actions.row, ttsState !== 'idle' && actions.rowPinned)}>
+      <div {...stylex.props(actions.row)}>
         <button
           {...stylex.props(actions.copy, copied && actions.copyDone)}
           onClick={() => copyText(message.content)}
@@ -653,22 +545,6 @@ export function MessageBubble({
           type="button"
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
-        </button>
-        <button
-          {...stylex.props(actions.copy, ttsState === 'playing' && actions.copyDone)}
-          onClick={readAloud}
-          title={
-            ttsState === 'loading' ? 'Loading…' : ttsState === 'playing' ? 'Stop' : 'Read aloud'
-          }
-          type="button"
-        >
-          {ttsState === 'loading' ? (
-            <SpinnerIcon />
-          ) : ttsState === 'playing' ? (
-            <StopIcon />
-          ) : (
-            <SpeakerIcon />
-          )}
         </button>
         {message.steps.length > 0 && (
           <button {...stylex.props(chipBtn.base)} onClick={() => onShowSteps?.(message.steps)}>

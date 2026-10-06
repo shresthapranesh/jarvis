@@ -10,7 +10,7 @@ Deeper notes live next to the code and load when you work there:
 
 ## Architecture
 
-- **API is GraphQL-first** — Strawberry + FastAPI. Queries/mutations over HTTP POST `/graphql`; live streams over `graphql-ws` subscriptions on the same path. REST only for what GraphQL can't carry: binary download, file upload, TTS/transcription, `/ws/live`, `/ws/browser`, log tailing, health. Frontend is React 19 + Relay.
+- **API is GraphQL-first** — Strawberry + FastAPI. Queries/mutations over HTTP POST `/graphql`; live streams over `graphql-ws` subscriptions on the same path. REST only for what GraphQL can't carry: binary download, file upload, `/ws/browser`, log tailing, health. Frontend is React 19 + Relay.
 - **A Rust edge (`edge/`) sits in front of Python** — phase 1 of moving to Rust so jarvis runs on old, low-RAM hardware. The edge owns :8000, answers the GraphQL operations ported so far from SQLite, fires all schedules, and proxies everything else to Python on :8001. With `JARVIS_WORKER_CMD` set it **starts Python on demand and stops it after `JARVIS_WORKER_IDLE` seconds idle**. Consequence for Python code: process start is no longer crash recovery — anything that runs at startup must be safe to run every few minutes.
 - **Long-running work goes through a durable SQLite job queue** (`core/queue/`), never bare `asyncio.create_task`. `job.id == task_id` is the single cancellation key. A job with `runtime = 'edge'` is the edge's agent loop's (`edge/src/agent/`): anything in Python that claims, reaps or sweeps jobs or their run rows must skip it.
 

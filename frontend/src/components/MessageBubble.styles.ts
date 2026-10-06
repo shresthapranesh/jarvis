@@ -83,8 +83,6 @@ export const actions = stylex.create({
   // Resting turns used to show nothing at all until hovered, which made settled
   // conversations look inert. Keep the row present but recessive; `turn.base`
   // publishes the hover value.
-  /** Held visible while text-to-speech is loading or playing. */
-  rowPinned: {opacity: 1},
   copy: {
     display: 'flex',
     alignItems: 'center',

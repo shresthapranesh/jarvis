@@ -27,8 +27,6 @@ class AppConfig:
     artifacts_dir: Path
     documents_dir: Path
     staging_dir: Path
-    piper_voice: str
-    whisper_model: str
     queue_backend: str  # "sqlite" today; future: "redis://…"
 
     @classmethod
@@ -61,10 +59,6 @@ class AppConfig:
             artifacts_dir=artifacts_dir,
             documents_dir=documents_dir,
             staging_dir=staging_dir,
-            piper_voice=overrides.get("piper_voice")
-                or os.environ.get("PIPER_VOICE", "voices/en_US-hfc_female-medium.onnx"),
-            whisper_model=overrides.get("whisper_model")
-                or os.environ.get("WHISPER_MODEL", "base"),
             queue_backend=overrides.get("queue_backend")
                 or os.environ.get("JARVIS_QUEUE", "sqlite"),
         )

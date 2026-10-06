@@ -24,9 +24,6 @@ spawn_workers/run_workflow (subgraphs on the parent's LLM), write_artifact
 (its live side-panel event is tied to this run's
 stream writer), and `remember` (there is no createMemory mutation to route to).
 
-A third kind of helper (e.g. `text_to_speech`) is neither a DB read nor a
-write — pure local compute, callable directly with no transport at all.
-
 Conversation and project scope are injected per kernel by core/kernels.py via
 `set_conversation()` / `set_project()`.
 """
@@ -1002,27 +999,6 @@ def project_memory(action: str = "read", content: str | None = None) -> str:
     return f"Project memory updated ({len(new)} chars{note})."
 
 
-def text_to_speech(text: str) -> str:
-    """Synthesize speech from text using the local Piper TTS voice.
-
-    Writes a scratch .wav file and returns its path — pass that path to the
-    write_artifact(file_path=...) tool to save it as a shareable artifact.
-    Raises if piper-tts isn't installed in this build, or the voice model file
-    is missing (set PIPER_VOICE env var).
-    """
-    from core.config import get_config
-    from core.tts import synthesize_wav_bytes
-
-    data = synthesize_wav_bytes(text)
-    cfg = get_config()
-    out_dir = cfg.work_dir
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f"tts-{uuid4().hex[:12]}.wav")
-    with open(path, "wb") as f:
-        f.write(data)
-    return path
-
-
 # ── MCP (external tool servers) ───────────────────────────────────────────────
 # Servers set to `lazy` are connected but unbound: their tool schemas are kept
 # out of every LLM call, and reached from here instead. The call itself runs in
@@ -1257,10 +1233,6 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     "mcp": (
         "external MCP tool servers loaded on demand",
         [mcp_servers, mcp_tools, mcp_help, mcp_call],
-    ),
-    "media": (
-        "local audio synthesis (write_artifact saves the result)",
-        [text_to_speech],
     ),
 }
 

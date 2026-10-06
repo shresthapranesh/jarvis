@@ -13,7 +13,6 @@ from .mutations.automation import AutomationMutation
 from .mutations.board_task import BoardTaskMutation
 from .mutations.browser import BrowserMutation
 from .mutations.conversation import ConversationMutation
-from .mutations.maintenance import MaintenanceMutation
 from .mutations.mcp import McpMutation
 from .mutations.memory import MemoryMutation
 from .mutations.models import ModelsMutation
@@ -30,7 +29,6 @@ from .queries.automation import AutomationQuery
 from .queries.board_task import BoardTaskQuery
 from .queries.browser import BrowserQuery
 from .queries.conversation import ConversationQuery
-from .queries.maintenance import MaintenanceQuery
 from .queries.mcp import McpQuery
 from .queries.memory import MemoryQuery
 from .queries.models import ModelsQuery
@@ -50,14 +48,14 @@ Query = merge_types("Query", (
     ModelsQuery, MemoryQuery, ConversationQuery, ArtifactQuery,
     AutomationQuery, BoardTaskQuery, WorkflowQuery, NotificationQuery,
     ProjectQuery, SkillQuery, TaskRunQuery, McpQuery, ApprovalQuery,
-    ToolQuery, BrowserQuery, SettingQuery, MaintenanceQuery,
+    ToolQuery, BrowserQuery, SettingQuery,
 ))
 Mutation = merge_types("Mutation", (
     MemoryMutation, ConversationMutation, ArtifactMutation,
     AutomationMutation, BoardTaskMutation, WorkflowMutation,
     NotificationMutation, ProjectMutation, SkillMutation, TaskRunMutation,
     McpMutation, ModelsMutation, ApprovalMutation, ToolMutation, BrowserMutation,
-    SettingMutation, MaintenanceMutation,
+    SettingMutation,
 ))
 Subscription = merge_types("Subscription", (
     ChatSubscription, AutomationSubscription, BoardTaskSubscription,

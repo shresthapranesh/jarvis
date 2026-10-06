@@ -148,10 +148,8 @@ impl Bot {
         let user_id = message["from"]["id"].as_i64().map(|id| id.to_string()).unwrap_or_default();
         let Some(model) = self.ctx.model_for("telegram", &user_id).await else { return };
 
-        if let Some(voice) = voice {
-            let suffix = if message.get("voice").is_some_and(Value::is_object) { ".ogg" } else { ".mp3" };
-            let file_id = voice["file_id"].as_str().unwrap_or_default().to_string();
-            return self.handle_voice(chat_id, model, &file_id, suffix).await;
+        if voice.is_some() {
+            return self.handle_voice(chat_id).await;
         }
         if let Some(photo) = photo {
             let bytes = match self.file(photo["file_id"].as_str().unwrap_or_default()).await {
@@ -168,31 +166,8 @@ impl Bot {
         }
     }
 
-    async fn handle_voice(self: std::sync::Arc<Self>, chat_id: i64, model: String, file_id: &str, suffix: &str) {
-        // A status for a real wait — the one message sent before the agent
-        // has anything to say.
-        let placeholder = self.send(chat_id, "⏳ Transcribing...").await;
-        let text = match self.file(file_id).await {
-            Ok(audio) => self.ctx.transcribe(audio, suffix).await,
-            Err(e) => Err(e),
-        };
-        let text = match text {
-            Ok(text) if !text.is_empty() => text,
-            failed => {
-                if let Err(e) = failed {
-                    tracing::warn!("telegram voice: {e}");
-                }
-                let note = "(could not transcribe audio)";
-                match placeholder {
-                    Some(id) => self.edit(chat_id, id, note).await,
-                    None => drop(self.send(chat_id, note).await),
-                }
-                return;
-            }
-        };
-        // Titled by what was said, not by the stored "[Voice] …".
-        let display = format!("[Voice] {text}");
-        self.dispatch(chat_id, placeholder, model, text.clone(), display, &text, vec![]).await;
+    async fn handle_voice(self: std::sync::Arc<Self>, chat_id: i64) {
+        self.send(chat_id, super::VOICE_UNSUPPORTED).await;
     }
 
     /// `_dispatch`: start the turn, then stream its reply into `message_id`

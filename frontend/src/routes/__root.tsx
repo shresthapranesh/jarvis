@@ -22,7 +22,6 @@ import {
   KanbanIcon,
   ListIcon,
   MenuIcon,
-  MicIcon,
   MoonIcon,
   ShieldCheckIcon,
   StarIcon,
@@ -88,7 +87,6 @@ const NAV_GROUPS: {heading: string; items: NavItem[]}[] = [
   {
     heading: 'Work',
     items: [
-      {to: '/live', label: 'Live', Icon: MicIcon},
       {to: '/board', label: 'Board', Icon: KanbanIcon},
       {to: '/workflow', label: 'Workflows', Icon: WorkflowIcon},
       {to: '/automation', label: 'Automations', Icon: BoltIcon},

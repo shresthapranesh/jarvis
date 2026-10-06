@@ -1,7 +1,7 @@
 """The chat bots, run by the Rust edge (`edge/src/bots/`).
 
 A fake chat service stands in for Telegram's Bot API, Discord's REST API and
-gateway, and Python's `/transcribe`; the edge runs its bots against it, with a
+gateway; the edge runs its bots against it, with a
 real worker linked that claims the runs they start. What a message *writes* is
 also diffed against Python's own bot handler on a twin database, as every
 ported operation is (`test_edge_parity.py`).
@@ -33,7 +33,7 @@ QUEUED_NOTE = "📥 Added to what I'm working on — it'll be picked up in a mom
 
 
 class FakeChat:
-    """Telegram + Discord + Python's /transcribe, on one port."""
+    """Telegram + Discord, on one port."""
 
     def __init__(self) -> None:
         self.port = _free_port()
@@ -41,7 +41,6 @@ class FakeChat:
         self.updates: list[dict[str, Any]] = []
         self.next_update = 1
         self.files: dict[str, bytes] = {}
-        self.transcript = "turn on the lights"
         self.channels: dict[str, dict[str, Any]] = {}
         self.gateway: list[dict[str, Any]] = []  # what the edge sent on the gateway
         self.dispatches: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -121,12 +120,6 @@ class FakeChat:
             assert request.path_params["token"] == f"bot{TG_TOKEN}"
             return Response(self.files[request.path_params["path"].removeprefix("files/")])
 
-        async def transcribe(request: Request) -> Response:
-            form = await request.form()
-            audio = form["audio"]
-            self.calls.append(("transcribe", {"filename": audio.filename, "bytes": await audio.read()}))
-            return JSONResponse({"text": self.transcript})
-
         async def discord(request: Request) -> Response:
             assert request.headers["authorization"] == f"Bot {DC_TOKEN}"
             path = "/" + request.path_params["path"]
@@ -190,7 +183,6 @@ class FakeChat:
         app = Starlette(routes=[
             Route("/tg/{token}/{method}", telegram, methods=["POST"]),
             Route("/tg/file/{token}/{path:path}", telegram_file),
-            Route("/transcribe", transcribe, methods=["POST"]),
             Route("/cdn/{name}", cdn),
             Route("/dc/{path:path}", discord, methods=["GET", "POST", "PATCH"]),
             WebSocketRoute("/gateway", gateway),
@@ -342,17 +334,10 @@ async def test_telegram_photo(bots, chat, work_dir):
 
 
 async def test_telegram_voice_note(bots, chat, work_dir):
-    chat.files["vo"] = b"OggS fake"
     chat.telegram(_tg_message(None, voice={"file_id": "vo", "duration": 2}))
-    # The one status message: it covers the transcription, then becomes the reply.
     status = await chat.until_sent("sendMessage")
-    assert status["text"] == "⏳ Transcribing..."
-    await chat.until_sent("editMessageText", lambda b: b["text"] == f"echo: {chat.transcript}")
-    assert chat.sent("transcribe") == [{"filename": "audio.ogg", "bytes": b"OggS fake"}]
-    assert len(chat.sent("sendMessage")) == 1
-    user = _rows(work_dir / "database.db",
-                 "SELECT content FROM messages WHERE conversation_id = 'telegram_100' AND role = 'user'")
-    assert user == [{"content": f"[Voice] {chat.transcript}"}]
+    assert status["text"] == "Voice notes aren't supported — send text instead."
+    assert _rows(work_dir / "database.db", "SELECT id FROM jobs WHERE payload LIKE '%telegram_100%'") == []
 
 
 async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_factory, edge_binary, chat, monkeypatch):
@@ -368,7 +353,6 @@ async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_fac
             contextlib.closing(sqlite3.connect(b_dir / "database.db")) as dst:
         src.backup(dst)
     since = datetime.now(timezone.utc).replace(microsecond=0)
-    chat.transcript = "x" * 90
 
     class Bot:
         async def send_message(self, **_: Any) -> Any:
@@ -395,10 +379,6 @@ async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_fac
         return SimpleNamespace(message=SimpleNamespace(chat_id=chat_id, **fields),
                                effective_user=SimpleNamespace(id=42))
 
-    async def transcribed(data: bytes, suffix: str = ".ogg") -> str:
-        return chat.transcript
-
-    monkeypatch.setattr("server.routes_media.transcribe_bytes", transcribed)
     context = SimpleNamespace(bot=Bot())
     before = asyncio.all_tasks()
     await telegram_bot.handle_message(update(100, text="hello"), context)
@@ -408,17 +388,16 @@ async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_fac
         task.cancel()
 
     chat.files["img"] = b"img"
-    chat.files["vo"] = b"OggS"
     async with _run_edge(edge_binary, b_dir, b_dir / "database.db", chat.env()) as client, fake_worker(client):
         chat.telegram(_tg_message("hello", chat_id=100))
         await chat.until_sent("sendChatAction", lambda b: b["chat_id"] == 100)
         chat.telegram(_tg_message(None, chat_id=101, photo=[{"file_id": "img"}], caption="what is this"))
         await chat.until_sent("sendChatAction", lambda b: b["chat_id"] == 101)
         chat.telegram(_tg_message(None, chat_id=102, voice={"file_id": "vo"}))
-        await chat.until_sent("sendChatAction", lambda b: b["chat_id"] == 102)
+        await chat.until_sent("sendMessage", lambda b: b["chat_id"] == 102)
 
         async def written() -> bool:
-            return len(_rows(b_dir / "database.db", "SELECT id FROM jobs")) == 3
+            return len(_rows(b_dir / "database.db", "SELECT id FROM jobs")) == 2
 
         await _until(written)
 

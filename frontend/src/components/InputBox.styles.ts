@@ -93,8 +93,6 @@ export const composer = stylex.create({
   /**
    * Keyboard advice fades in with focus — it is instruction for someone
    * already typing, and a resting composer should not be repeating it.
-   * Applied only when the hint is NOT carrying live speech text, which has to
-   * stay visible whether or not the textarea holds focus.
    */
   hintIdle: {
     opacity: 'var(--composer-hint-opacity)',
@@ -103,9 +101,9 @@ export const composer = stylex.create({
 });
 
 /**
- * The footer controls — attach, incognito, mic, model, send.
+ * The footer controls — attach, incognito, model, send.
  *
- * There is no `icon` style here any more: attach/incognito/mic now use
+ * There is no `icon` style here any more: attach/incognito now use
  * `iconBtn` from `./ui`, which is the same 26px borderless glyph every other
  * dense row in the app uses. Three controls each drawing their own fill and
  * border turned the footer into a row of little boxes; the app already had
@@ -114,7 +112,7 @@ export const composer = stylex.create({
 export const control = stylex.create({
   /** Rounds `iconBtn.base` to match the field it sits in. */
   glyph: {borderRadius: radii.md},
-  /** Toggled-on state for `iconBtn.base` — incognito armed, mic listening. */
+  /** Toggled-on state for `iconBtn.base` — incognito armed. */
   iconActive: {
     color: {default: colors.accent, ':hover': colors.accent},
     backgroundColor: {default: colors.accentDim, ':hover': colors.accentDim},

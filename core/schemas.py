@@ -78,7 +78,3 @@ class AttachmentIn(BaseModel):
     # and without this the turn proceeds as though the file were simply small —
     # the agent then reports "the file doesn't exist" as its own conclusion.
     persist_error: str | None = None
-
-
-class TTSRequest(BaseModel):
-    text: str

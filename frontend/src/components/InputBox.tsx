@@ -3,13 +3,12 @@ import {useEffect, useRef, useState} from 'react';
 
 import {useIsMobile} from '../hooks/useIsMobile';
 import {useModels} from '../hooks/useModels';
-import {useWhisperSTT} from '../hooks/useWhisperSTT';
 import {useToast} from '../lib/toast';
 import type {MediaAttachment, PersistedDocument} from '../lib/types';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {attachment, composer, control} from './InputBox.styles';
-import {field, iconBtn, stream} from './ui';
+import {field, iconBtn} from './ui';
 
 interface Props {
   onSubmit: (query: string, model: string, attachments: MediaAttachment[]) => void;
@@ -78,14 +77,6 @@ export function InputBox({
   const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const {listening, interimText, startListening, stopListening} = useWhisperSTT((text) => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.value = el.value ? el.value + ' ' + text : text;
-    handleInput();
-    el.focus();
-  });
 
   // Seed the model: prefer the per-conversation `initialModel`, then fall back
   // to the catalog default. Re-runs when the user navigates between
@@ -177,7 +168,10 @@ export function InputBox({
       // only called from onload, so a read that fails leaves no chip, no error,
       // and a user who thinks they attached a file.
       reader.onerror = () => {
-        toast.push(`Could not read ${file.name}${reader.error ? ` (${reader.error.name})` : ''}.`, 'error');
+        toast.push(
+          `Could not read ${file.name}${reader.error ? ` (${reader.error.name})` : ''}.`,
+          'error',
+        );
       };
       reader.readAsDataURL(file);
     });
@@ -384,46 +378,6 @@ export function InputBox({
             </button>
           )}
 
-          <button
-            type="button"
-            {...stylex.props(iconBtn.base, control.glyph, listening && control.iconActive)}
-            title={listening ? 'Stop recording' : 'Voice input'}
-            disabled={disabled || interimText === 'Transcribing…'}
-            onClick={() => (listening ? stopListening() : void startListening())}
-          >
-            {interimText === 'Transcribing…' ? (
-              <svg
-                {...stylex.props(stream.spinner)}
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-            ) : (
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="9" y="2" width="6" height="12" rx="3" />
-                <path d="M5 10a7 7 0 0 0 14 0" />
-                <line x1="12" y1="19" x2="12" y2="22" />
-                <line x1="8" y1="22" x2="16" y2="22" />
-              </svg>
-            )}
-          </button>
-
           <input
             ref={fileInputRef}
             type="file"
@@ -449,15 +403,13 @@ export function InputBox({
           </select>
 
           {/* On touch there is no Enter/Shift+Enter to describe, and at the 16px
-              control size the hint pushes the send button off screen. Live
-              speech interim text still shows — that one is not keyboard advice. */}
-          <span {...stylex.props(composer.hint, !interimText && composer.hintIdle)}>
-            {interimText ||
-              (queueing
-                ? 'Enter · delivered at the run’s next step'
-                : isMobile
-                  ? ''
-                  : 'Enter · Shift+Enter for newline')}
+              control size the hint pushes the send button off screen. */}
+          <span {...stylex.props(composer.hint, composer.hintIdle)}>
+            {queueing
+              ? 'Enter · delivered at the run’s next step'
+              : isMobile
+                ? ''
+                : 'Enter · Shift+Enter for newline'}
           </span>
 
           {onStop && (disabled || queueing) ? (

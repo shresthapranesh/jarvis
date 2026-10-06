@@ -5,8 +5,9 @@
 //! through the same `start_chat` the web UI's `startTask` uses — joining the
 //! run already going on that chat, if there is one — and the reply is the
 //! run's main-agent text, followed in the run mirror and edited into the chat
-//! as it grows. Python is started for the run (its job) and, for a voice note,
-//! for the transcription; never to keep a bot connected.
+//! as it grows. Python is started for the run (its job) when the edge can't
+//! run it; never to keep a bot connected. A voice note is answered with
+//! `VOICE_UNSUPPORTED`.
 //!
 //! Each bot is enabled by its token, as in Python: `TELEGRAM_BOT_TOKEN`,
 //! `DISCORD_BOT_TOKEN`. Python behind the edge starts neither.
@@ -24,7 +25,6 @@ use tokio::sync::watch;
 use crate::catalog;
 use crate::gql::start::{Attachment, ChatTurn, Dispatched, first_chars, start_chat};
 use crate::runs::{Registry, Run};
-use crate::supervisor::Supervisor;
 
 /// Edits to a streaming reply, at most one per this.
 const EDIT_INTERVAL: Duration = Duration::from_secs(1);
@@ -34,15 +34,15 @@ const EDIT_INTERVAL: Duration = Duration::from_secs(1);
 /// the reply already in flight will answer this too.
 const QUEUED_NOTE: &str = "📥 Added to what I'm working on — it'll be picked up in a moment.";
 
+/// The answer to a voice note: there is no transcription.
+const VOICE_UNSUPPORTED: &str = "Voice notes aren't supported — send text instead.";
+
 /// What every bot needs from the edge.
 #[derive(Clone)]
 pub struct Ctx {
     pool: SqlitePool,
     registry: Arc<Registry>,
-    supervisor: Arc<Supervisor>,
     documents_dir: PathBuf,
-    /// The Python server, for `/transcribe`.
-    backend: String,
     /// For the chat services: HTTPS, and redirects followed.
     http: reqwest::Client,
 }
@@ -51,9 +51,7 @@ pub struct Ctx {
 pub fn spawn(
     pool: SqlitePool,
     registry: Arc<Registry>,
-    supervisor: Arc<Supervisor>,
     documents_dir: PathBuf,
-    backend: String,
 ) {
     let token = |key: &str| std::env::var(key).ok().filter(|t| !t.trim().is_empty());
     let telegram_token = token("TELEGRAM_BOT_TOKEN");
@@ -64,9 +62,7 @@ pub fn spawn(
     let ctx = Ctx {
         pool,
         registry,
-        supervisor,
         documents_dir,
-        backend,
         http: reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
             .build()
@@ -151,30 +147,6 @@ impl Ctx {
         }
     }
 
-    /// Speech to text, by Python's `/transcribe` (Whisper). An empty string
-    /// is no speech.
-    async fn transcribe(&self, audio: Vec<u8>, suffix: &str) -> Result<String, String> {
-        // Held until the answer is in, so the worker isn't stopped under it.
-        let _worker = self.supervisor.ensure_up().await?;
-        let part = reqwest::multipart::Part::bytes(audio).file_name(format!("audio{suffix}"));
-        let form = reqwest::multipart::Form::new().part("audio", part);
-        let resp = self
-            .http
-            .post(format!("{}/transcribe", self.backend))
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| format!("transcribe: {e}"))?;
-        let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| format!("transcribe: {e}"))?;
-        match body.get("text").and_then(|t| t.as_str()) {
-            Some(text) if status.is_success() => Ok(text.trim().to_string()),
-            _ => Err(format!(
-                "transcribe: {status} {}",
-                body.get("error").and_then(|e| e.as_str()).unwrap_or_default()
-            )),
-        }
-    }
 
 }
 
