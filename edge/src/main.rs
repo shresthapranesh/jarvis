@@ -8,6 +8,7 @@ mod agent;
 mod approvals;
 mod aws;
 mod bots;
+mod browser;
 mod budget;
 mod catalog;
 mod checkpoints;
@@ -61,6 +62,8 @@ pub struct AppState {
     pub kernels: Arc<kernels::Kernels>,
     /// MCP servers (`mcp/`), which Python behind the edge calls through.
     pub mcp: Arc<mcp::Mcp>,
+    /// The live view of the agent's browser (`browser/`).
+    pub screencast: Arc<browser::screencast::Screencast>,
 }
 
 impl AppState {
@@ -263,6 +266,7 @@ async fn main() {
     if let Some(dir) = &config.static_dir {
         tracing::info!("serving the SPA from {}", dir.display());
     }
+    let screencast = browser::screencast::Screencast::new(pool.clone(), http.clone(), config.work_dir.clone());
     let state = AppState {
         config: Arc::new(config),
         pool: pool.clone(),
@@ -274,6 +278,7 @@ async fn main() {
         supervisor: supervisor.clone(),
         kernels: kernels.clone(),
         mcp,
+        screencast,
     };
     let app = Router::new()
         // GET /graphql (the subscription WebSocket) falls through to the proxy.
@@ -283,6 +288,7 @@ async fn main() {
         .route("/internal/kernels/shutdown", post(kernels::http_shutdown))
         .route("/internal/mcp/state", post(mcp::internal::state))
         .route("/internal/mcp/call", post(mcp::internal::call))
+        .route("/ws/browser", get(browser::ws::upgrade))
         .fallback(proxy::any)
         // Python sets no request-size limit on /graphql; neither does the edge.
         .layer(DefaultBodyLimit::disable())

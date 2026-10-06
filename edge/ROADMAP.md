@@ -50,7 +50,7 @@ it's on `main`.
 
 - [x] Workflow engine: `workflow/engine.py` and the node types, workflow runs, `run_workflow`
 - [ ] Voice: Whisper transcription, Piper TTS, `downloadVoice`, `voiceStatus`, `/ws/live` — L (Whisper alone is ~245 MB in Python)
-- [ ] `/ws/browser` — M
+- [x] `/ws/browser`: the live view, the browser launched when none is up
 - [ ] CLI: `main.py` → a Rust binary — M
 
 ## D. Switch Python off

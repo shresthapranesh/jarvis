@@ -1,6 +1,6 @@
 //! Reverse proxy to the Python server for everything the edge doesn't serve
 //! itself: un-ported GraphQL operations, subscriptions, the REST routes
-//! `rest.rs` doesn't take, the live-audio and browser WebSockets, and the SPA.
+//! `rest.rs` doesn't take, the live-audio WebSocket, and the SPA.
 //!
 //! Bodies are streamed both ways, never buffered: uploads are up to 100 MiB
 //! and `/server-logs/stream` is a response that never ends.

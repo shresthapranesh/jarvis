@@ -31,6 +31,8 @@ pub struct Config {
     /// The interpreter kernels run on: `JARVIS_KERNEL_PYTHON`, else the
     /// checkout's `.venv`, else `python3` on the PATH.
     pub kernel_python: PathBuf,
+    /// `WORK_DIR`, as given: the browser's default profile is under it.
+    pub work_dir: PathBuf,
 }
 
 pub struct WorkerConfig {
@@ -97,6 +99,7 @@ impl Config {
             static_dir,
             worker,
             kernel_python: python_in(&app_dir),
+            work_dir: work_dir()?,
             app_dir: resolve(app_dir),
         })
     }

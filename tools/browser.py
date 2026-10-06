@@ -187,6 +187,8 @@ def _has_display() -> bool:
 
 
 # ── Reaching the browser ─────────────────────────────────────────────────────
+# Ported by the edge (`edge/src/browser/mod.rs`) for the live view, along with
+# `cdp_url`, `profile_dir` and `executable` above: a change is made in both.
 
 def _endpoint_live(url: str) -> bool:
     import httpx

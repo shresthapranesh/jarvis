@@ -14,6 +14,9 @@ token stream.
 That last line is deliberate. The panel is view-only today, but the input
 channel exists from the first version so adding click/type forwarding later is
 a new message type rather than a new transport.
+
+Behind the edge this route is unused: `edge/src/browser/ws.rs` ports it (change
+both). It serves when Python stands alone.
 """
 
 from __future__ import annotations
