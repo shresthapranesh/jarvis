@@ -16,6 +16,9 @@ the first subscriber starts the cast and the last one stops it, so a closed
 panel costs no encoding. Frames are pushed into per-subscriber queues of depth
 1 — a slow socket drops stale frames instead of applying backpressure to the
 browser, which is the right trade for video nobody rewinds.
+
+**The edge serves `/ws/browser` itself** (`edge/src/browser/screencast.rs`, a
+port of this module): a change here is made in both.
 """
 
 from __future__ import annotations

@@ -31,6 +31,7 @@ Everything else lives in `sdk.py`, preloaded as `jarvis` in every kernel and dis
 - `browser.close()` on a CDP-attached browser disconnects, it doesn't quit — the persistent profile relies on that.
 
 ### Live browser view (`core/browser_stream.py` → `/ws/browser`)
+Behind the edge, `/ws/browser` is the edge's (`edge/src/browser/`, a port of this, `routes_browser.py` and `ensure_running` — change both); Python's route serves only when it stands alone.
 - Frames come from CDP `Page.startScreencast` on the server's own CDP client; sent as binary WebSocket messages, not GraphQL.
 - Screencast runs only while someone watches (ref-counted). Per-subscriber queues are depth 1, drop-oldest.
 - `_Subscriber` must be `@dataclass(eq=False)` (it lives in a set). `_ensure_page` opens a tab via `PUT /json/new` when none exist. `_prime()` grabs one screenshot on attach, since screencast only emits on paint.

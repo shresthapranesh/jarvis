@@ -599,6 +599,18 @@ to it when adding a provider.
   one buffer: the edge's `tracing` events plus the records a linked worker
   sends over the link (`type: "log"`), its pre-link backfill included — so
   opening it never starts Python. Diffed in `tests/test_edge_rest.py`.
+- **`/ws/browser`** (`src/browser/` — ports of `routes_browser.py`,
+  `core/browser_stream.py` and `tools/browser.py`'s `ensure_running`; change
+  both). The live view never starts Python: the edge finds the browser (or
+  launches one, as the kernel would), attaches its own CDP client to the tab
+  Playwright calls `pages[0]` (the first page `Target.setAutoAttach` reports),
+  and fans the screencast out — one cast while anyone watches, newest frame
+  only, the last frame for a late joiner. The messages are Python's, byte for
+  byte. Departures: a closed tab or browser ends the stream with
+  `unavailable`/`"the browser went away"` (Python kept sending `idle`), and the
+  next viewer attaches afresh; an attach that runs out its 15 s says so (Python
+  sent an empty reason); a page in a non-default browser context isn't skipped.
+  Tested against a fake DevTools browser in `tests/test_edge_browser.py`.
 
 ## Porting a domain
 
