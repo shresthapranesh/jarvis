@@ -598,19 +598,18 @@ their raw flags and skip it.
   reply returned): no conversation, its own kernel, shut down after; the
   prompt is read from `JARVIS_APP_DIR`.
 - **Python when only Python can.** These run the same command through
-  `$JARVIS_APP_DIR/main.py` (exec'd, before anything is written): no database
-  file yet, or one with no schema (Python creates and migrates it); a
+  `$JARVIS_APP_DIR/main.py` (exec'd, before anything is written): a
   `models.custom` row Python would refuse to load; a provider listing or a
-  probe `modelSync` would defer (credentials only boto3 reads); `memory *`
-  before the one-time LangGraph store import has run; `run` on a model the
-  edge doesn't call, or with `JARVIS_AGENT_RUNTIME=python`.
+  probe `modelSync` would defer (credentials only boto3 reads); `run` on a
+  model the edge doesn't call, or with `JARVIS_AGENT_RUNTIME=python`. Every
+  command first creates or migrates the database (`schema.rs`), as
+  `main.py`'s `init_db` does, and `memory *` copies the LangGraph store
+  over first, once, as `main.py` does.
 - **Output.** The same words as `main.py`, plain: tables are aligned columns,
   a panel is its title and text, `run` prints the reply's Markdown as is.
   Colour only on a terminal without `NO_COLOR`. `memory reset` asks
   `[y/N]` as `typer.confirm` does.
-- **Departures.** `main.py`'s own `init_db` runs migrations (and writes a
-  migration marker back) on every command; the edge's doesn't touch the
-  schema. Rich wraps at the console width and swallows `[text]` it reads as
+- **Departures.** Rich wraps at the console width and swallows `[text]` it reads as
   markup; the edge does neither. Not ported: `reports`/`view` (nothing writes
   `reports/` any more), `download-voice` (moves with voice). `maintenance *`
   is gone from both: its commands converted `checkpoints.db`.
@@ -621,9 +620,18 @@ their raw flags and skip it.
 
 ## Contracts with the Python side
 
-- **Python owns the schema** (`init_db` + `_migrate`). The edge creates no
-  tables and opens the same file with the same pragmas, plus
-  `foreign_keys = OFF`, which sqlx would otherwise turn on.
+- **The edge owns the schema** (`src/schema.rs`). At start, and before a
+  command-line command, it creates every table missing from `schema.sql` —
+  what `Base.metadata.create_all` makes, captured from `db/models.py` — then
+  runs its port of `db/engine.py:_migrate` (columns, indexes, the artifact
+  backfill, the FTS5 mirrors) and the one-time LangGraph store import, as
+  `Database.init` + `import_store_once` do for Python alone. Python still
+  runs its own on start (it finds nothing to do behind the edge), so a
+  schema change is made in `db/models.py` + `_migrate` and here:
+  re-capture `schema.sql` and port the migration step;
+  `tests/test_edge_schema.py` diffs the two over fresh and old databases.
+  The file is opened with Python's pragmas, plus `foreign_keys = OFF`,
+  which sqlx would otherwise turn on.
 - **Wire formats match byte for byte** (`src/gql/codec.rs`):
   - global ids are `base64("Type:id")`
   - `DateTime` is Python's `isoformat()`, which drops a zero fraction

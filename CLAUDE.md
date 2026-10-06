@@ -77,7 +77,7 @@ Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. The `jarvis` fixtur
 
 **Database**
 - `async_session` has `expire_on_commit=False` — don't `session.refresh()` after commit.
-- Updates use ORM `setattr`, not raw `UPDATE`, so `onupdate` fires. FK columns get `index=True`. Schema changes to existing tables go in `_migrate()` — and Python still owns the schema the edge reads.
+- Updates use ORM `setattr`, not raw `UPDATE`, so `onupdate` fires. FK columns get `index=True`. Schema changes to existing tables go in `_migrate()`. The edge owns the schema (`edge/src/schema.rs`): a model change is re-captured into `edge/src/schema.sql`, and a `_migrate` step is ported there too (`tests/test_edge_schema.py`).
 
 **Scheduling**
 - Build every cron trigger with `core/scheduler.py:_cron(expr)`, never `CronTrigger.from_crontab` — it applies the timezone and the Unix day-of-week fix. `edge/src/cron.rs` is a port: change both.

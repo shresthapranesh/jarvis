@@ -499,6 +499,7 @@ class Twin:
 async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: Path, one_zone):
     import sqlite3
 
+    from core.transcript_store import import_store_once
     from db import async_session
     from db.models import Artifact, DocumentChunk
 
@@ -513,6 +514,9 @@ async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: P
             DocumentChunk(id="ch2", document_id="d1", conversation_id="c1", seq=1, text="gamma"),
         ])
         await s.commit()
+    async with async_session() as s:
+        # A started server's database: the LangGraph store import has run.
+        await import_store_once(s, str(work_dir / "checkpoints.db"))
 
     b_dir = tmp_path_factory.mktemp("twin")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
