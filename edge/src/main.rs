@@ -276,9 +276,7 @@ async fn serve() {
     bots::spawn(
         pool.clone(),
         runs.clone(),
-        supervisor.clone(),
         config.documents_dir.clone(),
-        config.backend.clone(),
     );
     let owned = gql::owned_root_fields(&schema);
     tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));

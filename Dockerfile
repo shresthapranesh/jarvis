@@ -48,26 +48,19 @@ ENV UV_COMPILE_BYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH=/app \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    WORK_DIR=/data \
-    HF_HOME=/data/.cache/huggingface
+    WORK_DIR=/data
 
-# Audio decode for faster-whisper (the Linux transcription backend). Playwright
-# pulls its own system libs below via `--with-deps`.
+# Playwright pulls its own system libs below via `--with-deps`.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Dependencies only (cached unless pyproject/uv.lock change).
-# mlx / mlx-whisper / mlx-metal are Apple-Silicon-only; the app falls back to
-# faster-whisper on Linux (server/routes_media.py:_USE_MLX), so skip them.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project \
-      --no-install-package mlx \
-      --no-install-package mlx-whisper \
-      --no-install-package mlx-metal
+    uv sync --frozen --no-dev --no-install-project
 
 # Headless Chromium for the browser_agent / researcher tools.
 # Slim the image by ~500MB with: --build-arg INSTALL_BROWSERS=false

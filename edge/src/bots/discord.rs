@@ -361,8 +361,8 @@ impl Bot {
             .filter(|a| content_type(a).starts_with("image/"))
             .collect();
 
-        if let Some(i) = voice {
-            return self.handle_voice(&message, &attachments[i], model).await;
+        if voice.is_some() {
+            return self.handle_voice(&message).await;
         }
         if !images.is_empty() {
             let mut parts = vec![];
@@ -389,37 +389,9 @@ impl Bot {
         Ok(())
     }
 
-    async fn handle_voice(self: Arc<Self>, message: &Value, audio: &Value, model: String) -> Result<(), String> {
-        let channel_id = message["channel_id"].as_str().unwrap_or_default().to_string();
-        let ctype = audio["content_type"].as_str().unwrap_or_default().to_lowercase();
-        let suffix = if ctype.contains("ogg") {
-            ".ogg"
-        } else if ctype.contains("mp") {
-            ".mp3"
-        } else {
-            ".ogg"
-        };
-        // Typing while Whisper runs: a real wait, shown without a message.
-        let typing = self.typing(&channel_id);
-        let text = match download(&self.ctx.http, audio["url"].as_str().unwrap_or_default()).await {
-            Ok(bytes) => self.ctx.transcribe(bytes, suffix).await,
-            Err(e) => Err(e),
-        };
-        drop(typing);
-        let text = match text {
-            Ok(text) if !text.is_empty() => text,
-            failed => {
-                if let Err(e) = failed {
-                    tracing::warn!("discord voice: {e}");
-                }
-                self.send(&channel_id, "(could not transcribe audio)", None).await?;
-                return Ok(());
-            }
-        };
-        let target = self.target(message, &text).await;
-        // Titled by what was said, not by the stored "[Voice] …".
-        let display = format!("[Voice] {text}");
-        self.dispatch(&target, message, model, text.clone(), display, &text, vec![]).await;
+    async fn handle_voice(self: Arc<Self>, message: &Value) -> Result<(), String> {
+        let channel_id = message["channel_id"].as_str().unwrap_or_default();
+        self.send(channel_id, super::VOICE_UNSUPPORTED, None).await?;
         Ok(())
     }
 

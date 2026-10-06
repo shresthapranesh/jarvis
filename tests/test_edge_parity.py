@@ -1121,16 +1121,16 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
 @pytest.mark.parametrize(
     "query",
     [
-        # A root field the edge doesn't implement.
-        "{ voiceStatus { ready } }",
+        # A root field the edge doesn't know (Python answers with its error).
+        "{ notARootField { ready } }",
         # One owned root field and one not: the whole operation goes to Python.
-        "{ conversations { id } voiceStatus { ready } }",
+        "{ conversations { id } notARootField { ready } }",
         # A field that may defer, beside another.
         "{ models { default } modelSync { provider } }",
         # Owned root field, un-ported subfield: validation fails, so it's proxied.
         "{ conversations { id notAField } }",
-        # A mutation that isn't ported.
-        'mutation { downloadVoice { ready } }',
+        # A mutation the edge doesn't know.
+        'mutation { notAMutation { ready } }',
         # The run mirror isn't current without a worker.
         'mutation { stopBoardTask(id: "x") }',
         # A node id of a type the edge can't resolve.

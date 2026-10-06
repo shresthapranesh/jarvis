@@ -203,57 +203,6 @@ def start(
     uvicorn.run(app, host=host, port=port, reload=reload, log_config=None)
 
 
-@app.command("download-voice")
-def download_voice():
-    """Download the Piper TTS voice model into the voices/ directory."""
-    import httpx
-    from core.config import get_config
-    from rich.progress import TaskID
-
-    from core.voice import download_voice as _download, voice_status
-
-    cfg = get_config()
-    status = voice_status(cfg.piper_voice, cfg.work_dir)
-    if status.error:
-        rprint(f"[bold red]{status.error}[/bold red]")
-        raise typer.Exit(code=1)
-
-    console.print(f"[dim]Voice directory:[/dim] {status.directory}")
-    for f in status.files:
-        if f.exists:
-            console.print(f"[green]✓[/green] Already exists: {f.name}")
-
-    pending = [f for f in status.files if not f.exists]
-    if not pending:
-        console.print("[bold green]Done.[/bold green]")
-        return
-
-    with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        DownloadColumn(),
-        TransferSpeedColumn(),
-        console=console,
-    ) as progress:
-        tasks: dict[str, TaskID] = {}
-
-        def on_progress(name: str, seen: int, total: int | None) -> None:
-            if name not in tasks:
-                tasks[name] = progress.add_task(name, total=total)
-            progress.update(tasks[name], completed=seen, total=total)
-
-        try:
-            result = _download(cfg.piper_voice, cfg.work_dir, progress=on_progress)
-        except httpx.HTTPStatusError as exc:
-            rprint(f"[bold red]HTTP {exc.response.status_code}:[/bold red] {exc.request.url}")
-            raise typer.Exit(code=1)
-
-    for f in result.files:
-        if f.downloaded:
-            console.print(f"[green]✓[/green] Saved: {f.path}")
-    console.print("[bold green]Done.[/bold green]")
-
-
 def _run_db(coro):
     import asyncio
     from db.engine import init_db

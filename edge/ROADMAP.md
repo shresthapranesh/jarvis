@@ -49,9 +49,9 @@ it's on `main`.
 ## C. The big pieces
 
 - [x] Workflow engine: `workflow/engine.py` and the node types, workflow runs, `run_workflow`
-- [ ] Voice: Whisper transcription, Piper TTS, `downloadVoice`, `voiceStatus`, `/ws/live` — L (Whisper alone is ~245 MB in Python)
+- [x] Voice: removed instead of ported (Whisper, Piper, `downloadVoice`, `voiceStatus`, `/ws/live`, the Live page)
 - [x] `/ws/browser`: the live view, the browser launched when none is up
-- [x] CLI: `jarvis-edge run|config|model|memory|start` (`main.py`'s `download-voice` and `maintenance` go with voice and 2a step 11)
+- [x] CLI: `jarvis-edge run|config|model|memory|start` (`main.py`'s `download-voice` went with voice, `maintenance` with 2a step 11)
 
 ## D. Switch Python off
 

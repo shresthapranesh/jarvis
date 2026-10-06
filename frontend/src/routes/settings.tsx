@@ -79,7 +79,6 @@ function SettingsLayout() {
     // say 4 next to a heading saying 12. The set count stays in that
     // heading's hint, which is where it means something.
     config: settingData.settings.length,
-    maintenance: null,
   };
 
   return (

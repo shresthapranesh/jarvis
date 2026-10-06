@@ -158,10 +158,5 @@
   "name": "mcp_call",
   "description": "Call one MCP tool and return its output as text.",
   "group": "mcp"
- },
- {
-  "name": "text_to_speech",
-  "description": "Synthesize speech from text using the local Piper TTS voice.",
-  "group": "media"
  }
 ]

@@ -79,16 +79,10 @@ that's where egress is actually enforceable, not inside the kernel.
 
 ## Image notes & caveats
 
-- **Apple-Silicon audio (`mlx-whisper`) is skipped** on Linux by design; the
-  image uses the cross-platform `faster-whisper` backend (whisper models
-  download to `/data/.cache` on first use).
 - **Browser tools:** Chromium is installed unless you build with
   `--build-arg INSTALL_BROWSERS=false`. Under `cap_drop: ALL`, Chromium's
   sandbox is unavailable, so browser-use/Playwright must launch with
   `--no-sandbox` (or relax seccomp). Disable browsers if you don't need them —
   it removes ~500MB.
-- **TTS:** piper-tts needs a voice file at the path in `PIPER_VOICE`
-  (default `voices/...onnx`). Mount one in if you use `/tts`; otherwise audio
-  output is the only degraded feature.
 - The build needs network (uv + pnpm + Playwright downloads). First build is
   slow; layers cache afterward.

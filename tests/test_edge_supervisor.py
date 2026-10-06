@@ -318,7 +318,7 @@ async def test_spa_is_served_here_and_python_routes_are_not_shadowed(database, w
         head = await client.head("/assets/app-1.js")
         assert head.status_code == 200 and head.content == b""
         # Client-side routes, including ones that share a prefix with Python's.
-        for path in ("/c/abc", "/artifacts", "/artifacts/a1", "/documents/d1/raw/x", "/ws/live", "/uploads",
+        for path in ("/c/abc", "/artifacts", "/artifacts/a1", "/documents/d1/raw/x", "/uploads",
                      "/../secret.txt", "/%2e%2e/secret.txt"):
             resp = await client.get(path)
             assert resp.text == "<!doctype html>spa", path

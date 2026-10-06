@@ -358,19 +358,6 @@ export const tools = stylex.create({
   toggleInput: {cursor: {default: 'pointer', ':disabled': 'not-allowed'}},
 });
 
-/** Settings → Maintenance: the stats block. */
-export const maint = stylex.create({
-  stats: {display: 'flex', flexWrap: 'wrap', gap: 22, marginBlock: '10px 4px'},
-  stat: {display: 'flex', flexDirection: 'column', gap: 2},
-  dt: {
-    fontSize: type.tMicro,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    color: colors.textDim,
-  },
-  dd: {margin: 0, fontSize: type.tBody, fontWeight: 600, color: colors.text},
-});
-
 /** The config-key row's dashed "add a new key" strip. */
 export const configNew = stylex.create({
   root: {

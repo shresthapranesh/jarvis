@@ -6,10 +6,9 @@
 //! everything here is a no-op.
 //!
 //! **What starts Python**: a request the edge has to proxy (REST, the
-//! GraphQL it hasn't ported, the other WebSockets); a voice note a chat bot
-//! needs transcribed (`bots/`); a job it can claim, or one left `running` by a
-//! worker that died; and the edge's own start, so the startup sweeps run and a
-//! broken command shows up at once. Runs the edge
+//! GraphQL it hasn't ported, the other WebSockets); a job it can claim, or
+//! one left `running` by a worker that died; and the edge's own start, so the
+//! startup sweeps run and a broken command shows up at once. Runs the edge
 //! starts itself (`startTask` and the other triggers) need nothing more: they
 //! write a job, `Registry::wake` kicks this loop, and the run stays pending in
 //! the mirror until the new worker claims it.

@@ -7,7 +7,7 @@ import type {ReactNode} from 'react';
    the `/settings` layout route, where it renders for every child instead
    of being re-mounted by whichever tab happens to be showing. */
 
-export type SettingsTab = 'mcp' | 'tools' | 'notifications' | 'models' | 'config' | 'maintenance';
+export type SettingsTab = 'mcp' | 'tools' | 'notifications' | 'models' | 'config';
 
 export interface SettingsTabInfo {
   id: SettingsTab;
@@ -78,17 +78,6 @@ export const SETTINGS_TABS = [
         <code>main.py config set/get/list/delete</code> writes, except that a write here is also
         pushed into the running server instead of waiting for a restart. Keys another tab owns are
         shown read-only.
-      </>
-    ),
-  },
-  {
-    id: 'maintenance',
-    to: '/settings/maintenance',
-    label: 'Maintenance',
-    subtitle: (
-      <>
-        Housekeeping that used to need a terminal on the box: download the Piper voice model
-        that <code>POST /tts</code> needs.
       </>
     ),
   },

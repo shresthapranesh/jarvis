@@ -27,8 +27,8 @@ iana-time-zone = "0.1"
 dotenvy = "0.15"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 # rustls: the bots talk to Telegram and Discord over HTTPS (`bots/`);
-# multipart: a voice note goes to Python's /transcribe; socks: TELEGRAM_PROXY_URL.
-reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls", "multipart", "socks"] }
+# socks: TELEGRAM_PROXY_URL.
+reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls", "socks"] }
 serde = { version = "1", features = ["derive"] }
 # preserve_order: event payloads are re-serialized the way Python does it,
 # and Python keeps dict insertion order.
