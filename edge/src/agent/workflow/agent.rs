@@ -28,32 +28,18 @@ const RECURSION_LIMIT: u32 = 100;
 /// The agent's streamed text over every step, as `node_token`s under
 /// `node_id` — or why it failed.
 pub async fn run_text(env: &Env<'_>, node_id: &str, model: &str, query: String) -> Result<String, String> {
-    let agent = env.agent;
-    let pool = &agent.pool;
-    let mcp = agent.mcp.snapshot().await;
-    let policy = Policy::load(pool, &mcp).await;
-    let bound = tools::bound_for(&policy, false, &mcp);
-    let thread_id = Uuid::new_v4().to_string();
-    let retrieved = prompt::retrieved(pool, &agent.http, &query, &thread_id, &mcp)
-        .await
-        .map_err(|prompt::NeedsPython(why)| format!("the agent's prompt couldn't be built: {why}"))?;
-    let ends = Endpoints { compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(), ..Endpoints::from_env() };
-    let kernel = workers::Kernel::new(agent.kernels.clone(), thread_id.clone());
-    let mut node = NodeAgent {
-        env,
-        node_id,
-        model,
-        query: query.clone(),
-        policy,
-        mcp,
-        bound,
-        ends,
-        retrieved,
-        thread_id,
-        todos: vec![],
-        text: String::new(),
-        steps: 0,
-    };
+    let mut node = NodeAgent::new(env, node_id, model, &query).await?;
+    let kernel = workers::Kernel::new(env.agent.kernels.clone(), node.thread_id.clone());
+    let answer = node.run(query).await.map(|_| std::mem::take(&mut node.text));
+    kernel.shutdown().await;
+    answer
+}
+
+/// The agent's last reply — `main.py run`'s `agent.ainvoke(...)["messages"][-1]`:
+/// the same agent, on a history and kernel of its own, with no conversation.
+pub async fn run_reply(env: &Env<'_>, model: &str, query: String) -> Result<Message, String> {
+    let mut node = NodeAgent::new(env, "", model, &query).await?;
+    let kernel = workers::Kernel::new(env.agent.kernels.clone(), node.thread_id.clone());
     let answer = node.run(query).await;
     kernel.shutdown().await;
     answer
@@ -75,15 +61,44 @@ struct NodeAgent<'a, 'e> {
     steps: u32,
 }
 
-impl NodeAgent<'_, '_> {
-    async fn run(&mut self, query: String) -> Result<String, String> {
+impl<'a, 'e> NodeAgent<'a, 'e> {
+    async fn new(env: &'a Env<'e>, node_id: &'a str, model: &'a str, query: &str) -> Result<Self, String> {
+        let agent = env.agent;
+        let pool = &agent.pool;
+        let mcp = agent.mcp.snapshot().await;
+        let policy = Policy::load(pool, &mcp).await;
+        let bound = tools::bound_for(&policy, false, &mcp);
+        let thread_id = Uuid::new_v4().to_string();
+        let retrieved = prompt::retrieved(pool, &agent.http, query, &thread_id, &mcp)
+            .await
+            .map_err(|prompt::NeedsPython(why)| format!("the agent's prompt couldn't be built: {why}"))?;
+        let ends = Endpoints { compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(), ..Endpoints::from_env() };
+        Ok(NodeAgent {
+            env,
+            node_id,
+            model,
+            query: query.to_string(),
+            policy,
+            mcp,
+            bound,
+            ends,
+            retrieved,
+            thread_id,
+            todos: vec![],
+            text: String::new(),
+            steps: 0,
+        })
+    }
+
+    /// The loop, to the reply with no tool calls.
+    async fn run(&mut self, query: String) -> Result<Message, String> {
         let mut history = vec![Message::new(Role::User, Content::Text(query))];
         loop {
             self.take_step()?;
             let reply = self.model_step(&history).await?;
             history.push(reply.clone());
             if reply.tool_calls.is_empty() {
-                return Ok(std::mem::take(&mut self.text));
+                return Ok(reply);
             }
             self.take_step()?;
             let results = self.tool_step(&reply.tool_calls).await?;

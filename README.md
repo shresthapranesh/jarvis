@@ -108,6 +108,15 @@ uv run main.py view report-name
 uv run main.py download-voice
 ```
 
+The Rust edge binary carries the same commands without starting Python —
+`run`, `config`, `model`, `memory` and `start` (no command serves):
+
+```bash
+cd edge && cargo build --release
+./target/release/jarvis-edge run "What is the current state of AI chip manufacturing?"
+./target/release/jarvis-edge model list
+```
+
 ### Server options
 
 ```bash

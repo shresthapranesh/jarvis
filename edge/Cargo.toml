@@ -57,6 +57,8 @@ sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4.3"
 minijinja = { version = "2.24.0", default-features = false, features = ["builtins", "serde", "preserve_order", "std_collections"] }
+# The command line (`cli/`): `jarvis-edge run|config|model|memory|start`.
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions", "color"] }
 
 [profile.release]
 opt-level = "s"

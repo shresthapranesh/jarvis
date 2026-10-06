@@ -45,6 +45,9 @@ it.
 The built-in model list is compiled in from `core/builtin_models.json`, so
 rebuild the edge after editing it.
 
+The same binary is the command line (`src/cli/`, see below): `jarvis-edge`
+with no command serves, `jarvis-edge start [--host] [--port] [--debug]` too.
+
 ## Routing
 
 An operation is answered by the edge only when **every root field it selects**
@@ -576,6 +579,46 @@ the difference by name. Examples: LangChain dropped an assistant's text when it
 sat next to tool calls or was stored as a bare string, its tool-schema
 conversion was lossy, and it threw away reasoning. Add
 to it when adding a provider.
+
+## The command line (`src/cli/`)
+
+A port of `main.py` (change both): `run "<query>" [--model] [--no-save]
+[--debug]`, `config set|get|list|delete`, `model list|add|remove|set-default|sync`,
+`memory show|set|reset`, `start`, and a global `--work-dir`. Arguments are
+clap's; the test hooks (`--print-schema`, `--cron-next`, `--llm-call`, …) keep
+their raw flags and skip it.
+
+- **The same code as the server.** `config` writes `config_settings` raw, as
+  `db/ops.py` does (no validation; a running server reads the row when it next
+  needs it). `model` goes through `catalog.rs` and `gql/models.rs`'s
+  custom-model helpers; `model sync` through `discovery.rs`, every listing and
+  probe gathered before anything prints. `memory` reads and writes the
+  `AGENTS.md` row as `KvStore` does — `set` stores `{"content": …}` only, and
+  `updated_at` moves only when the value changes. `run` is the chat agent in
+  memory (`agent::workflow::run_once`, the workflow agent node's loop, last
+  reply returned): no conversation, its own kernel, shut down after; the
+  prompt is read from `JARVIS_APP_DIR`.
+- **Python when only Python can.** These run the same command through
+  `$JARVIS_APP_DIR/main.py` (exec'd, before anything is written): no database
+  file yet, or one with no schema (Python creates and migrates it); a
+  `models.custom` row Python would refuse to load; a provider listing or a
+  probe `modelSync` would defer (credentials only boto3 reads); `memory *`
+  before the one-time LangGraph store import has run; `run` on a model the
+  edge doesn't call, or with `JARVIS_AGENT_RUNTIME=python`.
+- **Output.** The same words as `main.py`, plain: tables are aligned columns,
+  a panel is its title and text, `run` prints the reply's Markdown as is.
+  Colour only on a terminal without `NO_COLOR`. `memory reset` asks
+  `[y/N]` as `typer.confirm` does.
+- **Departures.** `main.py`'s own `init_db` runs migrations (and writes a
+  migration marker back) on every command; the edge's doesn't touch the
+  schema. Rich wraps at the console width and swallows `[text]` it reads as
+  markup; the edge does neither. Not ported: `reports`/`view` (nothing writes
+  `reports/` any more), `download-voice` (moves with voice), `maintenance *`
+  (goes with 2a step 11).
+- Diffed against `main.py` — output, exit codes and rows — in
+  `tests/test_edge_cli.py`, with `run` on the fake Ollama of
+  `test_edge_loop.py` and `model sync` on the fake providers of
+  `test_edge_model_sync.py`.
 
 ## Contracts with the Python side
 
