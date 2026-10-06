@@ -138,10 +138,12 @@ def test_config(twins):
         assert re.search(r"foo\.bar\s+.*héllo wörld", side.out)
 
 
-def test_config_list_empty(twins):
-    # Edge only: Python's `init_db` writes a migration marker back on every run.
+def test_config_list_after_the_settings_are_gone(twins):
+    # Each side's `init_db` writes its migration marker back first.
     twins.seed("DELETE FROM config_settings")
-    assert twins.edge("config", "list") == Out(0, "No config settings found.")
+    for side in (twins.python("config", "list"), twins.edge("config", "list")):
+        assert side.code == 0 and "migration.artifact_message_ids" in side.out
+    twins.same_rows("SELECT key, value FROM config_settings")
 
 
 def test_model_writes(twins):
@@ -170,11 +172,9 @@ def test_model_writes(twins):
 
 
 def test_memory(twins, tmp_path):
-    # The LangGraph store import has run once on both sides.
-    twins.python("memory", "show")
-    twins.edge("memory", "show", handoff=True)
-
+    # The LangGraph store import runs once, on each side.
     twins.same("memory", "show")
+    twins.same_rows("SELECT namespace, key FROM kv_store")
     note = tmp_path / "agents.md"
     note.write_bytes("# Notes\r\nPrefers metric — café ✓\r\n".encode())
     twins.same("memory", "set", str(note))
@@ -196,13 +196,15 @@ def test_memory(twins, tmp_path):
     twins.same_rows(KV)
 
 
-def test_what_only_python_can_do_goes_to_python(twins, tmp_path):
-    # No database yet: Python creates it.
-    fresh = Twins(tmp_path / "fresh", twins.binary)
-    python, edge = fresh.python("config", "get", "x"), fresh.edge("config", "get", "x", handoff=True)
-    assert edge == python == Out(0, "Not set: x")
-    assert (fresh.rs / "database.db").exists()
+def test_a_database_that_isnt_there_yet(tmp_path, edge_binary):
+    fresh = Twins(tmp_path, edge_binary)
+    assert fresh.same("config", "get", "x") == Out(0, "Not set: x")
+    assert fresh.same("memory", "show").code == 0
+    with sqlite3.connect(fresh.rs / "database.db") as conn:
+        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0] > 26
 
+
+def test_what_only_python_can_do_goes_to_python(twins, tmp_path):
     # A catalog only Python loads (or fails to).
     twins.setting('models.custom', '[{"id": 5}]')
     python, edge = twins.python("model", "list"), twins.edge("model", "list", handoff=True)

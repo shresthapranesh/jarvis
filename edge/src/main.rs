@@ -33,6 +33,7 @@ mod pystr;
 mod rest;
 mod runs;
 mod schedule;
+mod schema;
 mod supervisor;
 
 use std::net::SocketAddr;
@@ -86,6 +87,7 @@ const HOOKS: &[&str] = &[
     "--llm-call",
     "--maintenance-due",
     "--maintenance-run",
+    "--init-db",
 ];
 
 fn main() {
@@ -180,6 +182,20 @@ async fn serve() {
             std::process::exit(2);
         }
     };
+    // The schema is the edge's: created or migrated before anything reads it.
+    if let Err(e) = schema::init(&pool, &config.db_path).await {
+        tracing::error!("database {}: {e}", config.db_path.display());
+        std::process::exit(2);
+    }
+    match schema::import_store_once(&pool, &config.checkpoints_db).await {
+        Ok(Some(copied)) if copied > 0 => tracing::info!("imported {copied} item(s) from the LangGraph store"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("the LangGraph store import failed: {e}"),
+    }
+    // `--init-db`: just that, for the tests that diff it against Python's.
+    if std::env::args().any(|a| a == "--init-db") {
+        return;
+    }
 
     let tz = schedule::resolve_tz(&pool).await;
 

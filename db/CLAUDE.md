@@ -3,7 +3,7 @@
 ## Conventions
 - Models in `models.py` with `DeclarativeBase`, `Mapped`, `mapped_column`. IDs `str(uuid4())`, timestamps `_now()` (UTC).
 - Every ForeignKey column gets `index=True`.
-- New tables are created by `create_all` at startup. Changes to existing tables go in `engine.py:_migrate()` (`ALTER TABLE` / `CREATE INDEX IF NOT EXISTS`). The Rust edge reads these tables but never migrates them.
+- New tables are created by `create_all` at startup. Changes to existing tables go in `engine.py:_migrate()` (`ALTER TABLE` / `CREATE INDEX IF NOT EXISTS`). The Rust edge owns the schema and does both itself (`edge/src/schema.rs`: `schema.sql` is `create_all` captured — re-capture with `JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_schema.py` — and `migrate` ports `_migrate`, change both).
 - `async_session` uses `expire_on_commit=False`; never `session.refresh()` after commit.
 - `update_*` functions use ORM `setattr`, not raw `UPDATE`, so `onupdate` fires.
 - SQLite FK enforcement is **off**; cascades are SQLAlchemy ORM cascades (explicit DELETEs).

@@ -147,7 +147,7 @@ async fn dispatch(command: Command) -> Done {
         Command::Run { query, model, no_save, .. } => run::run(&config, &pool, query, model, no_save).await,
         Command::Config(cmd) => config::run(&pool, cmd).await,
         Command::Model(cmd) => model::run(&pool, cmd).await,
-        Command::Memory(cmd) => memory::run(&pool, cmd).await,
+        Command::Memory(cmd) => memory::run(&pool, &config.checkpoints_db, cmd).await,
         Command::Start { .. } => unreachable!("start serves"),
     }
 }
@@ -167,22 +167,13 @@ fn logging(debug: bool) {
         .init();
 }
 
-/// The configuration and the database `main.py`'s `_run_db` would open.
-/// Python creates and migrates the schema: a database that isn't there yet,
-/// or has no tables, is Python's to set up.
+/// The configuration and the database `main.py`'s `_run_db` would open,
+/// created or migrated first, as its `init_db` does.
 async fn open() -> Result<(crate::config::Config, SqlitePool), Fail> {
     let config = crate::config::Config::from_env().map_err(Fail::Error)?;
-    if !config.db_path.exists() {
-        return Err(Fail::Python(format!("{} doesn't exist yet", config.db_path.display())));
-    }
-    let pool = crate::db::pool(&config.db_path).map_err(|e| Fail::Error(format!("database {}: {e}", config.db_path.display())))?;
-    let tables: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('config_settings', 'kv_store')")
-            .fetch_one(&pool)
-            .await?;
-    if tables < 2 {
-        return Err(Fail::Python("the database has no schema yet".into()));
-    }
+    let database = |e: String| Fail::Error(format!("database {}: {e}", config.db_path.display()));
+    let pool = crate::db::pool(&config.db_path).map_err(|e| database(e.to_string()))?;
+    crate::schema::init(&pool, &config.db_path).await.map_err(database)?;
     Ok((config, pool))
 }
 

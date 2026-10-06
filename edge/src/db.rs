@@ -1,6 +1,5 @@
-//! The SQLite pool. Python still owns the schema (`init_db` + `_migrate`), so
-//! nothing here creates tables; it only connects with the same per-connection
-//! settings `db/engine.py:_set_sqlite_pragmas` applies.
+//! The SQLite pool, connected with the same per-connection settings
+//! `db/engine.py:_set_sqlite_pragmas` applies. The schema is `schema.rs`'s.
 
 use std::path::Path;
 use std::str::FromStr;
@@ -10,8 +9,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePo
 
 pub fn pool(path: &Path) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))?
-        // On a fresh install the edge may boot before Python has created the
-        // file; creating it empty is what Python would do a moment later.
+        // A fresh install: `schema::init` makes the tables.
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)

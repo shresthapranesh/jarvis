@@ -2,12 +2,11 @@
 //! (namespace `memory`), as `main.py` reads and writes it through `KvStore`:
 //! `set` stores `{"content": …}` and nothing else.
 //!
-//! `main.py` first copies the LangGraph store out of `checkpoints.db`, once
-//! (`import_store_once`); an install where that hasn't happened yet is
-//! Python's to run.
+//! Each first copies the LangGraph store out of `checkpoints.db`, once
+//! (`schema::import_store_once`), as `main.py` does.
 
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use serde_json::{Value, json};
@@ -37,10 +36,10 @@ pub enum Cmd {
     },
 }
 
-pub async fn run(pool: &SqlitePool, cmd: Cmd) -> Done {
+pub async fn run(pool: &SqlitePool, checkpoints_db: &Path, cmd: Cmd) -> Done {
     match cmd {
         Cmd::Show => {
-            imported(pool).await?;
+            imported(pool, checkpoints_db).await?;
             let Some((value, updated_at)) = get(pool).await? else {
                 println!(
                     "{} The agent will use only the hardcoded system prompt.",
@@ -63,7 +62,7 @@ pub async fn run(pool: &SqlitePool, cmd: Cmd) -> Done {
                 println!("{}", yellow("Aborted."));
                 return Ok(1);
             }
-            imported(pool).await?;
+            imported(pool, checkpoints_db).await?;
             if get(pool).await?.is_none() {
                 println!("{}", yellow("No memory entry to delete."));
                 return Ok(0);
@@ -85,7 +84,7 @@ pub async fn run(pool: &SqlitePool, cmd: Cmd) -> Done {
                 println!("{} Use 'memory reset' instead.", red("Refusing to set an empty memory entry."));
                 return Ok(1);
             }
-            imported(pool).await?;
+            imported(pool, checkpoints_db).await?;
             put(pool, &json!({"content": content})).await?;
             println!("{}", ok(&format!("Wrote {} chars from {} to memory", pystr::len(&content), file.display())));
             Ok(0)
@@ -93,13 +92,9 @@ pub async fn run(pool: &SqlitePool, cmd: Cmd) -> Done {
     }
 }
 
-/// The store already came over from `checkpoints.db`, or Python does it.
-async fn imported(pool: &SqlitePool) -> Result<(), Fail> {
-    let done: Option<i64> =
-        sqlx::query_scalar("SELECT 1 FROM kv_store WHERE namespace = 'jarvis.migrations' AND key = 'langgraph_store'")
-            .fetch_optional(pool)
-            .await?;
-    done.map(drop).ok_or_else(|| Fail::Python("the LangGraph store hasn't been imported yet".into()))
+/// `_memory_store`: the LangGraph store copied over first, once.
+async fn imported(pool: &SqlitePool, checkpoints_db: &Path) -> Result<(), Fail> {
+    crate::schema::import_store_once(pool, checkpoints_db).await.map(drop).map_err(Fail::Error)
 }
 
 /// `KvStore.aget`: the document and its stored `updated_at`.

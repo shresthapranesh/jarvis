@@ -71,12 +71,15 @@ async def boot_jarvis() -> AsyncIterator[object]:
     from core.config import get_config
     from core.queue import SqliteJobQueue
     from core.runner import JarvisRunner, set_runner
-    from core.transcript_store import KvStore
-    from db import close_db, get_database, init_db
+    from core.transcript_store import KvStore, import_store_once
+    from db import async_session, close_db, get_database, init_db
 
     cfg = get_config()
     state._main_loop = asyncio.get_running_loop()  # _notify marshals onto this
     await init_db()
+    # As the lifespan does: the LangGraph store marker is there from the start.
+    async with async_session() as session:
+        await import_store_once(session, cfg.checkpoints_db)
 
     async with httpx.AsyncClient(timeout=30.0) as http:
         runner = JarvisRunner(
