@@ -15,7 +15,7 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from core.transcript import TranscriptError, check_checkpoints, decode, encode
+from core.transcript import TranscriptError, decode, encode
 
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
 PNG_B64 = base64.b64encode(PNG).decode()
@@ -177,21 +177,3 @@ def test_refuses_what_it_cannot_read():
     with pytest.raises(TranscriptError):
         decode({"v": 1, "role": "user", "content": [{"type": "image", "blob": "sha256:00", "mime_type": "image/png",
                                                      "extras": {"lc_type": "media"}}]})
-
-
-def test_check_reads_a_checkpoints_db(tmp_path):
-    """The `maintenance check-transcript` path, over a real LangGraph saver."""
-    from langgraph.checkpoint.sqlite import SqliteSaver
-    from langgraph.graph import START, MessagesState, StateGraph
-
-    db = tmp_path / "checkpoints.db"
-    graph = StateGraph(MessagesState)  # type: ignore[bad-specialization]
-    graph.add_node("echo", lambda state: {"messages": [GEMINI, ToolMessage(content="2", tool_call_id="c1")]})
-    graph.add_edge(START, "echo")
-    with SqliteSaver.from_conn_string(str(db)) as saver:
-        graph.compile(checkpointer=saver).invoke(
-            {"messages": [HumanMessage(content="hi")]}, {"configurable": {"thread_id": "t1"}},
-        )
-    report = check_checkpoints(str(db))
-    assert report.messages > 0
-    assert report.mismatches == []

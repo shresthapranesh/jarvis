@@ -30,8 +30,6 @@ model_app = typer.Typer(help="Manage models.")
 app.add_typer(model_app, name="model")
 memory_app = typer.Typer(help="Manage agent memory (AGENTS.md in the key-value store).")
 app.add_typer(memory_app, name="memory")
-maintenance_app = typer.Typer(help="Database maintenance tasks.")
-app.add_typer(maintenance_app, name="maintenance")
 
 
 @app.callback()
@@ -613,63 +611,6 @@ def memory_set(
 
     _run_db(_write)
     rprint(f"[green]✓[/green] Wrote {len(content)} chars from {file} to memory")
-
-
-# ── maintenance subcommands ─────────────────────────────────────────────────
-
-
-@maintenance_app.command("check-transcript")
-def check_transcript(
-    path: Annotated[Optional[Path], typer.Option("--path", help="checkpoints.db to read (default: this install's).")] = None,
-) -> None:
-    """Check that every message in checkpoints.db survives the transcript format.
-
-    Read-only. Run before moving threads off LangGraph checkpoints: each
-    message is encoded to the v1 transcript format (core/transcript_format.md)
-    and decoded back, and any that doesn't come back equal is listed.
-    """
-    from core.transcript import check_checkpoints
-
-    db_path = path or _checkpoints_db_path()
-    if not db_path.exists():
-        rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
-        raise typer.Exit(code=1)
-    report = check_checkpoints(str(db_path))
-    if not report.mismatches:
-        rprint(f"[green]{report.messages} messages round-trip exactly[/green]  [dim]({db_path})[/dim]")
-        return
-    rprint(f"[red]{len(report.mismatches)}+ of {report.messages} messages don't round-trip:[/red]")
-    for thread_id, index, why in report.mismatches:
-        rprint(f"  {thread_id} #{index}: {why}")
-    raise typer.Exit(code=1)
-
-
-@maintenance_app.command("convert-checkpoints")
-def convert_checkpoints() -> None:
-    """Move every conversation's thread from checkpoints.db into the transcript tables.
-
-    The server does this by itself on start (a `convert_checkpoints`
-    maintenance job); this runs the same sweep now. Safe while the server is
-    running, and again: converted threads are skipped. Threads in
-    checkpoints.db are only read.
-    """
-    from core.transcript_store import convert_checkpoints as convert, legacy_checkpointer
-
-    db_path = _checkpoints_db_path()
-    if not db_path.exists():
-        rprint(f"[red]checkpoints DB not found:[/red] {db_path}")
-        raise typer.Exit(code=1)
-
-    async def _convert(_session):
-        async with legacy_checkpointer(str(db_path)) as saver:
-            return await convert(saver, str(db_path))
-
-    report = _run_db(_convert)
-    rprint(f"[green]{report.converted} thread(s) converted[/green], {report.skipped} already  [dim]({db_path})[/dim]")
-    for thread_id, why in report.failed:
-        rprint(f"  [red]{thread_id}[/red]: {why}")
-    if report.failed:
-        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

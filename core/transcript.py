@@ -12,7 +12,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -299,45 +299,3 @@ def _b64(part: Mapping[str, Any], blobs: Mapping[str, bytes]) -> str:
     if ref not in blobs:
         raise TranscriptError(f"missing blob {ref}")
     return base64.b64encode(blobs[ref]).decode()
-
-
-# ── checking a checkpoints.db ────────────────────────────────────────────────
-
-
-@dataclass
-class CheckReport:
-    messages: int = 0
-    # (thread_id, message index, why) for each message that didn't come back equal.
-    mismatches: list[tuple[str, int, str]] = field(default_factory=list)
-
-
-def check_checkpoints(path: str, *, limit: int = 20) -> CheckReport:
-    """Encode and decode every message in every checkpoint of a LangGraph
-    `checkpoints.db`, through JSON as it would be stored, and report each one
-    that doesn't come back equal. Opens the file read-only."""
-    import json
-    import sqlite3
-    from pathlib import Path
-
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-
-    serde = JsonPlusSerializer()
-    report = CheckReport()
-    conn = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
-    try:
-        rows = conn.execute("SELECT thread_id, type, checkpoint FROM checkpoints")
-        for thread_id, kind, payload in rows:
-            checkpoint = serde.loads_typed((kind, payload))
-            for i, msg in enumerate((checkpoint.get("channel_values") or {}).get("messages") or []):
-                report.messages += 1
-                try:
-                    rec, blobs = encode(msg)
-                    back = decode(json.loads(json.dumps(rec)), {b.hash: b.data for b in blobs})
-                    why = None if back == msg else f"{type(msg).__name__} differs"
-                except Exception as exc:  # noqa: BLE001 — reported, not raised
-                    why = f"{type(msg).__name__}: {exc}"
-                if why and len(report.mismatches) < limit:
-                    report.mismatches.append((thread_id, i, why))
-    finally:
-        conn.close()
-    return report

@@ -94,31 +94,12 @@ class DbThread(Thread):
 
     @classmethod
     async def load(cls, thread_id: str) -> "DbThread":
-        """The thread's rows — converted from LangGraph's checkpoint first, if
-        that is the only place it exists yet."""
-        from core.transcript_store import import_checkpoint, legacy_checkpointer, load_thread
+        """The thread's rows."""
+        from core.transcript_store import load_thread
         from db import async_session
 
         async with async_session() as session:
             thread = await load_thread(session, thread_id)
-            if not thread.exists:
-                try:
-                    async with legacy_checkpointer() as checkpointer:
-                        converted = checkpointer is not None and await import_checkpoint(
-                            session, checkpointer, thread_id,
-                        )
-                except Exception as exc:
-                    # Either the batch conversion wrote it first (the unique
-                    # keys refused this copy), or the checkpoint won't convert
-                    # — which must not take the thread down with it: the run
-                    # starts it fresh, and says so.
-                    await session.rollback()
-                    converted = True
-                    if not (await load_thread(session, thread_id)).exists:
-                        logger.warning("could not convert checkpoint thread %s: %s", thread_id, exc)
-                        converted = False
-                if converted:
-                    thread = await load_thread(session, thread_id)
         return cls(thread_id, thread.messages, thread.todos)
 
     async def _write(self, messages: list[BaseMessage]) -> None:

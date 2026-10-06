@@ -36,7 +36,7 @@ it.
 | `JARVIS_BACKEND_URL` | `http://127.0.0.1:8001` | the Python server |
 | `JARVIS_EDGE_LOG` | `info` | `error`…`trace`, the edge's own logs only |
 | `DATABASE_URL` / `WORK_DIR` | as `core/config.py` | same database file as Python |
-| `ARTIFACTS_DIR` / `DOCUMENTS_DIR` / `STAGING_DIR` / `CHECKPOINTS_DB` | as `core/config.py` | same files as Python |
+| `ARTIFACTS_DIR` / `DOCUMENTS_DIR` / `STAGING_DIR` | as `core/config.py` | same files as Python |
 | `JARVIS_WORKER_CMD` | unset | the command that runs Python (via `sh -c`, in `JARVIS_APP_DIR`); set, the edge owns the worker |
 | `JARVIS_WORKER_IDLE` | `300` | seconds idle before the worker is stopped; `0` keeps it up (restarted if it dies) |
 | `JARVIS_APP_DIR` | the current directory | the jarvis checkout: where the worker runs, and `static/dist`, the SPA the edge serves |
@@ -467,8 +467,7 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   runs the tool calls the edge recorded but didn't run, and goes on from
   there (`chat_job_handler`), its text, step rows and spend continuing the
   edge's. A turn goes over when its next step needs what only Python has:
-  arguments that aren't plainly valid, or a conversation not yet converted
-  from `checkpoints.db`.
+  arguments that aren't plainly valid.
 - **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
   roles in `core/agents.py` — change both): `spawn_workers` runs its tasks at
   once, each on the run's model with its role's prompt and tools (the files,
@@ -613,8 +612,8 @@ their raw flags and skip it.
   migration marker back) on every command; the edge's doesn't touch the
   schema. Rich wraps at the console width and swallows `[text]` it reads as
   markup; the edge does neither. Not ported: `reports`/`view` (nothing writes
-  `reports/` any more), `download-voice` (moves with voice), `maintenance *`
-  (goes with 2a step 11).
+  `reports/` any more), `download-voice` (moves with voice). `maintenance *`
+  is gone from both: its commands converted `checkpoints.db`.
 - Diffed against `main.py` — output, exit codes and rows — in
   `tests/test_edge_cli.py`, with `run` on the fake Ollama of
   `test_edge_loop.py` and `model sync` on the fake providers of
@@ -686,7 +685,7 @@ Every query that reads only the database and files:
 | MCP | `mcpServers`, `mcpTools` — the configured servers (env, the first `mcp.json`, the `mcp.servers` setting, the load-mode overrides) and what the edge's MCP client loaded from them (`src/mcp/`, see "MCP") |
 | settings | `settings`, `setting` — the `KNOWN_SETTINGS` registry (`gql/settings.rs`), endpoint API keys redacted |
 | memory | `memories`, `memoryActivities`, `memoryUsage`, `agentMemory` (the `AGENTS.md` blob in `kv_store`, the legacy `/AGENTS.md` copied over on first touch) |
-| chat page | `models` (endpoint names from `models.endpoints` as providers; keys never sent), `todos` (`thread_state`; a thread not yet converted from `checkpoints.db`, read-only, `src/checkpoints.rs`), `browserAvailable` (an http CDP endpoint) |
+| chat page | `models` (endpoint names from `models.endpoints` as providers; keys never sent), `todos` (`thread_state`), `browserAvailable` (an http CDP endpoint) |
 | model sync | `modelSync` — each provider's listing and, with `probe`, a one-token call per catalog model (`src/discovery.rs`, a port of `core/model_discovery.py`; Bedrock signed with SigV4 by `src/aws.rs`, credentials from the environment, the shared files' static keys or the instance role). Listings run at once; skip reasons are Python's word for word. An AWS credential source boto3 alone reads (assume-role, SSO, web identity, `credential_process`, a container role), or a reply Python would fail on, sends the query to Python |
 | Relay | `node` for every Node type |
 

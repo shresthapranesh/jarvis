@@ -185,11 +185,6 @@ impl<'a> Turn<'a> {
                 return Outcome::HandOver(None);
             }
         };
-        // A conversation older than the transcript tables is converted from
-        // checkpoints.db by Python first.
-        if !thread.exists && self.has_history().await {
-            return Outcome::HandOver(None);
-        }
         if self.cancel_requested {
             self.run.update(|st| st.fields.cancelled = true);
         }
@@ -751,19 +746,6 @@ impl<'a> Turn<'a> {
                 .ok()
                 .flatten();
         row.map_or((None, false), |(p, e)| (p, e.unwrap_or(false)))
-    }
-
-    async fn has_history(&self) -> bool {
-        let earlier: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM messages WHERE conversation_id = ? AND role = 'assistant' AND id != ? LIMIT 1",
-        )
-        .bind(&self.thread_id)
-        .bind(&self.task_id)
-        .fetch_optional(self.pool())
-        .await
-        .ok()
-        .flatten();
-        earlier.is_some()
     }
 
     // ── the end ─────────────────────────────────────────────────────────────

@@ -1,12 +1,11 @@
 """The agent loop's own guarantees (`core/agent_loop.py`), beyond what the
-golden logs pin: durability across a crash, converting a LangGraph thread on
-first use, and how a run ends when something goes wrong."""
+golden logs pin: durability across a crash, and how a run ends when something
+goes wrong."""
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -59,32 +58,6 @@ async def test_a_reclaimed_turn_continues_where_it_stopped(jarvis, script):
         "HumanMessage", "AIMessage", "ToolMessage",
     ]
     assert runs == 1
-
-
-async def test_a_checkpoint_only_thread_is_converted_on_first_use(jarvis):
-    from langchain_core.runnables import RunnableConfig
-    from langgraph.checkpoint.base import empty_checkpoint
-
-    from core.transcript_store import legacy_checkpointer
-
-    history = [HumanMessage(content="old question", id="h1"), AIMessage(content="old answer", id="a1")]
-    checkpoint = empty_checkpoint()
-    checkpoint["channel_values"] = {"messages": history, "todos": [{"text": "kept", "status": "done"}]}
-    config: RunnableConfig = {"configurable": {"thread_id": "conv-old", "checkpoint_ns": ""}}
-    async with legacy_checkpointer(str(jarvis.config.checkpoints_db)) as cp:
-        assert cp is None  # no checkpoints.db: nothing to convert from
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-    async with AsyncSqliteSaver.from_conn_string(str(jarvis.config.checkpoints_db)) as cp:
-        await cp.aput(config, checkpoint, {}, {})
-
-    thread = await DbThread.load("conv-old")
-    assert thread.messages == history
-    assert thread.todos == [{"text": "kept", "status": "done"}]
-    # Converted once: the rows answer from now on, even with the file gone.
-    Path(jarvis.config.checkpoints_db).unlink()
-    again = await DbThread.load("conv-old")
-    assert again.messages == history
 
 
 def _looping_agent(tool_fn: Any) -> Agent:
