@@ -9,8 +9,7 @@ read and write this JSON, so a thread can move between them.
 Two rules shape it:
 
 - **Lossless.** A LangChain message encoded and decoded is equal to the
-  original — `tests/test_transcript.py` checks every shape, and
-  `main.py maintenance check-transcript` checks a real `checkpoints.db`.
+  original — `tests/test_transcript.py` checks every shape.
 - **Neutral where it matters, opaque elsewhere.** What a loop or a provider
   adapter acts on has a field of its own. What one provider attached for
   itself rides along in `extras`, untouched, for that provider to read back.

@@ -432,61 +432,10 @@ async def _project_memory_consolidation() -> None:
     logger.info("project memory consolidation: %s", await consolidate_project_memories(store))
 
 
-async def _convert_checkpoints() -> None:
-    from core.config import get_config  # noqa: PLC0415
-    from core.transcript_store import convert_checkpoints, legacy_checkpointer  # noqa: PLC0415
-
-    async with legacy_checkpointer() as checkpointer:
-        if checkpointer is None:
-            return
-        report = await convert_checkpoints(checkpointer, get_config().checkpoints_db)
-    logger.info(
-        "checkpoint conversion: %d thread(s) converted, %d already, %d failed",
-        report.converted, report.skipped, len(report.failed),
-    )
-    for thread_id, why in report.failed:
-        logger.warning("checkpoint conversion: %s stays on the lazy path: %s", thread_id, why)
-
-
 MAINTENANCE_TASKS = {
     "memory_consolidation": _memory_consolidation,
     "project_memory": _project_memory_consolidation,
-    "convert_checkpoints": _convert_checkpoints,
 }
-
-
-async def enqueue_checkpoint_conversion() -> bool:
-    """Queue the `convert_checkpoints` sweep if a conversation's thread is
-    still only in checkpoints.db and no sweep is queued already. Run at every
-    start: once everything is converted it reads two id lists and queues
-    nothing. Returns whether it queued one."""
-    import json  # noqa: PLC0415
-
-    from sqlalchemy import select  # noqa: PLC0415
-
-    from core.config import get_config  # noqa: PLC0415
-    from core.transcript_store import unconverted_threads  # noqa: PLC0415
-    from db import async_session  # noqa: PLC0415
-    from db.models import Job  # noqa: PLC0415
-
-    payload = {"task": "convert_checkpoints"}
-    async with async_session() as session:
-        pending = await unconverted_threads(session, get_config().checkpoints_db)
-        if not pending:
-            return False
-        queued = (await session.execute(
-            select(Job.id).where(
-                Job.kind == "maintenance",
-                Job.status.in_(["pending", "running"]),
-                Job.payload == json.dumps(payload),
-            ).limit(1)
-        )).scalar_one_or_none()
-        if queued is not None:
-            return False
-        await state.get_queue().enqueue("maintenance", payload, session=session)
-        await session.commit()
-    logger.info("checkpoint conversion queued: %d thread(s) still only in checkpoints.db", len(pending))
-    return True
 
 
 async def maintenance_job_handler(job) -> None:

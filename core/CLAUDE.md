@@ -2,7 +2,7 @@
 
 ## Agent loop (`agent_loop.py`, `agents.py`, `messages.py`, `compaction.py`)
 - `agent_loop.Agent` is the loop (no LangGraph): model step → tool batch → repeat. `build_agent(model, board=False)` builds the main agent (and its worker roles) once per model id + flags; anything that changes what's bound (tool policy, MCP load mode, catalog edits) must call `invalidate_agent_cache()`.
-- History is a `Thread`: `DbThread` (transcript tables, keyed by `configurable.thread_id`; a LangGraph-only thread is converted on first load, or earlier by the `convert_checkpoints` sweep) or an in-memory `Thread()` for one-shot runs (workers, workflow nodes, CLI, `/ws/live`) — pass `thread=`.
+- History is a `Thread`: `DbThread` (transcript tables, keyed by `configurable.thread_id`) or an in-memory `Thread()` for one-shot runs (workers, workflow nodes, CLI, `/ws/live`) — pass `thread=`.
 - Writes are per message and ordered: the model's reply (with its tool calls) before any tool runs, each tool result once it and the calls before it finish. A re-claimed chat job continues from the rows; its prompt id is derived from the task id (`chat_runtime.user_message_id`) so it replaces itself.
 - `recursion_limit` counts steps (model calls + tool batches), LangGraph's meaning: 100 ≈ 50 model calls, then `RecursionLimitReached` (chat finishes `done`).
 - `astream(..., subgraphs=True)` yields LangGraph's `(ns, mode, data)` chunks (`ns` always `()`), so `streaming._process_chunk` reads them. After each step the loop waits until the reader has handled everything so far (`Run.step_done`) — events written straight onto `TaskState` (approval requests) must not overtake the step. Close the stream with `aclosing` when breaking out early; closing cancels the run.
@@ -38,7 +38,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 
 ### Transcript format (`transcript.py`, `transcript_format.md`)
 - The v1 record of a message — what the agent loop stores per message (in place of LangGraph checkpoints), and what the Rust loop will read. Versioned and lossless: a LangChain message encodes and decodes back equal; anything not mapped to a field rides in `extras`.
-- A change to the format is a new version, made in `transcript_format.md` first. `main.py maintenance check-transcript` round-trips a real `checkpoints.db`.
+- A change to the format is a new version, made in `transcript_format.md` first.
 
 ## Model catalog (`model_catalog.py`, `builtin_models.json`, `model_discovery.py`)
 - Catalog = `BUILTIN_MODELS` (from `builtin_models.json`; first entry is the compile-time `DEFAULT_MODEL`) ∪ custom models in the `models.custom` setting. Ids are `provider:model_name`; providers: ollama, google_genai, bedrock, anthropic, meta, openrouter, or an endpoint's name. A new model from those needs no code — `main.py model add` or Settings → Models.

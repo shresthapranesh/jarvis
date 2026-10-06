@@ -35,7 +35,7 @@ pub mod retrieve;
 pub mod route;
 mod summarize;
 mod thread;
-mod tools;
+pub(crate) mod tools;
 mod turn;
 mod workers;
 pub mod workflow;

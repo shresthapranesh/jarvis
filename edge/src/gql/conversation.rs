@@ -219,8 +219,7 @@ pub struct ConversationQuery;
 
 #[Object]
 impl ConversationQuery {
-    /// The thread's todo list (`thread_state`). A thread no run has touched
-    /// since the move off LangGraph still has it in its checkpoint.
+    /// The thread's todo list (`thread_state`).
     async fn todos(&self, ctx: &Context<'_>, conversation_id: String) -> Result<Vec<TodoItem>> {
         let pool: &SqlitePool = ctx.data()?;
         let row: Option<Option<String>> =
@@ -232,12 +231,15 @@ impl ConversationQuery {
                 Err(sqlx::Error::Database(e)) if e.message().contains("no such table") => None,
                 other => other?,
             };
-        let todos = match row {
-            Some(raw) => crate::checkpoints::todos_from_json(raw.as_deref().unwrap_or("[]")),
-            None => ctx.data::<super::EdgeData>()?.checkpoints.todos(&conversation_id).await,
-        }
-        .map_err(|e| super::defer(format!("todos: {}", e.0)))?;
-        Ok(todos.into_iter().map(|t| TodoItem { text: t.text, status: t.status.into() }).collect())
+        let raw = match row.flatten().filter(|raw| !raw.is_empty()) {
+            Some(raw) => serde_json::from_str(&raw).map_err(|e| super::defer(format!("todos: {e}")))?,
+            None => Value::Array(vec![]),
+        };
+        let todos = crate::agent::tools::normalise_todos(raw.as_array().map_or(&[], Vec::as_slice));
+        Ok(todos
+            .into_iter()
+            .map(|t| TodoItem { text: t["text"].as_str().unwrap_or_default().into(), status: t["status"].as_str().unwrap_or_default().into() })
+            .collect())
     }
 
     /// List conversations for one surface (default "web", so bot/automation

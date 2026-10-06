@@ -11,7 +11,6 @@ mod bots;
 mod browser;
 mod budget;
 mod catalog;
-mod checkpoints;
 mod cli;
 mod config;
 mod consolidate;
@@ -108,7 +107,6 @@ async fn serve() {
             documents_dir: Default::default(),
             staging_dir: Default::default(),
             tz: chrono_tz::Tz::UTC,
-            checkpoints: checkpoints::Checkpoints::open("".as_ref()),
             http: reqwest::Client::new(),
             scheduler: schedule::Scheduler::new(pool.clone(), Default::default(), chrono_tz::Tz::UTC, Default::default()),
             kernels: kernels::Kernels::new(
@@ -213,7 +211,6 @@ async fn serve() {
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("http client");
-    let checkpoints = checkpoints::Checkpoints::open(&config.checkpoints_db);
     let runs: Arc<runs::Registry> = Default::default();
     let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
     let kernels = kernels::Kernels::new(
@@ -242,7 +239,6 @@ async fn serve() {
         documents_dir: config.documents_dir.clone(),
         staging_dir: config.staging_dir.clone(),
         tz,
-        checkpoints: checkpoints.clone(),
         http: http.clone(),
         scheduler: scheduler.clone(),
         kernels: kernels.clone(),

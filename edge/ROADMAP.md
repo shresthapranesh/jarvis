@@ -57,7 +57,7 @@ it's on `main`.
 
 - [ ] Schema and migrations owned by the edge (from `db/engine.py:_migrate`) — M
 - [ ] Parity tests that diff against Python become Rust-only tests — M
-- [ ] 2a step 11: drop `langgraph-checkpoint-sqlite`, `checkpoints.db` conversion, edge `checkpoints.rs`
+- [x] 2a step 11: drop `langgraph-checkpoint-sqlite`, `checkpoints.db` conversion, edge `checkpoints.rs`
 - [ ] Delete `server/`, the worker link and supervisor, and the Python dependencies (langchain and the rest)
 
 ## Not yet tried for real

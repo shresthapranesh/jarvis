@@ -21,7 +21,6 @@ dependencies = [
     "langchain-meta>=0.5.0",
     "langchain-ollama~=1.1",
     "langchain-openai~=1.1",
-    "langgraph-checkpoint-sqlite>=3.1.1",
     "mlx-whisper~=0.4",
     "openpyxl~=3.1",
     "piper-tts~=1.4",

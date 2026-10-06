@@ -18,9 +18,6 @@ pub struct Config {
     pub documents_dir: PathBuf,
     /// Where `POST /uploads` stages files (`AppConfig.staging_dir`).
     pub staging_dir: PathBuf,
-    /// LangGraph's database (`AppConfig.checkpoints_db`): todos, and the
-    /// memory jobs' watermarks, are read from it.
-    pub checkpoints_db: PathBuf,
     /// The built SPA (`static/dist` under the app), served here rather than
     /// by Python when it exists — loading the UI must not start Python.
     pub static_dir: Option<PathBuf>,
@@ -69,7 +66,6 @@ impl Config {
         });
         let documents_dir = resolve(env_path("DOCUMENTS_DIR").unwrap_or(resolve(work_dir()?).join("documents")));
         let staging_dir = resolve(env_path("STAGING_DIR").unwrap_or(resolve(work_dir()?).join("staging")));
-        let checkpoints_db = env_path("CHECKPOINTS_DB").unwrap_or(work_dir()?.join("checkpoints.db"));
         // The jarvis checkout: where Python runs, and where the SPA was built.
         let app_dir = app_dir();
         let static_dir = Some(app_dir.join("static").join("dist")).filter(|d| d.join("index.html").is_file());
@@ -95,7 +91,6 @@ impl Config {
             artifacts_dir,
             documents_dir,
             staging_dir,
-            checkpoints_db,
             static_dir,
             worker,
             kernel_python: python_in(&app_dir),

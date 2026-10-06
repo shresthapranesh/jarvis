@@ -38,8 +38,6 @@ indexmap = "2"
 libc = "0.2"
 # The SPA's file paths, as Python decoded them.
 percent-encoding = "2"
-# LangGraph checkpoints are msgpack (`gql/checkpoints.rs`).
-rmpv = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs"] }
 # rustls: the Discord gateway (`bots/discord.rs`).

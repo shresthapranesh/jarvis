@@ -19,7 +19,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -108,16 +108,11 @@ async def test_a_custom_model_python_would_reject_is_left_to_python(edge):
 
 
 async def test_todos(edge):
-    from langchain_core.messages import HumanMessage
-    from langchain_core.runnables import RunnableConfig
-    from langgraph.checkpoint.base import empty_checkpoint
-
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-    from core.config import get_config
+    from core.transcript_store import set_todos
+    from db import async_session
 
     query = _relay_text("TodoListQuery")
-    # No checkpoints.db rows at all yet.
+    # No `thread_state` row yet.
     await _assert_same(edge, query, {"conversationId": "c1"})
 
     todos = [
@@ -127,35 +122,16 @@ async def test_todos(edge):
         {"text": 42, "status": "bogus"},
         {"status": "done"},
     ]
-    async with AsyncSqliteSaver.from_conn_string(get_config().checkpoints_db) as cp:
-        for thread, values in (("c1", {"todos": todos}), ("c2", {"todos": "not a list"}), ("c3", {})):
-            config: RunnableConfig = {"configurable": {"thread_id": thread, "checkpoint_ns": ""}}
-            for step in range(2):  # the newest one wins
-                checkpoint = empty_checkpoint()
-                checkpoint["channel_values"] = {
-                    # A message is an extension type the edge skips over.
-                    "messages": [HumanMessage(content="hi", id=f"h{step}")],
-                    **({k: (v if step else ["stale"]) for k, v in values.items()}),
-                }
-                config = await cp.aput(config, checkpoint, {}, {})
-    for thread in ("c1", "c2", "c3", "nobody"):
-        data = await _assert_same(edge, query, {"conversationId": thread})
+    async with async_session() as s:
+        await set_todos(s, "c1", cast(list, todos))
+        await set_todos(s, "c2", cast(list, "not a list"))
+        await set_todos(s, "c3", None)
+        await set_todos(s, "c4", [])
+    for thread in ("c1", "c2", "c3", "c4", "nobody"):
+        await _assert_same(edge, query, {"conversationId": thread})
     data = await _assert_same(edge, query, {"conversationId": "c1"})
     assert [t["status"] for t in data["data"]["todos"]] == ["pending", "in_progress", "done", "pending"]
-
-    # Once a run has touched a thread its list is in `thread_state`, which
-    # wins over the checkpoint — an empty or cleared list included.
-    from core.transcript_store import set_todos
-    from db import async_session
-
-    async with async_session() as s:
-        await set_todos(s, "c1", [{"text": "new", "status": "done"}, "plain", {"text": 3}])
-        await set_todos(s, "c2", [])
-        await set_todos(s, "c3", None)
-    for thread in ("c1", "c2", "c3"):
-        data = await _assert_same(edge, query, {"conversationId": thread})
-    data = await _assert_same(edge, query, {"conversationId": "c1"})
-    assert [t["text"] for t in data["data"]["todos"]] == ["new", "plain", "3"]
+    assert [t["text"] for t in data["data"]["todos"]] == ["a legacy string", "doing", "done", "42"]
 
 
 @contextlib.contextmanager

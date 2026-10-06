@@ -9,7 +9,6 @@ import strawberry
 from strawberry import relay
 
 from core.schemas import _normalise_todos
-from core.transcript_store import legacy_checkpointer
 from db.models import ThreadState
 from db.ops import get_conversation_meta, list_conversations
 
@@ -62,17 +61,7 @@ class ConversationQuery:
 
     @strawberry.field
     async def todos(self, info: strawberry.Info, conversation_id: str) -> list[TodoItem]:
-        """The thread's todo list (`thread_state`). A thread no run has
-        touched since the move off LangGraph still has it in its checkpoint."""
+        """The thread's todo list (`thread_state`)."""
         state = await info.context["session"].get(ThreadState, conversation_id)
-        if state is not None:
-            raw = json.loads(state.todos) if state.todos else []
-        else:
-            async with legacy_checkpointer() as cp:
-                snapshot = None if cp is None else await cp.aget_tuple(
-                    {"configurable": {"thread_id": conversation_id}},
-                )
-            if snapshot is None:
-                return []
-            raw = (snapshot.checkpoint or {}).get("channel_values", {}).get("todos", [])
+        raw = json.loads(state.todos) if state is not None and state.todos else []
         return [TodoItem(text=t["text"], status=t["status"]) for t in _normalise_todos(raw)]

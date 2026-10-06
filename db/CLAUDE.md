@@ -17,14 +17,14 @@ Artifacts (row + `.md` under `artifacts_dir`, plus `ArtifactVersion` files) and 
 Todos live in `thread_state` (below), not on `conversations`.
 
 ## Transcript tables (`core/transcript_store.py`)
-`thread_messages` (one v1 transcript record per message, `seq`-ordered; `evicted_at` = compacted away, kept), `thread_state` (todos), `transcript_blobs` (media bytes, once per sha256), `kv_store` (the key-value store, `KvStore`: memory blob, consolidation watermarks, session state). They replace `checkpoints.db`: the agent loop (`core/agent_loop.py`) reads and writes threads here, converting a LangGraph-only thread on first use (`DbThread.load`).
+`thread_messages` (one v1 transcript record per message, `seq`-ordered; `evicted_at` = compacted away, kept), `thread_state` (todos), `transcript_blobs` (media bytes, once per sha256), `kv_store` (the key-value store, `KvStore`: memory blob, consolidation watermarks, session state). They replace `checkpoints.db`: the agent loop (`core/agent_loop.py`) reads and writes threads here.
 - Write through `apply_messages` — it merges like LangGraph's `add_messages` (same id replaces in place, `RemoveMessage` evicts), checked against it in `tests/test_transcript_store.py`.
 - `thread_id` has no FK (automation threads aren't conversations); `delete_conversation` calls `delete_thread`, which also drops blobs no other thread uses.
-- `import_checkpoint` / `import_store_once` convert LangGraph's data: once per thread, and the store once (a marker row, so a deleted key stays deleted). `convert_checkpoints` sweeps every conversation's thread still only in `checkpoints.db`: a `convert_checkpoints` maintenance job queued at server start while there is work (`core/scheduler.py:enqueue_checkpoint_conversion`), or `main.py maintenance convert-checkpoints`. Threads of no conversation (stateless automation runs, deleted conversations) are left behind.
+- `import_store_once` copies the LangGraph store out of `checkpoints.db` once (a marker row, so a deleted key stays deleted); plain `sqlite3`, no LangGraph. Threads still only in `checkpoints.db` are no longer read — the release before converted them.
 
 ## SQLite files (`~/.jarvis/`)
 - `database.db` — everything; PRAGMAs set per connection in `engine.py:_set_sqlite_pragmas`. `DATABASE_URL` overrides the path.
-- `checkpoints.db` — legacy, read-only: what LangGraph left. Opened only through `transcript_store.legacy_checkpointer()` to convert a thread still there (needs only `langgraph-checkpoint-sqlite`). Delete the dependency and the conversion code once every install has converted.
+- `checkpoints.db` — legacy, read-only: what LangGraph left. Only the one-time store import reads it (`CHECKPOINTS_DB` overrides the path); safe to delete once that has run.
 
 ## FTS5
 `memories_fts`, `document_chunks_fts`, `messages_fts`, `conversation_episodes_fts` are external-content tables kept in sync by triggers (`_ensure_fts()`). Adding one to `_FTS_TABLES` backfills on next boot. Missing FTS5 degrades to dense-only. Never pass raw user text to `MATCH`; use `core/retrieval.py:fts_match_expr()`. `bm25()` is negative, lower is better.

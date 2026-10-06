@@ -86,8 +86,6 @@ pub struct EdgeData {
     pub staging_dir: PathBuf,
     /// The scheduler's zone, for `Automation.nextRunAt`.
     pub tz: chrono_tz::Tz,
-    /// LangGraph's database, for `todos`.
-    pub checkpoints: crate::checkpoints::Checkpoints,
     /// For `browserAvailable`'s probe.
     pub http: reqwest::Client,
     /// A board mutation that readies a card runs a dispatch pass at once.
