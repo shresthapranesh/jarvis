@@ -29,7 +29,7 @@ it's on `main`.
 - [x] Attachments: removed instead of ported (uploads, documents and their index, image input, the bots' photos)
 - [x] Workers: `spawn_workers`, its roles and their tools (files, artifact reads, document search)
 - [x] Anthropic client: the Messages API, streamed, as `ChatAnthropic` sends it
-- [ ] Bedrock client — M
+- [x] Bedrock client: ConverseStream, signed by `aws.rs`, as `ChatBedrockConverse` sends it (credentials only boto3 reads stay Python's)
 - [x] MCP: our own client (stdio, Streamable HTTP, HTTP+SSE, websocket), servers, `mcpServers`/`mcpTools`, the server mutations, `callMcpTool`, bound `always` tools, `mcp.*` settings; Python behind the edge calls through it
 
 ## B. The remaining API

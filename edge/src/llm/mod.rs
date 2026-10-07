@@ -7,13 +7,15 @@
 //! - `compact` — clip stale tool output, collapse old tool-call groups.
 //! - `perf` — prefill/decode throughput per call and per run.
 //! - `shape` — strip thinking, repair orphaned calls, lay the prompt out.
-//! - `anthropic`, `google`, `ollama`, `openai_chat` (OpenRouter),
-//!   `openai_responses` (Meta) — one module per wire format: render a
+//! - `anthropic`, `bedrock` (ConverseStream), `google`, `ollama`,
+//!   `openai_chat` (OpenRouter), `openai_responses` (Meta) — one module per
+//!   wire format: render a
 //!   [`Prompt`], stream the reply, build the assistant record.
 //!
 //! [`complete`] is the one entry point.
 
 pub mod anthropic;
+pub mod bedrock;
 pub mod compact;
 pub mod google;
 mod lines;
@@ -209,6 +211,7 @@ async fn call(
             let key = needs(&ends.anthropic_key, "ANTHROPIC_API_KEY", req.model)?;
             anthropic::complete(http, &ends.anthropic_base, key, name, req, on_delta).await
         }
+        "bedrock" => bedrock::complete(http, name, req, on_delta).await,
         "google_genai" => google::complete(http, ends, name, req, on_delta).await,
         "ollama" => ollama::complete(http, ends, name, req, on_delta).await,
         "openrouter" => {

@@ -23,8 +23,10 @@ import base64
 import copy
 import json
 import os
+import struct
 import subprocess
 import threading
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
@@ -341,6 +343,44 @@ ANTHROPIC_REPLY = [
 ]
 
 
+def _header(name: str, value: str) -> bytes:
+    n, v = name.encode(), value.encode()
+    return bytes([len(n)]) + n + bytes([7]) + struct.pack(">H", len(v)) + v
+
+
+def _frame(event_type: str, payload: dict) -> bytes:
+    headers = _header(":event-type", event_type) + _header(":content-type", "application/json") \
+        + _header(":message-type", "event")
+    body = json.dumps(payload).encode()
+    total = 12 + len(headers) + len(body) + 4
+    prelude = struct.pack(">II", total, len(headers))
+    msg = prelude + struct.pack(">I", zlib.crc32(prelude)) + headers + body
+    return msg + struct.pack(">I", zlib.crc32(msg))
+
+
+BEDROCK_REPLY = [
+    ("messageStart", {"role": "assistant"}),
+    ("contentBlockDelta", {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": "Weighing "}}}),
+    ("contentBlockDelta", {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": "it."}}}),
+    ("contentBlockDelta", {"contentBlockIndex": 0, "delta": {"reasoningContent": {"signature": "c2lnLXRoaW5r"}}}),
+    ("contentBlockStop", {"contentBlockIndex": 0}),
+    ("contentBlockDelta", {"contentBlockIndex": 1, "delta": {"text": "Let me"}}),
+    ("contentBlockDelta", {"contentBlockIndex": 1, "delta": {"text": " check."}}),
+    ("contentBlockStop", {"contentBlockIndex": 1}),
+    ("contentBlockStart", {"contentBlockIndex": 2, "start": {"toolUse": {"toolUseId": "tooluse_1", "name": "run_cell"}}}),
+    ("contentBlockDelta", {"contentBlockIndex": 2, "delta": {"toolUse": {"input": "{\"code\": \"che"}}}),
+    ("contentBlockDelta", {"contentBlockIndex": 2, "delta": {"toolUse": {"input": "ck()\"}"}}}),
+    ("contentBlockStop", {"contentBlockIndex": 2}),
+    ("contentBlockStart", {"contentBlockIndex": 3, "start": {"toolUse": {"toolUseId": "tooluse_2", "name": "write_todos"}}}),
+    ("contentBlockDelta", {"contentBlockIndex": 3, "delta": {"toolUse": {"input": "{\"todos\": [\"x\"]}"}}}),
+    ("contentBlockStop", {"contentBlockIndex": 3}),
+    ("messageStop", {"stopReason": "tool_use"}),
+    ("metadata", {"usage": {"inputTokens": 112, "outputTokens": 40, "totalTokens": 852,
+                            "cacheReadInputTokens": 700, "cacheWriteInputTokens": 0},
+                  "metrics": {"latencyMs": 1234}}),
+]
+
+
 class _Provider:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
@@ -351,7 +391,12 @@ class _Provider:
                 body = self.rfile.read(int(self.headers.get("content-length", 0)))
                 provider.requests.append({"path": self.path, "headers": dict(self.headers), "body": json.loads(body)})
                 self.send_response(200)
-                if self.path.endswith("/v1/messages"):
+                if self.path.endswith("/converse-stream"):
+                    self.send_header("content-type", "application/vnd.amazon.eventstream")
+                    self.end_headers()
+                    for name, data in BEDROCK_REPLY:
+                        self.wfile.write(_frame(name, data))
+                elif self.path.endswith("/v1/messages"):
                     self.send_header("content-type", "text/event-stream")
                     self.end_headers()
                     for name, data in ANTHROPIC_REPLY:
@@ -409,12 +454,26 @@ VOLATILE = "## Current Tasks\n\n[ ] pack"
 _PROVIDER_ENV = (
     "GOOGLE_API_KEY", "GEMINI_API_KEY", "OLLAMA_HOST", "OPENROUTER_API_KEY", "META_API_KEY", "MODEL_API_BASE",
     "ANTHROPIC_API_KEY", "ANTHROPIC_API_URL", "ANTHROPIC_BASE_URL", "JARVIS_CACHE_TTL",
+    "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
 )
+# What both sides sign Bedrock calls with: keys in the environment, no files.
+_AWS = {"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE", "AWS_SECRET_ACCESS_KEY": "test-secret", "AWS_REGION": "us-east-1",
+        "AWS_CONFIG_FILE": "/dev/null", "AWS_SHARED_CREDENTIALS_FILE": "/dev/null"}
 
 
 def _endpoint_rows(url: str) -> list[dict]:
     """`models.endpoints` as stored: two OpenAI-compatible endpoints at the fake."""
     return [{"name": "local", "base_url": url, "api_key": "test-key"}, {"name": "keyless", "base_url": f"{url}/"}]
+
+
+@pytest.fixture(autouse=True)
+def _aws_env(monkeypatch):
+    """boto3, in this process, reads no profile or file of the machine's."""
+    for k in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_SESSION_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in _AWS.items():
+        monkeypatch.setenv(k, v)
 
 
 @pytest.fixture(autouse=True)
@@ -435,6 +494,7 @@ def _edge(edge_binary: Path, flag: str, tmp_path: Path, payload: dict, provider:
             JARVIS_OPENROUTER_BASE_URL=provider.url, OPENROUTER_API_KEY="test-key",
             MODEL_API_BASE=provider.url, META_API_KEY="test-key",
             ANTHROPIC_API_URL=provider.url, ANTHROPIC_API_KEY="test-key",
+            AWS_ENDPOINT_URL_BEDROCK_RUNTIME=provider.url, **_AWS,
         )
     # cwd = tmp_path so the repo's .env can't supply a real key.
     out = subprocess.run(
@@ -470,6 +530,11 @@ def _edge_input(model: str, records, blobs, *, cache: bool, segments=SEGMENTS) -
 
 def _llm(model: str, url: str):
     provider, _, name = model.partition(":")
+    if provider == "bedrock":
+        from langchain_aws import ChatBedrockConverse
+
+        # As `ModelSpec.build_llm` builds it, at the fake's address.
+        return ChatBedrockConverse(model=name, base_url=url)
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
@@ -689,9 +754,14 @@ MODELS = [
     # OpenAI-compatible endpoints the operator named (`models.endpoints`)
     "local:qwen3-32b",
     "keyless:llama-3.3-70b",
+    # cached: a Claude model on Bedrock takes cachePoint blocks
+    "bedrock:us.anthropic.claude-sonnet-4-6",
+    # an id with a colon, which the path escapes
+    "bedrock:amazon.nova-pro-v1:0",
 ]
 INTENDED = {
     "anthropic": lambda python, edge: None,
+    "bedrock": lambda python, edge: None,
     "google_genai": _intended_gemini,
     "ollama": _intended_ollama,
     "openrouter": _intended_openai_chat,
@@ -716,6 +786,16 @@ def _both(edge_binary, tmp_path, provider, model, records, blobs) -> tuple[dict,
 @pytest.mark.parametrize("model", MODELS)
 def test_request_matches_python(edge_binary, tmp_path, provider, name, model):
     records, blobs = _records(HISTORIES[name]())
+    if model.startswith("bedrock") and name == "responses_thread":
+        # Neither can send Bedrock another provider's call items: LangChain
+        # raises, and the edge fails the call with the same words.
+        with pytest.raises(ValueError, match="Unsupported content block type"):
+            _both(edge_binary, tmp_path, provider, model, records, blobs)
+        provider.requests.clear()
+        out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=_cache(model)), provider)
+        assert out[-1]["error"]["message"] == "Unsupported content block type: function_call"
+        assert provider.requests == []
+        return
     if model.startswith("ollama") and name == "responses_thread":
         # LangChain can't send Ollama a thread that came from the Responses
         # API: the function_call item left in the content is a ValueError.
@@ -799,7 +879,7 @@ def _semantics(rec: dict) -> dict:
     }
 
 
-@pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[4], MODELS[5], MODELS[7], MODELS[8]])
+@pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[4], MODELS[5], MODELS[7], MODELS[8], MODELS[10]])
 def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     records, blobs = _records(_chat())
     reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False,
@@ -815,7 +895,17 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     edge = _semantics(edge_rec)
     deltas = [line for line in out[:-1] if "event" not in line]
 
-    if model.startswith("anthropic"):
+    if model.startswith("bedrock"):
+        # LangChain kept the reasoning only in an opaque block, named the
+        # provider by its class and left the stop reason in its metadata; the
+        # edge records thinking, the catalog's provider id and the reason.
+        assert edge.pop("thinking") == "Weighing it." and python.pop("thinking") == ""
+        assert python["model"]["provider"] == "bedrock_converse"
+        python["model"]["provider"] = "bedrock"
+        assert edge["finish_reason"] == "tool_use" and python["finish_reason"] is None
+        python["finish_reason"] = "tool_use"
+        assert deltas == [{"thinking": "Weighing "}, {"thinking": "it."}, {"text": "Let me"}, {"text": " check."}]
+    elif model.startswith("anthropic"):
         # LangChain left the stop reason in its response metadata; the edge
         # keeps it as the finish reason.
         assert edge["finish_reason"] == "tool_use" and python["finish_reason"] is None
@@ -949,7 +1039,7 @@ def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provide
     assert edge_turn["parts"][0] == {"text": "Let me check.", "thoughtSignature": "dGV4dC1zaWc="}
 
 
-@pytest.mark.parametrize("model", [MODELS[0], MODELS[5], MODELS[7], MODELS[8]])
+@pytest.mark.parametrize("model", [MODELS[0], MODELS[5], MODELS[7], MODELS[8], MODELS[10]])
 def test_a_recorded_reply_goes_back_out_the_same(edge_binary, tmp_path, provider, model):
     """The next request after a reply the edge recorded is the same from
     either runtime — for Responses, the text item's server id and phase go
@@ -997,3 +1087,73 @@ def test_a_reply_python_recorded_goes_back_out_the_same(edge_binary, tmp_path, p
     turn = [m for m in edge["body"]["messages"] if m["role"] == "assistant"][-1]["content"]
     assert [b["type"] for b in turn] == ["text", "tool_use", "tool_use"]
     assert [b["id"] for b in turn[1:]] == ["toolu_1", "toolu_2"]
+
+
+def test_bedrock_calls_are_signed_as_boto3_signs_them(edge_binary, tmp_path, provider):
+    """The same signing scope and signed headers — the signature itself
+    differs only by the second each side signed in."""
+    model = MODELS[10]
+    records, blobs = _records(_chat())
+    python, edge, _ = _both(edge_binary, tmp_path, provider, model, records, blobs)
+    auth = [{k.lower(): v for k, v in r["headers"].items()}["authorization"] for r in (python, edge)]
+    scope = [a.split("Signature=")[0] for a in auth]
+    assert scope[0].split("/", 2)[2] == scope[1].split("/", 2)[2]  # region, service, signed headers
+    assert scope[1].startswith("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/")
+    assert "/us-east-1/bedrock/aws4_request, SignedHeaders=content-type;host;x-amz-date, " in scope[1]
+
+
+@pytest.mark.parametrize("name", HISTORIES)
+def test_bedrock_request_without_a_cache_matches_python(edge_binary, tmp_path, provider, name):
+    model = MODELS[11]
+    if name == "responses_thread":
+        return  # refused by both, above
+    records, blobs = _records(HISTORIES[name]())
+    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False, provider="bedrock"))
+    python = provider.take()["body"]
+    _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
+    assert provider.take()["body"] == python
+
+
+def test_a_bedrock_reply_python_recorded_goes_back_out_the_same(edge_binary, tmp_path, provider):
+    """LangChain records Bedrock's reasoning as an opaque block that history
+    stripping doesn't know, so it rides along signed; the edge sends it as
+    LangChain does, and the calls' string inputs as the objects they are."""
+    model = MODELS[10]
+    records, blobs = _records(_chat())
+    reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=True,
+                                                             provider="bedrock"))
+    provider.take()
+    rec, _ = encode(reply)
+    follow = [
+        *records,
+        rec,
+        *({"v": 1, "role": "tool", "content": "ok", "tool_call_id": c["id"], "status": "success"}
+          for c in rec["tool_calls"]),
+    ]
+    python, edge, _ = _both(edge_binary, tmp_path, provider, model, follow, blobs)
+    assert edge["body"] == python["body"]
+    turn = [m for m in edge["body"]["messages"] if m["role"] == "assistant"][-1]["content"]
+    assert turn[0] == {"reasoningContent": {"reasoningText": {"text": "Weighing it.", "signature": "c2lnLXRoaW5r"}}}
+    assert [b["toolUse"]["input"] for b in turn if "toolUse" in b] == [{"code": "check()"}, {"todos": ["x"]}]
+
+
+@pytest.mark.parametrize("cache", [True, False])
+def test_bedrock_blank_text_is_a_dot(edge_binary, tmp_path, provider, cache):
+    """boto3 can't send an empty text block: LangChain sends `"."` in its
+    place, and drops an empty bare string."""
+    model = MODELS[10]
+    history = [
+        HumanMessage("", id="u1"),
+        AIMessage(content="   "),
+        HumanMessage(content=[{"type": "text", "text": " "}, "", {"type": "text", "text": "go"}], id="u2"),
+        AIMessage(content="", tool_calls=[{"id": "b1", "name": "run_cell", "args": {"code": "1"}}]),
+        ToolMessage(content="", tool_call_id="b1"),
+        HumanMessage("next", id="u3"),
+        HumanMessage("and more", id="u4"),
+    ]
+    records, blobs = _records(history)
+    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=cache, provider="bedrock"))
+    python = provider.take()["body"]
+    _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=cache), provider)
+    assert provider.take()["body"] == python
+    assert {"text": "."} in python["messages"][0]["content"]

@@ -404,7 +404,7 @@ pub async fn call(
 
 /// botocore's rest-json error parse: the code from `x-amzn-errortype`, the
 /// body's `code` or `__type`, or the status; the message from `message`.
-fn error_parts(status: u16, error_type: Option<&str>, body: &[u8]) -> Result<(String, String), CallError> {
+pub(crate) fn error_parts(status: u16, error_type: Option<&str>, body: &[u8]) -> Result<(String, String), CallError> {
     let parsed: Value = if body.is_empty() {
         Value::Object(Default::default())
     } else {

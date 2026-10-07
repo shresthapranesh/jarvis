@@ -60,8 +60,13 @@ pub async fn serves_model(pool: &SqlitePool, model: &str) -> bool {
     calls_model(pool, model).await
 }
 
-/// The model's provider is one the edge's LLM layer calls.
+/// The model's provider is one the edge's LLM layer calls — for Bedrock,
+/// with credentials the edge can read (an AWS source only boto3 speaks is
+/// Python's).
 pub async fn calls_model(pool: &SqlitePool, model: &str) -> bool {
     let Some((provider, _)) = model.split_once(':') else { return false };
+    if provider == "bedrock" {
+        return !matches!(crate::aws::credentials().await, Err(crate::aws::CredError::Unsupported(_)));
+    }
     PROVIDERS.contains(&provider) || catalog::endpoints(pool).await.is_ok_and(|eps| eps.iter().any(|e| e.name == provider))
 }
