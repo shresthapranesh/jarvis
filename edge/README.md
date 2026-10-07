@@ -443,7 +443,7 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 - **Routing** (`route.rs`), when a turn or automation run is queued
   (`startTask`, `triggerAutomation`, a schedule firing): unless
   `JARVIS_AGENT_RUNTIME=python`, a turn on a provider the LLM layer speaks
-  (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint) is the
+  (Anthropic, Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint) is the
   edge's — for an
   automation, a code or webhook one, or a prompt or monitor one on such a
   model; for a board task (at dispatch), one on such a model: its job gets
@@ -546,6 +546,15 @@ on stdin.
   our request builder, so the request is ours byte for byte. Each renders a
   `Prompt`, streams the reply (text and thinking deltas) and builds the
   assistant record:
+  - `anthropic.rs`: the Messages API, for `anthropic`, as `ChatAnthropic`
+    (langchain-anthropic) sends it: user and tool turns merged into one user
+    message, a tool result as a `tool_result` block (its breakpoint hoisted
+    onto it), blank text left out, another provider's tool-call ids hashed
+    to `toolu_…` as LangChain does, `max_tokens` from langchain-anthropic's
+    model profiles (4096 for a model they don't list), `"ttl": "1h"` on the
+    breakpoints with `JARVIS_CACHE_TTL=1h`. Departures: a stored PDF goes as
+    a `document` block (LangChain sent a block Anthropic
+    refuses), and the stop reason is kept as the finish reason.
   - `google.rs`: Gemini's `streamGenerateContent`.
   - `ollama.rs`: Ollama's `/api/chat`. Tool schemas as the `ollama`
     client's `Tool` model keeps them (an optional argument is `{}`).
@@ -560,6 +569,8 @@ on stdin.
 
 Endpoints and keys come from the environment:
 
+- Anthropic: `ANTHROPIC_API_KEY`, with `ANTHROPIC_API_URL` (else
+  `ANTHROPIC_BASE_URL`) as the base URL, as langchain-anthropic reads them.
 - Google: `GOOGLE_API_KEY` (or `GEMINI_API_KEY`).
 - Ollama: `OLLAMA_HOST`, read the way the `ollama` client reads it.
 - OpenRouter: `OPENROUTER_API_KEY`.

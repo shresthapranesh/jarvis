@@ -7,12 +7,13 @@
 //! - `compact` — clip stale tool output, collapse old tool-call groups.
 //! - `perf` — prefill/decode throughput per call and per run.
 //! - `shape` — strip thinking, repair orphaned calls, lay the prompt out.
-//! - `google`, `ollama`, `openai_chat` (OpenRouter), `openai_responses`
-//!   (Meta) — one module per wire format: render a [`Prompt`], stream the
-//!   reply, build the assistant record.
+//! - `anthropic`, `google`, `ollama`, `openai_chat` (OpenRouter),
+//!   `openai_responses` (Meta) — one module per wire format: render a
+//!   [`Prompt`], stream the reply, build the assistant record.
 //!
 //! [`complete`] is the one entry point.
 
+pub mod anthropic;
 pub mod compact;
 pub mod google;
 mod lines;
@@ -107,6 +108,8 @@ impl std::fmt::Display for Error {
 /// Where each provider is, and the credentials for it.
 #[derive(Clone, Debug)]
 pub struct Endpoints {
+    pub anthropic_base: String,
+    pub anthropic_key: Option<String>,
     pub google_base: String,
     pub google_key: Option<String>,
     pub ollama_base: String,
@@ -123,6 +126,13 @@ impl Endpoints {
     pub fn from_env() -> Self {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
         Endpoints {
+            // langchain-anthropic's order.
+            anthropic_base: var("ANTHROPIC_API_URL")
+                .or_else(|| var("ANTHROPIC_BASE_URL"))
+                .unwrap_or_else(|| "https://api.anthropic.com".into())
+                .trim_end_matches('/')
+                .to_string(),
+            anthropic_key: var("ANTHROPIC_API_KEY"),
             google_base: var("JARVIS_GOOGLE_BASE_URL")
                 .unwrap_or_else(|| "https://generativelanguage.googleapis.com".into())
                 .trim_end_matches('/')
@@ -195,6 +205,10 @@ async fn call(
 ) -> Result<Message, Error> {
     let (provider, name) = req.model.split_once(':').ok_or_else(|| Error::fatal(format!("model id {:?}", req.model)))?;
     match provider {
+        "anthropic" => {
+            let key = needs(&ends.anthropic_key, "ANTHROPIC_API_KEY", req.model)?;
+            anthropic::complete(http, &ends.anthropic_base, key, name, req, on_delta).await
+        }
         "google_genai" => google::complete(http, ends, name, req, on_delta).await,
         "ollama" => ollama::complete(http, ends, name, req, on_delta).await,
         "openrouter" => {

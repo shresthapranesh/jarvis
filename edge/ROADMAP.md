@@ -28,7 +28,7 @@ it's on `main`.
 - [x] `resolveApproval` for an approved `call_mcp_tool`
 - [x] Attachments: removed instead of ported (uploads, documents and their index, image input, the bots' photos)
 - [x] Workers: `spawn_workers`, its roles and their tools (files, artifact reads, document search)
-- [ ] Anthropic client — M
+- [x] Anthropic client: the Messages API, streamed, as `ChatAnthropic` sends it
 - [ ] Bedrock client — M
 - [x] MCP: our own client (stdio, Streamable HTTP, HTTP+SSE, websocket), servers, `mcpServers`/`mcpTools`, the server mutations, `callMcpTool`, bound `always` tools, `mcp.*` settings; Python behind the edge calls through it
 

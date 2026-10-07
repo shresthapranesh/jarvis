@@ -348,7 +348,7 @@ async def test_the_edge_takes_the_turns_it_serves(database, work_dir: Path, edge
     dead = {"OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}"}
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, {**EDGE_ON, **dead})) as client:
         served = await _start(client, query="hello", model="ollama:llama3.3")
-        not_served = await _start(client, query="hello", model="anthropic:claude-sonnet-4-6")
+        not_served = await _start(client, query="hello", model="bedrock:us.anthropic.claude-sonnet-4-6")
 
         job = await _finished(served)
         assert (job.runtime, job.attempts, job.status) == ("edge", 1, "done")
