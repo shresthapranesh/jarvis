@@ -443,7 +443,7 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 - **Routing** (`route.rs`), when a turn or automation run is queued
   (`startTask`, `triggerAutomation`, a schedule firing): unless
   `JARVIS_AGENT_RUNTIME=python`, a turn on a provider the LLM layer speaks
-  (Anthropic, Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint) is the
+  (Anthropic, Bedrock, Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint) is the
   edge's — for an
   automation, a code or webhook one, or a prompt or monitor one on such a
   model; for a board task (at dispatch), one on such a model: its job gets
@@ -555,6 +555,19 @@ on stdin.
     breakpoints with `JARVIS_CACHE_TTL=1h`. Departures: a stored PDF goes as
     a `document` block (LangChain sent a block Anthropic
     refuses), and the stop reason is kept as the finish reason.
+  - `bedrock.rs`: ConverseStream, for `bedrock`, as `ChatBedrockConverse`
+    (langchain-aws) sends it through boto3, signed by `src/aws.rs` (service
+    `bedrock`, the endpoint from `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` /
+    `AWS_ENDPOINT_URL`, else the region's). Consecutive user or assistant
+    messages merged as `merge_message_runs` merges them, a tool result as a
+    `toolResult` in the user turn, a blank text as `"."`, signed thinking as
+    `reasoningContent`, breakpoints as `cachePoint` blocks, tool schemas
+    with their null branches stripped. The reply is AWS event-stream frames,
+    CRC-checked. Departures: the reasoning is recorded as thinking (LangChain
+    kept it opaque), the provider as `bedrock`, the stop reason as the finish
+    reason. A turn whose AWS credentials come from a source only boto3 reads
+    (assume-role, SSO, web identity, `credential_process`, a container role)
+    stays Python's.
   - `google.rs`: Gemini's `streamGenerateContent`.
   - `ollama.rs`: Ollama's `/api/chat`. Tool schemas as the `ollama`
     client's `Tool` model keeps them (an optional argument is `{}`).
@@ -571,6 +584,9 @@ Endpoints and keys come from the environment:
 
 - Anthropic: `ANTHROPIC_API_KEY`, with `ANTHROPIC_API_URL` (else
   `ANTHROPIC_BASE_URL`) as the base URL, as langchain-anthropic reads them.
+- Bedrock: boto3's chain as `src/aws.rs` reads it (environment keys, the
+  shared files' static keys, the instance role), the region from
+  `AWS_REGION` / `AWS_DEFAULT_REGION` (else `us-east-1`).
 - Google: `GOOGLE_API_KEY` (or `GEMINI_API_KEY`).
 - Ollama: `OLLAMA_HOST`, read the way the `ollama` client reads it.
 - OpenRouter: `OPENROUTER_API_KEY`.

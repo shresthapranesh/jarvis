@@ -340,12 +340,16 @@ async def _start(client, **input) -> str:
 
 async def test_the_edge_takes_the_turns_it_serves(database, work_dir: Path, edge_binary: Path):
     """A turn on a provider the edge speaks is the edge's to run (here its
-    model is unreachable, so it fails — in the edge, which records it); one on
-    a provider it doesn't is left for Python, untouched."""
+    model is unreachable, so it fails — in the edge, which records it); one it
+    can't make — Bedrock with credentials only boto3 reads — is left for
+    Python, untouched."""
     from db import async_session
     from db.models import ConfigSetting, Message
 
-    dead = {"OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}"}
+    dead = {"OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}",
+            # No keys or profile: a web identity token, which only boto3 reads.
+            "AWS_ACCESS_KEY_ID": "", "AWS_SECRET_ACCESS_KEY": "", "AWS_PROFILE": "", "AWS_DEFAULT_PROFILE": "",
+            "AWS_WEB_IDENTITY_TOKEN_FILE": str(work_dir / "token")}
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, {**EDGE_ON, **dead})) as client:
         served = await _start(client, query="hello", model="ollama:llama3.3")
         not_served = await _start(client, query="hello", model="bedrock:us.anthropic.claude-sonnet-4-6")

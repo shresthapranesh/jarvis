@@ -942,10 +942,12 @@ fn latest_user_text(history: &[Message]) -> String {
 }
 
 /// `honors_cache_control` with the default providers (`anthropic`, `bedrock`,
-/// `openrouter`): Anthropic itself, and an OpenRouter route to it.
+/// `openrouter`): Anthropic itself, Claude on Bedrock, and an OpenRouter
+/// route to Anthropic.
 pub(super) fn honors_cache_control(model: &str) -> bool {
     match model.split_once(':') {
         Some(("anthropic", _)) => true,
+        Some(("bedrock", name)) => name.to_lowercase().contains("anthropic."),
         Some(("openrouter", name)) => name.to_lowercase().trim_start_matches('~').starts_with("anthropic/"),
         _ => false,
     }
