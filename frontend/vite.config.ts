@@ -55,7 +55,6 @@ export default defineConfig({
   server: {
     proxy: {
       '/graphql': {target: 'http://localhost:8000', ws: true, changeOrigin: true},
-      '/uploads': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/ws/browser': {target: 'ws://localhost:8000', ws: true},
       '/artifacts': 'http://localhost:8000',

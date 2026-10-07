@@ -82,8 +82,6 @@ pub type EdgeSchema = Schema<Query, Mutation, runs::RunSubscription>;
 /// Process-level facts resolvers need besides the pool.
 pub struct EdgeData {
     pub artifacts_dir: PathBuf,
-    pub documents_dir: PathBuf,
-    pub staging_dir: PathBuf,
     /// The scheduler's zone, for `Automation.nextRunAt`.
     pub tz: chrono_tz::Tz,
     /// For `browserAvailable`'s probe.

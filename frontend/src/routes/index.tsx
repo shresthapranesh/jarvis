@@ -8,8 +8,6 @@ import {InputBox} from '../components/InputBox';
 import {errorBubble, page} from '../components/ui';
 import {useRunningTasks} from '../hooks/useRunningTasks';
 import {greeting, relativeTime} from '../lib/format';
-import type {MediaAttachment} from '../lib/types';
-import {uploadStagedAttachment} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {decodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
@@ -44,17 +42,12 @@ function IndexPage() {
 
   const running = useRunningTasks();
 
-  async function handleSubmit(query: string, model: string, attachments: MediaAttachment[]) {
+  async function handleSubmit(query: string, model: string) {
     setLoading(true);
     setError(null);
     try {
-      const uploads = attachments.length
-        ? await Promise.all(
-            attachments.map(async (a) => ({uploadId: (await uploadStagedAttachment(a)).uploadId})),
-          )
-        : null;
       const {taskId, conversationId} = await commitStartTask({
-        input: {query, model, attachmentUploads: uploads, ephemeral: incognito},
+        input: {query, model, ephemeral: incognito},
       });
 
       // The /c/$id route loader will fetch the new conversation page (which

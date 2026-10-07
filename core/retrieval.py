@@ -1,7 +1,7 @@
 """Hybrid retrieval primitives: lexical (SQLite FTS5) + dense fusion, and cutoff.
 
-Two problems this fixes, shared by `memory_store.search_memory` and
-`doc_index.search_chunks`:
+Two problems this fixes, shared by `memory_store.search_memory` and the
+skill and episode searches:
 
 1. **Dense-only search misses exact tokens.** Embeddings encode meaning, and an
    error code / filename / person's name has no meaning to encode — it is just a

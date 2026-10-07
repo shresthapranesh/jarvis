@@ -41,7 +41,7 @@ from .model_catalog import (  # noqa: F401 — re-exported for backwards compat
 # openrouter to the upstreams that actually honor cache_control blocks.
 _DEFAULT_CACHE_PROVIDERS = frozenset({"bedrock", "anthropic", "openrouter"})
 from .schemas import _normalise_todos
-from core.doc_index import embeddings_available
+from core.embeddings import embeddings_available
 from core.memory_store import load_core, search_memory
 from core.skill_store import skill_catalog
 from tools.artifacts import (
@@ -50,7 +50,6 @@ from tools.artifacts import (
     write_artifact,
 )
 from tools.code import run_cell
-from tools.documents import read_document, search_documents
 from tools.files import list_files, read_file, write_file
 from tools.memory import remember
 from tools.todos import set_todo_status, write_todos
@@ -254,7 +253,7 @@ async def _memory_volatile_parts(store, query: str) -> list[CacheSegment]:
 
     # Trivial detection — reuse same heuristic as query cache
     try:
-        from core.doc_index import _is_trivial_query
+        from core.embeddings import _is_trivial_query
 
         is_trivial = _is_trivial_query(query) if query else False
     except Exception:
@@ -568,9 +567,9 @@ async def _compute_retrieval(
             _episode_volatile_parts(conversation_id, query),
         )
         # Emit cache stats for /server-logs observability (debug level per-turn,
-        # info level periodically via doc_index itself)
+        # info level periodically via core.embeddings itself)
         try:
-            from core.doc_index import get_query_cache_stats
+            from core.embeddings import get_query_cache_stats
 
             stats = get_query_cache_stats()
             logger.debug(
@@ -751,10 +750,10 @@ def _build_agent(model: str, store: Any, board: bool = False) -> Agent:
         _mcp_tools_for_workers = []
 
     _ROLE_TOOLS: dict[str, list] = {
-        "general":    [run_cell, read_file, write_file, list_files, write_artifact, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
-        "researcher": [run_cell, read_file, read_artifact, artifact_list, search_documents, read_document] + _mcp_tools_for_workers,
+        "general":    [run_cell, read_file, write_file, list_files, write_artifact, read_artifact, artifact_list] + _mcp_tools_for_workers,
+        "researcher": [run_cell, read_file, read_artifact, artifact_list] + _mcp_tools_for_workers,
         "coder":      [run_cell, read_file, write_file, list_files],
-        "writer":     [read_file, write_file, write_artifact, read_artifact, artifact_list, search_documents, read_document],
+        "writer":     [read_file, write_file, write_artifact, read_artifact, artifact_list],
     }
 
     def _make_role_factory(role: str):

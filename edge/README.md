@@ -36,7 +36,7 @@ it.
 | `JARVIS_BACKEND_URL` | `http://127.0.0.1:8001` | the Python server |
 | `JARVIS_EDGE_LOG` | `info` | `error`…`trace`, the edge's own logs only |
 | `DATABASE_URL` / `WORK_DIR` | as `core/config.py` | same database file as Python |
-| `ARTIFACTS_DIR` / `DOCUMENTS_DIR` / `STAGING_DIR` | as `core/config.py` | same files as Python |
+| `ARTIFACTS_DIR` | as `core/config.py` | same files as Python |
 | `JARVIS_WORKER_CMD` | unset | the command that runs Python (via `sh -c`, in `JARVIS_APP_DIR`); set, the edge owns the worker |
 | `JARVIS_WORKER_IDLE` | `300` | seconds idle before the worker is stopped; `0` keeps it up (restarted if it dies) |
 | `JARVIS_APP_DIR` | the current directory | the jarvis checkout: where the worker runs, and `static/dist`, the SPA the edge serves |
@@ -107,8 +107,7 @@ back over the same socket (protocol 4):
 
 `startTask`, `runWorkflow` and `triggerAutomation` (`src/gql/start.rs`) write
 what Python's `register_*` functions wrote — the conversation, the user
-message, attachments copied from staging into `documents_dir` as `Document`
-rows, the domain row the run reports into, and the `jobs` row — in one
+message, the domain row the run reports into, and the `jobs` row — in one
 transaction. The run's model is resolved here too (`src/catalog.rs`), from the
 same `core/builtin_models.json` Python loads plus the `models.custom` and
 `default.model` settings rows.
@@ -150,7 +149,6 @@ has nothing to do:
 | board dispatch | every 15 s, and when Python sends `dispatch` | `dispatch_board_tasks`, in the edge |
 | memory consolidation | `0 */6 * * *` | the sweep in the edge (`src/consolidate/`), if due |
 | project memory | every 30 min | the sweep in the edge (`src/consolidate/`), if due |
-| staging cleanup | `0 * * * *` | deletes abandoned uploads, in the edge |
 | memory-activity prune | `0 4 * * *` | deletes old access-log rows, in the edge |
 
 Python behind the edge (`JARVIS_EDGE_URL` set — `core/edge_link.py:behind_edge`)
@@ -445,8 +443,8 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 - **Routing** (`route.rs`), when a turn or automation run is queued
   (`startTask`, `triggerAutomation`, a schedule firing): unless
   `JARVIS_AGENT_RUNTIME=python`, a turn on a provider the LLM layer speaks
-  (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint), with no
-  attachments, is the edge's — for an
+  (Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint) is the
+  edge's — for an
   automation, a code or webhook one, or a prompt or monitor one on such a
   model; for a board task (at dispatch), one on such a model: its job gets
   `runtime = 'edge'` and its run is mirrored as the edge's own. Everything
@@ -468,9 +466,9 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   arguments that aren't plainly valid.
 - **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
   roles in `core/agents.py` — change both): `spawn_workers` runs its tasks at
-  once, each on the run's model with its role's prompt and tools (the files,
-  artifact and document tools are `files.rs`, `artifacts.rs`, `documents.rs`,
-  ports of `tools/files.py`, `tools/artifacts.py`, `tools/documents.py`), a
+  once, each on the run's model with its role's prompt and tools (the file
+  and artifact tools are `files.rs`, `artifacts.rs`, ports of
+  `tools/files.py`, `tools/artifacts.py`), a
   history in memory and a kernel of its own. A worker can't be handed over,
   so it answers unknown tools, bad arguments (worded as `invoke_tool` words
   them) and gates itself. Its events reach the turn as notes, written and
@@ -638,13 +636,10 @@ their raw flags and skip it.
 - **`/server-logs` peer check.** Python's localhost-only check sees every
   proxied request as 127.0.0.1, so the edge enforces it on the real peer.
 - **REST the edge serves** (`src/rest.rs`, `src/logs.rs` — ports of
-  `routes_artifacts.py`, `routes_documents.py`, `routes_uploads.py`,
-  `routes_logs.py`; change both). Downloads answer as Starlette's
+  `routes_artifacts.py` and `routes_logs.py`; change both). Downloads answer as Starlette's
   `FileResponse`: its headers (ETag = md5 of `"{st_mtime}-{size}"`), one byte
   range, `HEAD` left to Python (FastAPI's 405); several ranges, a range number
-  only `int()` reads, or a path that isn't a file are proxied. `/uploads`
-  streams the `file` part to the staging directory (last one wins, 100 MiB
-  cap, FastAPI's 422 bodies); an urlencoded body is proxied. The log viewer is
+  only `int()` reads, or a path that isn't a file are proxied. The log viewer is
   one buffer: the edge's `tracing` events plus the records a linked worker
   sends over the link (`type: "log"`), its pre-link backfill included — so
   opening it never starts Python. Diffed in `tests/test_edge_rest.py`.

@@ -7,7 +7,7 @@ import logging
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.doc_index import embeddings_available, get_embedder
+from core.embeddings import embeddings_available, get_embedder
 from core.memory_store import embed_for_storage
 from db import async_session
 from db.models import Skill
@@ -88,7 +88,7 @@ def _cosine(query_vec: np.ndarray, query_norm: float, stored: bytes) -> float | 
     """Cosine of `query_vec` (norm precomputed) against stored float32 bytes.
 
     Returns None when the stored vector was embedded by a different model
-    (shape mismatch) — skip rather than crash, mirroring memory_store/doc_index.
+    (shape mismatch) — skip rather than crash, mirroring memory_store/embeddings.
     """
     vec = np.frombuffer(stored, dtype=np.float32)
     if vec.shape != query_vec.shape:
@@ -103,7 +103,7 @@ async def search_skills(query: str, *, k: int, skills: list[Skill]) -> list[dict
     there is no embedder, trivial query, or no comparable embedding.
     Uses cached query embedding to share work with memory retrieval.
     """
-    from core.doc_index import aembed_query_cached
+    from core.embeddings import aembed_query_cached
 
     if not query.strip():
         return []
@@ -137,7 +137,7 @@ async def skill_catalog(query: str) -> tuple[list[dict], bool]:
     nothing. Bodies are never included — the agent pulls those on demand via
     ``use_skill``.
     """
-    from core.doc_index import _is_trivial_query
+    from core.embeddings import _is_trivial_query
 
     async with async_session() as session:
         skills = await list_skills(session, enabled_only=True)

@@ -380,25 +380,6 @@ CREATE INDEX ix_artifacts_conversation_id ON artifacts (conversation_id);
 
 CREATE INDEX ix_artifacts_message_id ON artifacts (message_id);
 
-CREATE TABLE documents (
-	id VARCHAR NOT NULL, 
-	conversation_id VARCHAR NOT NULL, 
-	message_id VARCHAR, 
-	filename VARCHAR NOT NULL, 
-	mime_type VARCHAR NOT NULL, 
-	size INTEGER NOT NULL, 
-	path VARCHAR NOT NULL, 
-	index_status VARCHAR, 
-	created_at DATETIME NOT NULL, 
-	PRIMARY KEY (id), 
-	FOREIGN KEY(conversation_id) REFERENCES conversations (id), 
-	FOREIGN KEY(message_id) REFERENCES messages (id)
-);
-
-CREATE INDEX ix_documents_conversation_id ON documents (conversation_id);
-
-CREATE INDEX ix_documents_message_id ON documents (message_id);
-
 CREATE TABLE artifact_versions (
 	id VARCHAR NOT NULL, 
 	artifact_id VARCHAR NOT NULL, 
@@ -413,21 +394,4 @@ CREATE TABLE artifact_versions (
 CREATE INDEX ix_artifact_versions_artifact_id ON artifact_versions (artifact_id);
 
 CREATE UNIQUE INDEX ix_artifact_versions_artifact_version ON artifact_versions (artifact_id, version);
-
-CREATE TABLE document_chunks (
-	id VARCHAR NOT NULL, 
-	document_id VARCHAR NOT NULL, 
-	conversation_id VARCHAR NOT NULL, 
-	seq INTEGER NOT NULL, 
-	text TEXT NOT NULL, 
-	embedding BLOB, 
-	created_at DATETIME NOT NULL, 
-	PRIMARY KEY (id), 
-	FOREIGN KEY(document_id) REFERENCES documents (id), 
-	FOREIGN KEY(conversation_id) REFERENCES conversations (id)
-);
-
-CREATE INDEX ix_document_chunks_conversation_id ON document_chunks (conversation_id);
-
-CREATE INDEX ix_document_chunks_document_id ON document_chunks (document_id);
 

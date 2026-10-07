@@ -104,7 +104,7 @@ def _snapshot(db: Path) -> dict:
                                  and ("migrations" in json.dumps(r) or "migration." in json.dumps(r)) else v
                                  for v in r) for r in got]
         fts = {}
-        for name in ("memories_fts", "document_chunks_fts", "conversation_episodes_fts", "messages_fts"):
+        for name in ("memories_fts", "conversation_episodes_fts", "messages_fts"):
             with contextlib.suppress(sqlite3.OperationalError):
                 fts[name] = conn.execute(f"SELECT rowid, * FROM {name} ORDER BY rowid").fetchall()
     return {"master": master, "rows": rows, "fts": fts}
@@ -158,7 +158,6 @@ _ADDED = {
     "conversations": ["pinned", "surface", "project_id", "ephemeral"],
     "automations": ["notifications", "stateful"],
     "workflows": ["notifications"],
-    "documents": ["index_status"],
     "board_tasks": ["blocked_kind", "pending_answer"],
     "artifacts": ["mime_type"],
 }
@@ -205,11 +204,6 @@ def _old_database(path: Path) -> None:
               ('a1', 'x', 'a1.md', 'markdown', 'telegram_1', '2025-01-01 00:00:02.000000', '2025-01-01 00:00:02.000000'),
               ('a2', 'y', 'a2.md', 'markdown', 'telegram_1', '2025-01-01 00:00:05.000000', '2025-01-01 00:00:05.000000'),
               ('a3', 'z', 'a3.md', 'markdown', 'telegram_1', '2025-01-01 00:00:00.500000', '2025-01-01 00:00:00.500000');
-            INSERT INTO documents (id, conversation_id, filename, mime_type, size, path, created_at) VALUES
-              ('d1', 'telegram_1', 'a.txt', 'text/plain', 1, 'd1.txt', '2025-01-01 00:00:00.000000'),
-              ('d2', 'telegram_1', 'b.txt', 'text/plain', 1, 'd2.txt', '2025-01-01 00:00:00.000000');
-            INSERT INTO document_chunks (id, document_id, conversation_id, seq, text, created_at) VALUES
-              ('c1', 'd1', 'telegram_1', 0, 'chunk text about otters', '2025-01-01 00:00:00.000000');
         """)
         conn.commit()
 
@@ -225,12 +219,9 @@ async def test_an_old_database_is_migrated_the_same(edge_binary, tmp_path):
     with contextlib.closing(sqlite3.connect(tmp_path / "edge" / "data" / "database.db")) as conn:
         assert conn.execute("SELECT id, surface FROM conversations ORDER BY rowid").fetchall() == [
             ("telegram_1", "telegram"), ("discord_2", "discord"), ("telegramx", "web")]
-        assert conn.execute("SELECT id, index_status FROM documents ORDER BY id").fetchall() == [
-            ("d1", "indexed"), ("d2", None)]
         assert conn.execute("SELECT id, message_id FROM artifacts ORDER BY id").fetchall() == [
             ("a1", "m1"), ("a2", "m2"), ("a3", None)]
         assert {c for (c,) in conn.execute("SELECT name FROM pragma_table_info('messages')")} >= set(_ADDED["messages"])
-    assert edge["fts"]["document_chunks_fts"] == [(1, "chunk text about otters")]
     assert edge["fts"]["messages_fts"] == [(1, "first"), (2, "second"), (3, "a user turn")]
 
 

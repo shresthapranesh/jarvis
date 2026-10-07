@@ -6,8 +6,8 @@
 //! run already going on that chat, if there is one — and the reply is the
 //! run's main-agent text, followed in the run mirror and edited into the chat
 //! as it grows. Python is started for the run (its job) when the edge can't
-//! run it; never to keep a bot connected. A voice note is answered with
-//! `VOICE_UNSUPPORTED`.
+//! run it; never to keep a bot connected. A voice note or an image is
+//! answered with `TEXT_ONLY`.
 //!
 //! Each bot is enabled by its token, as in Python: `TELEGRAM_BOT_TOKEN`,
 //! `DISCORD_BOT_TOKEN`. Python behind the edge starts neither.
@@ -15,7 +15,6 @@
 mod discord;
 mod telegram;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,7 +22,7 @@ use sqlx::SqlitePool;
 use tokio::sync::watch;
 
 use crate::catalog;
-use crate::gql::start::{Attachment, ChatTurn, Dispatched, first_chars, start_chat};
+use crate::gql::start::{ChatTurn, Dispatched, first_chars, start_chat};
 use crate::runs::{Registry, Run};
 
 /// Edits to a streaming reply, at most one per this.
@@ -34,15 +33,14 @@ const EDIT_INTERVAL: Duration = Duration::from_secs(1);
 /// the reply already in flight will answer this too.
 const QUEUED_NOTE: &str = "📥 Added to what I'm working on — it'll be picked up in a moment.";
 
-/// The answer to a voice note: there is no transcription.
-const VOICE_UNSUPPORTED: &str = "Voice notes aren't supported — send text instead.";
+/// The answer to a voice note, an audio file or an image: nothing reads them.
+const TEXT_ONLY: &str = "Only text messages are supported — send text instead.";
 
 /// What every bot needs from the edge.
 #[derive(Clone)]
 pub struct Ctx {
     pool: SqlitePool,
     registry: Arc<Registry>,
-    documents_dir: PathBuf,
     /// For the chat services: HTTPS, and redirects followed.
     http: reqwest::Client,
 }
@@ -51,7 +49,6 @@ pub struct Ctx {
 pub fn spawn(
     pool: SqlitePool,
     registry: Arc<Registry>,
-    documents_dir: PathBuf,
 ) {
     let token = |key: &str| std::env::var(key).ok().filter(|t| !t.trim().is_empty());
     let telegram_token = token("TELEGRAM_BOT_TOKEN");
@@ -62,7 +59,6 @@ pub fn spawn(
     let ctx = Ctx {
         pool,
         registry,
-        documents_dir,
         http: reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
             .build()
@@ -110,31 +106,20 @@ impl Ctx {
     }
 
     /// Start a turn on `conversation_id`, or queue it onto the run there —
-    /// the bots' `_dispatch`. `display` is the user message as stored;
-    /// `title` titles the conversation if this creates it.
-    #[allow(clippy::too_many_arguments)]
-    async fn dispatch(
-        &self,
-        surface: &'static str,
-        conversation_id: String,
-        model: String,
-        query: String,
-        display: String,
-        title: &str,
-        attachments: Vec<Attachment>,
-    ) -> Result<Turn, String> {
+    /// the bots' `_dispatch`. The text titles the conversation if this
+    /// creates it.
+    async fn dispatch(&self, surface: &'static str, conversation_id: String, model: String, text: &str) -> Result<Turn, String> {
         let turn = ChatTurn {
-            query,
+            query: text.to_string(),
             model,
             conversation_id: Some(conversation_id),
-            title: Some(first_chars(title, 60)),
+            title: Some(first_chars(text, 60)),
             surface,
-            display: Some(display),
-            attachments,
+            display: Some(text.to_string()),
             project_id: None,
             ephemeral: false,
         };
-        match start_chat(&self.pool, &self.documents_dir, &self.registry, turn).await {
+        match start_chat(&self.pool, &self.registry, turn).await {
             Ok(Dispatched::Started { task_id, .. }) => match self.registry.get(&task_id) {
                 Some(run) => Ok(Turn::Started(Reply::new(run))),
                 // Registered as pending a moment ago; only a sweep of a job
@@ -148,25 +133,6 @@ impl Ctx {
     }
 
 
-}
-
-/// A file from a chat service, with a size cap. Through the bot's own
-/// client, so a Telegram proxy applies to downloads too.
-async fn download(http: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
-    /// Telegram's bot API serves files up to 20 MB; Discord's attachments run
-    /// to 25 MB on free servers.
-    const MAX: usize = 32 * 1024 * 1024;
-    let resp = http
-        .get(url)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(|e| e.without_url().to_string())?;
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    if bytes.len() > MAX {
-        return Err(format!("file too large ({} bytes)", bytes.len()));
-    }
-    Ok(bytes.to_vec())
 }
 
 /// Whether `user_id` is in an allowlist setting: comma-separated numeric ids.

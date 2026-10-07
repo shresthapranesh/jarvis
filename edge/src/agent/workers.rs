@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::tools::{Policy, Toolset};
-use super::{Agent, artifacts, documents, files};
+use super::{Agent, artifacts, files};
 use crate::llm::perf::CallPerf;
 use crate::llm::shape::{self, Layout};
 use crate::llm::transcript::{Content, Message, Part, Role, ToolCall, Typed};
@@ -69,18 +69,12 @@ const ROLES: [(&str, &str); 4] = [
 fn role_tools(role: &str) -> (&'static [&'static str], bool) {
     match role {
         "general" => (
-            &[
-                "run_cell", "read_file", "write_file", "list_files", "write_artifact", "read_artifact", "list_artifacts",
-                "search_documents", "read_document",
-            ],
+            &["run_cell", "read_file", "write_file", "list_files", "write_artifact", "read_artifact", "list_artifacts"],
             true,
         ),
-        "researcher" => (&["run_cell", "read_file", "read_artifact", "list_artifacts", "search_documents", "read_document"], true),
+        "researcher" => (&["run_cell", "read_file", "read_artifact", "list_artifacts"], true),
         "coder" => (&["run_cell", "read_file", "write_file", "list_files"], false),
-        _ => (
-            &["read_file", "write_file", "write_artifact", "read_artifact", "list_artifacts", "search_documents", "read_document"],
-            false,
-        ),
+        _ => (&["read_file", "write_file", "write_artifact", "read_artifact", "list_artifacts"], false),
     }
 }
 
@@ -247,8 +241,6 @@ enum Call {
     WriteArtifact { title: String, content: Option<String>, file_path: Option<String>, artifact_id: Option<String> },
     ReadArtifact { artifact_id: String, version: Option<i64> },
     ListArtifacts { all_conversations: bool },
-    SearchDocuments { query: String, k: i64 },
-    ReadDocument { document_id: String, offset: i64 },
     Mcp { server: String, tool: String, args: Value },
 }
 
@@ -459,8 +451,6 @@ impl<'c, 'a> Worker<'c, 'a> {
                 artifacts::read(pool, &ctx.agent.artifacts_dir, &cwd, &artifact_id, version).await
             }
             Call::ListArtifacts { all_conversations } => artifacts::list(pool, ctx.conversation.as_deref(), all_conversations).await,
-            Call::SearchDocuments { query, k } => documents::search(pool, &ctx.agent.http, ctx.conversation.as_deref(), &query, k).await,
-            Call::ReadDocument { document_id, offset } => documents::read(pool, &document_id, offset).await,
             Call::Mcp { .. } => unreachable!("an MCP call runs in tool_step"),
         }
     }
@@ -544,8 +534,6 @@ fn check(name: &str, args: &Value) -> Result<Call, String> {
         },
         "read_artifact" => Call::ReadArtifact { artifact_id: a.str("artifact_id"), version: a.opt_int("version") },
         "list_artifacts" => Call::ListArtifacts { all_conversations: a.bool("all_conversations", false) },
-        "search_documents" => Call::SearchDocuments { query: a.str("query"), k: a.int("k", 6) },
-        "read_document" => Call::ReadDocument { document_id: a.str("document_id"), offset: a.int("offset", 0) },
         other => unreachable!("{other} is no worker tool"),
     };
     if a.errors.is_empty() { Ok(call) } else { Err(bad_args(name, args, &a.errors)) }
@@ -583,13 +571,6 @@ impl Args<'_> {
                 self.fail(key, "Input should be a valid string");
                 None
             }
-        }
-    }
-
-    fn int(&mut self, key: &str, default: i64) -> i64 {
-        match self.args.get(key) {
-            None => default,
-            Some(v) => self.as_int(key, v).unwrap_or(default),
         }
     }
 
@@ -713,14 +694,6 @@ mod tests {
             check("read_artifact", &json!({"artifact_id": "a", "version": true})).unwrap(),
             Call::ReadArtifact { artifact_id: "a".into(), version: Some(1) }
         );
-        assert_eq!(check("read_document", &json!({"document_id": "d", "offset": "3"})).unwrap(), Call::ReadDocument {
-            document_id: "d".into(),
-            offset: 3
-        });
-        assert_eq!(check("search_documents", &json!({"query": "q", "k": 2.0})).unwrap(), Call::SearchDocuments {
-            query: "q".into(),
-            k: 2
-        });
     }
 
     #[test]

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import logging
-import os
 from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,7 +18,6 @@ from langchain_core.messages import HumanMessage
 
 from core.agent_loop import RecursionLimitReached
 from core.agents import build_agent, prefetch_retrieval
-from core.config import get_config
 from core.invocation_context import InvocationContext
 from core.queue import Job
 from core.run_scaffold import (
@@ -31,7 +27,6 @@ from core.run_scaffold import (
     queue_cancel_watch,
     start_run_callbacks,
 )
-from core.schemas import AttachmentIn
 from core.state import (
     QueuedMessage,
     TaskState,
@@ -41,13 +36,12 @@ from core.state import (
     log_task_created,
     log_task_received,
 )
-from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _build_message_content, _finalize_message, _process_chunk
+from core.streaming import STREAM_MODES, StreamChunk, TokenCoalescer, _finalize_message, _process_chunk
 
 from db import async_session
 from db.models import Conversation
 from db.ops import (
     add_message,
-    create_document,
     delete_message,
     get_or_create_conversation,
     get_project,
@@ -70,7 +64,6 @@ def user_message_id(task_id: str) -> str:
 
 async def _run_agent_task(
     task_id: str, query: str, model: str, conv_id: str,
-    attachments: list | None = None,
     invocation_context: InvocationContext | None = None,
     handoff: dict[str, Any] | None = None,
 ) -> None:
@@ -112,10 +105,9 @@ async def _run_agent_task(
         )
 
     try:
-        # Turn setup — message content (attachment extraction / doc indexing),
-        # the project lookup, and the turn's memory+skill retrieval are
-        # independent of each other, so they run concurrently instead of
-        # stacking their latencies.
+        # Turn setup — the project lookup and the turn's memory+skill
+        # retrieval are independent of each other, so they run concurrently
+        # instead of stacking their latencies.
         user_msg_id = user_message_id(task_id)
         # Jarvis-style: prefer InvocationContext infra refs over globals
         store = ctx.store if ctx is not None and ctx.store is not None else get_store()
@@ -125,10 +117,7 @@ async def _run_agent_task(
                 ctx.session_id = conv_id
             ctx.state.set(f"session:{conv_id}:last_query", query[:200])
         prefetch_retrieval(store, query, user_msg_id, conv_id)
-        content_task = asyncio.create_task(_build_message_content(query, attachments, model))
         scope_task = asyncio.create_task(_resolve_conv_scope(conv_id))
-
-        content = await content_task
 
         agent = build_agent(model, store=store, invocation_context=ctx)
         project_id, ephemeral = await scope_task
@@ -158,7 +147,7 @@ async def _run_agent_task(
         # immediately, since the write alone dispatches none.
         # The explicit id matches the prefetch_retrieval key above, so the
         # loop's retrieval-cache lookup hits the task already in flight.
-        stream_input: Any = {"messages": [HumanMessage(content=content, id=user_msg_id)], "todos": []}
+        stream_input: Any = {"messages": [HumanMessage(content=query, id=user_msg_id)], "todos": []}
         if handoff is not None:
             # The edge already wrote the prompt and reset the plan; the turn
             # goes on from its last step.
@@ -325,7 +314,6 @@ async def route_to_live_run(
     session: AsyncSession,
     conv_id: str,
     query: str,
-    attachments: list | None = None,
 ) -> tuple[str, str] | None:
     """Hand `query` to the run already up on this conversation, if there is one.
 
@@ -335,19 +323,10 @@ async def route_to_live_run(
     turn here is not a heavier version of the same thing: the thread lease
     would hold it until the live run ends, and the message would reach the
     model a turn late instead of mid-run.
-
-    Raises when a run is up but this message cannot join it, which is when it
-    has attachments: a queued row has to be replayable from the DB alone, and
-    it stores attachment metadata, not bytes.
     """
     task_id = in_flight_chat_task(conv_id)
     if task_id is None:
         return None
-    if attachments:
-        raise ValueError(
-            "a run is already in flight on this conversation and attachments cannot be "
-            "queued onto it — wait for it to finish, or stop it first"
-        )
     message_id, _ = await queue_chat_message(session, task_id, query)
     return task_id, message_id
 
@@ -424,7 +403,7 @@ async def chat_job_handler(job: Job) -> None:
     Convention: ``job.id == Message.id`` (the assistant placeholder Message).
 
     Payload: ``{"query": str, "model": str, "conv_id": str,
-                "attachments": list[dict] | None, "handoff": dict | None}``.
+                "handoff": dict | None}``.
     ``handoff`` is what the edge's agent loop carried when it handed this
     turn over mid-run: ``{text, step_seq, steps, usage}``.
 
@@ -437,8 +416,6 @@ async def chat_job_handler(job: Job) -> None:
     query: str = payload["query"]
     model: str = payload["model"]
     conv_id: str = payload["conv_id"]
-    raw_atts = payload.get("attachments") or []
-    attachments = [AttachmentIn.model_validate(a) for a in raw_atts] if raw_atts else None
     # Set when the edge's agent loop began this turn and handed it over.
     handoff: dict[str, Any] | None = payload.get("handoff")
 
@@ -469,7 +446,7 @@ async def chat_job_handler(job: Job) -> None:
 
     async with queue_cancel_watch(task_id, state):
         await _run_agent_task(
-            task_id, query, model, conv_id, attachments,
+            task_id, query, model, conv_id,
             invocation_context=invocation_context,
             handoff=handoff,
         )
@@ -482,7 +459,6 @@ async def enqueue_chat_task(
     query: str,
     model: str,
     conv_id: str,
-    attachments: list[AttachmentIn] | None = None,
     *,
     source: str = "http",
 ) -> str:
@@ -491,8 +467,7 @@ async def enqueue_chat_task(
     (used as the job_id by convention).
 
     Callers (GraphQL startTask, Telegram, Discord) are responsible for
-    creating the user Message + any per-source side effects (saving documents
-    to disk, etc.) BEFORE invoking this. They should also commit those rows
+    creating the user Message BEFORE invoking this. They should also commit those rows
     in the same session this function uses, so everything is atomic.
     """
     from core.state import get_queue
@@ -506,9 +481,6 @@ async def enqueue_chat_task(
         "model": model,
         "conv_id": conv_id,
     }
-    if attachments:
-        payload["attachments"] = [a.model_dump() for a in attachments]
-
     # The conversation is the thread: its turns run one at a time.
     await get_queue().enqueue(
         "chat", payload, job_id=task_id, session=session, thread_id=conv_id,
@@ -559,12 +531,11 @@ async def register_chat_task(
     query: str,
     model: str,
     conversation_id: str | None = None,
-    attachments: list | None = None,
     project_id: str | None = None,
     ephemeral: bool = False,
 ) -> ChatDispatch:
     """GraphQL-side wrapper: create conversation if missing, write the user
-    Message + any document attachments, then enqueue the chat job.
+    Message, then enqueue the chat job.
 
     ``project_id`` and ``ephemeral`` only apply when a new conversation is
     created here; joining an existing conversation goes through
@@ -586,60 +557,16 @@ async def register_chat_task(
         session, conversation_id, model, title, project_id=project_id, ephemeral=ephemeral
     )
 
-    routed = await route_to_live_run(session, conv.id, query, attachments)
+    routed = await route_to_live_run(session, conv.id, query)
     if routed is not None:
         task_id, message_id = routed
         return ChatDispatch(
             task_id=task_id, conversation_id=conv.id, queued_message_id=message_id,
         )
 
-    if attachments:
-        display_parts: list[dict] = [{"type": "text", "text": query}]
-        for att in attachments:
-            display_parts.append({"type": att.type, "name": att.name, "size": att.size, "mimeType": att.mime_type})
-        display_content = json.dumps(display_parts)
-    else:
-        display_content = query
-
-    user_msg = await add_message(session, conv.id, "user", display_content)
-
-    if attachments:
-        cfg = get_config()
-        cfg.documents_dir.mkdir(parents=True, exist_ok=True)
-        for att in attachments:
-            if att.type != "document":
-                continue
-            try:
-                doc_id = str(uuid4())
-                ext = os.path.splitext(att.name)[1] or ".bin"
-                doc_path = cfg.documents_dir / f"{doc_id}{ext}"
-                doc_path.write_bytes(base64.b64decode(att.data))
-                doc = await create_document(
-                    session,
-                    conversation_id=conv.id,
-                    message_id=user_msg.id,
-                    filename=att.name,
-                    mime_type=att.mime_type,
-                    size=att.size,
-                    path=str(doc_path),
-                )
-                # Mark the attachment before enqueue_chat_task serializes it
-                # into the job payload — the chat handler uses this id to
-                # chunk-index large documents instead of inlining them, and the
-                # path to hand tabular files to the kernel rather than the prompt.
-                att.document_id = doc.id
-                att.document_path = str(doc_path)
-            except Exception as e:
-                # Error, not warning: nothing downstream can recover from this,
-                # and the attachment is about to reach the model as a stub that
-                # promises a file which was never written.
-                logger.error(
-                    "Failed to persist document %s to %s: %s",
-                    att.name, cfg.documents_dir, e, exc_info=True,
-                )
-                att.persist_error = f"{type(e).__name__}: {e}"
+    await add_message(session, conv.id, "user", query)
 
     task_id = await enqueue_chat_task(
-        session, query, model, conv.id, attachments=attachments, source="http",
+        session, query, model, conv.id, source="http",
     )
     return ChatDispatch(task_id=task_id, conversation_id=conv.id)

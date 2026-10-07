@@ -81,7 +81,7 @@ async def search_episodes(conversation_id: str, query: str, k: int = EPISODES_PE
     about anything compacted away, and then nothing is injected. Results are
     re-sorted chronologically because they are read as history.
     """
-    from core.doc_index import _is_trivial_query, aembed_query_cached
+    from core.embeddings import _is_trivial_query, aembed_query_cached
 
     if not conversation_id or _is_trivial_query(query):
         return []

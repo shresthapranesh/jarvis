@@ -291,8 +291,7 @@ export function ConversationList() {
         title="Delete conversation"
         message={
           <>
-            Delete <strong>{deleteTarget?.title}</strong>? This removes its messages, artifacts, and
-            documents.
+            Delete <strong>{deleteTarget?.title}</strong>? This removes its messages and artifacts.
           </>
         }
         confirmLabel="Delete"

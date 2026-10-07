@@ -44,7 +44,6 @@ PARITY_OPERATIONS = {
     "ProjectQuery",
     "ArtifactDetailQuery",
     "ArtifactListQuery",
-    "DocumentListQuery",
     "AutomationListQuery",
     "AutomationRunsQuery",
     "BoardTasksQuery",
@@ -241,7 +240,7 @@ async def domains(database, work_dir: Path) -> dict[str, str]:
     from db import async_session
     from db.models import (
         Approval, Artifact, ArtifactVersion, Automation, AutomationRun, BoardTask, BoardTaskLink,
-        Conversation, Document, Memory, MemoryActivity, NotificationChannel, Skill, Workflow, WorkflowRun,
+        Conversation, Memory, MemoryActivity, NotificationChannel, Skill, Workflow, WorkflowRun,
     )
 
     art_dir = work_dir / "artifacts"
@@ -263,8 +262,6 @@ async def domains(database, work_dir: Path) -> dict[str, str]:
             Artifact(id="a-missing", title="Gone", filename=str(art_dir / "nope.md"), created_at=_ts(2026, 2, 2), updated_at=_ts(2026, 2, 2)),
             ArtifactVersion(id="v2", artifact_id="a-crlf", version=2, title="Notes", filename=str(art_dir / "a-crlf_v2.md"), created_at=_ts(2026, 2, 1, 3)),
             ArtifactVersion(id="v1", artifact_id="a-crlf", version=1, title="Notes", filename=str(art_dir / "a-crlf_v1.md"), created_at=_ts(2026, 2, 1, 1)),
-            Document(id="d2", conversation_id="c1", filename="b.csv", mime_type="text/csv", size=10, path="/x/b", created_at=_ts(2026, 2, 1, 5)),
-            Document(id="d1", conversation_id="c1", message_id="m-x", filename="a.pdf", mime_type="application/pdf", size=2048, path="/x/a", created_at=_ts(2026, 2, 1, 4)),
         ])
         s.add_all([
             # Day-of-month AND day-of-week, the APScheduler reading.
@@ -327,12 +324,11 @@ async def domains(database, work_dir: Path) -> dict[str, str]:
     return {}
 
 
-async def test_artifacts_and_documents(domains, edge):
+async def test_artifacts(domains, edge):
     await _assert_same(edge, _relay_text("ArtifactListQuery"), {"conversationId": None})
     await _assert_same(edge, _relay_text("ArtifactListQuery"), {"conversationId": "c1"})
     for raw in ("a-crlf", "a-binary", "a-missing", "nope"):
         await _assert_same(edge, _relay_text("ArtifactDetailQuery"), {"id": _gid("Artifact", raw)})
-    await _assert_same(edge, _relay_text("DocumentListQuery"), {"conversationId": "c1"})
     await _assert_same(edge, """query { artifactVersions(artifactId: "a-crlf") { id artifactId version title filename createdAt content } }""")
     await _assert_same(edge, """query { artifacts { id versionCount content versions { version content } } }""")
 
@@ -389,7 +385,7 @@ async def test_memories(domains, edge):
 
 
 @pytest.mark.parametrize("type_name, raw", [
-    ("Artifact", "a-crlf"), ("Document", "d1"), ("Automation", "au-and"), ("AutomationRun", "r-err"),
+    ("Artifact", "a-crlf"), ("Automation", "au-and"), ("AutomationRun", "r-err"),
     ("Workflow", "w2"), ("WorkflowRun", "wr1"), ("NotificationChannel", "n1"), ("Skill", "s2"),
 ])
 async def test_node_resolves_every_type(domains, edge, type_name, raw):
@@ -501,18 +497,14 @@ async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: P
 
     from core.transcript_store import import_store_once
     from db import async_session
-    from db.models import Artifact, DocumentChunk
+    from db.models import Artifact
 
     async with async_session() as s:
         # One markdown artifact with a live file and no history (the v1
-        # migration path), and indexed chunks for a document.
+        # migration path).
         (work_dir / "artifacts" / "a-plain.md").write_bytes(b"old\r\nbody")
         s.add(Artifact(id="a-plain", title="Plain", filename=str(work_dir / "artifacts" / "a-plain.md"),
                        created_at=_ts(2026, 2, 3), updated_at=_ts(2026, 2, 3)))
-        s.add_all([
-            DocumentChunk(id="ch1", document_id="d1", conversation_id="c1", seq=0, text="alpha beta"),
-            DocumentChunk(id="ch2", document_id="d1", conversation_id="c1", seq=1, text="gamma"),
-        ])
         await s.commit()
     async with async_session() as s:
         # A started server's database: the LangGraph store import has run.
@@ -618,7 +610,7 @@ async def test_skill_memory_and_conversation_mutations(twin):
     await twin.run(update, {"id": _gid("Conversation", "nope"), "pinned": True})
 
 
-async def test_artifact_and_document_mutations(twin):
+async def test_artifact_mutations(twin):
     fields = "id title filename kind updatedAt content versionCount versions { version title filename content createdAt }"
     update = f"mutation($id: ID!, $title: String, $content: String) {{ updateArtifact(id: $id, title: $title, content: $content) {{ {fields} }} }}"
     await twin.run(update, {"id": _gid("Artifact", "a-crlf"), "title": "Retitled"})
@@ -634,9 +626,6 @@ async def test_artifact_and_document_mutations(twin):
 
     await twin.run("mutation($id: ID!) { deleteArtifact(id: $id) }", {"id": _gid("Artifact", "a-crlf")})
     await twin.run("mutation($id: ID!) { deleteArtifact(id: $id) }", {"id": _gid("Artifact", "a-crlf")})
-    # Chunks go with the document; the FTS delete triggers must run in the edge's SQLite too.
-    await twin.run("mutation($id: ID!) { deleteDocument(id: $id) }", {"id": _gid("Document", "d1")})
-    await twin.run("mutation($id: ID!) { deleteDocument(id: $id) }", {"id": _gid("Document", "d1")})
 
 
 def _sql_both(twin: Twin, sql: str, *args: Any) -> None:
@@ -719,8 +708,7 @@ async def test_board_task_mutations(twin, board_queue):
 
 async def test_conversation_deletes_and_model_change(twin):
     """A conversation goes with everything it owns: messages and steps,
-    artifacts with their versions and files, documents with their chunks,
-    episodes, and its transcript — a blob another thread still names stays."""
+    artifacts with their versions and files, episodes, and its transcript — a blob another thread still names stays."""
     shared, own = "sha256:" + "a" * 64, "sha256:" + "b" * 64
     _sql_both(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
                     "VALUES ('cm1', 'c1', 'assistant', 'x', 'done', '2026-02-01 00:00:00.000000')")
@@ -873,7 +861,7 @@ async def test_setting_reads_and_writes(twin, monkeypatch):
     """The generic settings editor: the inventory (known keys unset, a
     free-form key, endpoint keys redacted), one key, and writes — the row a
     write returns carries Python's in-memory, UTC-aware stamp."""
-    monkeypatch.setattr("core.doc_index._embedding_model_override", None)
+    monkeypatch.setattr("core.embeddings._embedding_model_override", None)
     endpoints = json.dumps([{"name": "lab", "base_url": "http://x/v1", "api_key": "sk-secret"},
                             {"name": "local", "base_url": "http://y/v1", "api_key": ""}])
     for key, value in (("zeta.custom", "1"), ("alpha.custom", "ü"), ("models.endpoints", endpoints),
@@ -933,11 +921,11 @@ async def test_settings_python_words_go_to_python(seeded, edge):
 async def test_an_embedding_model_set_through_the_edge_reaches_a_linked_python(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
     """Python caches the embedding model, the catalog and the tool policy in
     process; a linked one is told."""
-    from core import doc_index, edge_link
+    from core import embeddings, edge_link
     from core.edge_link import EdgeLink
     from test_edge_runs import _edge_owns_runs, _until
 
-    monkeypatch.setattr(doc_index, "_embedding_model_override", None)
+    monkeypatch.setattr(embeddings, "_embedding_model_override", None)
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
         link = EdgeLink(f"ws://127.0.0.1:{client.base_url.port}/internal/worker")
         link.start()
@@ -946,10 +934,10 @@ async def test_an_embedding_model_set_through_the_edge_reaches_a_linked_python(j
             await _until(lambda: _edge_owns_runs(client))
             q = 'mutation { setSetting(key: "embedding.model", value: "models/linked") { note } }'
             assert (await _edge(client, q)).status_code == 200
-            assert doc_index._effective_model() == "models/linked"
+            assert embeddings._effective_model() == "models/linked"
             q = 'mutation { deleteSetting(key: "embedding.model") { note } }'
             assert (await _edge(client, q)).json()["data"]["deleteSetting"]["note"].startswith("Deleted. Applied.")
-            assert doc_index._embedding_model_override is None
+            assert embeddings._embedding_model_override is None
             # The catalog and the tool policy, which Python caches too.
             from core import model_catalog, tool_policy
 

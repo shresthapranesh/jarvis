@@ -29,7 +29,7 @@ def _vec(text: str) -> np.ndarray:
 
 
 def _stub_embeddings(monkeypatch, *, dense: bool = True):
-    import core.doc_index as doc_index
+    import core.embeddings as embeddings
     import core.memory_store as memory_store
 
     async def fake_store_embed(text):
@@ -39,7 +39,7 @@ def _stub_embeddings(monkeypatch, *, dense: bool = True):
         return _vec(query) if dense else None
 
     monkeypatch.setattr(memory_store, "embed_for_storage", fake_store_embed)
-    monkeypatch.setattr(doc_index, "aembed_query_cached", fake_query_embed)
+    monkeypatch.setattr(embeddings, "aembed_query_cached", fake_query_embed)
 
 
 async def _conversation() -> str:

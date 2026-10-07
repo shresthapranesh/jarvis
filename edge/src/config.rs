@@ -14,10 +14,6 @@ pub struct Config {
     pub db_path: PathBuf,
     /// Where artifact files live (`AppConfig.artifacts_dir`).
     pub artifacts_dir: PathBuf,
-    /// Where a chat's attachments are kept (`AppConfig.documents_dir`).
-    pub documents_dir: PathBuf,
-    /// Where `POST /uploads` stages files (`AppConfig.staging_dir`).
-    pub staging_dir: PathBuf,
     /// LangGraph's database (`AppConfig.checkpoints_db`): its store is
     /// copied into `kv_store` once (`schema::import_store_once`).
     pub checkpoints_db: PathBuf,
@@ -61,14 +57,11 @@ impl Config {
         if !backend.starts_with("http://") {
             return Err(format!("JARVIS_BACKEND_URL must be an http:// URL, got {backend}"));
         }
-        // Resolved, as Python's are: an artifact's or a document's stored
-        // path is under these.
+        // Resolved, as Python's is: an artifact's stored path is under it.
         let artifacts_dir = resolve(match std::env::var("ARTIFACTS_DIR") {
             Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
             _ => resolve(work_dir()?).join("artifacts"),
         });
-        let documents_dir = resolve(env_path("DOCUMENTS_DIR").unwrap_or(resolve(work_dir()?).join("documents")));
-        let staging_dir = resolve(env_path("STAGING_DIR").unwrap_or(resolve(work_dir()?).join("staging")));
         let checkpoints_db = env_path("CHECKPOINTS_DB").unwrap_or(work_dir()?.join("checkpoints.db"));
         // The jarvis checkout: where Python runs, and where the SPA was built.
         let app_dir = app_dir();
@@ -93,8 +86,6 @@ impl Config {
             backend,
             db_path: db_path()?,
             artifacts_dir,
-            documents_dir,
-            staging_dir,
             checkpoints_db,
             static_dir,
             worker,

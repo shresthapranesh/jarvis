@@ -89,25 +89,6 @@ export interface StreamingMessage {
   done: boolean;
 }
 
-export interface MediaAttachment {
-  id: string;
-  type: 'image' | 'audio' | 'video' | 'document';
-  name: string;
-  mimeType: string;
-  dataUrl: string; // full data URL (data:mime;base64,...) — for preview + sending
-  size: number;
-}
-
-export interface PersistedDocument {
-  id: string;
-  conversation_id: string;
-  message_id: string | null;
-  filename: string;
-  mime_type: string;
-  size: number;
-  created_at: string;
-}
-
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL';
 
 export interface LogRecord {

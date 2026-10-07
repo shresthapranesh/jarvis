@@ -6,7 +6,6 @@ import type {ArtifactRef, Step, TodoItem, TodoStatus} from '../lib/types';
 import {refreshArtifactList} from '../relay/ArtifactListQuery';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {loadConversationPage} from '../relay/ConversationPageQuery';
-import {refreshDocumentList} from '../relay/DocumentListQuery';
 import {environment} from '../relay/environment';
 import {refreshTodoList} from '../relay/TodoListQuery';
 import {refreshPendingApprovals} from './usePendingApprovals';
@@ -492,7 +491,6 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
               if (conversationId) {
                 await loadConversationPage(conversationId);
                 await refreshArtifactList(conversationId);
-                await refreshDocumentList(conversationId);
                 await refreshTodoList(conversationId);
               }
             })();

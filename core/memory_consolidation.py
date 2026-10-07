@@ -15,7 +15,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.transcript_store import KvStore
 
-from core.doc_index import embeddings_available
+from core.embeddings import embeddings_available
 from core.memory_store import upsert_memory
 from core.model_catalog import resolve_model_spec
 from db import async_session

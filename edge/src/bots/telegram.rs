@@ -2,9 +2,8 @@
 //!
 //! Long polling (`getUpdates`), message updates only, pending updates dropped
 //! at start as `start_polling(drop_pending_updates=True)` did. A chat is the
-//! conversation `telegram_<chat id>`. Handlers, first match wins as in
-//! python-telegram-bot: a voice note or audio file, then a photo, then text
-//! that isn't a command.
+//! conversation `telegram_<chat id>`. Text that isn't a command starts a
+//! turn; a voice note, audio file or photo is answered `TEXT_ONLY`.
 //!
 //! `TELEGRAM_PROXY_URL` (else `HTTPS_PROXY` / `ALL_PROXY`, which reqwest
 //! reads itself) proxies every call. `TELEGRAM_API_URL` points the bot at
@@ -14,8 +13,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::{Ctx, Reply, Step, Turn, Typing, clip, download};
-use crate::gql::start::Attachment;
+use super::{Ctx, Reply, Step, Turn, Typing, clip};
 
 /// Telegram's limit is 4096; Python cut at 4000.
 const MAX_MESSAGE: usize = 4000;
@@ -25,7 +23,6 @@ const POLL_TIMEOUT: u64 = 30;
 pub struct Bot {
     ctx: Ctx,
     api: String,
-    files: String,
     http: reqwest::Client,
 }
 
@@ -43,7 +40,6 @@ impl Bot {
         Ok(Self {
             ctx,
             api: format!("{base}/bot{token}"),
-            files: format!("{base}/file/bot{token}"),
             http: http.build().map_err(|e| e.to_string())?,
         })
     }
@@ -130,13 +126,6 @@ impl Bot {
         })
     }
 
-    /// A file the user sent, by its `file_id`.
-    async fn file(&self, file_id: &str) -> Result<Vec<u8>, String> {
-        let file = self.call("getFile", json!({"file_id": file_id})).await?;
-        let path = file["file_path"].as_str().ok_or("getFile: no file_path")?;
-        download(&self.http, &format!("{}/{path}", self.files)).await.map_err(|e| format!("download: {e}"))
-    }
-
     async fn handle(self: std::sync::Arc<Self>, message: Value) {
         let Some(chat_id) = message["chat"]["id"].as_i64() else { return };
         let voice = message.get("voice").or_else(|| message.get("audio")).filter(|v| v.is_object());
@@ -148,57 +137,30 @@ impl Bot {
         let user_id = message["from"]["id"].as_i64().map(|id| id.to_string()).unwrap_or_default();
         let Some(model) = self.ctx.model_for("telegram", &user_id).await else { return };
 
-        if voice.is_some() {
-            return self.handle_voice(chat_id).await;
-        }
-        if let Some(photo) = photo {
-            let bytes = match self.file(photo["file_id"].as_str().unwrap_or_default()).await {
-                Ok(bytes) => bytes,
-                Err(e) => return tracing::warn!("telegram photo: {e}"),
-            };
-            let query = message["caption"].as_str().unwrap_or("What's in this image?").to_string();
-            let attachment = Attachment::image("photo.jpg".into(), "image/jpeg".into(), bytes);
-            let display = format!("[Photo] {query}");
-            return self.dispatch(chat_id, None, model, query, display.clone(), &display, vec![attachment]).await;
+        if voice.is_some() || photo.is_some() {
+            self.send(chat_id, super::TEXT_ONLY).await;
+            return;
         }
         if let Some(text) = text {
-            self.dispatch(chat_id, None, model, text.to_string(), text.to_string(), text, vec![]).await;
+            self.dispatch(chat_id, model, text).await;
         }
     }
 
-    async fn handle_voice(self: std::sync::Arc<Self>, chat_id: i64) {
-        self.send(chat_id, super::VOICE_UNSUPPORTED).await;
-    }
-
-    /// `_dispatch`: start the turn, then stream its reply into `message_id`
-    /// (a status message to replace) or a new message.
-    #[allow(clippy::too_many_arguments)]
-    async fn dispatch(
-        self: std::sync::Arc<Self>,
-        chat_id: i64,
-        message_id: Option<i64>,
-        model: String,
-        query: String,
-        display: String,
-        title: &str,
-        attachments: Vec<Attachment>,
-    ) {
+    /// `_dispatch`: start the turn, then stream its reply.
+    async fn dispatch(self: std::sync::Arc<Self>, chat_id: i64, model: String, text: &str) {
         let typing = self.typing(chat_id);
         let conversation_id = format!("telegram_{chat_id}");
-        let turn = self.ctx.dispatch("telegram", conversation_id, model, query, display, title, attachments).await;
+        let turn = self.ctx.dispatch("telegram", conversation_id, model, text).await;
         let reply = match turn {
             Ok(Turn::Started(reply)) => reply,
             Ok(Turn::Note(note)) => {
                 drop(typing);
-                match message_id {
-                    Some(id) => self.edit(chat_id, id, &note).await,
-                    None => drop(self.send(chat_id, &note).await),
-                }
+                self.send(chat_id, &note).await;
                 return;
             }
             Err(e) => return tracing::warn!("telegram: starting a turn: {e}"),
         };
-        self.stream(chat_id, message_id, reply, typing).await;
+        self.stream(chat_id, None, reply, typing).await;
     }
 
     /// `_stream_to_telegram`. The reply's message is created on its first

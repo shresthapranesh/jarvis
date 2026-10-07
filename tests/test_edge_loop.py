@@ -239,7 +239,7 @@ async def twins(request, jarvis, work_dir: Path, tmp_path_factory, fake: FakeOll
     """Python in this process over `work_dir`, and an edge over a copy, both
     pointed at `fake` and at a CDP port nothing listens on. Parametrized
     indirectly, it sets those environment variables in both."""
-    from core import agents, doc_index, memory_store
+    from core import agents, embeddings, memory_store
     from db import async_session
     from db.models import ConfigSetting, Conversation, ConversationEpisode, Memory, Project, Skill
     from db.ops import hydrate_catalog
@@ -252,8 +252,8 @@ async def twins(request, jarvis, work_dir: Path, tmp_path_factory, fake: FakeOll
     monkeypatch.setenv("OLLAMA_HOST", fake.url)
     # Python's embedder is Ollama's — the fake — as the edge's is.
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    doc_index._embedder_cache.clear()
-    doc_index._query_cache.clear()
+    embeddings._embedder_cache.clear()
+    embeddings._query_cache.clear()
     memory_store._core_cache.update(text=None, ts=0.0)
     monkeypatch.setenv("JARVIS_BROWSER_CDP_URL", dead)
     agents._browser_probe = (0.0, False)
@@ -1904,8 +1904,8 @@ async def test_workers_at_once(twins):
 
 
 async def test_a_workers_tools(twins, tmp_path):
-    """A general worker's files, artifacts and documents, a tool it isn't
-    bound to and arguments it got wrong."""
+    """A general worker's files and artifacts, a tool it isn't bound to and
+    arguments it got wrong."""
     for db in (twins.python_db, twins.edge_db):
         art_dir = (db.parent / "artifacts").resolve()
         art_dir.mkdir(exist_ok=True)
@@ -1946,8 +1946,6 @@ async def test_a_workers_tools(twins, tmp_path):
                 ("read_artifact", {"artifact_id": "a-seed", "version": "1"}),
                 ("read_artifact", {"artifact_id": "a-seed", "version": 7}),
                 ("read_artifact", {"artifact_id": "nope"}),
-                ("search_documents", {"query": "rivers"}),
-                ("read_document", {"document_id": "nope"}),
             ]),
             Reply("", [("write_artifact", {"title": "Notes", "content": "# Notes"})]),
             read_back,
@@ -2057,12 +2055,10 @@ def test_the_edge_binds_pythons_tool_schemas(monkeypatch):
     finally:
         agents.invalidate_agent_cache()
     from tools.artifacts import list_artifacts, read_artifact
-    from tools.documents import read_document, search_documents
     from tools.files import list_files, read_file, write_file
 
     names = {t.name for t in board.tools}
-    workers = [t for t in (read_file, write_file, list_files, read_artifact, list_artifacts, search_documents,
-                           read_document) if t.name not in names]
+    workers = [t for t in (read_file, write_file, list_files, read_artifact, list_artifacts) if t.name not in names]
     python = [convert_to_openai_tool(t)["function"] for t in [*board.tools, *workers]]
     if os.environ.get("JARVIS_UPDATE_GOLDEN") == "1":
         TOOLS_JSON.write_text(json.dumps(python, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")

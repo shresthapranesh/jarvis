@@ -1,4 +1,4 @@
-//! Embeddings — `core/doc_index.py:get_embedder` and `aembed_query_cached`.
+//! Embeddings — `core/embeddings.py:get_embedder` and `aembed_query_cached`.
 //!
 //! The embedder Python would pick: Gemini (`batchEmbedContents`, the request
 //! the google-genai SDK sends) when `GOOGLE_API_KEY` is set, else Ollama's

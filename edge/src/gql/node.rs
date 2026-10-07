@@ -6,7 +6,7 @@
 use async_graphql::{Context, ID, Interface, Object, Result};
 use sqlx::SqlitePool;
 
-use super::artifact::{Artifact, Document};
+use super::artifact::Artifact;
 use super::automation::{Automation, AutomationRun};
 use super::board::BoardTask;
 use super::codec::decode_global_id;
@@ -23,7 +23,6 @@ pub const NODE_TYPES: &[&str] = &[
     "AutomationRun",
     "BoardTask",
     "Conversation",
-    "Document",
     "Message",
     "NotificationChannel",
     "Project",
@@ -40,7 +39,6 @@ pub enum Node {
     AutomationRun(AutomationRun),
     BoardTask(BoardTask),
     Conversation(Conversation),
-    Document(Document),
     Message(Message),
     NotificationChannel(NotificationChannel),
     Project(Project),
@@ -56,7 +54,6 @@ async fn resolve(pool: &SqlitePool, ty: &str, raw: &str) -> Result<Option<Node>>
         "AutomationRun" => AutomationRun::by_id(pool, raw).await?.map(Node::AutomationRun),
         "BoardTask" => BoardTask::by_id(pool, raw).await?.map(Node::BoardTask),
         "Conversation" => Conversation::by_id(pool, raw).await?.map(Node::Conversation),
-        "Document" => Document::by_id(pool, raw).await?.map(Node::Document),
         "Message" => Message::by_id(pool, raw).await?.map(Node::Message),
         "NotificationChannel" => NotificationChannel::by_id(pool, raw).await?.map(Node::NotificationChannel),
         "Project" => Project::by_id(pool, raw).await?.map(Node::Project),

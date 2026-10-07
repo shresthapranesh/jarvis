@@ -300,43 +300,5 @@
    },
    "type": "object"
   }
- },
- {
-  "name": "search_documents",
-  "description": "Semantically search the indexed documents attached to this conversation.\n\nUse this when a message references an attached document that was indexed\n(the attachment stub says so) and you need specific passages — names,\nfigures, clauses, sections. Phrase `query` as the content you want to\nfind, not a question. Returns the top-k matching passages with their\ndocument_id and position; follow up with read_document to read around\na hit.\n\nArgs:\n    query: What to look for (descriptive phrase works best).\n    k: How many passages to return (default 6).",
-  "parameters": {
-   "properties": {
-    "query": {
-     "type": "string"
-    },
-    "k": {
-     "default": 6,
-     "type": "integer"
-    }
-   },
-   "required": [
-    "query"
-   ],
-   "type": "object"
-  }
- },
- {
-  "name": "read_document",
-  "description": "Read an indexed document sequentially, one window at a time.\n\nUse this to read a large attached document in order — e.g. to skim from\nthe beginning, or to read on from a search_documents hit (pass that hit's\n`seq` as `offset`). Returns a window of text plus `next_offset`; call\nagain with `offset=next_offset` to continue. `next_offset` of null means\nyou reached the end.\n\nArgs:\n    document_id: The id from the attachment stub or a search hit.\n    offset: Chunk index to start from (default 0 = start of document).",
-  "parameters": {
-   "properties": {
-    "document_id": {
-     "type": "string"
-    },
-    "offset": {
-     "default": 0,
-     "type": "integer"
-    }
-   },
-   "required": [
-    "document_id"
-   ],
-   "type": "object"
-  }
  }
 ]

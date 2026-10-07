@@ -9,7 +9,7 @@
 6. If the edge already serves this type, update the Rust port and its parity test (see `edge/README.md`).
 
 ## Adding a REST endpoint (only when GraphQL doesn't fit)
-`routes_*.py` with `Annotated[AsyncSession, Depends(get_session)]` → `app.include_router` in `entrypoint.py` → proxy entry in `frontend/vite.config.ts` (`ws: true` for sockets) → helper in `frontend/src/lib/api.ts`. The edge serves the downloads, `/uploads` and `/server-logs` itself (`edge/src/rest.rs`, `logs.rs`) — change both.
+`routes_*.py` with `Annotated[AsyncSession, Depends(get_session)]` → `app.include_router` in `entrypoint.py` → proxy entry in `frontend/vite.config.ts` (`ws: true` for sockets) → helper in `frontend/src/lib/api.ts`. The edge serves the artifact downloads and `/server-logs` itself (`edge/src/rest.rs`, `logs.rs`) — change both.
 
 ## Runs: job queue + live streaming
 All run kinds (chat, automation, workflow, board, maintenance) share one pattern:
@@ -27,7 +27,6 @@ A message sent while a conversation has a run in flight is queued, not started (
 - Two carriers: `TaskState.pending_input` (fast path, drained synchronously in `model_request_node`) and a `messages` row with status `queued` (renders, survives restart).
 - Delivered messages get status `delivered` (not `done`) so the UI can lift them above the reply they landed in.
 - Clean finish with leftovers → `_redispatch_queued` starts the next turn. Stop/error/restart → rows stay `queued`; `_adopt_queued_messages` picks them up on the next run.
-- Refused with attachments (queued rows are text-only).
 
 ## Automations (`automation_runtime.py`)
 Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a reply starting with `NO_CHANGE` finishes as `no_change` and sends no notification).
@@ -51,12 +50,6 @@ Input types: `prompt`, `code` (subprocess), `webhook`, `monitor` (delta-gated: a
 - Agent writes go through `jarvis.project_memory` (dedups via `core/text_dedupe.dedupe_against`; 24k cap on the SDK path only).
 - `core/project_memory_consolidation.py` runs every 30 min: merge mode is add-only (enforced in code); only rewrite mode (~daily) may delete. Gates: new messages → quiet ≥15 min or waiting ≥24h → minimum material. Watermarks live in `kv_store`. Behind the edge it runs in `edge/src/consolidate/project.rs` (a port, with `core/text_dedupe.py` — change both).
 - `setConversationProject` exists because `updateConversation` can't express "clear".
-
-## Chat attachments (`chat_runtime.py`, `core/streaming.py`, `core/doc_index.py`)
-- `register_chat_task` writes attachments under `documents_dir` and creates `Document` rows; every stub carries the on-disk path so the agent can open it with `run_cell`.
-- Tabular files (csv/tsv/xlsx/parquet/jsonl) never enter the conversation: path + measured line count + head only (`_routes_to_code`). State counts only when measured.
-- Text over `INLINE_THRESHOLD` (12k chars) is indexed in the background. **Any document-reading path must wait on `Document.index_status`** (`await_index_ready` in-process, `_wait_for_index` in the SDK) — an empty search during indexing reads as "irrelevant".
-- Without embeddings or a `Document` row (bots, CLI), text is inlined up to 80k and says when it truncated.
 
 ## Config
 - Config writes go through `core/settings_admin.apply_setting` so in-process caches (tool policy, MCP, embedder) update. `scheduler.timezone` can't apply live and says so. Behind the edge, `edge/src/gql/settings.rs` serves these (a port — change both) and asks a linked worker to `apply_setting` the keys Python caches.

@@ -179,9 +179,7 @@
       "write_file",
       "write_artifact",
       "read_artifact",
-      "list_artifacts",
-      "search_documents",
-      "read_document"
+      "list_artifacts"
      ]
     },
     {

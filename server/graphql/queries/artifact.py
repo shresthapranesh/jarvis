@@ -1,14 +1,13 @@
-"""Artifact + Document queries."""
+"""Artifact queries."""
 
 from __future__ import annotations
 
 import strawberry
 from strawberry import relay
 
-from db.ops import get_artifact, list_artifact_versions, list_artifacts, list_documents
+from db.ops import get_artifact, list_artifact_versions, list_artifacts
 
 from ..types.artifact import Artifact, ArtifactVersion
-from ..types.document import Document
 
 
 @strawberry.type
@@ -34,16 +33,6 @@ class ArtifactQuery:
         if row is None:
             return None
         return Artifact.from_db(row)
-
-    @strawberry.field
-    async def documents(
-        self,
-        info: strawberry.Info,
-        conversation_id: str,
-    ) -> list[Document]:
-        session = info.context["session"]
-        rows = await list_documents(session, conversation_id)
-        return [Document.from_db(d) for d in rows]
 
     @strawberry.field
     async def artifact_versions(

@@ -1,4 +1,4 @@
-"""Artifact + Document mutations — update/delete artifact, delete document, restore version."""
+"""Artifact mutations — update/delete artifact, restore version."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from core.artifact_storage import artifact_path, version_path
 from db.ops import (
     create_artifact_version,
     delete_artifact as db_delete_artifact,
-    delete_document as db_delete_document,
     get_artifact,
     get_artifact_version,
     get_latest_artifact_version_number,
@@ -119,20 +118,4 @@ class ArtifactMutation:
             raise ValueError("artifact not found")
         # db_delete_artifact already cleans up the live file + all version files.
         await db_delete_artifact(session, id.node_id)
-        return True
-
-    @strawberry.mutation
-    async def delete_document(
-        self,
-        info: strawberry.Info,
-        id: relay.GlobalID,
-    ) -> bool:
-        session = info.context["session"]
-        doc = await db_delete_document(session, id.node_id)
-        if doc is None:
-            raise ValueError("document not found")
-        try:
-            Path(doc.path).unlink(missing_ok=True)
-        except OSError:
-            pass
         return True

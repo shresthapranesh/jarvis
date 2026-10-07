@@ -28,7 +28,6 @@ _MAX_OVERFLOW = int(os.environ.get("JARVIS_DB_MAX_OVERFLOW", "13"))
 # time, so the only cost is the inverted index.
 _FTS_TABLES = (
     ("memories_fts", "memories", "text"),
-    ("document_chunks_fts", "document_chunks", "text"),
     ("conversation_episodes_fts", "conversation_episodes", "text"),
     # Messages have no embeddings, so this one is not a hybrid arm — it is the
     # whole of `jarvis.search_conversations` (tools/sdk.py).
@@ -149,16 +148,6 @@ def _migrate(conn: Connection) -> None:
     wf_cols = {c["name"] for c in inspector.get_columns("workflows")}
     if "notifications" not in wf_cols:
         conn.execute(text("ALTER TABLE workflows ADD COLUMN notifications TEXT"))
-    doc_cols = {c["name"] for c in inspector.get_columns("documents")}
-    if "index_status" not in doc_cols:
-        conn.execute(text("ALTER TABLE documents ADD COLUMN index_status VARCHAR"))
-        # Anything already carrying chunks was indexed before the column existed;
-        # leaving those NULL would make the retrieval tools treat them as
-        # never-indexed and refuse to search them.
-        conn.execute(text(
-            "UPDATE documents SET index_status='indexed' WHERE id IN "
-            "(SELECT DISTINCT document_id FROM document_chunks)"
-        ))
     bt_cols = {c["name"] for c in inspector.get_columns("board_tasks")}
     if "blocked_kind" not in bt_cols:
         conn.execute(text("ALTER TABLE board_tasks ADD COLUMN blocked_kind VARCHAR"))

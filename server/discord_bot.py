@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import json
 import logging
@@ -16,7 +15,6 @@ import discord
 if TYPE_CHECKING:
     from discord.abc import MessageableChannel
 
-from core.schemas import AttachmentIn
 from core.state import (
     TaskState,
     _tasks,
@@ -137,15 +135,12 @@ def _strip_bot_mention(content: str, bot_user: discord.ClientUser | None) -> str
 # one conversation, so the alternative is two runs racing the same LangGraph
 # thread — and the reply already in flight will answer this too.
 _QUEUED_NOTE = "📥 Added to what I'm working on — it'll be picked up in a moment."
-VOICE_UNSUPPORTED = "Voice notes aren't supported — send text instead."
+TEXT_ONLY = "Only text messages are supported — send text instead."
 
 
-async def _route_or_none(session, conv_id: str, text: str, attachments) -> str | None:
+async def _route_or_none(session, conv_id: str, text: str) -> str | None:
     """Queue onto a live run. Returns a note to send, or None to start a turn."""
-    try:
-        routed = await route_to_live_run(session, conv_id, text, attachments)
-    except ValueError as exc:
-        return str(exc)
+    routed = await route_to_live_run(session, conv_id, text)
     return None if routed is None else _QUEUED_NOTE
 
 
@@ -154,7 +149,6 @@ async def _dispatch(
     model: str,
     user_content: str,
     db_user_content: str,
-    attachments: list[AttachmentIn] | None = None,
     reply_to: discord.Message | None = None,
 ) -> None:
     """Create DB records, start the agent task, and kick off streaming."""
@@ -162,7 +156,7 @@ async def _dispatch(
     conv_id = f"discord_{channel.id}"
     async with async_session() as session:
         await get_or_create_conversation(session, conv_id, model, db_user_content[:60], surface="discord")
-        note = await _route_or_none(session, conv_id, user_content, attachments)
+        note = await _route_or_none(session, conv_id, user_content)
         if note is not None:
             loading_task.cancel()
             with contextlib.suppress(Exception):
@@ -170,8 +164,7 @@ async def _dispatch(
             return
         await add_message(session, conv_id, "user", db_user_content)
         task_id = await enqueue_chat_task(
-            session, user_content, model, conv_id,
-            attachments=attachments, source="discord",
+            session, user_content, model, conv_id, source="discord",
         )
 
     task_state = _tasks[task_id]
@@ -237,11 +230,6 @@ async def _stream_to_discord(
         logger.debug("discord final edit: %s", exc)
 
 
-async def _handle_voice(message: discord.Message) -> None:
-    with contextlib.suppress(Exception):
-        await message.channel.send(VOICE_UNSUPPORTED)
-
-
 async def _handle_message(client: discord.Client, message: discord.Message) -> None:
     if message.author.bot:
         return
@@ -254,43 +242,14 @@ async def _handle_message(client: discord.Client, message: discord.Message) -> N
 
     text = _strip_bot_mention(message.content, client.user)
 
-    voice_attachment: discord.Attachment | None = None
-    image_attachments: list[discord.Attachment] = []
+    # A voice note or an image: there is nothing to read it.
     for att in message.attachments:
         ctype = (att.content_type or "").lower()
         is_voice_fn = getattr(att, "is_voice_message", None)
-        if (callable(is_voice_fn) and is_voice_fn()) or ctype.startswith("audio/"):
-            voice_attachment = att
-            break
-        if ctype.startswith("image/"):
-            image_attachments.append(att)
-
-    if voice_attachment is not None:
-        await _handle_voice(message)
-        return
-
-    if image_attachments:
-        attachments_in: list[AttachmentIn] = []
-        for att in image_attachments:
-            buf = await att.read()
-            b64 = base64.b64encode(bytes(buf)).decode()
-            attachments_in.append(AttachmentIn(
-                type="image",
-                name=att.filename,
-                mime_type=att.content_type or "image/jpeg",
-                data=b64,
-                size=len(buf),
-            ))
-        query = text or "What's in this image?"
-        target = await _resolve_target_channel(message, query)
-        await _dispatch(
-            target, model,
-            user_content=query,
-            db_user_content=f"[Image] {query}",
-            attachments=attachments_in,
-            reply_to=message,
-        )
-        return
+        if (callable(is_voice_fn) and is_voice_fn()) or ctype.startswith(("audio/", "image/")):
+            with contextlib.suppress(Exception):
+                await message.channel.send(TEXT_ONLY)
+            return
 
     if not text:
         return

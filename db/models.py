@@ -49,9 +49,6 @@ class Conversation(Base):
     artifacts: Mapped[list["Artifact"]] = relationship(
         "Artifact", back_populates="conversation", cascade="all, delete-orphan"
     )
-    documents: Mapped[list["Document"]] = relationship(
-        "Document", back_populates="conversation", cascade="all, delete-orphan"
-    )
     episodes: Mapped[list["ConversationEpisode"]] = relationship(
         "ConversationEpisode", back_populates="conversation", cascade="all, delete-orphan"
     )
@@ -307,67 +304,6 @@ class ArtifactVersion(Base):
     )
 
 
-# ── Documents (uploaded files persisted per conversation) ─────────────────────
-
-class Document(Base):
-    __tablename__ = "documents"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("conversations.id"), nullable=False, index=True
-    )
-    message_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("messages.id"), nullable=True, index=True
-    )
-    filename: Mapped[str] = mapped_column(String, nullable=False)
-    mime_type: Mapped[str] = mapped_column(String, nullable=False)
-    size: Mapped[int] = mapped_column(Integer, nullable=False)
-    path: Mapped[str] = mapped_column(String, nullable=False)
-    # Chunk-indexing state, for documents large enough to be indexed rather than
-    # inlined: 'pending' | 'indexed' | 'failed'. NULL means never indexed (the
-    # document was small enough to go straight into the message). Indexing runs
-    # in the background so it doesn't block the first token, and the retrieval
-    # tools wait on this — the kernel that hosts the `jarvis` SDK is a separate
-    # process, so an in-memory task registry alone can't tell it when to look.
-    index_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-
-    conversation: Mapped["Conversation"] = relationship(
-        "Conversation", back_populates="documents"
-    )
-    chunks: Mapped[list["DocumentChunk"]] = relationship(
-        "DocumentChunk", back_populates="document", cascade="all, delete-orphan"
-    )
-
-
-class DocumentChunk(Base):
-    """One indexed slice of a large attached document.
-
-    Only documents above the inline threshold get chunked (see
-    core/doc_index.py); small documents are stuffed straight into the
-    message and never appear here. `embedding` holds the float32 vector
-    bytes from the configured embedding model; `conversation_id` is
-    denormalized so semantic search can scope to a conversation without
-    a join.
-    """
-
-    __tablename__ = "document_chunks"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    document_id: Mapped[str] = mapped_column(
-        ForeignKey("documents.id"), nullable=False, index=True
-    )
-    conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("conversations.id"), nullable=False, index=True
-    )
-    seq: Mapped[int] = mapped_column(Integer, nullable=False)
-    text: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
-
-    document: Mapped["Document"] = relationship("Document", back_populates="chunks")
-
-
 # ── Workflow models ────────────────────────────────────────────────────────────
 
 class Workflow(Base):
@@ -595,7 +531,7 @@ class Memory(Base):
     fallback). `kind='core'` items are durable identity/preferences that load
     on every turn; `kind='fact'` items are vector-retrieved per turn by
     relevance. Global, not conversation-scoped. `embedding` holds the float32
-    vector bytes (same layout as DocumentChunk.embedding); null when no
+    vector bytes (float32, the embedding model's); null when no
     embedder was available at write time. See core/memory_store.py.
     """
 

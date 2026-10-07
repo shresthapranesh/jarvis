@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel
 
 
 # ── Agent state shapes ────────────────────────────────────────────────────────
@@ -57,24 +56,3 @@ def reduce_todos(current: object, update: object) -> list[TodoItem]:
         u if _TODO_RANK[u["status"]] >= _TODO_RANK[c["status"]] else c
         for c, u in zip(cur, upd)
     ]
-
-
-class AttachmentIn(BaseModel):
-    type: str       # image | audio | video | document
-    name: str
-    mime_type: str
-    data: str       # raw base64 (no data URL prefix)
-    size: int
-    # Set by register_chat_task when it persists a Document row; lets the
-    # chat handler chunk-index large documents instead of inlining them.
-    # None for sources that don't persist documents (bots, CLI) → inlined.
-    document_id: str | None = None
-    # The persisted file's location on disk, set alongside document_id. This is
-    # what lets the agent open an attachment with code instead of reading its
-    # text out of the prompt — see core/streaming.py:_tabular_part.
-    document_path: str | None = None
-    # Why persistence failed, when it did. Carried into the message instead of
-    # only a log line: a failed write leaves document_id/document_path unset,
-    # and without this the turn proceeds as though the file were simply small —
-    # the agent then reports "the file doesn't exist" as its own conclusion.
-    persist_error: str | None = None

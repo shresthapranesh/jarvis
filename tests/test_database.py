@@ -36,7 +36,7 @@ async def test_init_creates_schema_and_fts(work_dir: Path):
             text("SELECT count(*) FROM sqlite_master WHERE name LIKE '%_fts'")
         )).scalar()
     assert tables and tables > 20, "expected the full schema"
-    assert fts == 4, "memories_fts + document_chunks_fts + conversation_episodes_fts + messages_fts"
+    assert fts == 3, "memories_fts + conversation_episodes_fts + messages_fts"
     await db.close()
 
 

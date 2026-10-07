@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import json
 import logging
@@ -13,7 +12,6 @@ import time
 from telegram import Bot, Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
-from core.schemas import AttachmentIn
 from core.state import (
     TaskState,
     _tasks,
@@ -43,15 +41,12 @@ async def _check_and_get_model(user_id: int | None, chat_id: int) -> str | None:
 # one conversation, so the alternative is two runs racing the same LangGraph
 # thread — and the reply already in flight will answer this too.
 _QUEUED_NOTE = "📥 Added to what I'm working on — it'll be picked up in a moment."
-VOICE_UNSUPPORTED = "Voice notes aren't supported — send text instead."
+TEXT_ONLY = "Only text messages are supported — send text instead."
 
 
-async def _route_or_none(session, conv_id: str, text: str, attachments) -> str | None:
+async def _route_or_none(session, conv_id: str, text: str) -> str | None:
     """Queue onto a live run. Returns a note to send, or None to start a turn."""
-    try:
-        routed = await route_to_live_run(session, conv_id, text, attachments)
-    except ValueError as exc:
-        return str(exc)
+    routed = await route_to_live_run(session, conv_id, text)
     return None if routed is None else _QUEUED_NOTE
 
 
@@ -61,22 +56,20 @@ async def _dispatch(
     model: str,
     user_content: str,
     db_user_content: str,
-    attachments: list[AttachmentIn] | None = None,
 ) -> None:
     """Create DB records, start the agent task, and kick off streaming."""
     loading_task = asyncio.create_task(_loading_animation(bot, chat_id))
     conv_id = f"telegram_{chat_id}"
     async with async_session() as session:
         await get_or_create_conversation(session, conv_id, model, db_user_content[:60], surface="telegram")
-        note = await _route_or_none(session, conv_id, user_content, attachments)
+        note = await _route_or_none(session, conv_id, user_content)
         if note is not None:
             loading_task.cancel()
             await bot.send_message(chat_id=chat_id, text=note)
             return
         await add_message(session, conv_id, "user", db_user_content)
         task_id = await enqueue_chat_task(
-            session, user_content, model, conv_id,
-            attachments=attachments, source="telegram",
+            session, user_content, model, conv_id, source="telegram",
         )
 
     task_state = _tasks[task_id]
@@ -97,42 +90,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await _dispatch(context.bot, chat_id, model, text, text)
 
 
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_unsupported(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A voice note, audio file or photo: there is nothing to read it."""
     if not update.message:
         return
     user_id = update.effective_user.id if update.effective_user else None
     chat_id = update.message.chat_id
     if await _check_and_get_model(user_id, chat_id) is None:
         return
-    await context.bot.send_message(chat_id=chat_id, text=VOICE_UNSUPPORTED)
-
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.photo:
-        return
-
-    user_id = update.effective_user.id if update.effective_user else None
-    chat_id = update.message.chat_id
-    model = await _check_and_get_model(user_id, chat_id)
-    if model is None:
-        return
-
-    photo = update.message.photo[-1]
-    tg_file = await photo.get_file()
-    buf = await tg_file.download_as_bytearray()
-    b64 = base64.b64encode(bytes(buf)).decode()
-    attachment = AttachmentIn(
-        type="image", name="photo.jpg", mime_type="image/jpeg",
-        data=b64, size=len(buf),
-    )
-    query = update.message.caption or "What's in this image?"
-
-    await _dispatch(
-        context.bot, chat_id, model,
-        user_content=query,
-        db_user_content=f"[Photo] {query}",
-        attachments=[attachment],
-    )
+    await context.bot.send_message(chat_id=chat_id, text=TEXT_ONLY)
 
 
 async def _loading_animation(bot: Bot, chat_id: int) -> None:
@@ -201,7 +167,6 @@ def build_application(token: str) -> Application:
     if proxy:
         builder = builder.proxy(proxy).get_updates_proxy(proxy)
     app = builder.build()
-    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO | filters.PHOTO, handle_unsupported))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app

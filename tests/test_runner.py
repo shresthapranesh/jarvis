@@ -83,7 +83,6 @@ async def test_runner_config_redirects_the_whole_app(work_dir: Path, tmp_path: P
         set_runner(_runner_with(cfg, db, queue=object(), store=object(), http=http))
         assert Path(get_config().work_dir) == elsewhere
         assert Path(get_config().artifacts_dir).is_relative_to(elsewhere)
-        assert Path(get_config().documents_dir).is_relative_to(elsewhere)
         set_runner(None)
 
     assert Path(get_config().work_dir) != elsewhere, "runner teardown must restore"

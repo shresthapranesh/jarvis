@@ -301,7 +301,7 @@ def bound_tool_names() -> tuple[str, ...]:
 
 def _bound_inventory(policies: dict[str, ToolPolicy]) -> list[ToolInfo]:
     try:
-        from core.doc_index import embeddings_available
+        from core.embeddings import embeddings_available
 
         has_embedder = bool(embeddings_available())
     except Exception:
