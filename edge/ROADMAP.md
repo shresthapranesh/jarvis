@@ -58,7 +58,71 @@ it's on `main`.
 - [x] Schema and migrations owned by the edge (from `db/engine.py:_migrate`) — M
 - [ ] Parity tests that diff against Python become Rust-only tests — M
 - [x] 2a step 11: drop `langgraph-checkpoint-sqlite`, `checkpoints.db` conversion, edge `checkpoints.rs`
-- [ ] Delete `server/`, the worker link and supervisor, and the Python dependencies (langchain and the rest)
+- [ ] Delete `server/`, the worker link and supervisor, and the Python dependencies (langchain and the rest) — after everything below
+
+### What still reaches Python (audit, 2026-10-06)
+
+Every path by which the edge hands work to Python today. Each has to be
+ported, turned into an edge error, or found to be unreachable once Python is
+gone, before `server/` can be deleted.
+
+**Turns handed over mid-run** (`src/agent/`)
+
+- [ ] Tool arguments that aren't exactly what the schema asks (`tools::native`
+  → `Plan::Python`): Python words Pydantic's error to the model. The workers
+  already word these themselves (`workers.rs`); do the same for the main
+  agent's tools — M
+- [ ] Prompt context the edge can't build (`prompt::NeedsPython`):
+  `system_prompt.md` unreadable, a context read failing (fail the turn), an
+  https CDP endpoint (probe it in Rust) — S
+- [ ] A job the edge can't start: an unreadable thread, a chat job without its
+  payload, an automation of an input type it doesn't know, an error preparing
+  a board or workflow run (`agent/mod.rs`, `workflow/mod.rs`) — fail the run — S
+
+**GraphQL the edge defers** (`gql::defer`, 58 sites; `graphql.rs`)
+
+- [ ] Errors Python words: invalid JSON in settings, MCP and approval payloads,
+  a malformed `models.custom` row, values `agentMemory` would coerce, a provider
+  listing `modelSync` can't read, a context window GraphQL can't carry — word
+  them in Rust — M
+- [ ] State only a Python run holds: a paused Python workflow, a gate or a
+  browsing run of a Python worker (`approval.rs`, `mcp.rs`, `browser.rs`) — no
+  such runs once Python is gone; delete the checks — S
+- [ ] A model the edge doesn't call (consolidation, project memory, the board
+  planner, `run` in the CLI): with every provider ported, only Bedrock with
+  boto3-only credentials is left; embedding failures in memory writes — fail
+  with the error — S
+- [ ] AWS credential sources only boto3 reads (assume-role, SSO, web identity,
+  `credential_process`, a container role) — for `modelSync` and Bedrock turns:
+  port the ones worth having, declare the rest unsupported — decision, M–L
+- [ ] Requests the router won't take: batched arrays, multipart or non-JSON
+  bodies, a field or argument that fails validation, a deferring field beside
+  others — answer with a GraphQL error instead of proxying — S
+
+**Startup work only Python does** (`server/entrypoint.py` lifespan)
+
+- [ ] The incognito sweep: conversations a crash left behind
+  (`sweep_ephemeral_conversations`) — S
+- [ ] After an edge crash, check the edge's own run rows (messages, automation
+  and workflow runs still `running`) and the approvals its runs held:
+  `agent::queue::recover` resets only the jobs. Port what Python's zombie sweep
+  and `reconcile_startup` do for them, if a re-claim doesn't already — S–M
+
+**The command line** (`Fail::Python` → exec `main.py`)
+
+- [ ] A `models.custom` row Python rejects, an `AGENTS.md` row or file that
+  isn't text, a `model sync` deferral, `run` on a model the edge doesn't call —
+  errors in Rust — S
+
+**The kernel** (stays Python by design) — what it still imports
+
+- [ ] The `jarvis` SDK loads `core.config`, `core.embeddings` (and with it
+  `langchain-google-genai` / `langchain-ollama`, for `search_memory`),
+  `core.retrieval`, `core.tool_gate` and `core.tool_policy` (with `db/` and
+  SQLAlchemy, for the in-kernel gate), `core.text_dedupe`, and
+  `tools.research` / `tools.browser`. Decide: keep a slim `core/` + `db/` for the
+  kernel, or route embeddings and gates through the edge so the kernel needs
+  only `httpx` and the browser — decision, M
 
 ## Not yet tried for real
 
