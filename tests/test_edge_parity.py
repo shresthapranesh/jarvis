@@ -792,16 +792,18 @@ async def test_automation_mutations(twin):
     await twin.run(delete, {"id": gid("au-and")})
 
 
-async def test_a_failing_embedder_leaves_memory_writes_to_python(database, work_dir: Path, edge_binary: Path):
-    """A memory item can't be saved unembedded, and the embedder's error is
-    Python's to word: the edge proxies before writing. A skill saves
-    unembedded, as Python's does."""
+async def test_a_failing_embedder_fails_memory_writes(database, work_dir: Path, edge_binary: Path):
+    """A memory item can't be saved unembedded: the write fails with the
+    embedder's error, before anything is written. A skill saves unembedded,
+    as Python's does."""
     from edge_support import _free_port
 
     dead = {"OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}"}
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", dead) as client:
         add = 'mutation { addMemory(text: "tea at noon") { id } }'
-        assert (await client.post("/graphql", json={"query": add})).status_code == 502
+        failed = await client.post("/graphql", json={"query": add})
+        assert failed.status_code == 200
+        assert failed.json()["errors"][0]["message"].startswith("embedding failed:")
         create = 'mutation { createSkill(input: {name: "n", description: "d", body: "b"}) { name } }'
         assert (await client.post("/graphql", json={"query": create})).json() == {"data": {"createSkill": {"name": "n"}}}
     import sqlite3
@@ -812,9 +814,9 @@ async def test_a_failing_embedder_leaves_memory_writes_to_python(database, work_
 
 
 async def test_a_decomposition_the_edge_does_not_plan_goes_to_python(domains, edge):
-    """The planner is a model call: with the agent loop off (as here), or on a
-    model the edge doesn't call, `decomposeBoardTask` is Python's — decided
-    after the checks, before anything is written."""
+    """The planner is a model call: with the agent loop off (as here),
+    `decomposeBoardTask` is Python's — decided after the checks, before
+    anything is written."""
     q = 'mutation($id: ID!) { decomposeBoardTask(id: $id) { id } }'
     assert (await _edge(edge, q, {"id": _gid("BoardTask", "b-b")})).status_code == 502
     done = await _edge(edge, q, {"id": _gid("BoardTask", "b-a")})  # refused here, as Python refuses it
@@ -823,8 +825,8 @@ async def test_a_decomposition_the_edge_does_not_plan_goes_to_python(domains, ed
 
 async def test_a_consolidation_the_edge_does_not_call_goes_to_python(seeded, edge):
     """The consolidation passes are model calls: with the agent loop off (as
-    here), or on a model the edge doesn't call, they are Python's — an
-    unknown project refused first, as Python refuses it."""
+    here), they are Python's — an unknown project refused first, as Python
+    refuses it."""
     assert (await _edge(edge, "mutation { consolidateMemory }")).status_code == 502
     q = "mutation($id: ID!) { consolidateProjectMemory(id: $id) }"
     assert (await _edge(edge, q, {"id": _gid("Project", "p2")})).status_code == 502
@@ -915,7 +917,8 @@ async def test_settings_python_words_go_to_python(seeded, edge):
     set_ = "mutation($k: String!, $v: String!, $a: Boolean!) { setSetting(key: $k, value: $v, allowManaged: $a) { note } }"
     assert (await _edge(edge, set_, {"k": "tools.policy", "v": "{", "a": True})).status_code == 502
     both = 'mutation { setSetting(key: "a", value: "b") { note } deleteSetting(key: "a") { note } }'
-    assert (await _edge(edge, both)).status_code == 502  # a deferring field is owned only alone
+    refused = await _edge(edge, both)  # a deferring field is owned only alone
+    assert refused.json()["errors"][0]["message"] == "setSetting must be the only field in its operation"
 
 
 async def test_an_embedding_model_set_through_the_edge_reaches_a_linked_python(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
@@ -1113,10 +1116,6 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
         "{ notARootField { ready } }",
         # One owned root field and one not: the whole operation goes to Python.
         "{ conversations { id } notARootField { ready } }",
-        # A field that may defer, beside another.
-        "{ models { default } modelSync { provider } }",
-        # Owned root field, un-ported subfield: validation fails, so it's proxied.
-        "{ conversations { id notAField } }",
         # A mutation the edge doesn't know.
         'mutation { notAMutation { ready } }',
         # The run mirror isn't current without a worker.
@@ -1128,6 +1127,63 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
 async def test_unowned_operations_are_proxied(seeded, edge, query):
     resp = await _edge(edge, query)
     assert resp.status_code == 502  # the dead backend — i.e. it was proxied
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        {"content": b'{"query": "{ __typename }"}', "headers": {"content-type": "text/plain"}},
+        {"content": b'{"query": "{ __typename }"}', "headers": {"content-type": "Application/JSON"}},
+        {"files": {"operations": (None, '{"query": "{ __typename }"}'), "map": (None, "{}")}},
+        {"json": [{"query": "{ __typename }"}]},
+        {"content": b"{nope", "headers": {"content-type": "application/json"}},
+        {"json": {"variables": {}}},
+        {"json": {"query": None}},
+        {"json": {"query": 5}},
+        {"json": {"query": "{ __typename }", "variables": [1]}},
+        {"json": {"query": "{ __typename }", "extensions": "x"}},
+        {"json": {"query": "query A { conversations { id } }", "operationName": "B"}},
+        {"json": {"query": "{ conversations { id } }", "operationName": "A"}},
+        {"json": {"query": "query A { conversations { id } }", "operationName": 5}},
+    ],
+)
+async def test_requests_strawberry_refuses_are_refused_here(seeded, edge, request_):
+    """What Strawberry refuses before executing gets its 400 and its words
+    from the edge, never proxied."""
+    from fastapi import FastAPI
+
+    from server.graphql.router import router
+
+    app = FastAPI()
+    app.include_router(router, prefix="/graphql")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://python") as python:
+        expected = await python.post("/graphql", **request_)
+    resp = await edge.post("/graphql", **request_)
+    assert expected.status_code == 400
+    assert (resp.status_code, resp.text) == (expected.status_code, expected.text)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "{ conversations ",                       # a syntax error
+        "{ conversations { id notAField } }",     # an owned root field, a field no type has
+        'subscription { taskEvents(taskId: "x") { __typename } }',  # over HTTP
+    ],
+)
+async def test_errors_executing_reports_are_answered_here(seeded, edge, query):
+    resp = await _edge(edge, query)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"] is None and body["errors"]
+
+
+async def test_a_deferring_field_beside_another_is_refused(seeded, edge):
+    """Deferring re-runs the whole operation in Python, which would answer
+    the other field twice; it is refused instead."""
+    resp = await _edge(edge, "{ models { default } modelSync { provider } }")
+    assert resp.status_code == 200
+    assert resp.json() == {"data": None, "errors": [{"message": "modelSync must be the only field in its operation"}]}
 
 
 # ── schema contract ──────────────────────────────────────────────────────────
@@ -1176,8 +1232,9 @@ def test_edge_schema_is_a_subset_of_python(edge_binary):
         for fname, rfield in rtype.fields.items():
             assert fname in ptype.fields, f"{name}.{fname} is not in the Python schema"
             assert _signature(rfield) == _signature(ptype.fields[fname]), f"{name}.{fname} differs"
-        # A non-root type is fully ported or not at all: a missing field would
-        # make an owned operation fail validation and fall back on every call.
+        # A non-root type is fully ported or not at all: the edge answers a
+        # validation failure itself, so a missing field would fail an owned
+        # operation Python would answer.
         if name not in ("Query", "Mutation"):
             assert set(rtype.fields) == set(ptype.fields), f"{name} is partially ported"
 

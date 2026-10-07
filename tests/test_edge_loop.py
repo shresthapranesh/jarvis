@@ -1373,8 +1373,8 @@ async def test_a_gated_mcp_tool_runs_once_approved(twins, monkeypatch):
 
 async def test_the_inbox_answers_through_the_edge(twins):
     """`resolveApproval` on what the edge answers itself — a board task's
-    question, a gate with no run behind it — and its refusals, row for row
-    with Python."""
+    question, a gate with no run behind it, a paused node whose run is gone
+    (expired, and refused) — and its refusals, row for row with Python."""
     board_slots = [("full-1",), ("full-2",), ("full-3",)]  # no dispatch: the answer is the only change
     for db in (twins.python_db, twins.edge_db):
         with contextlib.closing(sqlite3.connect(db)) as c:
@@ -1385,7 +1385,8 @@ async def test_the_inbox_answers_through_the_edge(twins):
                       "failure_count, created_at, updated_at) VALUES ('bt', 'Pick', 'blocked', 0, 'user', 'Which?', "
                       "'needs_input', 0, '2026-01-01 00:00:00', '2026-01-01 00:00:00')")
             for aid, extra in (("ap-board", "'board_task', 'input', NULL, 'bt'"), ("ap-gate", "'tool', 'approval', 'run_cell', NULL"),
-                               ("ap-gate2", "'tool', 'approval', 'run_cell', NULL"), ("ap-done", "'tool', 'approval', 'x', NULL")):
+                               ("ap-gate2", "'tool', 'approval', 'run_cell', NULL"), ("ap-done", "'tool', 'approval', 'x', NULL"),
+                               ("ap-node", "'workflow', 'input', NULL, NULL")):
                 c.execute(f"INSERT INTO approvals (id, source, kind, tool, board_task_id, status, question, label, "
                           f"requested_at, updated_at) VALUES ('{aid}', {extra}, 'pending', 'q?', 'l', "
                           "'2026-01-01 00:00:00', '2026-01-01 00:00:00')")
@@ -1393,7 +1394,7 @@ async def test_the_inbox_answers_through_the_edge(twins):
             c.commit()
 
     for aid, answer in (("ap-board", "  Green  "), ("ap-gate", "sure thing"), ("ap-gate2", "what is it?"),
-                        ("ap-done", "yes"), ("nope", "yes"), ("ap-gate", "  ")):
+                        ("ap-done", "yes"), ("nope", "yes"), ("ap-gate", "  "), ("ap-node", "blue"), ("ap-node", "blue")):
         python = await _python_gql(RESOLVE, {"id": aid, "a": answer})
         edge = await _edge_gql(twins, RESOLVE, {"id": aid, "a": answer})
         assert edge == python, aid
@@ -1771,9 +1772,9 @@ async def test_the_sdk_asks_through_the_edge(twins):
         assert Normalizer().value(edge) == Normalizer().value(python), case
     python, edge = (_approvals(db, Normalizer()) for db in (twins.python_db, twins.edge_db))
     assert edge == python and len(python) == 2
-    # A human's request is Python's to refuse; the edge doesn't take it.
-    resp = await twins.client.post("/graphql", json={"query": REQUEST, "variables": cases[0]})
-    assert resp.status_code != 200
+    # A human's request is refused, in Python's words.
+    edge = await _edge_gql(twins, REQUEST, cases[0])
+    assert edge == await _python_gql(REQUEST, cases[0]) and edge["errors"]
 
 
 BROWSE = "mutation($u: String!, $p: String!, $c: String) { browserActivity(url: $u, phase: $p, conversationId: $c) }"
@@ -1821,9 +1822,9 @@ async def test_a_browse_is_announced_on_the_live_run(twins):
     assert edge == python
     steps = [e for e in python if e["kind"] == "BrowserStepEvent"]
     assert [(e["phase"], len(e["url"])) for e in steps] == [("start", 500), ("done", 500)]
-    # A human's is Python's to refuse.
-    resp = await twins.client.post("/graphql", json={"query": BROWSE, "variables": {"u": "x", "p": "start"}})
-    assert resp.status_code != 200
+    # A human's is refused, in Python's words.
+    edge = await _edge_gql(twins, BROWSE, {"u": "x", "p": "start"})
+    assert edge == await _python_gql(BROWSE, {"u": "x", "p": "start"}) and edge["errors"]
 
 
 # ── workers ──────────────────────────────────────────────────────────────────

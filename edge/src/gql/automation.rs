@@ -301,7 +301,7 @@ pub async fn delete_automation(pool: &SqlitePool, raw_id: &str, data: &EdgeData)
     tx.commit().await?;
     data.scheduler.schedules_changed();
     if let Some(t) = teardown {
-        t.finish(data).await;
+        t.finish(&data.kernels).await;
     }
     Ok(true)
 }

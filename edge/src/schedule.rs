@@ -9,8 +9,8 @@
 //! | project memory | every 30 min | the sweep, here (`consolidate/`) |
 //! | memory-activity prune | `0 4 * * *` | deletes old access-log rows, here |
 //!
-//! A memory sweep is Python's — a queued `maintenance` job — when the edge
-//! doesn't call the default model (`consolidate::served`).
+//! A memory sweep is Python's — a queued `maintenance` job — when the agent
+//! loop is off (`JARVIS_AGENT_RUNTIME=python`).
 //! Python behind the edge registers none of these (`core/edge_link.py:
 //! behind_edge`), and asks the edge instead — `dispatch` after a board
 //! change, `schedules` after an automation's schedule changed.
@@ -291,7 +291,7 @@ impl Scheduler {
             return Ok(());
         }
         let job_id = new_id();
-        let edge = crate::agent::route::serves_automation(&self.pool, id).await;
+        let edge = crate::agent::route::enabled();
         crate::jobs::insert(&self.pool, &job_id, "automation", &json!({"automation_id": id, "triggered_by": "schedule"}), None, edge)
             .await?;
         tracing::info!("automation {id} scheduled run enqueued (job {job_id})");
@@ -314,7 +314,7 @@ impl Scheduler {
             // The sweep's own checks decide, as they did before this one.
             Err(e) => tracing::warn!("maintenance {task}: could not tell whether it is due ({e}); going ahead"),
         }
-        if crate::consolidate::served(&self.pool, None).await.is_none() {
+        if !crate::agent::route::enabled() {
             return self.enqueue_maintenance(task).await;
         }
         if self.queued_maintenance(task).await?.is_some() {
@@ -502,8 +502,8 @@ impl Scheduler {
         }
         // A card whose previous run is still wrapping up (re-readied by its
         // own tool call) waits, or two runs would share its thread.
-        let ready: Vec<(String, String, Option<String>)> = sqlx::query_as(
-            "SELECT id, title, model FROM board_tasks WHERE status = 'ready' AND \
+        let ready: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, title FROM board_tasks WHERE status = 'ready' AND \
              (job_id IS NULL OR job_id NOT IN (SELECT id FROM jobs WHERE status IN ('pending', 'running'))) \
              ORDER BY priority DESC, created_at ASC LIMIT ?",
         )
@@ -512,10 +512,9 @@ impl Scheduler {
         .await?;
 
         let mut started = vec![];
-        for (task_id, title, model) in &ready {
+        let edge = crate::agent::route::enabled();
+        for (task_id, title) in &ready {
             let run_id = new_id();
-            // A read beside the write lock, which WAL allows.
-            let edge = crate::agent::route::serves_board(&self.pool, model.as_deref()).await;
             sqlx::query("UPDATE board_tasks SET status = 'running', job_id = ?, updated_at = ? WHERE id = ?")
                 .bind(&run_id)
                 .bind(now_stored())

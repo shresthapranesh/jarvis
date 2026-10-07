@@ -4,10 +4,9 @@
 //!
 //! The commands read and write the database as `main.py`'s do, through the
 //! edge's own ports of the same code (`catalog.rs`, `gql/models.rs`,
-//! `discovery.rs`, the agent loop). Whatever only Python can answer — a
-//! database Python hasn't created yet, a catalog it would refuse to load, a
-//! model the edge doesn't call, credentials only boto3 reads — runs the same
-//! command through `main.py` instead, before anything is written.
+//! `discovery.rs`, the agent loop). Only `run` with the agent loop switched
+//! off (`JARVIS_AGENT_RUNTIME=python`) runs the command through `main.py`
+//! instead.
 //!
 //! The output says what `main.py`'s says, as plain text: tables are aligned
 //! columns, a report is printed as its Markdown.
@@ -111,7 +110,7 @@ pub fn parse() -> Mode {
 
 /// Why a command didn't finish here.
 pub enum Fail {
-    /// Only Python can answer this: `main.py` runs the command instead.
+    /// The agent loop is Python's: `main.py` runs the command instead.
     Python(String),
     /// A failure to report.
     Error(String),

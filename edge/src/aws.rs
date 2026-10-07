@@ -6,7 +6,7 @@
 //! environment, static keys in the shared files, and an EC2 instance role.
 //! The rest of botocore's chain (assume-role, SSO, web identity,
 //! `credential_process`, container roles) is [`CredError::Unsupported`]: the
-//! caller hands the work to Python, whose boto3 has all of it.
+//! call fails, saying which source it found.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -34,6 +34,19 @@ pub enum CredError {
     Failed(String),
     /// A source this module doesn't speak; boto3 does.
     Unsupported(String),
+}
+
+impl CredError {
+    /// The error a call fails with.
+    pub fn message(self) -> String {
+        match self {
+            CredError::Failed(why) => why,
+            CredError::Unsupported(what) => format!(
+                "unsupported AWS credentials ({what}) — use access keys (in the environment or a shared \
+                 credentials file) or an EC2 instance role"
+            ),
+        }
+    }
 }
 
 /// `os.environ.get(k)`, with an empty value as unset (as boto3 reads most).

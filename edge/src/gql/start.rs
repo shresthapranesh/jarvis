@@ -250,7 +250,7 @@ pub async fn start_chat(
 
     let display = display.unwrap_or_else(|| query.clone());
     insert_message(&mut *tx, &conversation_id, "user", &display, None, "done").await?;
-        let task_id = enqueue_turn(pool, registry, tx, &conversation_id, &query, &model).await?;
+        let task_id = enqueue_turn(registry, tx, &conversation_id, &query, &model).await?;
     Ok(Dispatched::Started { task_id, conversation_id })
 }
 
@@ -258,7 +258,6 @@ pub async fn start_chat(
 /// task id) and the job, committed with `tx` and mirrored. The user's message
 /// is the caller's.
 async fn enqueue_turn(
-    pool: &SqlitePool,
     registry: &Registry,
     mut tx: Transaction<'_, Sqlite>,
     conversation_id: &str,
@@ -279,7 +278,7 @@ async fn enqueue_turn(
     let payload = json!({"query": query, "model": model, "conv_id": conversation_id});
     // The conversation is the thread: its turns run one at a time. The edge
     // runs the turn itself when it can (`agent/route.rs`).
-    let edge = crate::agent::route::serves_chat(pool, model).await;
+    let edge = crate::agent::route::enabled();
     let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(conversation_id), edge).await?;
     commit_run(registry, tx, &task_id, "chat", first_chars(query, 60), conversation_id, &enqueued_at, edge).await?;
     Ok(task_id)
@@ -301,7 +300,7 @@ pub async fn redispatch_queued(pool: &SqlitePool, registry: &Registry, conversat
     let started = async {
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query("UPDATE messages SET status = 'done' WHERE id = ?").bind(&message_id).execute(&mut *tx).await?;
-        enqueue_turn(pool, registry, tx, conversation_id, &text, model).await
+        enqueue_turn(registry, tx, conversation_id, &text, model).await
     };
     if let Err(e) = started.await {
         // The rows are still queued: the next run on the conversation adopts them.
@@ -405,8 +404,7 @@ impl StartMutation {
             _ => json!({}),
         };
         let run_id = new_id();
-        // Decided before the write lock is taken: it reads the catalog.
-        let edge = crate::agent::workflow::served(pool, &workflow_id).await;
+        let edge = crate::agent::route::enabled();
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO workflow_runs (id, workflow_id, status, inputs, outputs, node_results, error, started_at, \
@@ -478,8 +476,7 @@ impl StartMutation {
             .await?;
         let name = name.ok_or("automation not found")?;
         let run_id = new_id();
-        // Decided before the write lock is taken: it reads the catalog.
-        let edge = crate::agent::route::serves_automation(pool, &automation_id).await;
+        let edge = crate::agent::route::enabled();
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO automation_runs (id, automation_id, status, triggered_by, output, error, started_at, \

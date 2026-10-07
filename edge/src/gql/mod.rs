@@ -1,9 +1,10 @@
 //! The edge's GraphQL schema: the slice of the Python schema ported so far.
 //!
 //! It is deliberately partial. `router::decide` sends an operation here only
-//! when every root field it selects is one this schema defines, and anything
-//! the schema can't validate falls through to Python — so an un-ported field
-//! means "served by Python", never "broken".
+//! when every root field it selects is one this schema defines, so an
+//! un-ported root field means "served by Python", never "broken". Every type
+//! under one is ported whole (`tests/test_edge_parity.py` checks), so what
+//! this schema can't validate is the request's error, answered here.
 
 pub mod approval;
 pub mod artifact;

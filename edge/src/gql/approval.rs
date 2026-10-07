@@ -185,7 +185,14 @@ impl ApprovalMutation {
             run.emit_local("interrupt_resolved", &json!({"interrupt_id": row.interrupt_id}));
             return Ok(ResolveApprovalPayload { id, status: status.into(), result: Some("Delivered to the run.".into()) });
         }
-        Err(defer("a paused run waits in Python".into()))
+        // A worker's paused run waits in Python.
+        if row.task_id.as_deref().and_then(|t| registry.get(t)).is_some_and(|r| r.claimed()) {
+            return Err(defer("a paused run waits in Python".into()));
+        }
+        // The run is gone (restart, crash, or it moved on): say so instead of
+        // reporting success for an answer nobody received.
+        close(pool, &id, "expired", answer, "The run was no longer waiting; the answer was not delivered.").await?;
+        Err("the run this approval belongs to is no longer waiting".into())
     }
 
     // The agent's side of a gate: the `jarvis` SDK, in a kernel, records the

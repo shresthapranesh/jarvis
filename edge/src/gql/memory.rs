@@ -229,8 +229,8 @@ pub struct MemoryMutation;
 #[Object]
 impl MemoryMutation {
     // Embedded and merged into a near-duplicate of its kind, as the agent's
-    // `remember` does. An embedder that fails is Python's to report: the
-    // operation goes there before anything is written.
+    // `remember` does. An embedder that fails fails the write, before
+    // anything is written.
     async fn add_memory(
         &self,
         ctx: &Context<'_>,
@@ -245,7 +245,7 @@ impl MemoryMutation {
         let pool: &SqlitePool = ctx.data()?;
         let id = crate::agent::retrieve::upsert_memory(pool, &ctx.data::<EdgeData>()?.http, text, kind)
             .await
-            .map_err(|e| defer(format!("embedding failed: {e}")))?;
+            .map_err(|e| format!("embedding failed: {e}"))?;
         MemoryItem::by_id(pool, &id).await?.ok_or_else(|| "memory vanished".into())
     }
 
@@ -259,7 +259,7 @@ impl MemoryMutation {
         let pool: &SqlitePool = ctx.data()?;
         let blob = crate::agent::embed::for_storage(pool, &ctx.data::<EdgeData>()?.http, text)
             .await
-            .map_err(|e| defer(format!("embedding failed: {e}")))?;
+            .map_err(|e| format!("embedding failed: {e}"))?;
         let kind = kind.filter(|k| k == "core" || k == "fact");
         let updated = sqlx::query(
             "UPDATE memories SET text = ?, kind = COALESCE(?, kind), embedding = ?, updated_at = ? WHERE id = ?",
@@ -292,13 +292,13 @@ impl MemoryMutation {
         Ok(Memory { content, exists: true, modified_at: Some(now) })
     }
 
-    // A consolidation pass now. A model the edge doesn't call is Python's.
+    // A consolidation pass now. With the agent loop off, Python's.
     async fn consolidate_memory(&self, ctx: &Context<'_>, model: Option<String>) -> Result<String> {
+        if !crate::agent::route::enabled() {
+            return Err(defer("JARVIS_AGENT_RUNTIME=python".into()));
+        }
         let pool: &SqlitePool = ctx.data()?;
-        let model = crate::consolidate::served(pool, model.as_deref())
-            .await
-            .ok_or_else(|| defer("the consolidation model is called from Python".into()))?;
-        Ok(crate::consolidate::memory::consolidate(pool, &ctx.data::<EdgeData>()?.http, Some(&model)).await?)
+        Ok(crate::consolidate::memory::consolidate(pool, &ctx.data::<EdgeData>()?.http, model.as_deref()).await?)
     }
 
     // Delete the blob entirely — `main.py memory reset`. Not the same as

@@ -166,9 +166,10 @@ async def test_browser_available(edge):
         await _set("browser.cdp_url", json.dumps(url + "/"))  # JSON-quoted, trailing slash
         data = await _assert_same(edge, query)
         assert data["data"]["browserAvailable"] is True
-    # The edge has no TLS, and says so by leaving it to Python.
-    await _set("browser.cdp_url", "https://example.invalid")
-    assert (await _edge(edge, query)).status_code == 502
+    # An https endpoint is probed here too.
+    await _set("browser.cdp_url", f"https://127.0.0.1:{_free_port()}")
+    data = await _assert_same(edge, query)
+    assert data["data"]["browserAvailable"] is False
 
 
 # ── maintenance gates ────────────────────────────────────────────────────────

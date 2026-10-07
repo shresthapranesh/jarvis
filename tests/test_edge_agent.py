@@ -338,11 +338,10 @@ async def _start(client, **input) -> str:
     return body["data"]["startTask"]["taskId"]
 
 
-async def test_the_edge_takes_the_turns_it_serves(database, work_dir: Path, edge_binary: Path):
-    """A turn on a provider the edge speaks is the edge's to run (here its
-    model is unreachable, so it fails — in the edge, which records it); one it
-    can't make — Bedrock with credentials only boto3 reads — is left for
-    Python, untouched."""
+async def test_the_edge_takes_every_turn(database, work_dir: Path, edge_binary: Path):
+    """Every turn is the edge's to run. Here one's model is unreachable, and
+    the other's — Bedrock with credentials only boto3 reads — can't be called:
+    both fail in the edge, which records why."""
     from db import async_session
     from db.models import ConfigSetting, Message
 
@@ -352,16 +351,18 @@ async def test_the_edge_takes_the_turns_it_serves(database, work_dir: Path, edge
             "AWS_WEB_IDENTITY_TOKEN_FILE": str(work_dir / "token")}
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, {**EDGE_ON, **dead})) as client:
         served = await _start(client, query="hello", model="ollama:llama3.3")
-        not_served = await _start(client, query="hello", model="bedrock:us.anthropic.claude-sonnet-4-6")
+        bedrock = await _start(client, query="hello", model="bedrock:us.anthropic.claude-sonnet-4-6")
 
-        job = await _finished(served)
-        assert (job.runtime, job.attempts, job.status) == ("edge", 1, "done")
+        for task_id in (served, bedrock):
+            job = await _finished(task_id)
+            assert (job.runtime, job.attempts, job.status) == ("edge", 1, "done")
+            async with async_session() as s:
+                message = await s.get(Message, task_id)
+                assert message is not None and message.status == "error"
+                assert message.content.startswith("The run failed before completing:")
         async with async_session() as s:
-            message = await s.get(Message, served)
-            assert message is not None and message.status == "error"
-            assert message.content.startswith("The run failed before completing:")
-        job = await _job(not_served)
-        assert job is not None and (job.runtime, job.attempts, job.status) == (None, 0, "pending")
+            message = await s.get(Message, bedrock)
+            assert message is not None and "unsupported AWS credentials (web identity credentials)" in message.content
 
         # A configured MCP server is the edge's too: the turn stays here.
         async with async_session() as s:
@@ -428,3 +429,99 @@ async def test_python_without_the_edge_adopts_its_jobs(database):
     for job_id, runtime in (("e-pending", None), ("e-running", None), ("e-done", "edge")):
         job = await _job(job_id)
         assert job is not None and job.runtime == runtime, job_id
+
+
+async def test_a_run_that_cannot_start_fails_in_the_edge(database, work_dir: Path, edge_binary: Path):
+    """What Python's handler would raise on fails here instead: a chat job
+    with no payload fails, its message saying why; an automation of an input
+    type nobody knows fails its run, as Python's `_run_automation_inner`
+    does."""
+    from db import async_session
+    from db.models import Automation, AutomationRun, Conversation, Job, Message
+
+    async with async_session() as s:
+        s.add(Conversation(id="c-bare", title="t", model=GOOGLE))
+        s.add(Message(id="bare", conversation_id="c-bare", role="assistant", content="", status="running"))
+        await _edge_job(s, "bare", status="pending", thread_id="c-bare")
+        s.add(Automation(id="au-odd", name="odd", input_type="carrier-pigeon"))
+        await _edge_job(s, "odd-run", status="pending", kind="automation")
+        await s.commit()
+    async with async_session() as s:
+        job = await s.get(Job, "odd-run")
+        assert job is not None
+        job.payload = json.dumps({"automation_id": "au-odd", "triggered_by": "manual"})
+        await s.commit()
+
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, EDGE_ON)):
+        why = "the chat job has no query, model or conversation"
+        job = await _finished("bare")
+        assert (job.runtime, job.status, job.last_error) == ("edge", "error", why)
+        job = await _finished("odd-run")
+        assert (job.runtime, job.status) == ("edge", "done")
+    async with async_session() as s:
+        message = await s.get(Message, "bare")
+        assert message is not None and (message.status, message.content) == ("error", f"The run failed before completing: {why}")
+        run = await s.get(AutomationRun, "odd-run")
+        assert run is not None and (run.status, run.error) == ("error", "Unknown input_type: carrier-pigeon")
+
+
+async def test_an_edge_start_sweeps_what_a_crash_left(database, work_dir: Path, edge_binary: Path):
+    """Python's startup sweeps, run by the edge at its start with the agent
+    loop on (`sweep.rs`): a run row no live job stands behind is an error, a
+    board task with none is ready again; a request whose waiter died expires —
+    a deferred action, a board task's question and a linked Python's live
+    run's stay; an incognito conversation no live chat job belongs to is
+    deleted."""
+    from db import async_session
+    from db.models import (
+        Approval, Automation, AutomationRun, BoardTask, Conversation, Job, Message, Workflow, WorkflowRun,
+    )
+
+    async with async_session() as s:
+        for cid, ephemeral in (("c", False), ("e-dead", True), ("e-live", True)):
+            s.add(Conversation(id=cid, title="t", model=GOOGLE, ephemeral=ephemeral))
+        for mid, cid in (("m-dead", "c"), ("m-live", "c"), ("m-e", "e-live")):
+            s.add(Message(id=mid, conversation_id=cid, role="assistant", content="", status="running"))
+        # A linked Python's jobs: one queued, one running.
+        s.add(Job(id="m-live", kind="chat", payload="{}", status="pending"))
+        s.add(Job(id="m-e", kind="chat", payload="{}", status="pending"))
+        s.add(Job(id="py-run", kind="chat", payload="{}", status="running", locked_by="py"))
+        s.add(Automation(id="au", name="a", input_type="prompt"))
+        s.add(AutomationRun(id="ar-dead", automation_id="au", status="running", triggered_by="manual"))
+        s.add(Workflow(id="wf", name="w"))
+        s.add(WorkflowRun(id="wr-dead", workflow_id="wf", status="running"))
+        s.add(BoardTask(id="bt-dead", title="dead", status="running", job_id="gone"))
+        s.add(BoardTask(id="bt-live", title="live", status="running", job_id="py-run"))
+        s.add(Approval(id="gate-dead", source="tool", task_id="m-dead"))
+        s.add(Approval(id="gate-kernel", source="tool"))
+        s.add(Approval(id="node-dead", source="workflow", kind="input", task_id="wr-dead"))
+        s.add(Approval(id="deferred", source="chat", action="delete_skill", action_payload='{"skill_id": "x"}'))
+        s.add(Approval(id="board", source="board_task", kind="input", board_task_id="bt-live"))
+        s.add(Approval(id="py-gate", source="tool", task_id="py-run"))
+        await s.commit()
+
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, EDGE_ON)):
+        # The incognito sweep is the last.
+        deadline = time.monotonic() + 10
+        while True:
+            async with async_session() as s:
+                if await s.get(Conversation, "e-dead") is None:
+                    break
+            assert time.monotonic() < deadline, "the incognito sweep never ran"
+            await asyncio.sleep(0.05)
+
+    async with async_session() as s:
+        statuses = {mid: (await s.get(Message, mid)).status for mid in ("m-dead", "m-live", "m-e")}
+        assert statuses == {"m-dead": "error", "m-live": "running", "m-e": "running"}
+        for run in (await s.get(AutomationRun, "ar-dead"), await s.get(WorkflowRun, "wr-dead")):
+            assert (run.status, run.error) == ("error", "interrupted by server restart") and run.finished_at
+        dead, live = await s.get(BoardTask, "bt-dead"), await s.get(BoardTask, "bt-live")
+        # Ready again — and maybe already dispatched anew, under a new job.
+        assert dead.job_id != "gone"
+        assert (live.status, live.job_id) == ("running", "py-run")
+        approvals = {a: (await s.get(Approval, a)).status for a in
+                     ("gate-dead", "gate-kernel", "node-dead", "deferred", "board", "py-gate")}
+        assert approvals == {"gate-dead": "expired", "gate-kernel": "expired", "node-dead": "expired",
+                             "deferred": "pending", "board": "pending", "py-gate": "pending"}
+        assert (await s.get(Approval, "gate-dead")).result == "The run was lost when the server restarted."
+        assert await s.get(Conversation, "e-live") is not None

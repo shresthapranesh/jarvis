@@ -32,9 +32,9 @@ fn stability(name: &str) -> u32 {
     }
 }
 
-/// A part of the prompt only Python can build yet.
+/// Why the prompt couldn't be built; the run fails with it.
 #[derive(Debug)]
-pub struct NeedsPython(pub &'static str);
+pub struct Unbuilt(pub String);
 
 pub struct Context {
     pub system: String,
@@ -52,14 +52,14 @@ pub async fn retrieved(
     query: &str,
     conversation_id: &str,
     mcp: &crate::mcp::Snapshot,
-) -> Result<Vec<Segment>, NeedsPython> {
+) -> Result<Vec<Segment>, Unbuilt> {
     let mut parts = memory(pool, http, query).await?;
     parts.extend(skills(pool, http, query).await?);
     if let Some(text) = super::retrieve::earlier_episodes(pool, http, conversation_id, query).await {
         parts.push(seg("earlier_in_conversation", text, false));
     }
     parts.extend(mcp_servers(mcp));
-    if browser_live(pool, http).await? {
+    if browser_live(pool, http).await {
         parts.push(seg("browser", BROWSER, true));
     }
     Ok(parts)
@@ -72,9 +72,9 @@ pub async fn build(
     project_id: Option<&str>,
     todos: &[Value],
     retrieved: &[Segment],
-) -> Result<Context, NeedsPython> {
+) -> Result<Context, Unbuilt> {
     let system = std::fs::read_to_string(crate::config::app_dir().join("core").join("system_prompt.md"))
-        .map_err(|_| NeedsPython("core/system_prompt.md is not readable here"))?
+        .map_err(|e| Unbuilt(format!("reading core/system_prompt.md: {e}")))?
         .trim()
         .to_string();
 
@@ -111,11 +111,8 @@ fn seg(name: &str, content: impl Into<String>, cacheable: bool) -> Segment {
     Segment { name: name.into(), content: content.into(), cacheable }
 }
 
-fn db<T>(r: sqlx::Result<T>) -> Result<T, NeedsPython> {
-    r.map_err(|e| {
-        tracing::warn!("agent: reading the prompt's context: {e}");
-        NeedsPython("a context read failed")
-    })
+fn db<T>(r: sqlx::Result<T>) -> Result<T, Unbuilt> {
+    r.map_err(|e| Unbuilt(format!("reading the prompt's context: {e}")))
 }
 
 // ── memory ──────────────────────────────────────────────────────────────────
@@ -130,7 +127,7 @@ const CORE_MAX_CHARS: usize = 2000;
 
 /// `_memory_volatile_parts`, with an embedder configured — which Python
 /// always has (Gemini with a key, else Ollama's).
-async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, NeedsPython> {
+async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, Unbuilt> {
     let mut parts = vec![seg("memory_howto", MEMORY_HOWTO, true)];
     let core: Vec<String> = db(sqlx::query_scalar(
         "SELECT text FROM memories WHERE kind = 'core' ORDER BY updated_at DESC",
@@ -195,7 +192,7 @@ const SKILLS_TOPK: usize = 5;
 
 /// `_skills_volatile_parts`: the whole catalog when it is small (cached),
 /// else a shortlist ranked against the request (not).
-async fn skills(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, NeedsPython> {
+async fn skills(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, Unbuilt> {
     let rows: Vec<(String, String)> =
         db(sqlx::query_as("SELECT name, description FROM skills WHERE enabled = 1 ORDER BY name ASC")
             .fetch_all(pool)
@@ -283,22 +280,22 @@ const BROWSER_TTL: Duration = Duration::from_secs(60);
 static BROWSER_PROBE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 
 /// `_browser_reachable`, cached as Python caches it.
-async fn browser_live(pool: &SqlitePool, http: &reqwest::Client) -> Result<bool, NeedsPython> {
+async fn browser_live(pool: &SqlitePool, http: &reqwest::Client) -> bool {
     if let Some((at, up)) = *BROWSER_PROBE.lock().expect("probe lock") {
         if at.elapsed() < BROWSER_TTL {
-            return Ok(up);
+            return up;
         }
     }
-    let up = crate::gql::browser::reachable(pool, http).await.ok_or(NeedsPython("probing an https CDP endpoint"))?;
+    let up = crate::gql::browser::reachable(pool, http).await;
     *BROWSER_PROBE.lock().expect("probe lock") = Some((Instant::now(), up));
-    Ok(up)
+    up
 }
 
 // ── the project ─────────────────────────────────────────────────────────────
 
 /// `_project_volatile_parts`: re-read every step, so the agent's own
 /// project-memory writes show on the next call.
-async fn project(pool: &SqlitePool, project_id: Option<&str>) -> Result<Vec<Segment>, NeedsPython> {
+async fn project(pool: &SqlitePool, project_id: Option<&str>) -> Result<Vec<Segment>, Unbuilt> {
     let Some(project_id) = project_id else { return Ok(vec![]) };
     let row: Option<(String, Option<String>, String, String)> =
         db(sqlx::query_as("SELECT name, description, instructions, memory FROM projects WHERE id = ?")

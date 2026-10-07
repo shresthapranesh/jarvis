@@ -74,8 +74,6 @@ pub fn conversation_id(automation_id: &str) -> String {
 pub enum Prepared {
     /// The automation was deleted: nothing to run.
     Gone,
-    /// Python's to run: an input type the edge doesn't know.
-    Python,
     Ready(Spec),
 }
 
@@ -94,9 +92,6 @@ pub async fn prepare(pool: &SqlitePool, job: &Job) -> sqlx::Result<Prepared> {
         return Ok(Prepared::Gone);
     };
     let input_type: String = row.get("input_type");
-    if !["prompt", "monitor", "code", "webhook"].contains(&input_type.as_str()) {
-        return Ok(Prepared::Python);
-    }
     let triggered_by = job.payload["triggered_by"].as_str().unwrap_or("manual");
     let existing: Option<String> =
         sqlx::query_scalar("SELECT status FROM automation_runs WHERE id = ?").bind(&job.id).fetch_optional(pool).await?;
