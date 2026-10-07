@@ -1,5 +1,5 @@
-//! Artifact, ArtifactVersion and Document — `server/graphql/types/artifact.py`,
-//! `types/document.py` and `queries/artifact.py`.
+//! Artifact and ArtifactVersion — `server/graphql/types/artifact.py` and
+//! `queries/artifact.py`.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -119,38 +119,6 @@ impl ArtifactVersion {
     }
 }
 
-#[derive(SimpleObject, sqlx::FromRow, Clone)]
-#[graphql(complex)]
-pub struct Document {
-    #[graphql(skip)]
-    #[sqlx(rename = "id")]
-    pub raw_id: String,
-    pub conversation_id: String,
-    pub message_id: Option<String>,
-    pub filename: String,
-    pub mime_type: String,
-    pub size: i64,
-    pub created_at: DateTime,
-}
-
-const DOCUMENT_COLUMNS: &str = "id, conversation_id, message_id, filename, mime_type, size, created_at";
-
-impl Document {
-    pub async fn by_id(pool: &SqlitePool, raw_id: &str) -> Result<Option<Self>> {
-        Ok(sqlx::query_as(&format!("SELECT {DOCUMENT_COLUMNS} FROM documents WHERE id = ?"))
-            .bind(raw_id)
-            .fetch_optional(pool)
-            .await?)
-    }
-}
-
-#[ComplexObject]
-impl Document {
-    pub async fn id(&self) -> ID {
-        global_id("Document", &self.raw_id)
-    }
-}
-
 #[derive(Default)]
 pub struct ArtifactQuery;
 
@@ -173,15 +141,6 @@ impl ArtifactQuery {
     async fn artifact(&self, ctx: &Context<'_>, id: ID) -> Result<Option<Artifact>> {
         let (_, raw) = decode_global_id(&id)?;
         Artifact::by_id(ctx.data()?, &raw).await
-    }
-
-    async fn documents(&self, ctx: &Context<'_>, conversation_id: String) -> Result<Vec<Document>> {
-        Ok(sqlx::query_as(&format!(
-            "SELECT {DOCUMENT_COLUMNS} FROM documents WHERE conversation_id = ? ORDER BY created_at ASC"
-        ))
-        .bind(conversation_id)
-        .fetch_all(ctx.data::<SqlitePool>()?)
-        .await?)
     }
 
     async fn artifact_versions(&self, ctx: &Context<'_>, artifact_id: String) -> Result<Vec<ArtifactVersion>> {
@@ -347,21 +306,6 @@ impl ArtifactMutation {
         for (path,) in versions {
             remove_quietly(&path);
         }
-        Ok(true)
-    }
-
-    // The row and its indexed chunks, then the uploaded file.
-    async fn delete_document(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        let (_, raw) = decode_global_id(&id)?;
-        let pool: &SqlitePool = ctx.data()?;
-        let path: Option<(String,)> =
-            sqlx::query_as("SELECT path FROM documents WHERE id = ?").bind(&raw).fetch_optional(pool).await?;
-        let (path,) = path.ok_or("document not found")?;
-        let mut tx = crate::db::write_tx(pool).await?;
-        sqlx::query("DELETE FROM document_chunks WHERE document_id = ?").bind(&raw).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM documents WHERE id = ?").bind(&raw).execute(&mut *tx).await?;
-        tx.commit().await?;
-        remove_quietly(&path);
         Ok(true)
     }
 }

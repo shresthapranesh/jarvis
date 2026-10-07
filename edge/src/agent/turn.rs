@@ -95,7 +95,6 @@ pub struct Turn<'a> {
     /// This user message's retrieved context, by the message's id — the
     /// steps of one request reuse it, as Python's retrieval cache does.
     retrieved: Option<(Option<String>, Vec<crate::llm::shape::Segment>)>,
-    attachments: bool,
     cancel_requested: bool,
     started: chrono::DateTime<chrono::Utc>,
     events: Emitter,
@@ -115,7 +114,6 @@ impl<'a> Turn<'a> {
         let conversation_id = payload["conv_id"].as_str()?.to_string();
         let mut turn = Self::new(agent, job, run, Kind::Chat, conversation_id.clone(), payload["model"].as_str()?, payload["query"].as_str()?);
         turn.conversation = Some(conversation_id);
-        turn.attachments = payload["attachments"].as_array().is_some_and(|a| !a.is_empty());
         Some(turn)
     }
 
@@ -153,7 +151,6 @@ impl<'a> Turn<'a> {
             project_id: None,
             ephemeral: false,
             retrieved: None,
-            attachments: false,
             cancel_requested: job.cancel_requested,
             started: parse_stamp(&job.created_at),
             perf: PerfTracker::default(),
@@ -170,9 +167,6 @@ impl<'a> Turn<'a> {
     }
 
     pub async fn run(mut self) -> Outcome {
-        if self.attachments {
-            return Outcome::HandOver(None);
-        }
         if matches!(self.kind, Kind::Chat) {
             let (project_id, ephemeral) = self.scope().await;
             self.project_id = project_id;

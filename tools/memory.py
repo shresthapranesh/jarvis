@@ -13,7 +13,7 @@ import logging
 
 from langchain_core.tools import tool
 
-from core.doc_index import embeddings_available
+from core.embeddings import embeddings_available
 from core.memory_store import search_memory as _search_memory
 from core.memory_store import upsert_memory
 

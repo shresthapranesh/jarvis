@@ -318,13 +318,13 @@ async def test_spa_is_served_here_and_python_routes_are_not_shadowed(database, w
         head = await client.head("/assets/app-1.js")
         assert head.status_code == 200 and head.content == b""
         # Client-side routes, including ones that share a prefix with Python's.
-        for path in ("/c/abc", "/artifacts", "/artifacts/a1", "/documents/d1/raw/x", "/uploads",
+        for path in ("/c/abc", "/artifacts", "/artifacts/a1", "/documents/d1/raw", "/uploads",
                      "/../secret.txt", "/%2e%2e/secret.txt"):
             resp = await client.get(path)
             assert resp.text == "<!doctype html>spa", path
         # Python's own GET routes are proxied (to the dead backend: 502) —
         # or answered by the edge's REST routes (`rest.rs`), never the SPA.
-        served_here = {"/artifacts/a1/raw": 404, "/documents/d1/raw": 404, "/server-logs": 200}
+        served_here = {"/artifacts/a1/raw": 404, "/server-logs": 200}
         for path in routes:
             if path == "/server-logs/stream":
                 continue  # never ends; tests/test_edge_rest.py reads it

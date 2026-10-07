@@ -9,7 +9,7 @@ Two transports, chosen by what the operation needs:
 
 * **Reads** go straight to the app database over a read-only sqlite3
   connection (`mode=ro` — cannot take write locks against the server), plus
-  `core.doc_index.get_embedder()` for the semantic searches.
+  `core.embeddings.get_embedder()` for the semantic searches.
 * **Writes** go through the server's own GraphQL API over HTTP. The kernel is
   a separate process, so a direct DB write would miss the in-process side
   effects that make a write actually take effect — `_register_scheduler_job`
@@ -90,7 +90,7 @@ def _connect() -> Iterator[sqlite3.Connection]:
 def _embedder() -> Any:
     """The app's embeddings client, honoring the `embedding.model` config row."""
     global _embedding_override_applied
-    from core.doc_index import configure_embedding_model, get_embedder
+    from core.embeddings import configure_embedding_model, get_embedder
 
     if not _embedding_override_applied:
         _embedding_override_applied = True
@@ -195,165 +195,6 @@ def list_artifact_versions(artifact_id: str) -> list[dict]:
                 (artifact_id,),
             )
         ]
-
-
-# ── Indexed documents ─────────────────────────────────────────────────────────
-
-_READ_WINDOW_CHARS = 6000
-
-# Attachments are chunk-indexed in the background by the server so indexing
-# doesn't delay the first token. This kernel is a separate process, so it can't
-# await that task — it waits on the `index_status` flag the server writes.
-# Without this wait a search during indexing returns nothing, which reads as
-# "the document doesn't mention it" rather than "it isn't ready yet".
-_INDEX_WAIT_TIMEOUT = 120.0
-_INDEX_POLL_MAX_DELAY = 2.0
-
-
-def _wait_for_index(where: str, params: tuple) -> None:
-    """Poll until no document matched by `where` is still 'pending'."""
-    deadline = time.monotonic() + _INDEX_WAIT_TIMEOUT
-    delay = 0.1
-    while True:
-        with _connect() as conn:
-            pending = conn.execute(
-                f"SELECT COUNT(*) FROM documents WHERE {where} AND index_status = 'pending'",
-                params,
-            ).fetchone()[0]
-        if not pending or time.monotonic() >= deadline:
-            return
-        time.sleep(delay)
-        delay = min(delay * 1.5, _INDEX_POLL_MAX_DELAY)
-
-
-def list_documents() -> list[dict]:
-    """Files attached to this conversation: id, filename, size, on-disk path, index state.
-
-    `path` is the file exactly as uploaded. Open it with code when the answer is
-    a computation over the whole file rather than a passage of prose.
-    """
-    if not _conversation_id:
-        raise RuntimeError("No conversation scope — attachments are only available in chats.")
-    with _connect() as conn:
-        return [
-            dict(r)
-            for r in conn.execute(
-                "SELECT id, filename, mime_type, size, path, index_status, created_at"
-                " FROM documents WHERE conversation_id = ? ORDER BY created_at",
-                (_conversation_id,),
-            )
-        ]
-
-
-def document_path(document_id: str) -> str:
-    """The on-disk path of an attached file, for opening it with code.
-
-    Prefer this over read_document whenever the answer is a computation over the
-    whole file — a count, an aggregate, a filter, a join — rather than a passage
-    to quote. Raises if the id is unknown, belongs to another conversation, or
-    its file is gone.
-    """
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT path, conversation_id FROM documents WHERE id = ?", (document_id,)
-        ).fetchone()
-    if row is None:
-        raise LookupError(f"No document {document_id!r}.")
-    if _conversation_id and row["conversation_id"] != _conversation_id:
-        raise LookupError(f"Document {document_id!r} is not attached to this conversation.")
-    if not os.path.exists(row["path"]):
-        raise LookupError(
-            f"Document {document_id!r} is registered but its file is missing from disk."
-        )
-    return row["path"]
-
-
-def search_documents(query: str, k: int = 6) -> list[dict]:
-    """Top-k passages from this conversation's indexed attachments.
-
-    Phrase `query` as the content you want to find. Follow up with
-    read_document(document_id, offset=hit["seq"]) to read around a hit.
-
-    Waits for any attachment still being indexed, so the first call after a
-    large upload may pause briefly.
-    """
-    if not _conversation_id:
-        raise RuntimeError("No conversation scope — document search is only available in chats.")
-    _wait_for_index("conversation_id = ?", (_conversation_id,))
-    qvec = _embedder().embed_query(query)
-    with _connect() as conn:
-        # Rank on ids and vectors only. Selecting `text` for every chunk read the
-        # whole conversation's prose into this kernel to return k of them.
-        rows = conn.execute(
-            "SELECT id, embedding FROM document_chunks"
-            " WHERE conversation_id = ? AND embedding IS NOT NULL",
-            (_conversation_id,),
-        ).fetchall()
-        hits = _cosine_top_k(qvec, [(r["embedding"], r["id"]) for r in rows], k)
-        if not hits:
-            return []
-        placeholders = ",".join("?" * len(hits))
-        detail = conn.execute(
-            "SELECT c.id, c.document_id, c.seq, c.text, d.filename"
-            " FROM document_chunks c JOIN documents d ON c.document_id = d.id"
-            f" WHERE c.id IN ({placeholders})",
-            tuple(cid for _score, cid in hits),
-        ).fetchall()
-    by_id = {r["id"]: r for r in detail}
-    return [
-        {
-            "document_id": by_id[cid]["document_id"],
-            "filename": by_id[cid]["filename"],
-            "seq": by_id[cid]["seq"],
-            "score": round(score, 4),
-            "text": by_id[cid]["text"],
-        }
-        for score, cid in hits          # already ranked; keep that order
-        if cid in by_id
-    ]
-
-
-def read_document(document_id: str, offset: int = 0) -> dict:
-    """Sequential window of an indexed document; continue with offset=next_offset.
-
-    Waits if the document is still being indexed.
-    """
-    _wait_for_index("id = ?", (document_id,))
-    with _connect() as conn:
-        status = conn.execute(
-            "SELECT index_status FROM documents WHERE id = ?", (document_id,)
-        ).fetchone()
-        rows = conn.execute(
-            "SELECT c.text, d.filename"
-            " FROM document_chunks c JOIN documents d ON c.document_id = d.id"
-            " WHERE c.document_id = ? ORDER BY c.seq",
-            (document_id,),
-        ).fetchall()
-    if not rows:
-        if status is not None and status["index_status"] == "failed":
-            raise LookupError(
-                f"Document {document_id} could not be indexed (the embedding step failed), "
-                "so its text isn't available."
-            )
-        raise LookupError(
-            f"Document {document_id} has no index — small attachments are inlined in the message."
-        )
-    total = len(rows)
-    offset = max(0, min(offset, total - 1))
-    parts: list[str] = []
-    used = 0
-    i = offset
-    while i < total and used < _READ_WINDOW_CHARS:
-        parts.append(rows[i]["text"])
-        used += len(rows[i]["text"])
-        i += 1
-    return {
-        "filename": rows[0]["filename"],
-        "text": "\n\n".join(parts),
-        "offset": offset,
-        "next_offset": i if i < total else None,
-        "total_chunks": total,
-    }
 
 
 # ── Conversations ─────────────────────────────────────────────────────────────
@@ -1201,10 +1042,6 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     "artifacts": (
         "read/list saved deliverables (write_artifact stays a tool)",
         [list_artifacts, read_artifact, list_artifact_versions],
-    ),
-    "documents": (
-        "attached files — on-disk paths to open with code, plus search/read for indexed text",
-        [list_documents, document_path, search_documents, read_document],
     ),
     "conversations": (
         "search and re-read past chats (in a project, its other conversations)",

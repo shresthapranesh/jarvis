@@ -25,8 +25,6 @@ class AppConfig:
     checkpoints_db: str
     memory_file: str
     artifacts_dir: Path
-    documents_dir: Path
-    staging_dir: Path
     queue_backend: str  # "sqlite" today; future: "redis://…"
 
     @classmethod
@@ -37,14 +35,6 @@ class AppConfig:
         artifacts_dir = Path(
             overrides.get("artifacts_dir")
             or os.environ.get("ARTIFACTS_DIR", str(work_dir / "artifacts"))
-        ).resolve()
-        documents_dir = Path(
-            overrides.get("documents_dir")
-            or os.environ.get("DOCUMENTS_DIR", str(work_dir / "documents"))
-        ).resolve()
-        staging_dir = Path(
-            overrides.get("staging_dir")
-            or os.environ.get("STAGING_DIR", str(work_dir / "staging"))
         ).resolve()
         return cls(
             work_dir=work_dir,
@@ -57,8 +47,6 @@ class AppConfig:
             memory_file=overrides.get("memory_file")
                 or os.environ.get("MEMORY_FILE", "memory/AGENTS.md"),
             artifacts_dir=artifacts_dir,
-            documents_dir=documents_dir,
-            staging_dir=staging_dir,
             queue_backend=overrides.get("queue_backend")
                 or os.environ.get("JARVIS_QUEUE", "sqlite"),
         )

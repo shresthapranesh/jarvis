@@ -12,7 +12,6 @@ Skipped when `cargo` isn't installed.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import json
 import sqlite3
@@ -315,29 +314,14 @@ async def test_telegram_message_mid_run_joins_it(bots, chat, work_dir):
     assert queued == [{"content": "and also this"}]
 
 
-async def test_telegram_photo(bots, chat, work_dir):
-    chat.files["ph-big"] = b"\xff\xd8\xff fake jpeg"
-    sizes = [{"file_id": "ph-small", "width": 90, "height": 90}, {"file_id": "ph-big", "width": 800, "height": 800}]
-    chat.telegram(_tg_message(None, photo=sizes, caption="what is this"))
-    await chat.until_sent("sendMessage")
-    assert chat.sent("getFile") == [{"file_id": "ph-big"}]
-    db = work_dir / "database.db"
-    user = _rows(db, "SELECT content FROM messages WHERE conversation_id = 'telegram_100' AND role = 'user'")
-    assert user == [{"content": "[Photo] what is this"}]
-    payload = json.loads(_rows(db, "SELECT payload FROM jobs ORDER BY rowid DESC LIMIT 1")[0]["payload"])
-    assert payload["query"] == "what is this"
-    assert payload["attachments"] == [{
-        "type": "image", "name": "photo.jpg", "mime_type": "image/jpeg",
-        "data": base64.b64encode(b"\xff\xd8\xff fake jpeg").decode(), "size": 13,
-        "document_id": None, "document_path": None, "persist_error": None,
-    }]
-
-
-async def test_telegram_voice_note(bots, chat, work_dir):
+async def test_telegram_voice_notes_and_photos_are_text_only(bots, chat, work_dir):
     chat.telegram(_tg_message(None, voice={"file_id": "vo", "duration": 2}))
-    status = await chat.until_sent("sendMessage")
-    assert status["text"] == "Voice notes aren't supported — send text instead."
-    assert _rows(work_dir / "database.db", "SELECT id FROM jobs WHERE payload LIKE '%telegram_100%'") == []
+    chat.telegram(_tg_message(None, chat_id=101, photo=[{"file_id": "ph", "width": 9, "height": 9}], caption="what"))
+    for chat_id in (100, 101):
+        sent = await chat.until_sent("sendMessage", lambda b, c=chat_id: b["chat_id"] == c)
+        assert sent["text"] == "Only text messages are supported — send text instead."
+    assert chat.sent("getFile") == []
+    assert _rows(work_dir / "database.db", "SELECT id FROM jobs") == []
 
 
 async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_factory, edge_binary, chat, monkeypatch):
@@ -362,18 +346,6 @@ async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_fac
 
         async def send_chat_action(self, **_: Any) -> None: ...
 
-    class Media:
-        def __init__(self, data: bytes):
-            self.data = data
-
-        async def get_file(self) -> Any:
-            data = self.data
-
-            async def download() -> bytearray:
-                return bytearray(data)
-
-            return SimpleNamespace(download_as_bytearray=download)
-
     def update(chat_id: int, **message: Any) -> Any:
         fields = {"text": None, "photo": [], "caption": None, "voice": None, "audio": None, **message}
         return SimpleNamespace(message=SimpleNamespace(chat_id=chat_id, **fields),
@@ -382,28 +354,27 @@ async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_fac
     context = SimpleNamespace(bot=Bot())
     before = asyncio.all_tasks()
     await telegram_bot.handle_message(update(100, text="hello"), context)
-    await telegram_bot.handle_photo(update(101, photo=[Media(b"img")], caption="what is this"), context)
-    await telegram_bot.handle_voice(update(102, voice=Media(b"OggS")), context)
+    await telegram_bot.handle_unsupported(update(101, photo=[object()], caption="what is this"), context)
+    await telegram_bot.handle_unsupported(update(102, voice=object()), context)
     for task in asyncio.all_tasks() - before:  # the reply streams, waiting on runs nobody claims
         task.cancel()
 
-    chat.files["img"] = b"img"
     async with _run_edge(edge_binary, b_dir, b_dir / "database.db", chat.env()) as client, fake_worker(client):
         chat.telegram(_tg_message("hello", chat_id=100))
         await chat.until_sent("sendChatAction", lambda b: b["chat_id"] == 100)
         chat.telegram(_tg_message(None, chat_id=101, photo=[{"file_id": "img"}], caption="what is this"))
-        await chat.until_sent("sendChatAction", lambda b: b["chat_id"] == 101)
+        await chat.until_sent("sendMessage", lambda b: b["chat_id"] == 101)
         chat.telegram(_tg_message(None, chat_id=102, voice={"file_id": "vo"}))
         await chat.until_sent("sendMessage", lambda b: b["chat_id"] == 102)
 
         async def written() -> bool:
-            return len(_rows(b_dir / "database.db", "SELECT id FROM jobs")) == 2
+            return len(_rows(b_dir / "database.db", "SELECT id FROM jobs")) == 1
 
         await _until(written)
 
     dirs = (str(work_dir), str(b_dir))
     a, b = _dump(work_dir / "database.db"), _dump(b_dir / "database.db")
-    for table in ("conversations", "messages", "jobs", "documents"):
+    for table in ("conversations", "messages", "jobs"):
         assert _mask(b[table], since, dirs) == _mask(a[table], since, dirs), table
 
 
@@ -441,6 +412,16 @@ async def test_discord_identifies_and_answers_dms(bots, chat, work_dir):
     }
     conv = _rows(work_dir / "database.db", "SELECT surface, title FROM conversations WHERE id = 'discord_dm1'")
     assert conv == [{"surface": "discord", "title": "hi bot"}]
+
+
+async def test_discord_images_and_voice_notes_are_text_only(bots, chat, work_dir):
+    await _identified(chat)
+    chat.channels["dm1"] = {"id": "dm1", "type": 1}
+    image = {"id": "f1", "filename": "a.png", "content_type": "image/png", "url": "http://x/a.png"}
+    await chat.discord("MESSAGE_CREATE", _dc_message("what is this", attachments=[image]))
+    reply = await chat.until_sent("POST /channels/dm1/messages")
+    assert reply["content"] == "Only text messages are supported — send text instead."
+    assert _rows(work_dir / "database.db", "SELECT id FROM jobs") == []
 
 
 async def test_discord_in_a_server_needs_a_mention_and_opens_a_thread(bots, chat, work_dir):

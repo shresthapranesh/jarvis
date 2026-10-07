@@ -93,7 +93,6 @@ fn python_get_route(path: &str) -> bool {
         "/health" | "/server-logs" | "/server-logs/stream" | "/graphql" | "/openapi.json" | "/docs"
             | "/docs/oauth2-redirect" | "/redoc"
     ) || raw("/artifacts/")
-        || raw("/documents/")
 }
 
 /// `spa_fallback`: the file under the build if there is one, else

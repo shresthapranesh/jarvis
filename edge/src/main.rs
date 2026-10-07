@@ -106,11 +106,9 @@ async fn serve() {
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");
         let data = gql::EdgeData {
             artifacts_dir: Default::default(),
-            documents_dir: Default::default(),
-            staging_dir: Default::default(),
             tz: chrono_tz::Tz::UTC,
             http: reqwest::Client::new(),
-            scheduler: schedule::Scheduler::new(pool.clone(), Default::default(), chrono_tz::Tz::UTC, Default::default()),
+            scheduler: schedule::Scheduler::new(pool.clone(), Default::default(), chrono_tz::Tz::UTC),
             kernels: kernels::Kernels::new(
                 kernels::Launch { python: Default::default(), dir: Default::default(), env: vec![] },
                 ".".as_ref(),
@@ -202,7 +200,7 @@ async fn serve() {
     // The maintenance tests diff this against the Python sweeps' own checks:
     // whether each would find work in this database, as one JSON line.
     if std::env::args().any(|a| a == "--maintenance-due") {
-        let s = schedule::Scheduler::new(pool, Default::default(), tz, config.staging_dir.clone());
+        let s = schedule::Scheduler::new(pool, Default::default(), tz);
         let mut out = serde_json::Map::new();
         for task in ["memory_consolidation", "project_memory"] {
             let due = s.maintenance_due(task).await.map_or_else(|e| e.to_string().into(), serde_json::Value::from);
@@ -228,7 +226,7 @@ async fn serve() {
         .build()
         .expect("http client");
     let runs: Arc<runs::Registry> = Default::default();
-    let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz, config.staging_dir.clone());
+    let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz);
     let kernels = kernels::Kernels::new(
         kernels::Launch {
             python: config.kernel_python.clone(),
@@ -252,8 +250,6 @@ async fn serve() {
     });
     let data = gql::EdgeData {
         artifacts_dir: config.artifacts_dir.clone(),
-        documents_dir: config.documents_dir.clone(),
-        staging_dir: config.staging_dir.clone(),
         tz,
         http: http.clone(),
         scheduler: scheduler.clone(),
@@ -273,11 +269,7 @@ async fn serve() {
         http.clone(),
     );
     tokio::spawn(supervisor.clone().run());
-    bots::spawn(
-        pool.clone(),
-        runs.clone(),
-        config.documents_dir.clone(),
-    );
+    bots::spawn(pool.clone(), runs.clone());
     let owned = gql::owned_root_fields(&schema);
     tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
     // The chat turns the edge runs itself (`agent/`), and the recovery of any

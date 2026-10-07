@@ -228,17 +228,6 @@ input DiscoveredModelInput {
   contextWindow: Int = null
 }
 
-type Document implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  conversationId: String!
-  messageId: String
-  filename: String!
-  mimeType: String!
-  size: Int!
-  createdAt: DateTime!
-}
-
 type DoneEvent {
   message: String!
   conversationId: String!
@@ -383,7 +372,6 @@ type Mutation {
   updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!
   restoreArtifactVersion(id: ID!, version: Int!): Artifact!
   deleteArtifact(id: ID!): Boolean!
-  deleteDocument(id: ID!): Boolean!
   createAutomation(input: AutomationInput!): Automation!
   updateAutomation(id: ID!, input: AutomationInput!): Automation!
   deleteAutomation(id: ID!): Boolean!
@@ -546,7 +534,6 @@ type Query {
   todos(conversationId: String!): [TodoItem!]!
   artifacts(conversationId: String = null): [Artifact!]!
   artifact(id: ID!): Artifact
-  documents(conversationId: String!): [Document!]!
   artifactVersions(artifactId: String!): [ArtifactVersion!]!
   automations: [Automation!]!
   automation(id: ID!): Automation
@@ -665,7 +652,6 @@ input StartTaskInput {
   query: String!
   model: String = null
   conversationId: String = null
-  attachmentUploads: [UploadReferenceInput!] = null
   projectId: String = null
   ephemeral: Boolean! = false
 }
@@ -740,10 +726,6 @@ type ToolApprovalRequest {
 type UnreachableModel {
   id: String!
   reason: String!
-}
-
-input UploadReferenceInput {
-  uploadId: String!
 }
 
 type WindowFinding {

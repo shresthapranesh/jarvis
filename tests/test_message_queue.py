@@ -308,22 +308,6 @@ async def test_start_task_starts_normally_when_idle(jarvis):
     assert second.conversation_id == conv_id
 
 
-async def test_start_task_refuses_to_queue_attachments(jarvis):
-    from core.schemas import AttachmentIn
-    from db import async_session
-    from server.chat_runtime import register_chat_task
-
-    _, conv_id = await _running_task("first turn")
-    att = AttachmentIn(type="image", name="a.png", mime_type="image/png", data="", size=0)
-
-    async with async_session() as s:
-        with pytest.raises(ValueError, match="attachments cannot be"):
-            await register_chat_task(
-                s, query="look at this", model="test:model",
-                conversation_id=conv_id, attachments=[att],
-            )
-
-
 async def test_in_flight_lookup_is_scoped_to_the_conversation(jarvis):
     from core.state import _tasks
     from server.chat_runtime import in_flight_chat_task

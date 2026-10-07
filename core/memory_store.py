@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from core.doc_index import get_embedder
+from core.embeddings import get_embedder
 from core.retrieval import cosine_ranking, env_float, fts_match_expr, select_hybrid
 from db import async_session
 from db.ops import (
@@ -124,7 +124,7 @@ async def search_memory(
     still runs, so keyless / Ollama-less setups keep working memory search.
     Logs access to memory_activities fire-and-forget for audit.
     """
-    from core.doc_index import _is_trivial_query, aembed_query_cached
+    from core.embeddings import _is_trivial_query, aembed_query_cached
 
     if _is_trivial_query(query):
         return []

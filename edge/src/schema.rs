@@ -156,15 +156,6 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
     if !columns(tx, "workflows").await?.contains("notifications") {
         exec(tx, "ALTER TABLE workflows ADD COLUMN notifications TEXT").await?;
     }
-    if !columns(tx, "documents").await?.contains("index_status") {
-        exec(tx, "ALTER TABLE documents ADD COLUMN index_status VARCHAR").await?;
-        // Anything already carrying chunks was indexed before the column existed.
-        exec(
-            tx,
-            "UPDATE documents SET index_status='indexed' WHERE id IN (SELECT DISTINCT document_id FROM document_chunks)",
-        )
-        .await?;
-    }
     let board = columns(tx, "board_tasks").await?;
     if !board.contains("blocked_kind") {
         exec(tx, "ALTER TABLE board_tasks ADD COLUMN blocked_kind VARCHAR").await?;
@@ -204,9 +195,8 @@ async fn backfill_artifact_message_ids(tx: &mut Transaction<'_, Sqlite>) -> sqlx
 }
 
 /// `_FTS_TABLES`: (fts table, source table, indexed column).
-const FTS_TABLES: [(&str, &str, &str); 4] = [
+const FTS_TABLES: [(&str, &str, &str); 3] = [
     ("memories_fts", "memories", "text"),
-    ("document_chunks_fts", "document_chunks", "text"),
     ("conversation_episodes_fts", "conversation_episodes", "text"),
     ("messages_fts", "messages", "content"),
 ];

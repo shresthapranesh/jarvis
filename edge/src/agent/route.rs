@@ -17,11 +17,10 @@ pub fn enabled() -> bool {
 /// operator's own OpenAI-compatible endpoints.
 const PROVIDERS: &[&str] = &["google_genai", "ollama", "openrouter", "meta"];
 
-/// Whether the edge runs this turn: the agent loop is on, the model's
-/// provider is one the edge calls, and there are no attachments (reading
-/// them is Python's).
-pub async fn serves_chat(pool: &SqlitePool, model: &str, attachments: bool) -> bool {
-    enabled() && !attachments && serves_model(pool, model).await
+/// Whether the edge runs this turn: the agent loop is on and the model's
+/// provider is one the edge calls.
+pub async fn serves_chat(pool: &SqlitePool, model: &str) -> bool {
+    enabled() && serves_model(pool, model).await
 }
 
 /// Whether the edge runs this automation: a code or webhook one, or a prompt

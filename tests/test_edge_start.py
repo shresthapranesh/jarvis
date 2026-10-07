@@ -1,7 +1,7 @@
 """Starting and steering runs from the Rust edge (`edge/src/gql/start.rs`).
 
 Two halves, because a trigger is two things. What it *writes* — the
-conversation, the messages, the documents, the job a worker will claim — is
+conversation, the messages, the job a worker will claim — is
 diffed against Python's own trigger on a twin database, exactly as the other
 mutations are (`test_edge_parity.py`). What it *starts* is driven end to end:
 a real worker in this process, linked to a real edge, claims the job the edge
@@ -59,16 +59,6 @@ async def _seed() -> None:
         await s.commit()
 
 
-def _stage(directories: tuple[Path, ...], upload_id: str, filename: str, mime: str, data: bytes) -> None:
-    """The same staged upload on both sides of the twin."""
-    for d in directories:
-        (d / "staging").mkdir(exist_ok=True)
-        (d / "staging" / upload_id).write_bytes(data)
-        (d / "staging" / f"{upload_id}.meta.json").write_text(
-            json.dumps({"filename": filename, "mime_type": mime, "size": len(data)})
-        )
-
-
 @pytest.fixture
 async def twin(jarvis, work_dir: Path, tmp_path_factory, edge_binary: Path):
     import sqlite3
@@ -80,13 +70,6 @@ async def twin(jarvis, work_dir: Path, tmp_path_factory, edge_binary: Path):
         src.backup(dst)
     async with _run_edge(edge_binary, b_dir, b_dir / "database.db") as client, fake_worker(client):
         yield Twin(client, work_dir, b_dir)
-
-
-def _documents(t: Twin) -> None:
-    """Attachments are written under fresh uuids; their bytes must match."""
-    a, b = _files(t.a_dir / "documents"), _files(t.b_dir / "documents")
-    assert sorted(b.values()) == sorted(a.values())
-    assert sorted(Path(n).suffix for n in b) == sorted(Path(n).suffix for n in a)
 
 
 async def test_start_task_writes_what_python_writes(twin):
@@ -102,21 +85,6 @@ async def test_start_task_writes_what_python_writes(twin):
     await twin.run(START, {"input": {"query": "secret", "ephemeral": True}})
     await twin.run(START, {"input": {"query": "secret project", "projectId": "p1", "ephemeral": True}})
     await twin.run(START, {"input": {"query": "nope", "projectId": "missing"}})
-
-
-async def test_start_task_with_attachments(twin):
-    dirs = (twin.a_dir, twin.b_dir)
-    _stage(dirs, "u-csv", "sales.csv", "text/csv", b"region,amount\nnorth,1\n")
-    _stage(dirs, "u-png", "chart.png", "image/png", b"\x89PNG\r\n\x1a\nfake")
-    _stage(dirs, "u-noext", ".env", "application/octet-stream", b"K=V")
-    uploads = [{"uploadId": u} for u in ("u-csv", "u-png", "u-noext")]
-    await twin.run(START, {"input": {"query": "summarize", "attachmentUploads": uploads}})
-    _documents(twin)
-    for d in dirs:  # consumed
-        assert not list((d / "staging").iterdir())
-    await twin.run(START, {"input": {"query": "summarize", "attachmentUploads": [{"uploadId": "expired"}]}})
-    # An empty list is no attachments at all.
-    await twin.run(START, {"input": {"query": "plain", "attachmentUploads": []}})
 
 
 def _queued(db: Path, conversation_id: str) -> list[str]:
@@ -139,11 +107,8 @@ async def test_a_busy_conversation_queues_instead(twin):
     task = first["data"]["startTask"]["taskId"]
     edge_task = await _edge_run(twin, "chat")
     # A second message joins the run that's up (still pending, on both sides:
-    # nothing claims jobs here); with attachments it can't.
+    # nothing claims jobs here).
     await twin.run(START, {"input": {"query": "  and also this  ", "conversationId": "c2"}})
-    _stage((twin.a_dir, twin.b_dir), "u-doc", "notes.txt", "text/plain", b"hi")
-    await twin.run(START, {"input": {"query": "with a file", "conversationId": "c2",
-                                     "attachmentUploads": [{"uploadId": "u-doc"}]}})
     # The same through queueMessage, and its refusals.
     for query in ("queued", "   "):
         await twin.run(QUEUE, {"taskId": task, "query": query}, edge_variables={"taskId": edge_task, "query": query})
@@ -200,7 +165,7 @@ class Scripted:
             await asyncio.sleep(0.02)
         return "stopped" if state.cancelled else "done"
 
-    async def chat(self, task_id, query, model, conv_id, attachments=None, invocation_context=None, handoff=None):
+    async def chat(self, task_id, query, model, conv_id, invocation_context=None, handoff=None):
         from core.run_scaffold import finish_task_state
         from core.state import _tasks, emit_event
 

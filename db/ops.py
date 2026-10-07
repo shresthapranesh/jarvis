@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.config import get_config
-from db.models import EDGE_RUNTIME, Approval, Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, ConversationEpisode, Document, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
+from db.models import EDGE_RUNTIME, Approval, Artifact, Automation, AutomationRun, BoardTask, BoardTaskLink, ConfigSetting, Conversation, ConversationEpisode, Job, Memory, Message, NotificationChannel, Project, Skill, Step, Workflow, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -295,11 +295,6 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
     ).all()
     art_ids = [row[0] for row in art_rows]
     art_filenames = {row[0]: row[1] for row in art_rows}
-    doc_paths = list(
-        (await session.execute(
-            select(Document.path).where(Document.conversation_id == conv_id)
-        )).scalars()
-    )
     # Artifact versions — collect their on-disk paths before cascade
     from db.models import ArtifactVersion
     version_paths: list[str] = []
@@ -310,7 +305,7 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
             )).scalars()
         )
 
-    await session.delete(conv)  # cascades messages, steps, artifacts, documents via ORM
+    await session.delete(conv)  # cascades messages, steps, artifacts via ORM
     await session.commit()
 
     cfg = get_config()
@@ -331,12 +326,6 @@ async def delete_conversation(session: AsyncSession, conv_id: str) -> None:
             Path(vp).unlink(missing_ok=True)
         except OSError as e:
             logger.warning("Failed to unlink artifact version file %s: %s", vp, e)
-
-    for raw_path in doc_paths:
-        try:
-            Path(raw_path).unlink(missing_ok=True)
-        except OSError as e:
-            logger.warning("Failed to unlink document file %s: %s", raw_path, e)
 
     try:
         from core.transcript_store import delete_thread
@@ -1370,54 +1359,6 @@ async def get_latest_artifact_version_number(
     return int(max_v) if max_v is not None else 0
 
 
-# ── Document CRUD ─────────────────────────────────────────────────────────────
-
-async def create_document(
-    session: AsyncSession,
-    conversation_id: str,
-    message_id: str | None,
-    filename: str,
-    mime_type: str,
-    size: int,
-    path: str,
-) -> Document:
-    doc = Document(
-        id=str(uuid4()),
-        conversation_id=conversation_id,
-        message_id=message_id,
-        filename=filename,
-        mime_type=mime_type,
-        size=size,
-        path=path,
-    )
-    session.add(doc)
-    await session.commit()
-    return doc
-
-
-async def get_document(session: AsyncSession, document_id: str) -> Document | None:
-    return await session.get(Document, document_id)
-
-
-async def list_documents(session: AsyncSession, conversation_id: str) -> list[Document]:
-    q = (
-        select(Document)
-        .where(Document.conversation_id == conversation_id)
-        .order_by(Document.created_at.asc())
-    )
-    result = await session.execute(q)
-    return list(result.scalars().all())
-
-
-async def delete_document(session: AsyncSession, document_id: str) -> Document | None:
-    doc = await session.get(Document, document_id)
-    if doc is None:
-        return None
-    await session.delete(doc)
-    await session.commit()
-    return doc
-
-
 # ── Memory CRUD ───────────────────────────────────────────────────────────────
 
 async def list_memories(session: AsyncSession, kind: str | None = None) -> list[Memory]:
@@ -1495,25 +1436,6 @@ async def search_memories_lexical(
         return [r[0] for r in rows.all()]
     except Exception as exc:
         logger.warning("lexical memory search failed (%s) — dense-only this turn", exc)
-        return []
-
-
-async def search_chunks_lexical(
-    session: AsyncSession, conversation_id: str, match_expr: str, *, limit: int = 20
-) -> list[str]:
-    """DocumentChunk ids in `conversation_id` matching `match_expr`, best first."""
-    try:
-        rows = await session.execute(sa_text("""
-            SELECT c.id AS id
-            FROM document_chunks_fts f
-            JOIN document_chunks c ON c.rowid = f.rowid
-            WHERE document_chunks_fts MATCH :q AND c.conversation_id = :cid
-            ORDER BY bm25(document_chunks_fts)
-            LIMIT :limit
-        """), {"q": match_expr, "cid": conversation_id, "limit": limit})
-        return [r[0] for r in rows.all()]
-    except Exception as exc:
-        logger.warning("lexical chunk search failed (%s) — dense-only this turn", exc)
         return []
 
 

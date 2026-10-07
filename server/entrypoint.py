@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 
 
 from core.config import get_config
-from core.doc_index import configure_embedding_model
+from core.embeddings import configure_embedding_model
 from core.log_setup import get_broadcast_handler, setup_logging
 from core.queue import SqliteJobQueue, Worker
 
@@ -29,11 +29,9 @@ from core.approvals import reconcile_startup
 from db.ops import adopt_edge_jobs, cleanup_zombie_running_rows, get_setting, hydrate_catalog, list_enabled_scheduled_automations
 from .graphql import graphql_router
 from .routes_artifacts import router as artifacts_router
-from .routes_documents import router as documents_router
 from .routes_browser import router as browser_router
 from .routes_logs import router as logs_router
 from .routes_media import router as media_router
-from .routes_uploads import router as uploads_router
 from core.edge_link import behind_edge, respawned_by_edge
 from core.scheduler import (
     _register_scheduler_job,
@@ -44,7 +42,6 @@ from core.scheduler import (
     register_memory_activity_prune_job,
     register_memory_consolidation_job,
     register_project_memory_job,
-    register_staging_cleanup_job,
     set_scheduler_timezone,
 )
 
@@ -180,7 +177,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             register_kernel_reaper_job()
             register_memory_consolidation_job()
             register_project_memory_job()
-            register_staging_cleanup_job()
             register_board_dispatch_job()
             register_memory_activity_prune_job()
 
@@ -401,9 +397,7 @@ app.add_middleware(
 app.include_router(media_router)
 app.include_router(browser_router)
 app.include_router(artifacts_router)
-app.include_router(documents_router)
 app.include_router(logs_router)
-app.include_router(uploads_router)
 app.include_router(graphql_router, prefix="/graphql")
 
 

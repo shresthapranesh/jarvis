@@ -58,7 +58,7 @@ KNOWN_SETTINGS: tuple[SettingSpec, ...] = (
     SettingSpec(
         key="embedding.model",
         label="Embedding model",
-        description="Gemini embedding model for document indexing and vector memory. Needs GOOGLE_API_KEY. Applied immediately; already-embedded content keeps its old vectors.",
+        description="Gemini embedding model for vector memory, skills and episodes. Needs GOOGLE_API_KEY. Applied immediately; already-embedded content keeps its old vectors.",
         placeholder="models/gemini-embedding-001",
     ),
     SettingSpec(
@@ -229,7 +229,7 @@ async def apply_setting(session, key: str) -> str:
 
     try:
         if key == "embedding.model":
-            from core.doc_index import configure_embedding_model
+            from core.embeddings import configure_embedding_model
 
             configure_embedding_model(value)
             return "Applied. New embeddings use this model; existing vectors are unchanged."

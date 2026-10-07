@@ -7,7 +7,6 @@
 //! | board dispatch | every 15 s, and on request | `dispatch_board_tasks`, here |
 //! | memory consolidation | `0 */6 * * *` | the sweep, here (`consolidate/`) |
 //! | project memory | every 30 min | the sweep, here (`consolidate/`) |
-//! | staging cleanup | `0 * * * *` | deletes abandoned uploads, here |
 //! | memory-activity prune | `0 4 * * *` | deletes old access-log rows, here |
 //!
 //! A memory sweep is Python's — a queued `maintenance` job — when the edge
@@ -22,7 +21,6 @@
 //! the edge was down is caught up on.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -86,7 +84,6 @@ enum Action {
     Dispatch,
     /// A memory sweep: `core/scheduler.py:MAINTENANCE_TASKS`.
     Maintenance(&'static str),
-    StagingCleanup,
     ActivityPrune,
 }
 
@@ -147,7 +144,6 @@ pub struct Scheduler {
     pool: SqlitePool,
     runs: Arc<Registry>,
     tz: Tz,
-    staging_dir: PathBuf,
     /// The memory sweeps' model calls.
     http: reqwest::Client,
     /// Python changed an automation's schedule.
@@ -158,12 +154,11 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(pool: SqlitePool, runs: Arc<Registry>, tz: Tz, staging_dir: PathBuf) -> Arc<Self> {
+    pub fn new(pool: SqlitePool, runs: Arc<Registry>, tz: Tz) -> Arc<Self> {
         Arc::new(Self {
             pool,
             runs,
             tz,
-            staging_dir,
             http: reqwest::Client::new(),
             changed: Notify::new(),
             dispatching: Mutex::new(()),
@@ -187,7 +182,6 @@ impl Scheduler {
             Entry::new(Action::Dispatch, When::Every(chrono::Duration::seconds(dispatch_every())), 30, self.tz, now),
             Entry::new(Action::Maintenance("memory_consolidation"), cron("0 */6 * * *"), 300, self.tz, now),
             Entry::new(Action::Maintenance("project_memory"), minutes(30), 300, self.tz, now),
-            Entry::new(Action::StagingCleanup, cron("0 * * * *"), 300, self.tz, now),
             Entry::new(Action::ActivityPrune, cron("0 4 * * *"), 300, self.tz, now),
         ]
     }
@@ -279,10 +273,6 @@ impl Scheduler {
             Action::Automation { id, schedule } => self.fire_automation(id, schedule).await,
             Action::Dispatch => self.dispatch().await.map(|_| ()),
             Action::Maintenance(task) => self.fire_maintenance(task).await,
-            Action::StagingCleanup => {
-                self.cleanup_staging();
-                Ok(())
-            }
             Action::ActivityPrune => self.prune_activities().await,
         };
         if let Err(e) = result {
@@ -460,21 +450,6 @@ impl Scheduler {
         Ok(false)
     }
 
-    /// `_cleanup_staged_uploads`: uploads staged over an hour ago and never
-    /// claimed by a `startTask`.
-    fn cleanup_staging(&self) {
-        let Ok(entries) = std::fs::read_dir(&self.staging_dir) else { return };
-        let cutoff = std::time::SystemTime::now() - Duration::from_secs(3600);
-        for entry in entries.flatten() {
-            let stale = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t < cutoff);
-            if stale {
-                if let Err(e) = std::fs::remove_file(entry.path()) {
-                    tracing::warn!("staging cleanup: failed to unlink {}: {e}", entry.path().display());
-                }
-            }
-        }
-    }
-
     /// `prune_memory_activities(older_than_days=90)`.
     async fn prune_activities(&self) -> sqlx::Result<()> {
         let cutoff = (Utc::now() - chrono::Duration::days(90)).format("%Y-%m-%d %H:%M:%S%.6f").to_string();
@@ -632,7 +607,7 @@ mod tests {
         ] {
             sqlx::query(ddl).execute(&pool).await.unwrap();
         }
-        Scheduler::new(pool, Arc::default(), Tz::UTC, PathBuf::new())
+        Scheduler::new(pool, Arc::default(), Tz::UTC)
     }
 
     async fn jobs(s: &Scheduler) -> Vec<(String, String)> {

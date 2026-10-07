@@ -14,7 +14,7 @@ pnpm build      # relay + vite build → ../static/dist/
 - Relay keys records by `id` alone, regardless of type. Don't select `id` on a non-node type whose id can collide with a node's — alias it (see the model sync query).
 - Operations live as per-operation modules in `src/relay/`; convert ids with `encodeGlobalId` / `decodeGlobalId` (`relay/globalId.ts`).
 - **Routes**: file-based in `src/routes/` (`createFileRoute('/path')`). `routeTree.gen.ts` is generated — never edit it.
-- **REST helpers** go in `src/lib/api.ts`; dev proxying in `vite.config.ts` (`/graphql`, `/uploads`, `/health`, `/ws/browser`, `/artifacts`, `/server-logs`).
+- **REST helpers** go in `src/lib/api.ts`; dev proxying in `vite.config.ts` (`/graphql`, `/health`, `/ws/browser`, `/artifacts`, `/server-logs`).
 - **Formatting**: `pnpm fmt` (oxfmt) rewrites many untouched files — format only the files you changed.
 - Test mobile layouts with DevTools device emulation, not window resizing.
 

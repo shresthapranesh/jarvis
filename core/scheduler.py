@@ -320,37 +320,6 @@ def register_project_memory_job(interval_minutes: int = 30) -> None:
     logger.info("project memory consolidation scheduled: every %s min", interval_minutes)
 
 
-def _cleanup_staged_uploads(max_age_seconds: int = 3600) -> None:
-    """Delete staged upload files (and their .meta.json sidecars) older than
-    `max_age_seconds`. Files that were claimed by a successful startTask are
-    deleted at claim time; this catches abandoned uploads."""
-    import time  # noqa: PLC0415
-    from core.config import get_config  # noqa: PLC0415
-
-    cfg = get_config()
-    if not cfg.staging_dir.exists():
-        return
-    cutoff = time.time() - max_age_seconds
-    for entry in cfg.staging_dir.iterdir():
-        try:
-            if entry.stat().st_mtime < cutoff:
-                entry.unlink(missing_ok=True)
-        except OSError as e:
-            logger.warning("staging cleanup: failed to unlink %s: %s", entry, e)
-
-
-def register_staging_cleanup_job(cron_expr: str = "0 * * * *") -> None:
-    """Register the staged-uploads cleanup cron job. Defaults to hourly."""
-    _scheduler.add_job(
-        func=_cleanup_staged_uploads,
-        trigger=_cron(cron_expr),
-        id="staging_cleanup",
-        replace_existing=True,
-        misfire_grace_time=300,
-    )
-    logger.info("staging cleanup scheduled: %s", cron_expr)
-
-
 def _run_kernel_reaper() -> None:
     """Called from BackgroundScheduler thread — reaps idle run_cell kernels on the main loop."""
     from core.kernels import get_kernel_registry  # noqa: PLC0415

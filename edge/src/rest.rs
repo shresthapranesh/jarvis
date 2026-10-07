@@ -1,8 +1,6 @@
 //! The REST routes the edge serves itself, ahead of the proxy:
-//! `GET /artifacts/{id}/raw` and `GET /documents/{id}/raw`
-//! (`server/routes_artifacts.py`, `routes_documents.py`), `POST /uploads`
-//! (`routes_uploads.py`) and the log viewer's `/server-logs` (`routes_logs.py`,
-//! here `logs.rs`). Change both.
+//! `GET /artifacts/{id}/raw` (`server/routes_artifacts.py`) and the log
+//! viewer's `/server-logs` (`routes_logs.py`, here `logs.rs`). Change both.
 //!
 //! A download answers as Starlette's `FileResponse` does: its headers, a
 //! single byte range. (`HEAD` is FastAPI's 405, so Python's.) Whatever the edge doesn't reproduce — several ranges, a
@@ -12,18 +10,16 @@
 use std::path::{Path, PathBuf};
 
 use axum::body::Body;
-use axum::extract::{FromRequest, Multipart, Request};
+use axum::extract::Request;
 use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::AppState;
 use crate::pystr;
 
-/// `_MAX_UPLOAD_BYTES`.
-const MAX_UPLOAD_BYTES: u64 = 100 * 1024 * 1024;
 /// `FileResponse.chunk_size`.
 const CHUNK: usize = 64 * 1024;
 
@@ -35,12 +31,8 @@ pub async fn serve(state: &AppState, req: Request) -> Result<Response, Request> 
         if let Some(id) = raw_id(&path, "/artifacts/") {
             return artifact(&state.pool, &id, req).await;
         }
-        if let Some(id) = raw_id(&path, "/documents/") {
-            return document(&state.pool, &id, req).await;
-        }
     }
     match (req.method().clone(), path.as_str()) {
-        (Method::POST, "/uploads") => upload(&state.config.staging_dir, req).await,
         (Method::GET, "/server-logs") => Ok(crate::logs::list(req.headers())),
         (Method::GET, "/server-logs/stream") => Ok(crate::logs::stream(req.headers())),
         _ => Err(req),
@@ -91,21 +83,6 @@ async fn artifact(pool: &SqlitePool, id: &str, req: Request) -> Result<Response,
     let inline = ["audio", "video", "image"].contains(&kind.as_str());
     let download = format!("{title}{}", suffix(&name));
     file_response(&path, &media_type, &download, if inline { "inline" } else { "attachment" }, req).await
-}
-
-async fn document(pool: &SqlitePool, id: &str, req: Request) -> Result<Response, Request> {
-    let row: Option<(String, String, String)> =
-        match sqlx::query_as("SELECT filename, mime_type, path FROM documents WHERE id = ?").bind(id).fetch_optional(pool).await {
-            Ok(row) => row,
-            Err(_) => return Err(req),
-        };
-    let Some((filename, mime_type, stored)) = row else { return Ok(not_found("not found")) };
-    let path = resolve(&stored);
-    if tokio::fs::metadata(&path).await.is_err() {
-        return Ok(not_found("file missing"));
-    }
-    let media_type = if mime_type.is_empty() { "application/octet-stream".to_string() } else { mime_type };
-    file_response(&path, &media_type, &filename, "attachment", req).await
 }
 
 /// `PurePath.suffix`: the last `.ext` of the name, unless the dot leads or
@@ -279,131 +256,6 @@ async fn file_response(path: &Path, media_type: &str, filename: &str, dispositio
         }
     }));
     Ok(out.body(body).expect("a file response"))
-}
-
-/// The `file` part as Starlette's form parser leaves it: the last one wins.
-enum Part {
-    File { tmp: PathBuf, filename: String, content_type: Option<String>, size: u64, over: bool },
-    Text(String),
-}
-
-/// FastAPI's 422 for the `file` form field.
-fn unprocessable(part: Option<&Part>) -> Response {
-    let detail = match part {
-        Some(Part::Text(input)) => json!({"type": "value_error", "loc": ["body", "file"],
-            "msg": "Value error, Expected UploadFile, received: <class 'str'>", "input": input, "ctx": {"error": {}}}),
-        _ => json!({"type": "missing", "loc": ["body", "file"], "msg": "Field required", "input": null}),
-    };
-    json_response(StatusCode::UNPROCESSABLE_ENTITY, &json!({"detail": [detail]}))
-}
-
-async fn discard(part: Option<Part>) {
-    if let Some(Part::File { tmp, .. }) = part {
-        let _ = tokio::fs::remove_file(tmp).await;
-    }
-}
-
-/// `upload_file`: the bytes and a `.meta.json` beside them in the staging
-/// directory, streamed rather than held. A body that isn't a form has no
-/// `file` (Starlette reads it as an empty form); an urlencoded one is
-/// Python's to parse.
-async fn upload(staging: &Path, req: Request) -> Result<Response, Request> {
-    let content_type =
-        req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
-    if content_type.starts_with("application/x-www-form-urlencoded") {
-        return Err(req);
-    }
-    if !content_type.starts_with("multipart/form-data") {
-        return Ok(unprocessable(None));
-    }
-    let Ok(mut form) = Multipart::from_request(req, &()).await else {
-        return Ok(unprocessable(None));
-    };
-    if tokio::fs::create_dir_all(staging).await.is_err() {
-        return Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-    }
-    let mut chosen: Option<Part> = None;
-    loop {
-        let mut field = match form.next_field().await {
-            Ok(Some(field)) => field,
-            Ok(None) => break,
-            // A body the parser gives up on: no `file` came through.
-            Err(_) => {
-                discard(chosen.take()).await;
-                return Ok(unprocessable(None));
-            }
-        };
-        if field.name() != Some("file") {
-            continue;
-        }
-        let part = match field.file_name().map(str::to_string) {
-            None => match field.text().await {
-                Ok(text) => Part::Text(text),
-                Err(_) => {
-                    discard(chosen.take()).await;
-                    return Ok(unprocessable(None));
-                }
-            },
-            Some(filename) => {
-                let content_type = field.content_type().map(str::to_string);
-                let tmp = staging.join(format!(".{}.part", uuid::Uuid::new_v4()));
-                let Ok(mut out) = tokio::fs::File::create(&tmp).await else {
-                    return Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-                };
-                let (mut size, mut over) = (0u64, false);
-                loop {
-                    match field.chunk().await {
-                        Ok(Some(chunk)) => {
-                            size += chunk.len() as u64;
-                            over |= size > MAX_UPLOAD_BYTES;
-                            if !over && out.write_all(&chunk).await.is_err() {
-                                let _ = tokio::fs::remove_file(&tmp).await;
-                                return Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(_) => {
-                            let _ = tokio::fs::remove_file(&tmp).await;
-                            discard(chosen.take()).await;
-                            return Ok(unprocessable(None));
-                        }
-                    }
-                }
-                let _ = out.flush().await;
-                Part::File { tmp, filename, content_type, size, over }
-            }
-        };
-        discard(chosen.replace(part)).await;
-    }
-    let Some(Part::File { tmp, filename, content_type, size, over }) = chosen else {
-        return Ok(unprocessable(chosen.as_ref()));
-    };
-    if over {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Ok(json_response(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            &json!({"error": format!("upload exceeds {} MiB limit", MAX_UPLOAD_BYTES / (1024 * 1024))}),
-        ));
-    }
-    let upload_id = uuid::Uuid::new_v4().to_string();
-    let filename = if filename.is_empty() { upload_id.clone() } else { filename };
-    let mime_type = content_type.filter(|c| !c.is_empty()).unwrap_or_else(|| "application/octet-stream".into());
-    let meta = json!({
-        "filename": filename,
-        "mime_type": mime_type,
-        "size": size,
-        "created_at": isoformat_utc_now(),
-    });
-    let wrote = tokio::fs::rename(&tmp, staging.join(&upload_id)).await.is_ok()
-        && tokio::fs::write(staging.join(format!("{upload_id}.meta.json")), crate::pyjson::dumps(&meta)).await.is_ok();
-    if !wrote {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-    }
-    Ok(json_response(
-        StatusCode::OK,
-        &json!({"uploadId": upload_id, "filename": filename, "mimeType": mime_type, "size": size}),
-    ))
 }
 
 /// `datetime.now(timezone.utc).isoformat()`.

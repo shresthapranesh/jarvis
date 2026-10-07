@@ -26,7 +26,7 @@ it's on `main`.
 - [x] Approvals: gated tools wait in the edge; `resolveApproval` (gates, board questions), `requestToolApproval`
 - [x] `resolveApproval` for deferred deletes (`delete_workflow`, `delete_automation`, `delete_skill`) and every denial
 - [x] `resolveApproval` for an approved `call_mcp_tool`
-- [ ] Attachments: text extraction at turn start (PDF, docx, xlsx, …) — M–L
+- [x] Attachments: removed instead of ported (uploads, documents and their index, image input, the bots' photos)
 - [x] Workers: `spawn_workers`, its roles and their tools (files, artifact reads, document search)
 - [ ] Anthropic client — M
 - [ ] Bedrock client — M
@@ -44,7 +44,7 @@ it's on `main`.
 - [x] Tools: `tools`, `setToolPolicy`
 - [x] `modelSync`: provider model listings (Gemini, Anthropic, Bedrock, Ollama, OpenRouter, endpoints) and the probe calls (an AWS credential source only boto3 reads goes to Python)
 - [x] `browserActivity` (an edge run's stream; a worker's run is Python's)
-- [x] REST: `/uploads`, `/artifacts/{id}/raw`, `/documents/{id}/raw`, `/server-logs` (+ `/stream`, the edge's and a linked worker's records)
+- [x] REST: `/artifacts/{id}/raw`, `/server-logs` (+ `/stream`, the edge's and a linked worker's records)
 
 ## C. The big pieces
 

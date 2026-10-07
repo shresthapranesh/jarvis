@@ -7,8 +7,6 @@ import type {ConversationListQuery as TConversationListQuery} from '../__generat
 import type {ProjectQuery as TProjectQuery} from '../__generated__/ProjectQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {formatRelativeTime} from '../lib/api';
-import type {MediaAttachment} from '../lib/types';
-import {uploadStagedAttachment} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {commitDeleteProject} from '../relay/DeleteProjectMutation';
 import {decodeGlobalId} from '../relay/globalId';
@@ -103,17 +101,12 @@ export function ProjectDetail({id}: Props) {
     {onSuccess: () => setActionError(null), onError: (e) => setActionError(e.message)},
   );
 
-  async function handleNewChat(query: string, model: string, attachments: MediaAttachment[]) {
+  async function handleNewChat(query: string, model: string) {
     setChatBusy(true);
     setActionError(null);
     try {
-      const uploads = attachments.length
-        ? await Promise.all(
-            attachments.map(async (a) => ({uploadId: (await uploadStagedAttachment(a)).uploadId})),
-          )
-        : null;
       const {taskId, conversationId} = await commitStartTask({
-        input: {query, model, attachmentUploads: uploads, projectId: id},
+        input: {query, model, projectId: id},
       });
       await navigate({
         to: '/c/$id',

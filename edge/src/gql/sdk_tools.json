@@ -15,26 +15,6 @@
   "group": "artifacts"
  },
  {
-  "name": "list_documents",
-  "description": "Files attached to this conversation: id, filename, size, on-disk path, index state.",
-  "group": "documents"
- },
- {
-  "name": "document_path",
-  "description": "The on-disk path of an attached file, for opening it with code.",
-  "group": "documents"
- },
- {
-  "name": "search_documents",
-  "description": "Top-k passages from this conversation's indexed attachments.",
-  "group": "documents"
- },
- {
-  "name": "read_document",
-  "description": "Sequential window of an indexed document; continue with offset=next_offset.",
-  "group": "documents"
- },
- {
   "name": "search_conversations",
   "description": "Past conversations that mention `query`, best match first.",
   "group": "conversations"

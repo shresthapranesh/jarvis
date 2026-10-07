@@ -120,7 +120,7 @@ def make_spawn_workers(role_factories: dict[str, Callable[[], Any]]):
             # Each worker gets its OWN kernel via a unique kernel_key so that
             # concurrent workers' run_cell sessions stay isolated (they'd
             # otherwise collide on the parent conversation's single kernel).
-            # conversation_id is still propagated for artifact/document scoping.
+            # conversation_id is still propagated for artifact scoping.
             worker_key = f"{parent_conv_id or 'worker'}::w{idx}::{uuid4().hex[:8]}"
             try:
                 worker = factory()

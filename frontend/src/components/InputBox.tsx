@@ -3,15 +3,13 @@ import {useEffect, useRef, useState} from 'react';
 
 import {useIsMobile} from '../hooks/useIsMobile';
 import {useModels} from '../hooks/useModels';
-import {useToast} from '../lib/toast';
-import type {MediaAttachment, PersistedDocument} from '../lib/types';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
-import {attachment, composer, control} from './InputBox.styles';
+import {composer, control} from './InputBox.styles';
 import {field, iconBtn} from './ui';
 
 interface Props {
-  onSubmit: (query: string, model: string, attachments: MediaAttachment[]) => void;
+  onSubmit: (query: string, model: string) => void;
   disabled?: boolean;
   /**
    * A run is in flight and sending queues instead of starting a second turn.
@@ -19,13 +17,11 @@ interface Props {
    * `disabled` is false here and every rule that keys off it stays off.
    */
   queueing?: boolean;
-  /** Called instead of `onSubmit` while `queueing`. Text only. */
+  /** Called instead of `onSubmit` while `queueing`. */
   onQueue?: (query: string) => void;
   onStop?: () => void;
   conversationId?: string;
   initialModel?: string;
-  persistedDocuments?: PersistedDocument[];
-  onDeletePersistedDocument?: (docId: string) => void;
   // Incognito toggle — only wired on the new-chat surface (index page). When
   // provided, an eye-off button lets the user start the conversation ephemeral.
   incognito?: boolean;
@@ -38,24 +34,6 @@ interface Props {
   fullWidth?: boolean;
 }
 
-function fileTypeCategory(mimeType: string): 'image' | 'audio' | 'video' | 'document' {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType.startsWith('audio/')) return 'audio';
-  if (mimeType.startsWith('video/')) return 'video';
-  return 'document';
-}
-
-// Mirrors _MAX_UPLOAD_BYTES in server/routes_uploads.py. Kept in sync by hand:
-// the two guards protect different things (browser memory vs. server disk), and
-// the client one has to fire before any bytes are read.
-const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
-
-function formatBytes(n: number): string {
-  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 ** 3).toFixed(1)} GB`;
-  if (n >= 1024 * 1024) return `${Math.round(n / 1024 ** 2)} MB`;
-  return `${Math.round(n / 1024)} KB`;
-}
-
 export function InputBox({
   onSubmit,
   disabled = false,
@@ -64,19 +42,14 @@ export function InputBox({
   onStop,
   conversationId,
   initialModel,
-  persistedDocuments,
-  onDeletePersistedDocument,
   incognito = false,
   onToggleIncognito,
   fullWidth = false,
 }: Props) {
   const {data: catalog} = useModels();
   const isMobile = useIsMobile();
-  const toast = useToast();
   const [model, setModel] = useState('');
-  const [attachments, setAttachments] = useState<MediaAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Seed the model: prefer the per-conversation `initialModel`, then fall back
   // to the catalog default. Re-runs when the user navigates between
@@ -124,63 +97,14 @@ export function InputBox({
   function send() {
     const query = textareaRef.current?.value.trim();
     if (queueing) {
-      // Text only: a queued message has to be replayable from its stored row
-      // after a restart, and the row carries attachment metadata, not bytes.
       if (!query || !onQueue) return;
       onQueue(query);
       clearInput();
       return;
     }
-    if ((!query && attachments.length === 0) || disabled || !model) return;
-    onSubmit(query ?? '', model, attachments);
+    if (!query || disabled || !model) return;
+    onSubmit(query, model);
     clearInput();
-    setAttachments([]);
-  }
-
-  function handleFiles(files: FileList | null) {
-    if (!files) return;
-    Array.from(files).forEach((file) => {
-      // Refuse oversized files here rather than at POST /uploads. The server
-      // caps at the same number, but by then the browser has already spent the
-      // memory: readAsDataURL builds a base64 copy ~1.33x the file, and past a
-      // few hundred MB that exceeds V8's max string length and simply fails.
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        toast.push(
-          `${file.name} is ${formatBytes(file.size)} — the limit is ${formatBytes(MAX_ATTACHMENT_BYTES)}.`,
-          'error',
-        );
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        const attachment: MediaAttachment = {
-          id: crypto.randomUUID(),
-          type: fileTypeCategory(file.type),
-          name: file.name,
-          mimeType: file.type,
-          dataUrl,
-          size: file.size,
-        };
-        setAttachments((prev) => [...prev, attachment]);
-      };
-      // Without this the attachment silently never appears: setAttachments is
-      // only called from onload, so a read that fails leaves no chip, no error,
-      // and a user who thinks they attached a file.
-      reader.onerror = () => {
-        toast.push(
-          `Could not read ${file.name}${reader.error ? ` (${reader.error.name})` : ''}.`,
-          'error',
-        );
-      };
-      reader.readAsDataURL(file);
-    });
-    // reset so the same file can be re-attached after removal
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }
-
-  function removeAttachment(id: string) {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
   return (
@@ -193,120 +117,6 @@ export function InputBox({
           incognito && composer.cardIncognito,
         )}
       >
-        {(attachments.length > 0 || (persistedDocuments && persistedDocuments.length > 0)) && (
-          <div {...stylex.props(attachment.strip)}>
-            {persistedDocuments?.map((doc) => (
-              <div
-                key={`saved-${doc.id}`}
-                {...stylex.props(attachment.thumb)}
-                title={`${doc.filename} (saved to conversation)`}
-              >
-                <div {...stylex.props(attachment.icon, attachment.iconSaved)}>
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                    <polyline points="10 9 9 9 8 9" />
-                  </svg>
-                  <span {...stylex.props(attachment.name)}>{doc.filename}</span>
-                </div>
-                {onDeletePersistedDocument && (
-                  <button
-                    {...stylex.props(attachment.remove)}
-                    onClick={() => onDeletePersistedDocument(doc.id)}
-                    title="Remove from conversation"
-                    type="button"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
-            {attachments.map((att) => (
-              <div key={att.id} {...stylex.props(attachment.thumb)}>
-                {att.type === 'image' ? (
-                  <img src={att.dataUrl} alt={att.name} {...stylex.props(attachment.image)} />
-                ) : (
-                  <div {...stylex.props(attachment.icon)}>
-                    {att.type === 'audio' ? (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M9 18V5l12-2v13" />
-                        <circle cx="6" cy="18" r="3" />
-                        <circle cx="18" cy="16" r="3" />
-                      </svg>
-                    ) : att.type === 'document' ? (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                        <line x1="16" y1="13" x2="8" y2="13" />
-                        <line x1="16" y1="17" x2="8" y2="17" />
-                        <polyline points="10 9 9 9 8 9" />
-                      </svg>
-                    ) : (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                        <line x1="7" y1="2" x2="7" y2="22" />
-                        <line x1="17" y1="2" x2="17" y2="22" />
-                        <line x1="2" y1="12" x2="22" y2="12" />
-                        <line x1="2" y1="7" x2="7" y2="7" />
-                        <line x1="2" y1="17" x2="7" y2="17" />
-                        <line x1="17" y1="17" x2="22" y2="17" />
-                        <line x1="17" y1="7" x2="22" y2="7" />
-                      </svg>
-                    )}
-                    <span {...stylex.props(attachment.name)}>{att.name}</span>
-                  </div>
-                )}
-                <button
-                  {...stylex.props(attachment.remove)}
-                  onClick={() => removeAttachment(att.id)}
-                  title="Remove"
-                  type="button"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
         <textarea
           ref={(el) => {
             textareaRef.current = el;
@@ -328,27 +138,6 @@ export function InputBox({
         />
 
         <div {...stylex.props(composer.footer)}>
-          <button
-            type="button"
-            {...stylex.props(iconBtn.base, control.glyph)}
-            title={queueing ? 'Queued messages are text only' : 'Attach file'}
-            disabled={disabled || queueing}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
-
           {onToggleIncognito && (
             <button
               type="button"
@@ -377,15 +166,6 @@ export function InputBox({
               </svg>
             </button>
           )}
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,audio/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv,text/markdown,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.md,.rtf"
-            multiple
-            style={{display: 'none'}}
-            onChange={(e) => handleFiles(e.target.files)}
-          />
 
           <select
             {...stylex.props(control.model, field.selectChrome)}

@@ -1,5 +1,5 @@
 """The REST routes the edge serves itself (`edge/src/rest.rs`, `logs.rs`):
-raw artifact and document downloads, upload staging, and the log viewer.
+raw artifact downloads and the log viewer.
 
 Python's routers run on a bare FastAPI app over the same database; the edge
 runs with a dead backend, so a request it hands to Python comes back 502 —
@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 from pathlib import Path
 
 import httpx
@@ -26,27 +25,25 @@ from edge_support import _run_edge, edge_binary  # noqa: F401 — edge_binary is
 async def python(database):
     from fastapi import FastAPI
 
-    from server import routes_artifacts, routes_documents, routes_uploads
+    from server import routes_artifacts
 
     app = FastAPI()
-    for module in (routes_artifacts, routes_documents, routes_uploads):
-        app.include_router(module.router)
+    app.include_router(routes_artifacts.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://python") as client:
         yield client
 
 
 @pytest.fixture
 async def files(database, work_dir: Path) -> Path:
-    """Artifacts and documents with their files, in shapes the headers vary by."""
+    """Artifacts with their files, in shapes the headers vary by."""
     from db import async_session
-    from db.models import Artifact, Document
+    from db.models import Artifact
 
     d = work_dir / "files"
     d.mkdir()
     (d / "report.md").write_text("# Title\n" + "x" * 300)
     (d / "clip.mp3").write_bytes(bytes(range(256)) * 40)
     (d / "data.bin").write_bytes(b"\0\1\2" * 10)
-    (d / "notes.txt").write_text("plain notes")
     os.utime(d / "clip.mp3", (1_700_000_000.123456, 1_700_000_000.123456))
     async with async_session() as s:
         s.add_all([
@@ -55,10 +52,6 @@ async def files(database, work_dir: Path) -> Path:
             Artifact(id="a-untitled", title="", filename=str(d / "data.bin"), kind="file"),
             Artifact(id="a-gone", title="Gone", filename=str(d / "missing.pdf"), kind="file"),
             Artifact(id="a-dir", title="Dir", filename=str(d), kind="file"),
-            Document(id="d-1", conversation_id="c", filename="notes v1.txt", mime_type="text/plain", path=str(d / "notes.txt"),
-                     size=11),
-            Document(id="d-gone", conversation_id="c", filename="x.pdf", mime_type="application/pdf", path=str(d / "nope.pdf"),
-                     size=1),
         ])
         await s.commit()
     return d
@@ -66,9 +59,8 @@ async def files(database, work_dir: Path) -> Path:
 
 @pytest.fixture
 async def edge(files, work_dir: Path, edge_binary: Path, tmp_path_factory):
-    staging = tmp_path_factory.mktemp("edge-work")
-    async with _run_edge(edge_binary, staging, work_dir / "database.db", {"JARVIS_EDGE_LOG": "info"}) as client:
-        client.work_dir = staging
+    edge_work = tmp_path_factory.mktemp("edge-work")
+    async with _run_edge(edge_binary, edge_work, work_dir / "database.db", {"JARVIS_EDGE_LOG": "info"}) as client:
         yield client
 
 
@@ -90,7 +82,7 @@ async def _same(python: httpx.AsyncClient, edge: httpx.AsyncClient, method: str,
 
 async def test_downloads_answer_as_starlettes_file_response(python, edge, files):
     for url in ("/artifacts/a-md/raw", "/artifacts/a-audio/raw", "/artifacts/a-untitled/raw", "/artifacts/a-gone/raw",
-                "/artifacts/nope/raw", "/documents/d-1/raw", "/documents/d-gone/raw", "/documents/nope/raw"):
+                "/artifacts/nope/raw"):
         await _same(python, edge, "GET", url)
     whole = await python.get("/artifacts/a-audio/raw")
     etag, modified = whole.headers["etag"], whole.headers["last-modified"]
@@ -103,58 +95,13 @@ async def test_downloads_answer_as_starlettes_file_response(python, edge, files)
 
 async def test_what_the_edge_leaves_to_python(edge, files):
     """Several ranges, a range number only `int()` reads, a path that isn't a
-    file, a HEAD (FastAPI's 405), an urlencoded upload: Python's to answer
-    (here, the dead backend's 502)."""
+    file, a HEAD (FastAPI's 405): Python's to answer (here, the dead
+    backend's 502)."""
     assert (await edge.head("/artifacts/a-md/raw")).status_code == 502
     for url, headers in (("/artifacts/a-audio/raw", {"range": "bytes=0-1,5-9"}),
                          ("/artifacts/a-audio/raw", {"range": "bytes=+1-2"}),
                          ("/artifacts/a-dir/raw", None)):
         assert (await edge.get(url, headers=headers)).status_code == 502, (url, headers)
-    assert (await edge.post("/uploads", data={"file": "x"})).status_code == 502  # urlencoded
-
-
-def _staged(d: Path) -> list[tuple[str, bytes, dict]]:
-    """Each staged upload: its bytes and its meta, ids and stamps masked."""
-    out = []
-    for meta in sorted(d.glob("*.meta.json")):
-        body = json.loads(meta.read_text())
-        raw = meta.read_text()
-        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{6})?\+00:00", body.pop("created_at"))
-        out.append((re.sub(r'"created_at": "[^"]*"', '"created_at": <now>', raw), (d / meta.name.removesuffix(".meta.json")).read_bytes(), body))
-    assert not [p for p in d.iterdir() if p.name.startswith(".")], "a partial upload was left behind"
-    return sorted(out, key=lambda r: (r[2]["filename"], r[1]))
-
-
-async def test_uploads_are_staged_as_python_stages_them(python, edge, work_dir: Path):
-    from core.config import get_config
-
-    cases = [
-        {"files": {"file": ("notes.txt", b"hello", "text/plain")}},
-        {"files": {"file": ("Café ✓ résumé.pdf", b"%PDF-1", "application/pdf")}},
-        {"files": {"file": ("raw.bin", b"\0\1", "")}},
-        {"files": [("file", ("one.txt", b"1", "text/plain")), ("file", ("two.txt", b"22", "text/x"))]},
-        {"files": {"other": ("a.txt", b"x", "text/plain")}},
-        {"files": {"file": (None, b"just text")}},
-        {"content": b"abc", "headers": {"content-type": "text/plain"}},
-        {"files": {"file": ("", b"xy", "text/plain")}},
-        {"content": b"--xx\r\nbroken", "headers": {"content-type": "multipart/form-data; boundary=xx"}},
-    ]
-    mask = lambda body: {**body, "uploadId": "<id>"} if "uploadId" in body else body  # noqa: E731
-    for case in cases:
-        expected = await python.post("/uploads", **case)
-        got = await edge.post("/uploads", **case)
-        assert (got.status_code, mask(got.json())) == (expected.status_code, mask(expected.json())), case
-        if "uploadId" in got.json():
-            assert (edge.work_dir / "staging" / got.json()["uploadId"]).exists()
-    assert _staged(edge.work_dir / "staging") == _staged(get_config().staging_dir)
-
-
-async def test_an_oversized_upload_is_refused(edge):
-    big = b"\0" * (100 * 1024 * 1024 + 1)
-    got = await edge.post("/uploads", files={"file": ("big.bin", big, "application/octet-stream")}, timeout=60)
-    assert (got.status_code, got.json()) == (413, {"error": "upload exceeds 100 MiB limit"})
-    staging = edge.work_dir / "staging"
-    assert not list(staging.iterdir()) if staging.exists() else True
 
 
 async def test_the_log_viewer_shows_the_edge_and_a_linked_worker(edge, monkeypatch):

@@ -47,7 +47,7 @@ const KNOWN: &[Spec] = &[
     Spec {
         key: "embedding.model",
         label: "Embedding model",
-        description: "Gemini embedding model for document indexing and vector memory. Needs GOOGLE_API_KEY. Applied immediately; already-embedded content keeps its old vectors.",
+        description: "Gemini embedding model for vector memory, skills and episodes. Needs GOOGLE_API_KEY. Applied immediately; already-embedded content keeps its old vectors.",
         managed_by: "",
         kind: "text",
         choices: &[],

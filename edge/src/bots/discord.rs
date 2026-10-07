@@ -24,8 +24,7 @@ use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
-use super::{Ctx, Reply, Step, Turn, Typing, clip, download};
-use crate::gql::start::Attachment;
+use super::{Ctx, Reply, Step, Turn, Typing, clip};
 
 /// Discord's limit is 2000; Python left headroom.
 const MAX_MESSAGE: usize = 1900;
@@ -349,67 +348,31 @@ impl Bot {
         };
         let text = strip_mention(message["content"].as_str().unwrap_or_default(), me.as_deref());
 
-        let attachments = message["attachments"].as_array().cloned().unwrap_or_default();
-        let content_type = |a: &Value| a["content_type"].as_str().unwrap_or_default().to_lowercase();
-        let is_voice = |a: &Value| {
-            (!a["duration_secs"].is_null() && !a["waveform"].is_null()) || content_type(a).starts_with("audio/")
-        };
-        // The first voice note wins; images before it still count, as in Python.
-        let voice = attachments.iter().position(is_voice);
-        let images: Vec<&Value> = attachments[..voice.unwrap_or(attachments.len())]
-            .iter()
-            .filter(|a| content_type(a).starts_with("image/"))
-            .collect();
-
-        if voice.is_some() {
-            return self.handle_voice(&message).await;
-        }
-        if !images.is_empty() {
-            let mut parts = vec![];
-            for image in images {
-                let url = image["url"].as_str().unwrap_or_default();
-                let bytes = download(&self.ctx.http, url).await.map_err(|e| format!("image: {e}"))?;
-                let mime = match image["content_type"].as_str() {
-                    Some(m) if !m.is_empty() => m.to_string(),
-                    _ => "image/jpeg".into(),
-                };
-                parts.push(Attachment::image(image["filename"].as_str().unwrap_or("image").to_string(), mime, bytes));
-            }
-            let query = if text.is_empty() { "What's in this image?".to_string() } else { text };
-            let target = self.target(&message, &query).await;
-            let display = format!("[Image] {query}");
-            self.dispatch(&target, &message, model, query, display.clone(), &display, parts).await;
+        // A voice note or an image: nothing reads them.
+        let unreadable = message["attachments"].as_array().into_iter().flatten().any(|a| {
+            let content_type = a["content_type"].as_str().unwrap_or_default().to_lowercase();
+            (!a["duration_secs"].is_null() && !a["waveform"].is_null())
+                || content_type.starts_with("audio/")
+                || content_type.starts_with("image/")
+        });
+        if unreadable {
+            let channel_id = message["channel_id"].as_str().unwrap_or_default();
+            self.send(channel_id, super::TEXT_ONLY, None).await?;
             return Ok(());
         }
         if text.is_empty() {
             return Ok(());
         }
         let target = self.target(&message, &text).await;
-        self.dispatch(&target, &message, model, text.clone(), text.clone(), &text, vec![]).await;
-        Ok(())
-    }
-
-    async fn handle_voice(self: Arc<Self>, message: &Value) -> Result<(), String> {
-        let channel_id = message["channel_id"].as_str().unwrap_or_default();
-        self.send(channel_id, super::VOICE_UNSUPPORTED, None).await?;
+        self.dispatch(&target, &message, model, &text).await;
         Ok(())
     }
 
     /// `_dispatch`: start the turn in `channel_id`, then stream its reply.
-    #[allow(clippy::too_many_arguments)]
-    async fn dispatch(
-        self: &Arc<Self>,
-        channel_id: &str,
-        original: &Value,
-        model: String,
-        query: String,
-        display: String,
-        title: &str,
-        attachments: Vec<Attachment>,
-    ) {
+    async fn dispatch(self: &Arc<Self>, channel_id: &str, original: &Value, model: String, text: &str) {
         let typing = self.typing(channel_id);
         let conversation_id = format!("discord_{channel_id}");
-        match self.ctx.dispatch("discord", conversation_id, model, query, display, title, attachments).await {
+        match self.ctx.dispatch("discord", conversation_id, model, text).await {
             Ok(Turn::Started(reply)) => self.stream(channel_id, original, reply, typing).await,
             Ok(Turn::Note(note)) => {
                 drop(typing);

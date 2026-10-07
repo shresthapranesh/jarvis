@@ -7,7 +7,6 @@ import type {ArtifactListQuery} from '../__generated__/ArtifactListQuery.graphql
 import type {ConversationPageFragment$key} from '../__generated__/ConversationPageFragment.graphql';
 import type {ConversationPageQuery as TConversationPageQuery} from '../__generated__/ConversationPageQuery.graphql';
 import type {ConversationPageRefetchQuery} from '../__generated__/ConversationPageRefetchQuery.graphql';
-import type {DocumentListQuery} from '../__generated__/DocumentListQuery.graphql';
 import type {TodoListQuery} from '../__generated__/TodoListQuery.graphql';
 import {ActivitySidebar} from '../components/ActivitySidebar';
 import {ArtifactPanel} from '../components/ArtifactPanel';
@@ -19,22 +18,13 @@ import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {ThreadSpine} from '../components/ThreadSpine';
 import {page} from '../components/ui';
-import {refreshRunningTasks} from '../hooks/useRunningTasks';
 import {useBrowserAvailable} from '../hooks/useBrowserAvailable';
+import {refreshRunningTasks} from '../hooks/useRunningTasks';
 import {useTaskEvents} from '../hooks/useTaskEvents';
 import {messageAnchorId} from '../lib/thread';
-import type {
-  ArtifactCard,
-  MediaAttachment,
-  Message,
-  PersistedDocument,
-  Step,
-  TodoItem,
-  TodoStatus,
-} from '../lib/types';
-import {mapMessage} from '../lib/types';
 import {useToast} from '../lib/toast';
-import {uploadStagedAttachment} from '../lib/uploads';
+import type {ArtifactCard, Message, Step, TodoItem, TodoStatus} from '../lib/types';
+import {mapMessage} from '../lib/types';
 import {artifactListQuery} from '../relay/ArtifactListQuery';
 import {conversationPageFragment} from '../relay/ConversationPageFragment';
 import {
@@ -42,9 +32,7 @@ import {
   conversationPageQuery,
   loadConversationPage,
 } from '../relay/ConversationPageQuery';
-import {commitDeleteDocument} from '../relay/DeleteDocumentMutation';
 import {commitDiscardConversation} from '../relay/DiscardConversationMutation';
-import {documentListQuery, refreshDocumentList} from '../relay/DocumentListQuery';
 import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
 import {commitQueueMessage} from '../relay/QueueMessageMutation';
 import {commitStartTask} from '../relay/StartTaskMutation';
@@ -214,25 +202,6 @@ function ConversationPage() {
     setArtifactPanelOpen(true);
   }
 
-  const documentListData = useLazyLoadQuery<DocumentListQuery>(
-    documentListQuery,
-    {conversationId: id},
-    {fetchPolicy: 'store-and-network'},
-  );
-  const persistedDocuments = useMemo<PersistedDocument[]>(
-    () =>
-      documentListData.documents.map((d) => ({
-        id: decodeGlobalId(d.id),
-        conversation_id: d.conversationId,
-        message_id: d.messageId ?? null,
-        filename: d.filename,
-        mime_type: d.mimeType,
-        size: d.size,
-        created_at: d.createdAt,
-      })),
-    [documentListData.documents],
-  );
-
   const todoListData = useLazyLoadQuery<TodoListQuery>(
     todoListQuery,
     {conversationId: id},
@@ -246,15 +215,6 @@ function ConversationPage() {
   const todos = liveTodos ?? persistedTodos;
 
   const conversationModel = data.model;
-
-  async function handleDeletePersistedDocument(docId: string) {
-    try {
-      await commitDeleteDocument(docId);
-      await refreshDocumentList(id);
-    } catch (err) {
-      console.error('Failed to delete document:', err);
-    }
-  }
 
   useEffect(() => {
     if ((streaming || !!runningMsg) && panelOpen && steps.length > 0) {
@@ -375,7 +335,7 @@ function ConversationPage() {
     setPanelOpen(true);
   }
 
-  async function handleSubmit(query: string, model: string, attachments: MediaAttachment[]) {
+  async function handleSubmit(query: string, model: string) {
     setPendingUser({
       id: 'pending',
       role: 'user',
@@ -397,13 +357,8 @@ function ConversationPage() {
     pinBottomRef.current = false;
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
-      const uploads = attachments.length
-        ? await Promise.all(
-            attachments.map(async (a) => ({uploadId: (await uploadStagedAttachment(a)).uploadId})),
-          )
-        : null;
       const {taskId} = await commitStartTask({
-        input: {query, model, conversationId: id, attachmentUploads: uploads},
+        input: {query, model, conversationId: id},
       });
       // Subscribe to the live stream immediately — the connection won't surface
       // the new running message until the refetch below completes.
@@ -412,13 +367,10 @@ function ConversationPage() {
       // in the Relay store; usePaginationFragment re-renders automatically.
       await loadConversationPage(id);
       void refreshRunningTasks();
-      if (attachments.some((a) => a.type === 'document')) {
-        void refreshDocumentList(id);
-      }
     } catch (err) {
-      // Without this the turn fails silently: an oversized upload answers 413,
-      // uploadStagedAttachment throws, and a bare try/finally turned that into
-      // an unhandled rejection — the message never sent and nothing said so.
+      // Without this the turn fails silently: a bare try/finally turned a
+      // failed send into an unhandled rejection — the message never sent and
+      // nothing said so.
       toast.push((err as Error).message || 'Could not send that message.', 'error');
     } finally {
       setPendingUser(null);
@@ -642,8 +594,6 @@ function ConversationPage() {
           onStop={handleStop}
           conversationId={id}
           initialModel={conversationModel}
-          persistedDocuments={persistedDocuments}
-          onDeletePersistedDocument={handleDeletePersistedDocument}
         />
       </footer>
     </div>

@@ -25,7 +25,6 @@
 mod artifacts;
 mod automation;
 mod board;
-mod documents;
 pub mod embed;
 mod events;
 mod files;

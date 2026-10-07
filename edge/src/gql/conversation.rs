@@ -387,7 +387,7 @@ impl Teardown {
 
 /// `db/ops.py:delete_conversation`, rows only: the conversation and what its
 /// ORM relationships cascade to — messages and their steps, artifacts and
-/// their versions, documents and their chunks, episodes — then its
+/// their versions, episodes — then its
 /// transcript thread (`transcript_store.delete_thread`). None when there's
 /// no such conversation, which deletes nothing at all, thread included. The
 /// caller commits, then runs the returned `Teardown`.
@@ -412,18 +412,12 @@ pub async fn delete_conversation(
     .bind(conv_id)
     .fetch_all(&mut **tx)
     .await?;
-    let documents: Vec<String> = sqlx::query_scalar("SELECT path FROM documents WHERE conversation_id = ?")
-        .bind(conv_id)
-        .fetch_all(&mut **tx)
-        .await?;
 
     for sql in [
         "DELETE FROM steps WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)",
         "DELETE FROM messages WHERE conversation_id = ?",
         "DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE conversation_id = ?)",
         "DELETE FROM artifacts WHERE conversation_id = ?",
-        "DELETE FROM document_chunks WHERE document_id IN (SELECT id FROM documents WHERE conversation_id = ?)",
-        "DELETE FROM documents WHERE conversation_id = ?",
         "DELETE FROM conversation_episodes WHERE conversation_id = ?",
         "DELETE FROM conversations WHERE id = ?",
     ] {
@@ -439,7 +433,6 @@ pub async fn delete_conversation(
         })
         .collect();
     files.extend(versions.into_iter().map(PathBuf::from));
-    files.extend(documents.into_iter().map(PathBuf::from));
     Ok(Some(Teardown {
         conversation_id: conv_id.to_string(),
         files,

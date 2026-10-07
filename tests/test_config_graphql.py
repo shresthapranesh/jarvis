@@ -159,16 +159,16 @@ async def test_keys_with_whitespace_are_rejected(database):
 
 async def test_embedding_model_write_applies_to_this_process(database):
     """The whole reason this exists as a resolver and not just a DB write."""
-    from core import doc_index
+    from core import embeddings
 
-    before = doc_index._embedding_model_override
+    before = embeddings._embedding_model_override
     try:
         res = await _exec(
             "mutation($k: String!, $v: String!) { setSetting(key: $k, value: $v) { note } }",
             {"k": "embedding.model", "v": "models/test-embedding-1"},
         )
         assert not res.errors, res.errors
-        assert doc_index._embedding_model_override == "models/test-embedding-1"
+        assert embeddings._embedding_model_override == "models/test-embedding-1"
 
         res = await _exec(
             "mutation($k: String!) { deleteSetting(key: $k) { note } }",
@@ -177,9 +177,9 @@ async def test_embedding_model_write_applies_to_this_process(database):
         assert not res.errors, res.errors
         # Delete goes through the same apply path — the cache has no idea a row
         # was involved, only that the effective value changed.
-        assert doc_index._embedding_model_override is None
+        assert embeddings._embedding_model_override is None
     finally:
-        doc_index.configure_embedding_model(before)
+        embeddings.configure_embedding_model(before)
 
 
 async def test_tool_policy_write_drops_the_compiled_agent_cache(database):
