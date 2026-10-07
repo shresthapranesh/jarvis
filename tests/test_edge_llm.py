@@ -300,6 +300,47 @@ RESPONSES_REPLY = [
 ]
 
 
+ANTHROPIC_REPLY = [
+    ("message_start", {"type": "message_start", "message": {
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-4-6", "content": [],
+        "stop_reason": None, "stop_sequence": None,
+        "usage": {"input_tokens": 112, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 700,
+                  "output_tokens": 1}}}),
+    ("content_block_start", {"type": "content_block_start", "index": 0,
+                             "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                             "delta": {"type": "thinking_delta", "thinking": "Weighing "}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                             "delta": {"type": "thinking_delta", "thinking": "it."}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                             "delta": {"type": "signature_delta", "signature": "c2lnLXRoaW5r"}}),
+    ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+    ("content_block_start", {"type": "content_block_start", "index": 1,
+                             "content_block": {"type": "text", "text": ""}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 1,
+                             "delta": {"type": "text_delta", "text": "Let me"}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 1,
+                             "delta": {"type": "text_delta", "text": " check."}}),
+    ("content_block_stop", {"type": "content_block_stop", "index": 1}),
+    ("content_block_start", {"type": "content_block_start", "index": 2, "content_block": {
+        "type": "tool_use", "id": "toolu_1", "name": "run_cell", "input": {}}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 2,
+                             "delta": {"type": "input_json_delta", "partial_json": "{\"code\": \"che"}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 2,
+                             "delta": {"type": "input_json_delta", "partial_json": "ck()\"}"}}),
+    ("content_block_stop", {"type": "content_block_stop", "index": 2}),
+    ("content_block_start", {"type": "content_block_start", "index": 3, "content_block": {
+        "type": "tool_use", "id": "toolu_2", "name": "write_todos", "input": {}}}),
+    ("content_block_delta", {"type": "content_block_delta", "index": 3,
+                             "delta": {"type": "input_json_delta", "partial_json": "{\"todos\": [\"x\"]}"}}),
+    ("content_block_stop", {"type": "content_block_stop", "index": 3}),
+    ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": None},
+                       "usage": {"input_tokens": 112, "cache_creation_input_tokens": 0,
+                                 "cache_read_input_tokens": 700, "output_tokens": 40}}),
+    ("message_stop", {"type": "message_stop"}),
+]
+
+
 class _Provider:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
@@ -310,7 +351,12 @@ class _Provider:
                 body = self.rfile.read(int(self.headers.get("content-length", 0)))
                 provider.requests.append({"path": self.path, "headers": dict(self.headers), "body": json.loads(body)})
                 self.send_response(200)
-                if "generatecontent" in self.path.lower():
+                if self.path.endswith("/v1/messages"):
+                    self.send_header("content-type", "text/event-stream")
+                    self.end_headers()
+                    for name, data in ANTHROPIC_REPLY:
+                        self.wfile.write(f"event: {name}\ndata: {json.dumps(data)}\n\n".encode())
+                elif "generatecontent" in self.path.lower():
                     self.send_header("content-type", "text/event-stream")
                     self.end_headers()
                     for c in GEMINI_REPLY:
@@ -362,6 +408,7 @@ VOLATILE = "## Current Tasks\n\n[ ] pack"
 
 _PROVIDER_ENV = (
     "GOOGLE_API_KEY", "GEMINI_API_KEY", "OLLAMA_HOST", "OPENROUTER_API_KEY", "META_API_KEY", "MODEL_API_BASE",
+    "ANTHROPIC_API_KEY", "ANTHROPIC_API_URL", "ANTHROPIC_BASE_URL", "JARVIS_CACHE_TTL",
 )
 
 
@@ -387,6 +434,7 @@ def _edge(edge_binary: Path, flag: str, tmp_path: Path, payload: dict, provider:
             JARVIS_GOOGLE_BASE_URL=provider.url, GOOGLE_API_KEY="test-key", OLLAMA_HOST=provider.url,
             JARVIS_OPENROUTER_BASE_URL=provider.url, OPENROUTER_API_KEY="test-key",
             MODEL_API_BASE=provider.url, META_API_KEY="test-key",
+            ANTHROPIC_API_URL=provider.url, ANTHROPIC_API_KEY="test-key",
         )
     # cwd = tmp_path so the repo's .env can't supply a real key.
     out = subprocess.run(
@@ -422,6 +470,11 @@ def _edge_input(model: str, records, blobs, *, cache: bool, segments=SEGMENTS) -
 
 def _llm(model: str, url: str):
     provider, _, name = model.partition(":")
+    if provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        # As `ModelSpec.build_llm` builds it, at the fake's address.
+        return ChatAnthropic(model_name=name, timeout=None, stop=None, api_key="test-key", base_url=url)
     if provider == "google_genai":
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -623,6 +676,9 @@ def _intended_openai_responses(python: dict, edge: dict) -> None:
 
 
 MODELS = [
+    "anthropic:claude-sonnet-4-6",
+    # Not in langchain-anthropic's profiles: its fallback max_tokens.
+    "anthropic:claude-opus-5-5",
     "google_genai:gemma-4-31b-it",
     "google_genai:gemini-3.1-flash-lite",
     "ollama:gemma4:26b",
@@ -635,6 +691,7 @@ MODELS = [
     "keyless:llama-3.3-70b",
 ]
 INTENDED = {
+    "anthropic": lambda python, edge: None,
     "google_genai": _intended_gemini,
     "ollama": _intended_ollama,
     "openrouter": _intended_openai_chat,
@@ -682,13 +739,38 @@ def test_request_matches_python(edge_binary, tmp_path, provider, name, model):
     assert edge == python
 
 
+@pytest.mark.parametrize("name", HISTORIES)
+def test_anthropic_request_without_a_cache_matches_python(edge_binary, tmp_path, provider, name):
+    """Anthropic always caches here; its plain layout (string content, one
+    system string) is what a run with caching turned off would send."""
+    model = MODELS[0]
+    records, blobs = _records(HISTORIES[name]())
+    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False, provider="anthropic"))
+    python = provider.take()["body"]
+    _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
+    assert provider.take()["body"] == python
+
+
+def test_anthropic_max_tokens_follow_langchains_profiles(edge_binary, tmp_path, provider):
+    from langchain_anthropic.data._profiles import _PROFILES
+
+    records, blobs = _records(_chat())
+    for name in [*_PROFILES, "claude-unknown-9"]:
+        expected = _llm(f"anthropic:{name}", provider.url).max_tokens
+        _edge(edge_binary, "--llm-call", tmp_path, _edge_input(f"anthropic:{name}", records, blobs, cache=False),
+              provider)
+        assert provider.take()["body"]["max_tokens"] == expected, name
+
+
 @pytest.mark.parametrize("model,header,value", [
-    (MODELS[0], "x-goog-api-key", "test-key"),
-    (MODELS[3], "authorization", "Bearer test-key"),
+    (MODELS[0], "x-api-key", "test-key"),
+    (MODELS[0], "anthropic-version", "2023-06-01"),
+    (MODELS[2], "x-goog-api-key", "test-key"),
     (MODELS[5], "authorization", "Bearer test-key"),
-    (MODELS[6], "authorization", "Bearer test-key"),
+    (MODELS[7], "authorization", "Bearer test-key"),
+    (MODELS[8], "authorization", "Bearer test-key"),
     # No key, no header — where LangChain's client sends a placeholder.
-    (MODELS[7], "authorization", None),
+    (MODELS[9], "authorization", None),
 ])
 def test_key_header(edge_binary, tmp_path, provider, model, header, value):
     records, blobs = _records(_chat())
@@ -717,7 +799,7 @@ def _semantics(rec: dict) -> dict:
     }
 
 
-@pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[3], MODELS[5], MODELS[6]])
+@pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[4], MODELS[5], MODELS[7], MODELS[8]])
 def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     records, blobs = _records(_chat())
     reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False,
@@ -733,7 +815,13 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     edge = _semantics(edge_rec)
     deltas = [line for line in out[:-1] if "event" not in line]
 
-    if model.startswith("ollama"):
+    if model.startswith("anthropic"):
+        # LangChain left the stop reason in its response metadata; the edge
+        # keeps it as the finish reason.
+        assert edge["finish_reason"] == "tool_use" and python["finish_reason"] is None
+        python["finish_reason"] = "tool_use"
+        assert deltas == [{"thinking": "Weighing "}, {"thinking": "it."}, {"text": "Let me"}, {"text": " check."}]
+    elif model.startswith("ollama"):
         # LangChain dropped Ollama's thinking and left the stop reason in
         # its response metadata; the edge keeps both.
         assert edge.pop("thinking") == "Hmm." and python.pop("thinking") == ""
@@ -839,7 +927,7 @@ def test_run_events_match_python(edge_binary, tmp_path, provider, model):
 def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provider):
     """A thread the edge wrote to can continue in Python: its record decodes,
     and LangChain sends the call's thought signature back."""
-    model = MODELS[0]
+    model = MODELS[2]
     records, blobs = _records(_chat())
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     provider.take()
@@ -861,8 +949,8 @@ def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provide
     assert edge_turn["parts"][0] == {"text": "Let me check.", "thoughtSignature": "dGV4dC1zaWc="}
 
 
-@pytest.mark.parametrize("model", [MODELS[3], MODELS[5], MODELS[6]])
-def test_openai_record_goes_back_out_the_same(edge_binary, tmp_path, provider, model):
+@pytest.mark.parametrize("model", [MODELS[0], MODELS[5], MODELS[7], MODELS[8]])
+def test_a_recorded_reply_goes_back_out_the_same(edge_binary, tmp_path, provider, model):
     """The next request after a reply the edge recorded is the same from
     either runtime — for Responses, the text item's server id and phase go
     back with it."""
@@ -884,3 +972,28 @@ def test_openai_record_goes_back_out_the_same(edge_binary, tmp_path, provider, m
         said = [i for i in edge["input"] if i.get("id") == "msg_1"]
         assert said == [{"type": "message", "role": "assistant", "id": "msg_1", "phase": "commentary",
                          "content": [{"type": "output_text", "text": "Let me check.", "annotations": []}]}]
+
+
+def test_a_reply_python_recorded_goes_back_out_the_same(edge_binary, tmp_path, provider):
+    """Python records Anthropic's tool calls as opaque `tool_use` parts beside
+    the calls; the edge sends that record on as Python does — each call once,
+    and the thinking left out (`strip_historical_thinking` drops it from every
+    assistant turn, on both sides)."""
+    model = MODELS[0]
+    records, blobs = _records(_chat())
+    reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=True,
+                                                             provider="anthropic"))
+    provider.take()
+    rec, _ = encode(reply)
+    assert [p.get("data", {}).get("type") for p in rec["content"] if p["type"] == "opaque"] == ["tool_use", "tool_use"]
+    follow = [
+        *records,
+        rec,
+        *({"v": 1, "role": "tool", "content": "ok", "tool_call_id": c["id"], "status": "success"}
+          for c in rec["tool_calls"]),
+    ]
+    python, edge, _ = _both(edge_binary, tmp_path, provider, model, follow, blobs)
+    assert edge["body"] == python["body"]
+    turn = [m for m in edge["body"]["messages"] if m["role"] == "assistant"][-1]["content"]
+    assert [b["type"] for b in turn] == ["text", "tool_use", "tool_use"]
+    assert [b["id"] for b in turn[1:]] == ["toolu_1", "toolu_2"]

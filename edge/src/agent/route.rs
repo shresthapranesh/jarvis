@@ -15,7 +15,7 @@ pub fn enabled() -> bool {
 
 /// Providers the edge's LLM layer speaks (`llm::call`), besides the
 /// operator's own OpenAI-compatible endpoints.
-const PROVIDERS: &[&str] = &["google_genai", "ollama", "openrouter", "meta"];
+const PROVIDERS: &[&str] = &["anthropic", "google_genai", "ollama", "openrouter", "meta"];
 
 /// Whether the edge runs this turn: the agent loop is on and the model's
 /// provider is one the edge calls.
