@@ -1,6 +1,6 @@
 //! `run "<query>"` — the chat agent on one query, nothing kept: its own
-//! history and kernel, no conversation, the last reply printed. A model the
-//! edge doesn't call (or the agent loop switched off) is Python's to run.
+//! history and kernel, no conversation, the last reply printed. With the
+//! agent loop switched off (`JARVIS_AGENT_RUNTIME=python`) it is Python's.
 
 use std::io::{IsTerminal, Write};
 
@@ -13,8 +13,8 @@ use crate::config::Config;
 use crate::llm::transcript::{Content, Part, Typed};
 
 pub async fn run(config: &Config, pool: &SqlitePool, query: String, model: Option<String>, no_save: bool) -> Done {
-    // `_run_db` hydrates the catalog; one Python can't load fails there.
-    let (default, _) = catalog::catalog(pool).await?.map_err(|e| Fail::Python(format!("models.custom: {}", e.0)))?;
+    // `_run_db` hydrates the catalog; one that can't load fails there.
+    let (default, _) = catalog::catalog(pool).await?.map_err(|e| Fail::Error(e.message()))?;
     let seed = catalog::seed_model();
     // `--model` defaults to the seed, which stands for "the default".
     let asked = match model {
@@ -30,9 +30,6 @@ pub async fn run(config: &Config, pool: &SqlitePool, query: String, model: Optio
     };
     if !route::enabled() {
         return Err(Fail::Python("JARVIS_AGENT_RUNTIME=python".into()));
-    }
-    if !route::calls_model(pool, &model).await {
-        return Err(Fail::Python(format!("the edge doesn't call {model}")));
     }
     if model != asked {
         // On a CLI a typo'd --model would otherwise answer from a model the

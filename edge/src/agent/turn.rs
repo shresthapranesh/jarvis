@@ -10,8 +10,8 @@
 //! A history that outgrows the model's threshold is summarized before the
 //! call (`summarize.rs`). `spawn_workers` runs its workers here too
 //! (`workers.rs`), their events written and announced as they come, and
-//! `run_workflow` its workflow (`workflow/`). A step that needs Python (`prompt::NeedsPython`,
-//! `tools::Plan::Python`) hands the turn over with what it carried
+//! `run_workflow` its workflow (`workflow/`). A step that needs Python
+//! (`tools::Plan::Python`) hands the turn over with what it carried
 //! (`Outcome::HandOver`); Python runs the recorded calls and goes on.
 
 use std::sync::Arc;
@@ -172,17 +172,33 @@ impl<'a> Turn<'a> {
             self.project_id = project_id;
             self.ephemeral = ephemeral;
         }
-        let mut thread = match Thread::load(self.pool(), &self.thread_id).await {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!("agent: {e}; handing the turn to Python");
-                return Outcome::HandOver(None);
-            }
-        };
         if self.cancel_requested {
             self.run.update(|st| st.fields.cancelled = true);
         }
+        let result = match Thread::load(self.pool(), &self.thread_id).await {
+            Ok(mut thread) => self.start(&mut thread).await,
+            Err(e) => Err(Stop::Failed(format!("reading the thread: {e}"))),
+        };
+        if let Err(Stop::Python(why)) = &result {
+            tracing::info!("agent: run {} goes to Python: {why}", self.task_id);
+            return self.hand_over();
+        }
+        match self.kind {
+            Kind::Automation(_) => return self.finish_automation(result).await,
+            Kind::Board(_) => return self.finish_board(result).await,
+            Kind::Chat => {}
+        }
+        match result {
+            Ok(()) => self.finish_done(false).await,
+            Err(Stop::Limit) => self.finish_done(true).await,
+            Err(Stop::Cancelled) => self.finish_stopped().await,
+            Err(Stop::Python(_)) => unreachable!("handed over above"),
+            Err(Stop::Failed(e)) => self.finish_failed(e).await,
+        }
+    }
 
+    /// The prompt into the thread, then the loop.
+    async fn start(&mut self, thread: &mut Thread) -> Result<(), Stop> {
         // The prompt — and for chat, the plan reset, live subscribers first,
         // as Python. An automation's thread keeps its plan between runs.
         // The prompt's id is derived from the run, so a re-claimed run
@@ -214,25 +230,9 @@ impl<'a> Turn<'a> {
                 wrote.await
             }
         };
-        let result = match wrote {
-            Ok(()) => self.turn(&mut thread).await,
+        match wrote {
+            Ok(()) => self.turn(thread).await,
             Err(e) => Err(Stop::Failed(e)),
-        };
-        if let Err(Stop::Python(why)) = &result {
-            tracing::info!("agent: run {} goes to Python: {why}", self.task_id);
-            return self.hand_over();
-        }
-        match self.kind {
-            Kind::Automation(_) => return self.finish_automation(result).await,
-            Kind::Board(_) => return self.finish_board(result).await,
-            Kind::Chat => {}
-        }
-        match result {
-            Ok(()) => self.finish_done(false).await,
-            Err(Stop::Limit) => self.finish_done(true).await,
-            Err(Stop::Cancelled) => self.finish_stopped().await,
-            Err(Stop::Python(_)) => unreachable!("handed over above"),
-            Err(Stop::Failed(e)) => self.finish_failed(e).await,
         }
     }
 
@@ -315,10 +315,10 @@ impl<'a> Turn<'a> {
         };
         let context = match context {
             Ok(c) => c,
-            Err(prompt::NeedsPython(why)) => {
-                // Delivered already: they go into the thread for Python to see.
+            Err(prompt::Unbuilt(why)) => {
+                // Delivered already: they go into the thread, not lost.
                 thread.apply(self.pool(), queued).await.map_err(Stop::Failed)?;
-                return Err(Stop::Python(why.into()));
+                return Err(Stop::Failed(format!("the prompt couldn't be built: {why}")));
             }
         };
 

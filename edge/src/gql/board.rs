@@ -424,8 +424,7 @@ impl BoardTaskMutation {
 
     // Split a standalone waiting task into planner-made subtasks, which
     // become its parents: the original runs last as the synthesis step.
-    // Returns the subtasks as created. A model the edge doesn't call goes to
-    // Python before anything is written.
+    // Returns the subtasks as created. With the agent loop off, Python's.
     async fn decompose_board_task(&self, ctx: &Context<'_>, id: ID) -> Result<Vec<BoardTask>> {
         let (_, raw) = decode_global_id(&id)?;
         let (pool, data) = (ctx.data::<SqlitePool>()?, ctx.data::<EdgeData>()?);
@@ -440,8 +439,8 @@ impl BoardTaskMutation {
         if has_parents.is_some() {
             return Err("task already has dependencies — decompose only standalone tasks".into());
         }
-        if !crate::agent::route::serves_board(pool, task.model.as_deref()).await {
-            return Err(defer("the planner's model is called from Python".into()));
+        if !crate::agent::route::enabled() {
+            return Err(defer("JARVIS_AGENT_RUNTIME=python".into()));
         }
         let model = crate::catalog::resolve_model(pool, task.model.as_deref()).await?;
         let specs = parse_decomposition(&plan(pool, &data.http, &model, &task).await?)?;
@@ -582,7 +581,7 @@ impl BoardTaskMutation {
         sqlx::query("DELETE FROM board_tasks WHERE id = ?").bind(&raw).execute(&mut *tx).await?;
         tx.commit().await?;
         if let Some(t) = teardown {
-            t.finish(data).await;
+            t.finish(&data.kernels).await;
         }
         Ok(true)
     }

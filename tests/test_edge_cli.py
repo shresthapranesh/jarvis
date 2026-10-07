@@ -204,11 +204,23 @@ def test_a_database_that_isnt_there_yet(tmp_path, edge_binary):
         assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0] > 26
 
 
-def test_what_only_python_can_do_goes_to_python(twins, tmp_path):
-    # A catalog only Python loads (or fails to).
+def test_what_python_fails_on_fails_here(twins, tmp_path):
+    """Python dies of these with a traceback; the edge exits the same way,
+    saying why in a line."""
+    def error(*args: str) -> str:
+        proc = subprocess.run([str(twins.binary), *args], cwd=twins.rs, capture_output=True, text=True,
+                              env=_env(twins.rs, {"JARVIS_APP_DIR": str(twins.no_python)}), timeout=120)
+        return proc.stderr
+
+    # A catalog that won't load.
     twins.setting('models.custom', '[{"id": 5}]')
-    python, edge = twins.python("model", "list"), twins.edge("model", "list", handoff=True)
-    assert (edge.code, edge.out) == (python.code, python.out)
+    assert twins.same("model", "list") == Out(1, "")
+    assert "the models.custom setting has a malformed row (model id 5)" in error("model", "list")
+    twins.setting('models.custom', '[]')
+    # A file that isn't UTF-8 text.
+    (tmp_path / "bad.md").write_bytes(b"\xff\xfe")
+    assert twins.same("memory", "set", str(tmp_path / "bad.md")) == Out(1, "")
+    assert "bad.md isn't UTF-8 text" in error("memory", "set", str(tmp_path / "bad.md"))
 
 
 @pytest.fixture

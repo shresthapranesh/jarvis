@@ -46,6 +46,13 @@ pub fn is_builtin(id: &str) -> bool {
 #[derive(Debug)]
 pub struct Malformed(pub String);
 
+impl Malformed {
+    /// The error a command fails with.
+    pub fn message(&self) -> String {
+        format!("the models.custom setting has a malformed row ({}) — fix or delete it with `config set models.custom`", self.0)
+    }
+}
+
 /// `load_model_catalog`: the operator's default, and the built-ins followed by
 /// the custom models, deduplicated by id (first wins).
 pub async fn catalog(pool: &SqlitePool) -> sqlx::Result<Result<(String, Vec<Spec>), Malformed>> {

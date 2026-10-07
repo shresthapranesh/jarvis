@@ -321,7 +321,7 @@ impl ConversationMutation {
         let teardown = delete_conversation(&mut tx, &raw, &data.artifacts_dir).await?;
         tx.commit().await?;
         if let Some(t) = teardown {
-            t.finish(data).await;
+            t.finish(&data.kernels).await;
         }
         Ok(true)
     }
@@ -339,7 +339,7 @@ impl ConversationMutation {
         let teardown = delete_conversation(&mut tx, &raw, &data.artifacts_dir).await?;
         tx.commit().await?;
         if let Some(t) = teardown {
-            t.finish(data).await;
+            t.finish(&data.kernels).await;
         }
         Ok(true)
     }
@@ -362,7 +362,7 @@ pub struct Teardown {
 }
 
 impl Teardown {
-    pub async fn finish(self, data: &super::EdgeData) {
+    pub async fn finish(self, kernels: &crate::kernels::Kernels) {
         for path in &self.files {
             if let Err(e) = std::fs::remove_file(path) {
                 if e.kind() != std::io::ErrorKind::NotFound {
@@ -381,7 +381,7 @@ impl Teardown {
                 }
             }
         }
-        data.kernels.shutdown(&self.conversation_id).await;
+        kernels.shutdown(&self.conversation_id).await;
     }
 }
 

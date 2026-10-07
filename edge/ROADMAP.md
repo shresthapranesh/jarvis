@@ -72,12 +72,12 @@ gone, before `server/` can be deleted.
   → `Plan::Python`): Python words Pydantic's error to the model. The workers
   already word these themselves (`workers.rs`); do the same for the main
   agent's tools — M
-- [ ] Prompt context the edge can't build (`prompt::NeedsPython`):
-  `system_prompt.md` unreadable, a context read failing (fail the turn), an
-  https CDP endpoint (probe it in Rust) — S
-- [ ] A job the edge can't start: an unreadable thread, a chat job without its
+- [x] Prompt context the edge can't build: `system_prompt.md` unreadable or a
+  context read failing fails the turn (`prompt::Unbuilt`); an https CDP
+  endpoint is probed in Rust — S
+- [x] A job the edge can't start: an unreadable thread, a chat job without its
   payload, an automation of an input type it doesn't know, an error preparing
-  a board or workflow run (`agent/mod.rs`, `workflow/mod.rs`) — fail the run — S
+  a board or workflow run — fails the run (`Agent::fail_start`, `queue::fail`) — S
 
 **GraphQL the edge defers** (`gql::defer`, 58 sites; `graphql.rs`)
 
@@ -85,34 +85,40 @@ gone, before `server/` can be deleted.
   a malformed `models.custom` row, values `agentMemory` would coerce, a provider
   listing `modelSync` can't read, a context window GraphQL can't carry — word
   them in Rust — M
-- [ ] State only a Python run holds: a paused Python workflow, a gate or a
-  browsing run of a Python worker (`approval.rs`, `mcp.rs`, `browser.rs`) — no
-  such runs once Python is gone; delete the checks — S
-- [ ] A model the edge doesn't call (consolidation, project memory, the board
-  planner, `run` in the CLI): with every provider ported, only Bedrock with
-  boto3-only credentials is left; embedding failures in memory writes — fail
-  with the error — S
+- [x] State only a Python run holds: an answer to a request no live run waits
+  on is expired here, with Python's "no longer waiting". What's left — the
+  `run.claimed()` checks in `approval.rs`, `mcp.rs`, `browser.rs` — is reached
+  only through a linked worker's run, so it goes with the worker link — S
+- [x] A model the edge doesn't call (consolidation, project memory, the board
+  planner, `run` in the CLI, runs): every run is routed to the edge and a
+  model it can't call fails with the reason; embedding failures in memory
+  writes fail the write — S
 - [ ] AWS credential sources only boto3 reads (assume-role, SSO, web identity,
   `credential_process`, a container role) — for `modelSync` and Bedrock turns:
   port the ones worth having, declare the rest unsupported — decision, M–L
-- [ ] Requests the router won't take: batched arrays, multipart or non-JSON
+- [x] Requests the router won't take: batched arrays, multipart or non-JSON
   bodies, a field or argument that fails validation, a deferring field beside
-  others — answer with a GraphQL error instead of proxying — S
+  others — Strawberry's 400s in its words, executing's errors, a refusal for
+  the deferring field — S
 
 **Startup work only Python does** (`server/entrypoint.py` lifespan)
 
-- [ ] The incognito sweep: conversations a crash left behind
-  (`sweep_ephemeral_conversations`) — S
-- [ ] After an edge crash, check the edge's own run rows (messages, automation
-  and workflow runs still `running`) and the approvals its runs held:
-  `agent::queue::recover` resets only the jobs. Port what Python's zombie sweep
-  and `reconcile_startup` do for them, if a re-claim doesn't already — S–M
+- [x] The incognito sweep: conversations a crash left behind
+  (`sweep_ephemeral_conversations`), at the edge's start with the agent loop
+  on (`agent/sweep.rs`). Python behind the edge still sweeps too, until it goes
+  (with `JARVIS_EDGE_RESPAWN`) — S
+- [x] After an edge crash, the run rows no live job stands behind and the
+  approvals whose waiter died (`cleanup_zombie_running_rows`,
+  `reconcile_startup`), at the edge's start (`agent/sweep.rs`). Not ported:
+  `_backfill_board`, a one-time backfill for tasks blocked before the
+  approvals table existed — S–M
 
 **The command line** (`Fail::Python` → exec `main.py`)
 
-- [ ] A `models.custom` row Python rejects, an `AGENTS.md` row or file that
+- [x] A `models.custom` row Python rejects, an `AGENTS.md` row or file that
   isn't text, a `model sync` deferral, `run` on a model the edge doesn't call —
-  errors in Rust — S
+  errors in Rust. Only `run` with `JARVIS_AGENT_RUNTIME=python` still execs
+  `main.py` — S
 
 **The kernel** (stays Python by design) — what it still imports
 

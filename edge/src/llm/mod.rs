@@ -224,7 +224,7 @@ async fn call(
         }
         other => match ends.compatible.iter().find(|e| e.name == other) {
             Some(ep) => openai_chat::complete(http, &ep.base_url, ep.api_key.as_deref(), provider, name, req, on_delta).await,
-            None => Err(Error::fatal(format!("provider {other} isn't served by the edge yet"))),
+            None => Err(Error::fatal(format!("Unknown provider '{other}' for model '{}'", req.model))),
         },
     }
 }

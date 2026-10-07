@@ -37,9 +37,7 @@ pub async fn complete(
     on_delta: &mut (dyn FnMut(Delta) + Send),
 ) -> Result<Message, Error> {
     let body = render(req)?;
-    let creds = aws::credentials().await.map_err(|e| match e {
-        aws::CredError::Failed(why) | aws::CredError::Unsupported(why) => Error::fatal(why),
-    })?;
+    let creds = aws::credentials().await.map_err(|e| Error::fatal(e.message()))?;
     let region = aws::region();
     let raw = format!("{}/model/{}/converse-stream", aws::endpoint("bedrock-runtime", &region), aws::encode_label(name));
     let url = Url::parse(&raw).map_err(|e| Error::fatal(format!("{raw}: {e}")))?;

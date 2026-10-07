@@ -33,6 +33,7 @@ mod queue;
 pub mod retrieve;
 pub mod route;
 mod summarize;
+mod sweep;
 mod thread;
 pub(crate) mod tools;
 mod turn;
@@ -48,7 +49,7 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 use tokio::sync::Semaphore;
 
-use crate::gql::codec::iso_from_db;
+use crate::gql::codec::{iso_from_db, now_stored};
 use crate::kernels::Kernels;
 use crate::runs::{Meta, Registry, Run};
 use queue::Job;
@@ -80,6 +81,8 @@ pub struct Agent {
 enum Outcome {
     /// Finished here — answered, stopped or failed; the run's rows say which.
     Finished,
+    /// Couldn't begin (`fail_start`): the job fails with this.
+    Failed(String),
     /// Python runs the rest: the job is released to it, carrying the turn so
     /// far (`None`: nothing ran here, Python starts it from the beginning).
     HandOver(Option<Value>),
@@ -108,9 +111,10 @@ impl Agent {
         })
     }
 
-    /// Recover what a previous edge left, then claim and run edge jobs until
-    /// the process ends. With the agent loop off, only the recovery: every
-    /// edge job goes to Python.
+    /// Recover what a previous edge left and sweep up what a crash left
+    /// behind (`sweep.rs`), then claim and run edge jobs until the process
+    /// ends. With the agent loop off, only the recovery: every edge job goes
+    /// to Python, whose start sweeps.
     pub async fn run(self: Arc<Self>) {
         let serving = route::enabled();
         match queue::recover(&self.pool, serving).await {
@@ -125,6 +129,8 @@ impl Agent {
         if !serving {
             return;
         }
+        // Before the first claim: a run claimed now is no zombie.
+        sweep::run(&self.pool, &self.kernels, &self.artifacts_dir).await;
         loop {
             // A slot before the claim: a claimed job's lock is ticking.
             let Ok(slot) = self.slots.clone().acquire_owned().await else { return };
@@ -171,6 +177,10 @@ impl Agent {
                 Ok(_) => self.runs.wake(),
                 Err(e) => tracing::error!("agent: completing job {}: {e}", job.id),
             },
+            Outcome::Failed(error) => match queue::fail(&self.pool, &job.id, &self.worker, &error).await {
+                Ok(_) => self.runs.wake(),
+                Err(e) => tracing::error!("agent: failing job {}: {e}", job.id),
+            },
             Outcome::HandOver(carried) => self.hand_over(&job, Some(&run), carried).await,
         }
     }
@@ -185,10 +195,7 @@ impl Agent {
         }
         match turn::Turn::chat(self, job, run.clone()) {
             Some(turn) => turn.run().await,
-            None => {
-                tracing::warn!("agent: job {} has no chat payload; handing it to Python", job.id);
-                Outcome::HandOver(None)
-            }
+            None => self.fail_start(job, run, "the chat job has no query, model or conversation".into()).await,
         }
     }
 
@@ -202,24 +209,17 @@ impl Agent {
                 self.end(run, "error");
                 return Outcome::Finished;
             }
-            Ok(automation::Prepared::Python) => return Outcome::HandOver(None),
-            Err(e) => {
-                tracing::warn!("agent: preparing automation run {}: {e}; handing it to Python", job.id);
-                return Outcome::HandOver(None);
-            }
+            Err(e) => return self.fail_start(job, run, format!("preparing the run: {e}")).await,
         };
-        if spec.input_type == "code" || spec.input_type == "webhook" {
-            let end = if spec.input_type == "code" {
-                automation::run_code(&spec, run).await
-            } else {
-                automation::run_webhook(&spec, run).await
+        if spec.input_type != "prompt" && spec.input_type != "monitor" {
+            let end = match spec.input_type.as_str() {
+                "code" => automation::run_code(&spec, run).await,
+                "webhook" => automation::run_webhook(&spec, run).await,
+                other => automation::End::Failed(format!("Unknown input_type: {other}")),
             };
             let status = automation::finish(&self.pool, run, &spec, end).await;
             self.end(run, status);
             return Outcome::Finished;
-        }
-        if !route::serves_model(&self.pool, &spec.model).await {
-            return Outcome::HandOver(None);
         }
         if spec.stateful && automation::sibling_running(&self.pool, &spec).await.unwrap_or(false) {
             let skip = "skipped: a previous run of this stateful automation is still in flight";
@@ -242,17 +242,10 @@ impl Agent {
                 self.end(run, "done");
                 return Outcome::Finished;
             }
-            Err(e) => {
-                tracing::warn!("agent: preparing board run {}: {e}; handing it to Python", job.id);
-                return Outcome::HandOver(None);
-            }
+            Err(e) => return self.fail_start(job, run, format!("preparing the run: {e}")).await,
         };
-        if !route::serves_model(&self.pool, &spec.model).await {
-            return Outcome::HandOver(None);
-        }
         if let Err(e) = board::claim(&self.pool, &spec).await {
-            tracing::warn!("agent: claiming board task {}: {e}; handing it to Python", spec.task_id);
-            return Outcome::HandOver(None);
+            return self.fail_start(job, run, format!("claiming the task: {e}")).await;
         }
         turn::Turn::board(self, job, run.clone(), spec).run().await
     }
@@ -278,6 +271,58 @@ impl Agent {
                 run.update(|st| st.fields.cancelled = true);
             }
         }
+    }
+
+    /// A run that couldn't begin — what Python's handler raising came to,
+    /// without its row left `running`: the row records the error, the run
+    /// ends `error`, and the job fails.
+    async fn fail_start(&self, job: &Job, run: &Arc<Run>, error: String) -> Outcome {
+        tracing::warn!("agent: {} run {} couldn't start: {error}", job.kind, job.id);
+        let now = now_stored();
+        let written = match job.kind.as_str() {
+            "chat" => {
+                sqlx::query("UPDATE messages SET content = ?, status = 'error' WHERE id = ? AND status = 'running'")
+                    .bind(format!("The run failed before completing: {error}"))
+                    .bind(&job.id)
+                    .execute(&self.pool)
+                    .await
+            }
+            "automation" | "workflow" => {
+                let table = if job.kind == "workflow" { "workflow_runs" } else { "automation_runs" };
+                sqlx::query(&format!(
+                    "UPDATE {table} SET status = 'error', error = ?, finished_at = ? WHERE id = ? \
+                     AND status IN ('pending', 'running')"
+                ))
+                .bind(&error)
+                .bind(&now)
+                .bind(&job.id)
+                .execute(&self.pool)
+                .await
+            }
+            // As a failed run of it leaves it: blocked on the error.
+            _ => {
+                sqlx::query(
+                    "UPDATE board_tasks SET status = 'blocked', blocked_reason = ?, blocked_kind = 'error', \
+                     failure_count = failure_count + 1, finished_at = ?, updated_at = ? WHERE job_id = ? AND status = 'running'",
+                )
+                .bind(format!("error: {error}"))
+                .bind(&now)
+                .bind(&now)
+                .bind(&job.id)
+                .execute(&self.pool)
+                .await
+            }
+        };
+        if let Err(e) = written {
+            tracing::error!("agent: recording run {}'s failure: {e}", job.id);
+        }
+        if job.kind == "workflow" {
+            run.emit_local("workflow_error", &serde_json::json!({"error": error, "run_id": job.id}));
+        } else {
+            run.emit_local("error", &serde_json::json!({"error": error}));
+        }
+        self.end(run, "error");
+        Outcome::Failed(error)
     }
 
     /// `finish_task_state` for a run that ended before its turn began.

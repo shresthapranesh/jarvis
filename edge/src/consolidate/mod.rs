@@ -13,9 +13,9 @@
 //! Python in `tests/test_edge_loop.py`.
 //!
 //! Both read the messages table past a watermark kept in `kv_store`, call
-//! the model once per batch (`llm::ask`), and write rows. The edge runs them
-//! when it calls the model (`served`); otherwise they are Python's, as
-//! before — a queued `maintenance` job, or the mutation proxied.
+//! the model once per batch (`llm::ask`), and write rows. With the agent
+//! loop off (`JARVIS_AGENT_RUNTIME=python`) they are Python's — a queued
+//! `maintenance` job, or the mutation proxied.
 
 pub mod dedupe;
 pub mod memory;
@@ -24,17 +24,6 @@ pub mod project;
 use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
 use serde_json::Value;
 use sqlx::SqlitePool;
-
-/// Whether the edge runs a pass on this model (`None`: the default): the
-/// agent runtime is on and the model's provider is one the edge calls.
-/// No tools are bound, so a configured MCP server doesn't matter.
-pub async fn served(pool: &SqlitePool, model: Option<&str>) -> Option<String> {
-    if !crate::agent::route::enabled() {
-        return None;
-    }
-    let model = crate::catalog::resolve_model(pool, model).await.ok()?;
-    crate::agent::route::calls_model(pool, &model).await.then_some(model)
-}
 
 /// One maintenance sweep by name, as `MAINTENANCE_TASKS` runs it: the
 /// summary Python logs.

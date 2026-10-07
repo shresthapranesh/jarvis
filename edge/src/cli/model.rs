@@ -117,7 +117,7 @@ pub async fn run(pool: &SqlitePool, cmd: Cmd) -> Done {
 
 /// The catalog as `hydrate_catalog` loads it: the default and every model.
 async fn loaded(pool: &SqlitePool) -> Result<(String, Vec<Spec>), Fail> {
-    catalog::catalog(pool).await?.map_err(|e| Fail::Python(format!("models.custom: {}", e.0)))
+    catalog::catalog(pool).await?.map_err(|e| Fail::Error(e.message()))
 }
 
 /// Every provider a model id may name — `known_providers()` — or every one
@@ -147,7 +147,7 @@ async fn add(pool: &SqlitePool, model_id: String, label: String, provider: Optio
     }
     let mut tx = crate::db::write_tx(pool).await?;
     let mut rows = custom_rows(&mut tx).await?;
-    add_custom(&mut rows, &model_id, &label, &prov, window).map_err(|e| Fail::Python(e.message))?;
+    add_custom(&mut rows, &model_id, &label, &prov, window).map_err(|e| Fail::Error(e.message))?;
     put_custom(&mut tx, rows).await?;
     tx.commit().await?;
     let win = match window {
@@ -159,8 +159,8 @@ async fn add(pool: &SqlitePool, model_id: String, label: String, provider: Optio
     Ok(0)
 }
 
-/// One provider's findings, gathered before any is printed: what only Python
-/// can answer must be found out before the output starts.
+/// One provider's findings, gathered before any is printed: a provider that
+/// fails the sync must be found out before the output starts.
 enum Finding {
     Skipped(String),
     Report { offered: usize, report: discovery::Report, unreachable: Vec<(String, String)> },
@@ -195,7 +195,7 @@ async fn sync(pool: &SqlitePool, specs: &[Spec], provider: Option<String>, probe
                 findings.push(Finding::Skipped(why));
                 continue;
             }
-            Err(discovery::Fail::Defer(why)) => return Err(Fail::Python(format!("model sync {prov}: {why}"))),
+            Err(discovery::Fail::Defer(why)) => return Err(Fail::Error(format!("model sync {prov}: {why}"))),
         };
         let report = discovery::build_report(prov, specs, &found);
         let mut unreachable = vec![];
@@ -205,7 +205,7 @@ async fn sync(pool: &SqlitePool, specs: &[Spec], provider: Option<String>, probe
                     Ok(Ok(())) => {}
                     Ok(Err(why)) => unreachable.push((spec.id.clone(), why)),
                     Err(discovery::Fail::Skip(why) | discovery::Fail::Defer(why)) => {
-                        return Err(Fail::Python(format!("probing {}: {why}", spec.id)));
+                        return Err(Fail::Error(format!("probing {}: {why}", spec.id)));
                     }
                 }
             }

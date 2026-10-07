@@ -16,22 +16,13 @@ impl BrowserQuery {
     /// Never fails, and never launches a browser: a page load must not open
     /// a window.
     async fn browser_available(&self, ctx: &Context<'_>) -> Result<bool> {
-        let pool = ctx.data::<SqlitePool>()?;
-        match reachable(pool, &ctx.data::<EdgeData>()?.http).await {
-            Some(up) => Ok(up),
-            None => Err(super::defer(format!("browserAvailable: {} isn't plain http", cdp_url(pool).await))),
-        }
+        Ok(reachable(ctx.data::<SqlitePool>()?, &ctx.data::<EdgeData>()?.http).await)
     }
 }
 
-/// `_endpoint_live(cdp_url())`, or `None` when the endpoint isn't plain
-/// http — the edge speaks no TLS; Python's probe does.
-pub async fn reachable(pool: &SqlitePool, http: &reqwest::Client) -> Option<bool> {
-    let url = cdp_url(pool).await;
-    if !url.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://")) {
-        return None;
-    }
-    Some(crate::browser::endpoint_live(http, &url).await)
+/// `_endpoint_live(cdp_url())`.
+pub async fn reachable(pool: &SqlitePool, http: &reqwest::Client) -> bool {
+    crate::browser::endpoint_live(http, &cdp_url(pool).await).await
 }
 
 /// `browserActivity` (`mutations/browser.py` — change both): the kernel's

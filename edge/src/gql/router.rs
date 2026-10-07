@@ -20,10 +20,16 @@ use super::node::NODE_TYPES;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Decision {
+    /// The edge executes it — a parse or validation error included, which
+    /// executing reports as Python does.
     Edge,
     /// Why Python gets it — logged at debug, so a field that's expected to be
     /// ported but isn't is easy to spot.
     Backend(String),
+    /// Refused before execution with a 400, in Strawberry's words.
+    BadRequest(String),
+    /// Answered with this GraphQL error.
+    Refused(String),
 }
 
 /// Root fields the edge's schema defines, per operation type.
@@ -96,25 +102,26 @@ pub fn decide(
     caller: Caller,
     link_up: bool,
 ) -> Decision {
-    let doc = match parse_query(query) {
-        Ok(doc) => doc,
-        // Python owns the error message for a malformed document.
-        Err(_) => return Decision::Backend("unparseable".into()),
-    };
+    let Ok(doc) = parse_query(query) else { return Decision::Edge };
     let Some(op) = select_operation(&doc, operation_name) else {
-        return Decision::Backend("operation not found".into());
+        return match operation_name {
+            Some(name) => Decision::BadRequest(format!("Unknown operation named \"{name}\".")),
+            // Several operations, none named: executing says so.
+            None => Decision::Edge,
+        };
     };
     let fields = match op.ty {
         OperationType::Query => &owned.query,
         OperationType::Mutation => &owned.mutation,
-        // Over HTTP; the edge serves subscriptions on its WebSocket.
-        OperationType::Subscription => return Decision::Backend("subscription".into()),
+        // Over HTTP, where executing refuses it; subscriptions are served
+        // on the WebSocket.
+        OperationType::Subscription => return Decision::Edge,
     };
     let walk = Walk { owned: fields, doc: &doc, variables, caller, link_up };
     let roots = walk.root_fields(&op.selection_set.node);
     if roots.len() > 1 {
         if let Some(name) = roots.iter().find(|n| DEFERRING_FIELDS.contains(&n.as_str())) {
-            return Decision::Backend(format!("{name} beside other fields"));
+            return Decision::Refused(format!("{name} must be the only field in its operation"));
         }
     }
     match walk.check(&op.selection_set.node) {
@@ -123,9 +130,12 @@ pub fn decide(
     }
 }
 
+/// `get_operation_ast`: the named operation, or the only one when none is named.
 fn select_operation<'a>(doc: &'a ExecutableDocument, name: Option<&str>) -> Option<&'a OperationDefinition> {
     match (&doc.operations, name) {
-        (DocumentOperations::Single(op), _) => Some(&op.node),
+        // Anonymous: a name doesn't match it.
+        (DocumentOperations::Single(op), None) => Some(&op.node),
+        (DocumentOperations::Single(_), Some(_)) => None,
         (DocumentOperations::Multiple(ops), Some(name)) => ops.get(name).map(|op| &op.node),
         // The parser files a lone *named* operation under Multiple too.
         (DocumentOperations::Multiple(ops), None) if ops.len() == 1 => ops.values().next().map(|op| &op.node),
@@ -203,8 +213,6 @@ impl Walk<'_> {
             "deleteWorkflow" | "deleteSkill" | "deleteAutomation" if self.caller == Caller::Agent => {
                 Err(format!("{name} by the agent is approval-gated"))
             }
-            // Python refuses a human's; its error is Python's to word.
-            "requestToolApproval" | "browserActivity" if self.caller != Caller::Agent => Err(format!("{name} by a human")),
             _ => Ok(()),
         }
     }
@@ -247,15 +255,27 @@ mod tests {
     }
 
     #[test]
-    fn unowned_mutations_subscriptions_and_introspection_go_to_backend() {
+    fn unowned_mutations_and_introspection_go_to_backend() {
         for q in [
             "mutation { startTask(input: {query: \"x\"}) { taskId } }",
             "mutation { createProject(input: {name: \"a\"}) { id } startTask(input: {query: \"x\"}) { taskId } }",
-            "subscription { taskEvents(taskId: \"x\") { __typename } }",
             "{ __schema { types { name } } }",
         ] {
             assert!(matches!(decide_h(q, json!({})), Decision::Backend(_)), "{q}");
         }
+    }
+
+    #[test]
+    fn malformed_requests_are_answered_here() {
+        // Executing reports these, as Python does.
+        assert_eq!(decide_h("{ conversations ", json!({})), Decision::Edge);
+        assert_eq!(decide_h("subscription { taskEvents(taskId: \"x\") { __typename } }", json!({})), Decision::Edge);
+        assert_eq!(decide_h("query A { conversations { id } } query B { projects { id } }", json!({})), Decision::Edge);
+        // Strawberry's 400.
+        let q = "query A { conversations { id } }";
+        assert_eq!(decide(&owned(), q, Some("B"), &json!({}), Caller::Human, true), Decision::BadRequest("Unknown operation named \"B\".".into()));
+        let anonymous = "{ conversations { id } }";
+        assert!(matches!(decide(&owned(), anonymous, Some("A"), &json!({}), Caller::Human, true), Decision::BadRequest(_)));
     }
 
     #[test]
@@ -269,7 +289,7 @@ mod tests {
         let alone = "mutation { resolveApproval(id: \"a\", answer: \"y\") { id } }";
         let both = "mutation { createProject(input: {name: \"a\"}) { id } resolveApproval(id: \"a\", answer: \"y\") { id } }";
         assert_eq!(decide(&owned, alone, None, &json!({}), Caller::Human, true), Decision::Edge);
-        assert!(matches!(decide(&owned, both, None, &json!({}), Caller::Human, true), Decision::Backend(_)));
+        assert!(matches!(decide(&owned, both, None, &json!({}), Caller::Human, true), Decision::Refused(_)));
     }
 
     #[test]

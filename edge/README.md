@@ -55,14 +55,23 @@ is defined in the edge's schema. The schema reads its root fields back from its
 own SDL, so the routing table can't drift from the code. Everything else goes
 to Python:
 
-- subscriptions and the mutations not yet ported,
+- the queries and mutations not yet ported,
 - introspection,
-- `node(id:)` when the id names a type the edge can't resolve,
-- any operation that fails the edge's validation, e.g. it selects a field on an
-  owned type that isn't ported. Logged at warn, because it means a type was
-  only partly ported.
+- `node(id:)` when the id names a type the edge can't resolve.
 
 Splitting one operation across both servers is never attempted.
+
+A request that isn't a well-formed operation is answered here, never
+proxied (`graphql.rs`, `gql/router.rs`): what Strawberry refuses before
+executing gets its 400 and its words — a body that isn't JSON or isn't sent
+as `application/json` (multipart included: uploads aren't enabled), a batch
+("Batching is not enabled"), a `query`, `variables` or `extensions` of the
+wrong type, no query, an `operationName` naming no operation. A parse or
+validation error is executing's, as in Python — every type under an owned
+root field is ported whole, so it is the request's error — and so is a
+subscription sent over HTTP. A field that may defer (`DEFERRING_FIELDS`)
+beside another is refused with a GraphQL error: deferring re-runs the whole
+operation in Python, which would write the others twice.
 
 ## The worker link (`/internal/worker`)
 
@@ -155,10 +164,9 @@ Python behind the edge (`JARVIS_EDGE_URL` set — `core/edge_link.py:behind_edge
 registers none of these, nor the idle-kernel reaper: the kernels are the
 edge's too (see "The kernels"). Its `dispatch_board_tasks()` sends `dispatch` instead of claiming
 cards itself, `_register_scheduler_job` / `_remove_scheduler_job` send
-`schedules`. The memory sweeps run in the edge when it calls the default
-model (`consolidate::served`: the agent loop on, a provider it speaks);
-otherwise they are queued as `maintenance` jobs for Python's worker
-(`core/scheduler.py:MAINTENANCE_TASKS`), as before. The decision is configuration, not
+`schedules`. The memory sweeps run in the edge unless the agent loop is off
+(`JARVIS_AGENT_RUNTIME=python`); then they are queued as `maintenance` jobs
+for Python's worker (`core/scheduler.py:MAINTENANCE_TASKS`), as before. The decision is configuration, not
 link state, so a reconnecting link can't leave both sides firing.
 
 - **Cron is APScheduler's, not a library's.** `cron.rs` ports
@@ -263,8 +271,8 @@ get a 503 naming the reason.
 `proxy.rs:python_get_route`, checked against the app's route table by the
 tests), `/health`, and the queries the chat page makes — `models`, `todos`
 and `browserAvailable`. A resolver that meets data only Python reads
-faithfully (a checkpoint in another encoding, an https CDP endpoint, a
-`models.custom` row Python itself would fail on) returns an `edgeDefer` error,
+faithfully (a `models.custom` row Python itself would fail on) returns an
+`edgeDefer` error,
 and `graphql.rs` answers the whole operation in Python instead.
 
 ## The kernels (`src/kernels/`)
@@ -440,15 +448,19 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 - **Events and steps** (`events.rs`): tokens batched as `TokenCoalescer`
   does, each step's row written before its event.
 
-- **Routing** (`route.rs`), when a turn or automation run is queued
-  (`startTask`, `triggerAutomation`, a schedule firing): unless
-  `JARVIS_AGENT_RUNTIME=python`, a turn on a provider the LLM layer speaks
-  (Anthropic, Bedrock, Google, Ollama, OpenRouter, Meta, an OpenAI-compatible endpoint) is the
-  edge's — for an
-  automation, a code or webhook one, or a prompt or monitor one on such a
-  model; for a board task (at dispatch), one on such a model: its job gets
-  `runtime = 'edge'` and its run is mirrored as the edge's own. Everything
-  else is Python's, as before.
+- **Routing** (`route.rs`), when a run is queued (`startTask`,
+  `triggerAutomation`, `runWorkflow`, a schedule firing, a board dispatch):
+  unless `JARVIS_AGENT_RUNTIME=python`, every chat turn, automation run,
+  workflow run and board task is the edge's — its job gets `runtime = 'edge'`
+  and its run is mirrored as the edge's own. A model the edge can't call
+  (Bedrock with credentials only boto3 reads, a provider nobody configured)
+  fails the run with the reason, as a model Python can't call fails there.
+- **A run that can't start** — a chat job without its payload, an
+  unreadable thread, an automation of an unknown input type (failed as
+  Python's handler fails it), a row or task the database won't give up —
+  fails: its row records the error, the run ends `error`, and so does its job
+  (`Agent::fail_start`, `queue::fail`). So does a prompt that can't be built
+  (`prompt::Unbuilt`: `system_prompt.md` unreadable, a context read failing).
 - **Claiming** (`queue.rs`) is `SqliteJobQueue._claim` plus `runtime =
   'edge'`, under the same thread lease, so a conversation's turns still run
   one at a time whichever side runs each. The lock is renewed at a third of
@@ -462,8 +474,8 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   carries `payload.handoff = {text, step_seq, steps, usage}`: Python then
   runs the tool calls the edge recorded but didn't run, and goes on from
   there (`chat_job_handler`), its text, step rows and spend continuing the
-  edge's. A turn goes over when its next step needs what only Python has:
-  arguments that aren't plainly valid.
+  edge's. A turn goes over only when its next step needs what only Python
+  has: arguments that aren't plainly valid.
 - **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
   roles in `core/agents.py` — change both): `spawn_workers` runs its tasks at
   once, each on the run's model with its role's prompt and tools (the file
@@ -489,17 +501,17 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   of a workflow, automation or skill runs here before the row closes, so a
   failure leaves it answerable; so does an approved MCP call, through the
   edge's MCP client), and a request a workflow the edge runs is paused on. A
-  workflow Python runs, paused on a future, or a gate a worker's run
-  is waiting on, is deferred to Python before anything is written — which is
-  why it's owned only alone in an operation. `requestToolApproval`, the
+  workflow a linked worker runs, paused on a future, or a gate a worker's
+  run is waiting on, is deferred to Python before anything is written —
+  which is why it's owned only alone in an operation. A request no live run
+  is waiting on is closed `expired` with Python's "no longer waiting". `requestToolApproval`, the
   SDK's request from a kernel, is the edge's on the same terms.
   Throughput measured before a handover isn't carried.
 - **Workflows** (`src/agent/workflow/`, ports of `workflow/engine.py`,
   `workflow/nodes.py`, `core/workflow_template.py`,
   `server/workflow_runtime.py` and `tools/workflows.py:run_workflow` — change
-  both): `runWorkflow` queues an edge job when the loop is on and every model
-  the graph can call (each node's, the default, a map's saved workflow's) is
-  one the edge calls (`workflow::served`). The engine runs the graph in
+  both): `runWorkflow` queues an edge job when the loop is on. The engine
+  runs the graph in
   frontiers, prunes a conditional's or router's unchosen branches, and gives
   each node its retries, timeout and `on_error`; templates are Jinja
   (minijinja, printing values as Python's `str()` does, with Python's
@@ -522,7 +534,15 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   not diffed).
 - **Recovery**: at start the edge re-queues its jobs a previous edge left
   running; with the loop off, it hands every live edge job to Python. Python
-  running without the edge adopts them (`db/ops.py:adopt_edge_jobs`).
+  running without the edge adopts them (`db/ops.py:adopt_edge_jobs`). Then
+  it sweeps what a crash left behind (`sweep.rs`, ports of Python's startup
+  sweeps — change both): a message, automation run or workflow run still
+  `running` with no live job is an error, a board task `running` with none
+  is `ready` again (`cleanup_zombie_running_rows`); a pending tool gate or
+  paused node whose waiter died is `expired`, unless a linked Python's live
+  run holds it (`reconcile_startup`); and incognito conversations no live
+  chat job belongs to are deleted (`sweep_ephemeral_conversations`). Only
+  with the loop on: off, Python runs every run, and its own start sweeps.
 
 Tested in `tests/test_edge_agent.py` (routing, the queue, the handover's
 Python side) and `tests/test_edge_loop.py`, which runs scripted turns
@@ -620,11 +640,12 @@ their raw flags and skip it.
   memory (`agent::workflow::run_once`, the workflow agent node's loop, last
   reply returned): no conversation, its own kernel, shut down after; the
   prompt is read from `JARVIS_APP_DIR`.
-- **Python when only Python can.** These run the same command through
-  `$JARVIS_APP_DIR/main.py` (exec'd, before anything is written): a
-  `models.custom` row Python would refuse to load; a provider listing or a
-  probe `modelSync` would defer (credentials only boto3 reads); `run` on a
-  model the edge doesn't call, or with `JARVIS_AGENT_RUNTIME=python`. Every
+- **Python only for its agent loop.** `run` with `JARVIS_AGENT_RUNTIME=python`
+  runs through `$JARVIS_APP_DIR/main.py` (exec'd). Everything else the edge
+  answers itself, failing with the reason where Python would have answered
+  something: a `models.custom` row that won't load, a provider listing or
+  probe it can't read (credentials only boto3 reads), an `AGENTS.md` row or
+  file that isn't text; `run` on a model it can't call fails the call. Every
   command first creates or migrates the database (`schema.rs`), as
   `main.py`'s `init_db` does, and `memory *` copies the LangGraph store
   over first, once, as `main.py` does.
@@ -687,8 +708,8 @@ their raw flags and skip it.
 
 1. Port the type and its query resolvers under `src/gql/`, and add the query
    object to `Query` in `src/gql/mod.rs`. Port **every** field of a type: a
-   partly ported type makes owned operations fail validation and fall back on
-   every call.
+   partly ported type makes owned operations fail validation, and the edge
+   answers that failure itself.
 2. If the type is a Relay `Node`, add it to `Node` and `NODE_TYPES` in
    `src/gql/node.rs`.
 3. Add the frontend operations that are now owned to `PARITY_OPERATIONS` in

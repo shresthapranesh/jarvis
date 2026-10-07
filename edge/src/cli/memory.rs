@@ -50,7 +50,7 @@ pub async fn run(pool: &SqlitePool, checkpoints_db: &Path, cmd: Cmd) -> Done {
             let content = match value.get("content") {
                 None => String::new(),
                 Some(Value::String(s)) => s.clone(),
-                Some(_) => return Err(Fail::Python("AGENTS.md content isn't text".into())),
+                Some(_) => return Err(Fail::Error("the stored AGENTS.md content isn't text".into())),
             };
             println!("{}\n", dim(&format!("Updated: {} ({} chars)", py_datetime(&updated_at), pystr::len(&content))));
             println!("{}", cyan("── AGENTS.md ──"));
@@ -78,7 +78,7 @@ pub async fn run(pool: &SqlitePool, checkpoints_db: &Path, cmd: Cmd) -> Done {
             }
             let bytes = std::fs::read(&file).map_err(|e| Fail::Error(format!("{}: {e}", file.display())))?;
             // `read_text(encoding="utf-8")`: strict, with universal newlines.
-            let text = String::from_utf8(bytes).map_err(|_| Fail::Python(format!("{} isn't UTF-8", file.display())))?;
+            let text = String::from_utf8(bytes).map_err(|_| Fail::Error(format!("{} isn't UTF-8 text", file.display())))?;
             let content = text.replace("\r\n", "\n").replace('\r', "\n");
             if pystr::strip(&content).is_empty() {
                 println!("{} Use 'memory reset' instead.", red("Refusing to set an empty memory entry."));
@@ -107,7 +107,7 @@ async fn get(pool: &SqlitePool) -> Result<Option<(Value, String)>, Fail> {
     let Some((raw, updated_at)) = row else { return Ok(None) };
     match serde_json::from_str::<Value>(&raw) {
         Ok(value @ Value::Object(_)) => Ok(Some((value, updated_at))),
-        _ => Err(Fail::Python("the AGENTS.md row isn't a JSON object".into())),
+        _ => Err(Fail::Error("the stored AGENTS.md entry isn't a JSON object".into())),
     }
 }
 

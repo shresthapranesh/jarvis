@@ -121,6 +121,23 @@ pub async fn complete(pool: &SqlitePool, id: &str, worker: &str) -> sqlx::Result
     Ok(r.rows_affected() == 1)
 }
 
+/// `fail` with no retry: the job ends `error`, and its thread's lease is free.
+pub async fn fail(pool: &SqlitePool, id: &str, worker: &str, error: &str) -> sqlx::Result<bool> {
+    let now = now_stored();
+    let r = sqlx::query(
+        "UPDATE jobs SET status = 'error', last_error = ?, completed_at = ?, locked_by = NULL, locked_until = NULL, \
+         updated_at = ? WHERE id = ? AND status = 'running' AND locked_by = ?",
+    )
+    .bind(error)
+    .bind(&now)
+    .bind(&now)
+    .bind(id)
+    .bind(worker)
+    .execute(pool)
+    .await?;
+    Ok(r.rows_affected() == 1)
+}
+
 /// Hand the job to Python: pending again, `runtime` cleared, so a Python
 /// worker claims it next. `handoff` — what the turn carried, when the edge
 /// had started it — goes into the payload for `chat_job_handler`; without it

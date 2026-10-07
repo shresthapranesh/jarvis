@@ -71,7 +71,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         let thread_id = Uuid::new_v4().to_string();
         let retrieved = prompt::retrieved(pool, &agent.http, query, &thread_id, &mcp)
             .await
-            .map_err(|prompt::NeedsPython(why)| format!("the agent's prompt couldn't be built: {why}"))?;
+            .map_err(|prompt::Unbuilt(why)| format!("the agent's prompt couldn't be built: {why}"))?;
         let ends = Endpoints { compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(), ..Endpoints::from_env() };
         Ok(NodeAgent {
             env,
@@ -118,7 +118,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         let pool = &self.env.agent.pool;
         let context = prompt::build(pool, &self.query, None, &self.todos, &self.retrieved)
             .await
-            .map_err(|prompt::NeedsPython(why)| format!("the agent's prompt couldn't be built: {why}"))?;
+            .map_err(|prompt::Unbuilt(why)| format!("the agent's prompt couldn't be built: {why}"))?;
         let provider = self.model.split_once(':').map_or("", |(p, _)| p);
         let layout = Layout {
             system: &context.system,

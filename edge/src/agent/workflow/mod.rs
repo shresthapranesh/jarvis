@@ -4,9 +4,8 @@
 //! (`serve` here) and `tools/workflows.py:run_workflow` (`Call`) — a change
 //! to either side is made in both.
 //!
-//! A run triggered while the edge's agent loop is on, and every model its
-//! graph names is one the edge calls (`served`), is queued as an edge job
-//! and run here start to finish. A paused node waits on its `approvals` row,
+//! A run triggered while the edge's agent loop is on is queued as an edge
+//! job and run here start to finish. A paused node waits on its `approvals` row,
 //! which the edge's `resumeWorkflowRun`, `resolveWorkflowApproval` and
 //! `resolveApproval` answer (`answer`). As in Python, the run's state is in
 //! memory only: an edge that restarts mid-run runs it again from the start.
@@ -16,14 +15,13 @@ mod engine;
 mod nodes;
 mod template;
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 use sqlx::SqlitePool;
 
 use super::queue::Job;
-use super::{Agent, Outcome, route};
+use super::{Agent, Outcome};
 use crate::budget::{Budget, Limits};
 use crate::gql::codec::now_stored;
 use crate::pyjson;
@@ -39,56 +37,6 @@ const MAX_DEPTH: u32 = 3;
 pub async fn run_once(agent: &Agent, model: &str, query: String) -> Result<crate::llm::transcript::Message, String> {
     let env = Env { agent, run: None, pause: None, meter: None, depth: 0 };
     agent::run_reply(&env, model, query).await
-}
-
-/// Whether the edge runs this workflow: the agent loop is on and every
-/// model its graph can call — the ones its nodes name, the default for the
-/// ones that name none, and those of the saved workflows its maps run — is
-/// one the edge calls.
-pub async fn served(pool: &SqlitePool, workflow_id: &str) -> bool {
-    if !route::enabled() {
-        return false;
-    }
-    let mut models: HashSet<Option<String>> = [None].into();
-    let mut seen = HashSet::new();
-    let mut todo = vec![workflow_id.to_string()];
-    while let Some(id) = todo.pop() {
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        let definition: Option<String> =
-            sqlx::query_scalar("SELECT definition FROM workflows WHERE id = ?").bind(&id).fetch_optional(pool).await.ok().flatten();
-        // A missing map workflow fails its node either way.
-        let Some(Ok(definition)) = definition.map(|d| serde_json::from_str::<Value>(&d)) else { continue };
-        walk(&definition, &mut models, &mut todo);
-    }
-    for model in models {
-        match crate::catalog::resolve_model(pool, model.as_deref()).await {
-            Ok(m) if route::serves_model(pool, &m).await => {}
-            _ => return false,
-        }
-    }
-    true
-}
-
-/// Every `model` named anywhere in a definition, and every `workflow_id` a
-/// map names.
-fn walk(v: &Value, models: &mut HashSet<Option<String>>, workflows: &mut Vec<String>) {
-    match v {
-        Value::Object(m) => {
-            for (k, v) in m {
-                match (k.as_str(), v) {
-                    ("model", Value::String(s)) if !s.is_empty() => {
-                        models.insert(Some(s.clone()));
-                    }
-                    ("workflow_id", Value::String(s)) if !s.is_empty() => workflows.push(s.clone()),
-                    _ => walk(v, models, workflows),
-                }
-            }
-        }
-        Value::Array(items) => items.iter().for_each(|i| walk(i, models, workflows)),
-        _ => {}
-    }
 }
 
 struct Workflow {
@@ -120,17 +68,10 @@ impl Agent {
                 self.end(run, "error");
                 return Outcome::Finished;
             }
-            Err(e) => {
-                tracing::warn!("agent: loading workflow run {run_id}: {e}; handing it to Python");
-                return Outcome::HandOver(None);
-            }
+            Err(e) => return self.fail_start(job, run, format!("loading the workflow: {e}")).await,
         };
-        if !served(pool, &workflow_id).await {
-            return Outcome::HandOver(None);
-        }
         if let Err(e) = begin(pool, &run_id, &workflow_id, &inputs).await {
-            tracing::warn!("agent: starting workflow run {run_id}: {e}; handing it to Python");
-            return Outcome::HandOver(None);
+            return self.fail_start(job, run, format!("starting the run: {e}")).await;
         }
         if job.cancel_requested {
             run.update(|st| st.fields.cancelled = true);
@@ -354,24 +295,5 @@ impl Call {
             Ok(outputs) => pyjson::dumps_indent(&Value::Object(outputs), 2),
             Err(e) => format!("Workflow execution failed: {e}"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_model_a_graph_can_call_is_found() {
-        let def = json!({"nodes": [
-            {"id": "a", "type": "agent", "config": {"model": "ollama:x"}},
-            {"id": "b", "type": "sequential", "config": {"steps": [{"model": "meta:y"}, {"model": ""}]}},
-            {"id": "c", "type": "map", "config": {"workflow_id": "w2", "sub_graph": {"nodes": [{"config": {"model": "z:z"}}]}}},
-        ]});
-        let (mut models, mut workflows) = (HashSet::new(), vec![]);
-        walk(&def, &mut models, &mut workflows);
-        let want: HashSet<Option<String>> = ["ollama:x", "meta:y", "z:z"].iter().map(|m| Some(m.to_string())).collect();
-        assert_eq!(models, want);
-        assert_eq!(workflows, vec!["w2"]);
     }
 }
