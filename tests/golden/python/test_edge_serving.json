@@ -16,6 +16,56 @@
    }
   }
  ],
+ "test_maintenance_gates_match_the_sweeps": [
+  {
+   "memory_consolidation": false,
+   "project_memory": false
+  },
+  {
+   "memory_consolidation": false,
+   "project_memory": false
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": false
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": false
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": false
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": true
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": false
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": true
+  },
+  {
+   "memory_consolidation": false,
+   "project_memory": true
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": true
+  },
+  {
+   "memory_consolidation": false,
+   "project_memory": true
+  },
+  {
+   "memory_consolidation": true,
+   "project_memory": true
+  }
+ ],
  "test_models": [
   {
    "data": {

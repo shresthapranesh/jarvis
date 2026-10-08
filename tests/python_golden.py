@@ -1,13 +1,16 @@
 """Python's answers, recorded, for the tests that diff the Rust server.
 
-These tests used to run every scenario on both servers and compare. The
-Python server is gone, so what it answered was recorded while it still
-existed (`tests/golden/python/<module>.json`, at the commit that removed it)
-and each test compares the Rust server against that.
+These tests used to run every scenario on both sides and compare. Python's
+server and runtime are gone, so what they answered was recorded while they
+still existed (`tests/golden/python/<module>.json`) and each test compares the
+Rust server against that.
 
-`await recorded()` returns the value stored for this call — the n-th
-`recorded` call of the running test. Values keep their Python types: tuples,
-bytes, datetimes and sets are tagged in the JSON.
+`await recorded(compute)` (or `recorded_sync(compute)` in a plain test)
+returns the value stored for this call — the n-th `recorded` call of the
+running test. With `JARVIS_RECORD_PYTHON=1` it instead runs `compute` (a
+callable producing Python's side) and stores what it returns; that only works
+at a commit where the Python code still exists. Values keep their Python
+types: tuples, bytes, datetimes, sets and paths are tagged in the JSON.
 
 A recording is Python's behaviour, frozen. A deliberate change to what the
 server answers is a change to the recording: edit the JSON, and say why in
@@ -17,7 +20,9 @@ the commit.
 from __future__ import annotations
 
 import base64
+import inspect
 import json
+import os
 import re
 import sys
 from datetime import datetime
@@ -28,6 +33,7 @@ import pytest
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden" / "python"
 REPO = Path(__file__).resolve().parent.parent
+RECORD = os.environ.get("JARVIS_RECORD_PYTHON") == "1"
 
 _LOCAL_PORT = re.compile(r"(127\.0\.0\.1|localhost):\d+")
 
@@ -40,6 +46,28 @@ def portable(value: Any) -> Any:
     for path, name in ((sys.executable, "<python>"), (str(REPO), "<repo>")):
         text = text.replace(json.dumps(path)[1:-1], name)
     return json.loads(_LOCAL_PORT.sub(r"\1:<port>", text))
+
+
+def _encode(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return {"$tuple": [_encode(v) for v in value]}
+    if isinstance(value, list):
+        return [_encode(v) for v in value]
+    if isinstance(value, dict):
+        if all(isinstance(k, str) for k in value) and not any(k.startswith("$") for k in value):
+            return {k: _encode(v) for k, v in value.items()}
+        return {"$dict": [[_encode(k), _encode(v)] for k, v in value.items()]}
+    if isinstance(value, (bytes, bytearray)):
+        return {"$bytes": base64.b64encode(bytes(value)).decode()}
+    if isinstance(value, datetime):
+        return {"$datetime": value.isoformat()}
+    if isinstance(value, (set, frozenset)):
+        return {"$set": sorted((_encode(v) for v in value), key=json.dumps)}
+    if isinstance(value, Path):
+        return {"$path": str(value)}
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    raise TypeError(f"can't record a {type(value).__name__}: {value!r}")
 
 
 def _decode(value: Any) -> Any:
@@ -64,16 +92,27 @@ def _decode(value: Any) -> Any:
     return value
 
 
-_recordings: dict[str, dict[str, list[Any]]] = {}
+class _Store:
+    """One module's recordings, keyed by test then call number."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.data: dict[str, list[Any]] = json.loads(path.read_text()) if path.exists() else {}
+        self.dirty = False
+
+    def save(self) -> None:
+        if self.dirty:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(self.data, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+            self.dirty = False
+
+
+_stores: dict[str, _Store] = {}
 
 
 class _Current:
-    def __init__(self, module: str, test: str) -> None:
-        if module not in _recordings:
-            path = GOLDEN_DIR / f"{module}.json"
-            _recordings[module] = json.loads(path.read_text()) if path.exists() else {}
-        self.calls = _recordings[module].get(test)
-        self.module, self.test, self.n = module, test, 0
+    def __init__(self, store: _Store, test: str) -> None:
+        self.store, self.test, self.n = store, test, 0
 
 
 # Tests run one at a time; async fixtures and helpers run in tasks of their
@@ -83,17 +122,55 @@ _current: _Current | None = None
 
 @pytest.fixture(autouse=True)
 def _python_golden(request):
+    module = Path(request.node.fspath).stem
+    store = _stores.get(module) or _stores.setdefault(module, _Store(GOLDEN_DIR / f"{module}.json"))
     global _current
-    _current = _Current(Path(request.node.fspath).stem, request.node.name)
+    _current = _Current(store, request.node.name)
     yield
     _current = None
+    store.save()
 
 
-async def recorded() -> Any:
-    """Python's side of the next comparison in this test."""
+def _next(compute: Any) -> tuple[_Current, int, bool]:
     cur = _current
     assert cur is not None, "recorded() outside a test"
     n, cur.n = cur.n, cur.n + 1
-    if cur.calls is None or n >= len(cur.calls):
-        pytest.fail(f"no recording of Python's answer #{n} for {cur.test} in {cur.module}.json")
-    return _decode(cur.calls[n])
+    return cur, n, RECORD and compute is not None
+
+
+def _store(cur: _Current, n: int, value: Any) -> Any:
+    """Record answer `n` — in place, so a test whose other answers replay
+    can re-record just this one."""
+    calls = cur.store.data.setdefault(cur.test, [])
+    if n < len(calls):
+        calls[n] = _encode(value)
+    elif n == len(calls):
+        calls.append(_encode(value))
+    else:
+        pytest.fail(f"answer #{n} of {cur.test} recorded before #{len(calls)}")
+    cur.store.dirty = True
+    return _decode(calls[n])
+
+
+def _replay(cur: _Current, n: int) -> Any:
+    calls = cur.store.data.get(cur.test)
+    if calls is None or n >= len(calls):
+        pytest.fail(f"no recording of Python's answer #{n} for {cur.test} in {cur.store.path.name}")
+    return _decode(calls[n])
+
+
+async def recorded(compute: Any = None) -> Any:
+    """Python's side of the next comparison in this test (see the module docs)."""
+    cur, n, record = _next(compute)
+    if not record:
+        return _replay(cur, n)
+    value = compute()
+    if inspect.isawaitable(value):
+        value = await value
+    return _store(cur, n, value)
+
+
+def recorded_sync(compute: Any = None) -> Any:
+    """`recorded` for a plain (non-async) test; `compute` must be plain too."""
+    cur, n, record = _next(compute)
+    return _store(cur, n, compute()) if record else _replay(cur, n)

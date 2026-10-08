@@ -19,6 +19,7 @@ import pytest
 
 from core.kernels import KernelRegistry
 from edge_support import edge_binary  # noqa: F401 — edge_binary is a fixture
+from python_golden import recorded
 
 KERNEL_ENV = {"JARVIS_KERNEL_PYTHON": sys.executable, "JARVIS_APP_DIR": str(Path(__file__).resolve().parent.parent)}
 
@@ -73,7 +74,10 @@ async def _py_run(registry: KernelRegistry, key: str, code: str, timeout: float 
 
 async def _both(edge: EdgeKernels, registry: KernelRegistry, key: str, cells: list) -> tuple[list, list]:
     """Each `(code, kwargs)` through Python's registry, then the edge."""
-    python = [await _py_run(registry, key, code, **kw) for code, kw in cells]
+    async def python_side() -> list[str]:
+        return [await _py_run(registry, key, code, **kw) for code, kw in cells]
+
+    python = await recorded(python_side)
     got = [await _edge_run(edge, key, code, **kw) for code, kw in cells]
     return python, got
 
@@ -131,11 +135,15 @@ async def test_an_open_approval_holds_the_timeout(edge, py_kernels):
 
 
 async def test_shutdown_forgets_the_session(edge, py_kernels):
-    await _py_run(py_kernels, "k", "x = 1")
+    async def python_side() -> list[str]:
+        await _py_run(py_kernels, "k", "x = 1")
+        await py_kernels.shutdown("k")
+        return [await _py_run(py_kernels, "k", "x")]
+
+    python = await recorded(python_side)
     await _edge_run(edge, "k", "x = 1")
-    await py_kernels.shutdown("k")
     assert await edge.ask({"shutdown": "k"}) == {"ok": True}
-    python, got = await _both(edge, py_kernels, "k", [("x", {})])
+    got = [await _edge_run(edge, "k", "x")]
     assert got == python and "NameError" in got[0]
 
 
@@ -150,7 +158,7 @@ async def test_input_fails_at_once(edge, py_kernels):
     """Intended: the edge never offers stdin, so `input()` raises at once.
     Python's client offered it with nobody to answer, so the cell hung until
     its timeout."""
-    python = await _py_run(py_kernels, "k", "input('name? ')", timeout=2)
+    python = await recorded(lambda: _py_run(py_kernels, "k", "input('name? ')", timeout=2))
     assert python.endswith("[execution timed out after 2s — kernel interrupted; session state is preserved]")
     loop = asyncio.get_running_loop()
     started = loop.time()

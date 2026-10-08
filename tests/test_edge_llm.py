@@ -42,6 +42,7 @@ from core.runner import RunnerConfig
 from core.messages import build_llm_messages, repair_orphan_tool_calls, strip_historical_thinking
 from core.transcript import decode, encode
 from edge_support import edge_binary  # noqa: F401 — a fixture
+from python_golden import GOLDEN_DIR, RECORD, recorded_sync
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\nfake image bytes").decode()
 
@@ -191,10 +192,42 @@ def _long_loop() -> list:
     return out
 
 
-HISTORIES = {
+def _image_results() -> list:
+    history: list = [HumanMessage("Look.", id="u1")]
+    image: list[Any] = [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}}]
+    for i in range(8):
+        history.append(_gemini_ai("", [(f"i{i}", "run_cell", {"code": "show()"}, None)]))
+        history.append(ToolMessage(content=image, tool_call_id=f"i{i}", name="run_cell"))
+    return history
+
+
+def _blank_text() -> list:
+    return [
+        HumanMessage("", id="u1"),
+        AIMessage(content="   "),
+        HumanMessage(content=[{"type": "text", "text": " "}, "", {"type": "text", "text": "go"}], id="u2"),
+        AIMessage(content="", tool_calls=[{"id": "b1", "name": "run_cell", "args": {"code": "1"}}]),
+        ToolMessage(content="", tool_call_id="b1"),
+        HumanMessage("next", id="u3"),
+        HumanMessage("and more", id="u4"),
+    ]
+
+
+HISTORIES = ["chat", "tool_loop", "foreign_calls", "responses_thread", "long_loop"]
+_BUILDERS = {
     "chat": _chat, "tool_loop": _tool_loop, "foreign_calls": _foreign_calls, "responses_thread": _responses_thread,
-    "long_loop": _long_loop,
+    "long_loop": _long_loop, "image_results": _image_results, "blank_text": _blank_text,
 }
+_HISTORY_FILE = GOLDEN_DIR / "test_edge_llm_histories.json"
+
+
+def _load_histories() -> dict[str, tuple[list[dict], dict[str, str]]]:
+    """Each history as Python encoded it into transcript records (and blobs)."""
+    if RECORD:
+        data = {name: _records(make()) for name, make in _BUILDERS.items()}
+        _HISTORY_FILE.write_text(json.dumps(data, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+    return {name: (records, blobs) for name, (records, blobs) in json.loads(_HISTORY_FILE.read_text()).items()}
+
 
 
 def _records(history: list) -> tuple[list[dict], dict[str, str]]:
@@ -209,6 +242,9 @@ def _records(history: list) -> tuple[list[dict], dict[str, str]]:
 def _python_history(records: list[dict], blobs: dict[str, str]) -> list:
     raw = {h: base64.b64decode(b) for h, b in blobs.items()}
     return [decode(r, raw) for r in records]
+
+
+HISTORY = _load_histories()
 
 
 # ── the fake provider ────────────────────────────────────────────────────────
@@ -584,6 +620,38 @@ def _python_call(model: str, url: str, messages: list) -> BaseMessage:
     return asyncio.run(run())
 
 
+def _py_prompt(records, blobs, *, cache: bool, provider: str, segments=SEGMENTS) -> list:
+    return _python_prompt(_python_history(records, blobs), cache=cache, provider=provider, segments=segments)
+
+
+def _py_request(provider: _Provider, model: str, records, blobs, *, cache: bool) -> dict:
+    """What Python sends the fake for `records`."""
+    _python_call(model, provider.url, _py_prompt(records, blobs, cache=cache, provider=model.split(":")[0]))
+    return provider.take()
+
+
+def _py_reply(provider: _Provider, model: str, records, blobs, *, cache: bool) -> dict:
+    """The record Python makes of the fake's reply."""
+    reply = _python_call(model, provider.url, _py_prompt(records, blobs, cache=cache, provider=model.split(":")[0]))
+    provider.take()
+    return json.loads(json.dumps(encode(reply)[0]))
+
+
+def _py_failure(provider: _Provider, model: str, records, blobs) -> str:
+    """How Python refuses to send `records`."""
+    try:
+        _python_call(model, provider.url, _py_prompt(records, blobs, cache=_cache(model), provider=model.split(":")[0]))
+    except Exception as e:  # noqa: BLE001 — what it raised is the answer
+        return f"{type(e).__name__}: {e}"
+    finally:
+        provider.requests.clear()
+    raise AssertionError("Python sent it")
+
+
+def _cached(model: str) -> bool:
+    return recorded_sync(lambda: _cache(model))
+
+
 # ── shaping ──────────────────────────────────────────────────────────────────
 
 
@@ -631,8 +699,8 @@ def _normalized(prompt: dict) -> dict:
 @pytest.mark.parametrize("provider_id", ["anthropic", "bedrock", "openrouter", "google_genai"])
 @pytest.mark.parametrize("cache", [True, False])
 def test_shaping_matches_python(edge_binary, tmp_path, name, provider_id, cache):
-    records, blobs = _records(HISTORIES[name]())
-    expected = _neutral_python(_python_prompt(_python_history(records, blobs), cache=cache, provider=provider_id))
+    records, blobs = HISTORY[name]
+    expected = recorded_sync(lambda: _neutral_python(_py_prompt(records, blobs, cache=cache, provider=provider_id)))
     [got] = _edge(edge_binary, "--llm-shape", tmp_path, _edge_input(f"{provider_id}:m", records, blobs, cache=cache))
     if cache:
         got = _normalized(got)
@@ -640,9 +708,9 @@ def test_shaping_matches_python(edge_binary, tmp_path, name, provider_id, cache)
 
 
 def test_shaping_without_segments(edge_binary, tmp_path):
-    records, blobs = _records(_chat())
-    expected = _neutral_python(_python_prompt(_python_history(records, blobs), cache=False, provider="ollama",
-                                              segments=[]))
+    records, blobs = HISTORY["chat"]
+    expected = recorded_sync(lambda: _neutral_python(_py_prompt(records, blobs, cache=False, provider="ollama",
+                                                                segments=[])))
     [got] = _edge(edge_binary, "--llm-shape", tmp_path,
                   _edge_input("ollama:m", records, blobs, cache=False, segments=[]))
     assert got == expected
@@ -650,7 +718,7 @@ def test_shaping_without_segments(edge_binary, tmp_path):
 
 def test_long_loop_is_compacted(edge_binary, tmp_path):
     """The parity above is only worth something if compaction fired."""
-    records, blobs = _records(_long_loop())
+    records, blobs = HISTORY["long_loop"]
     [got] = _edge(edge_binary, "--llm-shape", tmp_path, _edge_input("ollama:m", records, blobs, cache=False))
     texts = [m["content"] for m in got["messages"] if isinstance(m["content"], str)]
     assert sum(t.startswith("[Previous tool activity: run_cell => run_cell: 0: é…x") for t in texts[:2]) == 1
@@ -660,13 +728,8 @@ def test_long_loop_is_compacted(edge_binary, tmp_path):
 def test_stub_leaves_a_result_without_text_unquoted(edge_binary, tmp_path):
     """Intended: a collapsed result with no text isn't quoted. Python quotes
     the repr of its content — a truncated data URL the model pays for."""
-    image: list[Any] = [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}}]
-    history: list = [HumanMessage("Look.", id="u1")]
-    for i in range(8):
-        history.append(_gemini_ai("", [(f"i{i}", "run_cell", {"code": "show()"}, None)]))
-        history.append(ToolMessage(content=image, tool_call_id=f"i{i}", name="run_cell"))
-    records, blobs = _records(history)
-    expected = _neutral_python(_python_prompt(_python_history(records, blobs), cache=False, provider="ollama"))
+    records, blobs = HISTORY["image_results"]
+    expected = recorded_sync(lambda: _neutral_python(_py_prompt(records, blobs, cache=False, provider="ollama")))
     [got] = _edge(edge_binary, "--llm-shape", tmp_path, _edge_input("ollama:m", records, blobs, cache=False))
     for m in expected["messages"][1:5]:
         assert m["content"].startswith("[Previous tool activity: run_cell => run_cell: [{'type': 'image_url'")
@@ -733,10 +796,10 @@ def _intended_openai_responses(python: dict, edge: dict) -> None:
     # LangChain skipped a recorded bare-string text part, so the assistant's
     # words vanished from the model's context; the edge sends them as an
     # output message (no server id, since it had none).
-    said = {json.dumps(i["content"]) for i in python["input"] if i.get("role") == "assistant"}
+    said = {json.dumps(i["content"], sort_keys=True) for i in python["input"] if i.get("role") == "assistant"}
     edge["input"] = [
         i for i in edge["input"]
-        if not (i.get("role") == "assistant" and "id" not in i and json.dumps(i["content"]) not in said)
+        if not (i.get("role") == "assistant" and "id" not in i and json.dumps(i["content"], sort_keys=True) not in said)
     ]
 
 
@@ -773,10 +836,8 @@ INTENDED = {
 
 def _both(edge_binary, tmp_path, provider, model, records, blobs) -> tuple[dict, dict, list]:
     """What Python and the edge each send for `records`, and the edge's output."""
-    cache = _cache(model)
-    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=cache,
-                                                     provider=model.split(":")[0]))
-    python = provider.take()
+    cache = _cached(model)
+    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=cache))
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=cache), provider)
     assert "message" in out[-1], out[-1]
     return python, provider.take(), out
@@ -785,23 +846,21 @@ def _both(edge_binary, tmp_path, provider, model, records, blobs) -> tuple[dict,
 @pytest.mark.parametrize("name", HISTORIES)
 @pytest.mark.parametrize("model", MODELS)
 def test_request_matches_python(edge_binary, tmp_path, provider, name, model):
-    records, blobs = _records(HISTORIES[name]())
+    records, blobs = HISTORY[name]
     if model.startswith("bedrock") and name == "responses_thread":
         # Neither can send Bedrock another provider's call items: LangChain
         # raises, and the edge fails the call with the same words.
-        with pytest.raises(ValueError, match="Unsupported content block type"):
-            _both(edge_binary, tmp_path, provider, model, records, blobs)
-        provider.requests.clear()
-        out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=_cache(model)), provider)
+        refused = recorded_sync(lambda: _py_failure(provider, model, records, blobs))
+        assert refused.startswith("ValueError: Unsupported content block type")
+        out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=_cached(model)), provider)
         assert out[-1]["error"]["message"] == "Unsupported content block type: function_call"
         assert provider.requests == []
         return
     if model.startswith("ollama") and name == "responses_thread":
         # LangChain can't send Ollama a thread that came from the Responses
         # API: the function_call item left in the content is a ValueError.
-        with pytest.raises(ValueError, match="Unsupported message content type"):
-            _both(edge_binary, tmp_path, provider, model, records, blobs)
-        provider.requests.clear()
+        refused = recorded_sync(lambda: _py_failure(provider, model, records, blobs))
+        assert refused.startswith("ValueError: Unsupported message content type")
         out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
         assert "message" in out[-1], out[-1]
         sent = provider.take()["body"]["messages"]
@@ -824,19 +883,20 @@ def test_anthropic_request_without_a_cache_matches_python(edge_binary, tmp_path,
     """Anthropic always caches here; its plain layout (string content, one
     system string) is what a run with caching turned off would send."""
     model = MODELS[0]
-    records, blobs = _records(HISTORIES[name]())
-    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False, provider="anthropic"))
-    python = provider.take()["body"]
+    records, blobs = HISTORY[name]
+    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=False))["body"]
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     assert provider.take()["body"] == python
 
 
 def test_anthropic_max_tokens_follow_langchains_profiles(edge_binary, tmp_path, provider):
-    from langchain_anthropic.data._profiles import _PROFILES
+    def python() -> dict[str, int]:
+        from langchain_anthropic.data._profiles import _PROFILES
 
-    records, blobs = _records(_chat())
-    for name in [*_PROFILES, "claude-unknown-9"]:
-        expected = _llm(f"anthropic:{name}", provider.url).max_tokens
+        return {name: _llm(f"anthropic:{name}", provider.url).max_tokens for name in [*_PROFILES, "claude-unknown-9"]}
+
+    records, blobs = HISTORY["chat"]
+    for name, expected in recorded_sync(python).items():
         _edge(edge_binary, "--llm-call", tmp_path, _edge_input(f"anthropic:{name}", records, blobs, cache=False),
               provider)
         assert provider.take()["body"]["max_tokens"] == expected, name
@@ -853,7 +913,7 @@ def test_anthropic_max_tokens_follow_langchains_profiles(edge_binary, tmp_path, 
     (MODELS[9], "authorization", None),
 ])
 def test_key_header(edge_binary, tmp_path, provider, model, header, value):
-    records, blobs = _records(_chat())
+    records, blobs = HISTORY["chat"]
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     headers = {k.lower(): v for k, v in provider.take()["headers"].items()}
     assert headers.get(header) == value
@@ -881,10 +941,9 @@ def _semantics(rec: dict) -> dict:
 
 @pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[4], MODELS[5], MODELS[7], MODELS[8], MODELS[10]])
 def test_reply_matches_python(edge_binary, tmp_path, provider, model):
-    records, blobs = _records(_chat())
-    reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False,
-                                                             provider=model.split(":")[0]))
-    python = _semantics(encode(reply)[0])
+    records, blobs = HISTORY["chat"]
+    python_rec = recorded_sync(lambda: _py_reply(provider, model, records, blobs, cache=False))
+    python = _semantics(python_rec)
     if model.startswith(("openrouter", "meta", "local")):
         # LangChain named the provider by wire format; the edge records the
         # catalog's provider id, as the transcript format says.
@@ -915,7 +974,7 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
         # LangChain dropped Ollama's thinking and left the stop reason in
         # its response metadata; the edge keeps both.
         assert edge.pop("thinking") == "Hmm." and python.pop("thinking") == ""
-        assert edge["finish_reason"] == encode(reply)[0]["extras"]["response_metadata"]["done_reason"]
+        assert edge["finish_reason"] == python_rec["extras"]["response_metadata"]["done_reason"]
         python["finish_reason"] = edge["finish_reason"]
         assert deltas == [{"thinking": "Hmm."}, {"text": "Let me"}, {"text": " check."}]
     elif model.startswith(("openrouter", "meta", "local")):
@@ -989,11 +1048,15 @@ def _clockless(value: Any, server_timed: bool) -> Any:
 def test_run_events_match_python(edge_binary, tmp_path, provider, model):
     """A one-call run's `budget_update` and `perf_update`, and the perf a
     chat turn stores, as Python's callback handlers produce them."""
-    records, blobs = _records(_chat())
-    python, python_perf = _python_run_events(
-        model, provider.url, _python_prompt(_python_history(records, blobs), cache=False, provider=model.split(":")[0])
-    )
-    provider.take()
+    records, blobs = HISTORY["chat"]
+
+    def python_run() -> tuple[list[dict], dict | None]:
+        run = _python_run_events(model, provider.url,
+                                 _py_prompt(records, blobs, cache=False, provider=model.split(":")[0]))
+        provider.take()
+        return run
+
+    python, python_perf = recorded_sync(python_run)
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     edge = [line for line in out if "event" in line]
     assert [e["event"] for e in edge] == ["budget_update", "perf_update"]
@@ -1018,7 +1081,7 @@ def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provide
     """A thread the edge wrote to can continue in Python: its record decodes,
     and LangChain sends the call's thought signature back."""
     model = MODELS[2]
-    records, blobs = _records(_chat())
+    records, blobs = HISTORY["chat"]
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     provider.take()
     reply = out[-1]["message"]
@@ -1028,9 +1091,7 @@ def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provide
         reply,
         *({"v": 1, "role": "tool", "content": "ok", "tool_call_id": c["id"], "status": "success"} for c in calls),
     ]
-    _python_call(model, provider.url, _python_prompt(_python_history(follow, blobs), cache=False,
-                                                     provider="google_genai"))
-    sent = provider.take()["body"]["contents"]
+    sent = recorded_sync(lambda: _py_request(provider, model, follow, blobs, cache=False))["body"]["contents"]
     model_turn = [c for c in sent if c["role"] == "model"][-1]
     assert [p.get("thoughtSignature") for p in model_turn["parts"] if "functionCall" in p] == ["Y2FsbC1zaWc=", None]
     # …and the edge itself sends it back with the text's signature too.
@@ -1044,8 +1105,8 @@ def test_a_recorded_reply_goes_back_out_the_same(edge_binary, tmp_path, provider
     """The next request after a reply the edge recorded is the same from
     either runtime — for Responses, the text item's server id and phase go
     back with it."""
-    records, blobs = _records(_chat())
-    out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=_cache(model)), provider)
+    records, blobs = HISTORY["chat"]
+    out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=_cached(model)), provider)
     provider.take()
     reply = out[-1]["message"]
     follow = [
@@ -1070,11 +1131,8 @@ def test_a_reply_python_recorded_goes_back_out_the_same(edge_binary, tmp_path, p
     and the thinking left out (`strip_historical_thinking` drops it from every
     assistant turn, on both sides)."""
     model = MODELS[0]
-    records, blobs = _records(_chat())
-    reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=True,
-                                                             provider="anthropic"))
-    provider.take()
-    rec, _ = encode(reply)
+    records, blobs = HISTORY["chat"]
+    rec = recorded_sync(lambda: _py_reply(provider, model, records, blobs, cache=True))
     assert [p.get("data", {}).get("type") for p in rec["content"] if p["type"] == "opaque"] == ["tool_use", "tool_use"]
     follow = [
         *records,
@@ -1093,7 +1151,7 @@ def test_bedrock_calls_are_signed_as_boto3_signs_them(edge_binary, tmp_path, pro
     """The same signing scope and signed headers — the signature itself
     differs only by the second each side signed in."""
     model = MODELS[10]
-    records, blobs = _records(_chat())
+    records, blobs = HISTORY["chat"]
     python, edge, _ = _both(edge_binary, tmp_path, provider, model, records, blobs)
     auth = [{k.lower(): v for k, v in r["headers"].items()}["authorization"] for r in (python, edge)]
     scope = [a.split("Signature=")[0] for a in auth]
@@ -1107,9 +1165,8 @@ def test_bedrock_request_without_a_cache_matches_python(edge_binary, tmp_path, p
     model = MODELS[11]
     if name == "responses_thread":
         return  # refused by both, above
-    records, blobs = _records(HISTORIES[name]())
-    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=False, provider="bedrock"))
-    python = provider.take()["body"]
+    records, blobs = HISTORY[name]
+    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=False))["body"]
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     assert provider.take()["body"] == python
 
@@ -1119,11 +1176,8 @@ def test_a_bedrock_reply_python_recorded_goes_back_out_the_same(edge_binary, tmp
     stripping doesn't know, so it rides along signed; the edge sends it as
     LangChain does, and the calls' string inputs as the objects they are."""
     model = MODELS[10]
-    records, blobs = _records(_chat())
-    reply = _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=True,
-                                                             provider="bedrock"))
-    provider.take()
-    rec, _ = encode(reply)
+    records, blobs = HISTORY["chat"]
+    rec = recorded_sync(lambda: _py_reply(provider, model, records, blobs, cache=True))
     follow = [
         *records,
         rec,
@@ -1142,18 +1196,8 @@ def test_bedrock_blank_text_is_a_dot(edge_binary, tmp_path, provider, cache):
     """boto3 can't send an empty text block: LangChain sends `"."` in its
     place, and drops an empty bare string."""
     model = MODELS[10]
-    history = [
-        HumanMessage("", id="u1"),
-        AIMessage(content="   "),
-        HumanMessage(content=[{"type": "text", "text": " "}, "", {"type": "text", "text": "go"}], id="u2"),
-        AIMessage(content="", tool_calls=[{"id": "b1", "name": "run_cell", "args": {"code": "1"}}]),
-        ToolMessage(content="", tool_call_id="b1"),
-        HumanMessage("next", id="u3"),
-        HumanMessage("and more", id="u4"),
-    ]
-    records, blobs = _records(history)
-    _python_call(model, provider.url, _python_prompt(_python_history(records, blobs), cache=cache, provider="bedrock"))
-    python = provider.take()["body"]
+    records, blobs = HISTORY["blank_text"]
+    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=cache))["body"]
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=cache), provider)
     assert provider.take()["body"] == python
     assert {"text": "."} in python["messages"][0]["content"]

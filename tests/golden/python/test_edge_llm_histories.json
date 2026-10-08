@@ -1,0 +1,1333 @@
+{
+ "blank_text": [
+  [
+   {
+    "content": "",
+    "id": "u1",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": "   ",
+    "role": "assistant",
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "text": " ",
+      "type": "text"
+     },
+     "",
+     {
+      "text": "go",
+      "type": "text"
+     }
+    ],
+    "id": "u2",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": "",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "1"
+      },
+      "id": "b1",
+      "name": "run_cell"
+     }
+    ],
+    "v": 1
+   },
+   {
+    "content": "",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "b1",
+    "v": 1
+   },
+   {
+    "content": "next",
+    "id": "u3",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": "and more",
+    "id": "u4",
+    "role": "user",
+    "v": 1
+   }
+  ],
+  {}
+ ],
+ "chat": [
+  [
+   {
+    "content": "Summary of earlier turns: the user is planning a trip.",
+    "role": "system",
+    "v": 1
+   },
+   {
+    "content": "Where should I go in May?",
+    "id": "u1",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "extras": {
+       "index": 0
+      },
+      "thinking": "They like warm places.",
+      "type": "thinking"
+     },
+     "Try Lisbon."
+    ],
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "And in June?",
+    "id": "u2",
+    "role": "user",
+    "v": 1
+   }
+  ],
+  {}
+ ],
+ "foreign_calls": [
+  [
+   {
+    "content": "Look it up.",
+    "id": "u1",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": "",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "search()"
+      },
+      "id": "x1",
+      "name": "run_cell"
+     },
+     {
+      "args": {
+       "code": "read()"
+      },
+      "id": "x2",
+      "name": "run_cell"
+     }
+    ],
+    "v": 1
+   },
+   {
+    "content": "found",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "x1",
+    "v": 1
+   },
+   {
+    "content": "read",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "x2",
+    "v": 1
+   }
+  ],
+  {}
+ ],
+ "image_results": [
+  [
+   {
+    "content": "Look.",
+    "id": "u1",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i0",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i0",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i1",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i1",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i2",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i2",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i3",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i3",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i4",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i4",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i5",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i5",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i6",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i6",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"show()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "show()"
+      },
+      "id": "i7",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "i7",
+    "v": 1
+   }
+  ],
+  {
+   "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363": "iVBORw0KGgpmYWtlIGltYWdlIGJ5dGVz"
+  }
+ ],
+ "long_loop": [
+  [
+   {
+    "content": "Crunch the numbers.",
+    "id": "u1",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(0)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(0)"
+      },
+      "id": "r0",
+      "name": "run_cell",
+      "signature": "c2lnLXI0"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "0: é…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…x",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r0",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(1)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(1)"
+      },
+      "id": "r1",
+      "name": "run_cell",
+      "signature": "c2lnLXI1"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "1: é…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…x",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r1",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(2)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(2)"
+      },
+      "id": "r2",
+      "name": "run_cell",
+      "signature": "c2lnLXI2"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "2: é…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…x",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r2",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(3)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(3)"
+      },
+      "id": "r3",
+      "name": "run_cell",
+      "signature": "c2lnLXI3"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "3: é…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…x",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r3",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(4)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(4)"
+      },
+      "id": "r4",
+      "name": "run_cell",
+      "signature": "c2lnLXI4"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "4: é…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…x",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r4",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(5)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(5)"
+      },
+      "id": "r5",
+      "name": "run_cell",
+      "signature": "c2lnLXI5"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "ok",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r5",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(6)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(6)"
+      },
+      "id": "r6",
+      "name": "run_cell",
+      "signature": "c2lnLXI6"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "6: é…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…x",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r6",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"step(7)\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "step(7)"
+      },
+      "id": "r7",
+      "name": "run_cell",
+      "signature": "c2lnLXI7"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "7: é…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…xé…x",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "r7",
+    "v": 1
+   },
+   {
+    "content": [
+     "Summary 0."
+    ],
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "More 0?",
+    "id": "m0",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": [
+     "Summary 1."
+    ],
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "More 1?",
+    "id": "m1",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": [
+     "Summary 2."
+    ],
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "More 2?",
+    "id": "m2",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": [
+     "Summary 3."
+    ],
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "More 3?",
+    "id": "m3",
+    "role": "user",
+    "v": 1
+   }
+  ],
+  {}
+ ],
+ "responses_thread": [
+  [
+   {
+    "content": "What do you know about me?",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "data": {
+       "id": "rs_6a57:rs_bf48",
+       "index": 0,
+       "summary": [],
+       "type": "reasoning"
+      },
+      "type": "opaque"
+     },
+     {
+      "extras": {
+       "id": "msg_84dd",
+       "index": 1,
+       "phase": "commentary"
+      },
+      "text": "I'll check what I have stored.",
+      "type": "text"
+     },
+     {
+      "data": {
+       "arguments": "{\"code\": \"search_memory('user')\"}",
+       "call_id": "call_b002",
+       "id": "fc_9121",
+       "index": 2,
+       "name": "run_cell",
+       "type": "function_call"
+      },
+      "type": "opaque"
+     }
+    ],
+    "extras": {
+     "response_metadata": {
+      "id": "resp_6a57",
+      "model": "muse-spark-1.1",
+      "object": "response",
+      "status": "completed"
+     }
+    },
+    "id": "resp_6a57",
+    "model": {
+     "name": "muse-spark-1.1",
+     "provider": "openai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "search_memory('user')"
+      },
+      "id": "call_b002",
+      "name": "run_cell"
+     }
+    ],
+    "usage": {
+     "input": 8027,
+     "input_details": {
+      "cache_read": 0
+     },
+     "output": 307,
+     "output_details": {
+      "reasoning": 172
+     },
+     "total": 8334
+    },
+    "v": 1
+   },
+   {
+    "content": "[]",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "call_b002",
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "data": {
+       "id": "rs_6a58:rs_9240",
+       "index": 0,
+       "summary": [],
+       "type": "reasoning"
+      },
+      "type": "opaque"
+     },
+     {
+      "extras": {
+       "index": 1
+      },
+      "text": "Nothing yet — café orders aside.",
+      "type": "text"
+     }
+    ],
+    "id": "resp_6a58",
+    "model": {
+     "name": "muse-spark-1.1",
+     "provider": "openai"
+    },
+    "role": "assistant",
+    "v": 1
+   },
+   {
+    "content": "Remember that I like tea.",
+    "role": "user",
+    "v": 1
+   }
+  ],
+  {}
+ ],
+ "tool_loop": [
+  [
+   {
+    "content": "Add 1 and 1, then plan the week.",
+    "id": "u1",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "extras": {
+       "index": 0
+      },
+      "thinking": "Two things to do.",
+      "type": "thinking"
+     }
+    ],
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"1+1\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "1+1"
+      },
+      "id": "c1",
+      "name": "run_cell",
+      "signature": "c2lnLWMx"
+     },
+     {
+      "args": {
+       "todos": [
+        "a",
+        "b"
+       ]
+      },
+      "id": "c2",
+      "name": "write_todos"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "{\"stdout\": \"2\"}",
+    "name": "run_cell",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "c1",
+    "v": 1
+   },
+   {
+    "content": "[\"a\", \"b\"]",
+    "name": "write_todos",
+    "role": "tool",
+    "status": "success",
+    "tool_call_id": "c2",
+    "v": 1
+   },
+   {
+    "content": [
+     "Done: 2."
+    ],
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": [
+     {
+      "text": "What is in this picture?",
+      "type": "text"
+     },
+     {
+      "blob": "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363",
+      "extras": {
+       "lc_type": "image_url"
+      },
+      "mime_type": "image/png",
+      "type": "image"
+     }
+    ],
+    "id": "u2",
+    "role": "user",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"inspect()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "inspect()"
+      },
+      "id": "c3",
+      "name": "run_cell",
+      "signature": "c2lnLWMz"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "Traceback: boom",
+    "role": "tool",
+    "status": "error",
+    "tool_call_id": "c3",
+    "v": 1
+   },
+   {
+    "content": "",
+    "extras": {
+     "additional_kwargs": {
+      "function_call": {
+       "arguments": "{\"code\": \"retry()\"}",
+       "name": "run_cell"
+      }
+     }
+    },
+    "finish_reason": "STOP",
+    "id": "lc_run--a",
+    "model": {
+     "name": "gemma-4-31b-it",
+     "provider": "google_genai"
+    },
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "args": {
+       "code": "retry()"
+      },
+      "id": "c4",
+      "name": "run_cell",
+      "signature": "c2lnLWM0"
+     }
+    ],
+    "usage": {
+     "input": 10,
+     "output": 5,
+     "total": 15
+    },
+    "v": 1
+   },
+   {
+    "content": "Never mind.",
+    "id": "u3",
+    "role": "user",
+    "v": 1
+   }
+  ],
+  {
+   "sha256:e1c58e396f17a33c4d4be764b44df068d6d84ba7a442906884c886b80ac07363": "iVBORw0KGgpmYWtlIGltYWdlIGJ5dGVz"
+  }
+ ]
+}

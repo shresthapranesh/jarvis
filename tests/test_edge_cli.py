@@ -24,7 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from edge_support import edge_binary  # noqa: F401 — a fixture
+from edge_support import edge_binary, fresh_db  # noqa: F401 — edge_binary is a fixture
+from python_golden import RECORD, portable, recorded_sync
 from test_edge_loop import MODEL, FakeOllama, Reply
 from test_edge_model_sync import _PROVIDER_ENV, Fake, _providers
 
@@ -72,9 +73,15 @@ class Twins:
             d.mkdir(parents=True)
 
     def python(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None) -> Out:
+        """What `main.py` printed and exited with, as recorded."""
+        code, out = recorded_sync(lambda: self._main(*args, stdin=stdin, env=env))
+        return Out(code, out.replace("<tmp>", str(self.py.parent)))
+
+    def _main(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None) -> tuple[int, str]:
         proc = subprocess.run([sys.executable, str(REPO / "main.py"), *args], cwd=self.py, input=stdin,
                               capture_output=True, text=True, env=_env(self.py, env), timeout=120)
-        return _out(proc)
+        out = _out(proc)
+        return out.code, out.out.replace(str(self.py.parent), "<tmp>")
 
     def edge(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None,
              checkout: bool = False) -> Out:
@@ -89,13 +96,14 @@ class Twins:
         return python
 
     def rows(self, sql: str) -> tuple[list, list]:
+        """Python's rows (as recorded) and the edge's."""
         def read(db: Path) -> list:
             with sqlite3.connect(db) as conn:
                 return conn.execute(sql).fetchall()
-        return read(self.py / "database.db"), read(self.rs / "database.db")
+        return recorded_sync(lambda: read(self.py / "database.db")), read(self.rs / "database.db")
 
     def same_rows(self, sql: str) -> list:
-        python, edge = self.rows(sql)
+        python, edge = (portable(rows) for rows in self.rows(sql))
         assert edge == python, sql
         return python
 
@@ -116,10 +124,11 @@ KV = "SELECT namespace, key, value FROM kv_store WHERE namespace != 'jarvis.migr
 @pytest.fixture
 def twins(tmp_path: Path, edge_binary: Path) -> Twins:
     t = Twins(tmp_path, edge_binary)
-    assert t.python("config", "list").code == 0  # creates the schema
-    # A backup, not a file copy: what Python wrote may still be in the WAL.
-    with sqlite3.connect(t.py / "database.db") as src, sqlite3.connect(t.rs / "database.db") as dst:
-        src.backup(dst)
+    assert t.python("config", "list").code == 0  # Python made its schema
+    fresh_db(edge_binary, t.rs / "database.db")
+    if not RECORD:
+        # Somewhere for seeds to go; what Python read back was recorded.
+        fresh_db(edge_binary, t.py / "database.db")
     return t
 
 
@@ -265,9 +274,12 @@ def test_run(twins, model):
     env = {"OLLAMA_HOST": model.url, "JARVIS_BROWSER_CDP_URL": "http://127.0.0.1:9"}
     script = [Reply("", [("write_todos", {"todos": ["look", "answer"]})]), Reply("The answer is **42**.")]
 
-    model.reset(script)
-    python = twins.python("run", "--model", MODEL, "What is it?", env=env)
-    asked = model.requests
+    def python_run() -> tuple[tuple[int, str], list]:
+        model.reset(script)
+        return twins._main("run", "--model", MODEL, "What is it?", env=env), model.requests
+
+    (code, out), asked = recorded_sync(python_run)
+    python = Out(code, out)
     model.reset(script)
     # The agent reads its prompt from the checkout. That it's the edge, not
     # Python, shows in the reply: raw Markdown, no Rich panel.
