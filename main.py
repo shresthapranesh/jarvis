@@ -172,37 +172,6 @@ def view(
     console.print(Panel(Markdown(content), title=f"[bold cyan]{path.name}[/bold cyan]", border_style="cyan"))
 
 
-@app.command()
-def start(
-    host: str = typer.Option("127.0.0.1", help="Bind address."),
-    port: int = typer.Option(8000, help="TCP port."),
-    debug: Annotated[bool, typer.Option("--debug", help="Log to console at DEBUG level (default: write to ~/.jarvis/jarvis.log).")] = False,
-    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (dev only)."),
-):
-    """Start the web server and stream agent results via SSE."""
-    import uvicorn
-    from core.config import get_config
-    from server.entrypoint import app
-
-    _setup_logging(debug, get_config().work_dir)
-
-    url = f"http://{host}:{port}"
-    console.print(
-        Panel(
-            f"[bold green]Server:[/bold green]  {url}\n"
-            f"[bold cyan]Health:[/bold cyan]  {url}/health\n\n"
-            f"[bold yellow]Example:[/bold yellow]\n"
-            f"  curl -N -X POST {url}/run \\\n"
-            f'    -H "Content-Type: application/json" \\\n'
-            f"    -d '{{\"query\": \"Research the AI chip market\"}}'",
-            title="[bold]Research Agent API[/bold]",
-            border_style="green",
-        )
-    )
-
-    uvicorn.run(app, host=host, port=port, reload=reload, log_config=None)
-
-
 def _run_db(coro):
     import asyncio
     from db.engine import init_db

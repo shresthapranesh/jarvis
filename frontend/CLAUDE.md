@@ -5,12 +5,12 @@ Always `pnpm`, never npm.
 ```bash
 pnpm dev        # vite on :5173 + relay-compiler --watch
 pnpm relay      # regenerate src/__generated__
-pnpm schema     # regenerate schema.graphql from the Python schema
+pnpm schema     # regenerate schema.graphql from the server (`jarvis-edge --print-schema`)
 pnpm typecheck  # relay + tsc -b
 pnpm build      # relay + vite build → ../static/dist/
 ```
 
-- **Relay**: `tsc` and `vite build` need `src/__generated__/`, so run `pnpm relay` after changing any `graphql` literal, and `pnpm schema` first after changing the Python schema (the dev watcher doesn't see the Python side). Never edit `__generated__/`.
+- **Relay**: `tsc` and `vite build` need `src/__generated__/`, so run `pnpm relay` after changing any `graphql` literal, and `pnpm schema` first after changing the server's schema (the dev watcher doesn't see the Rust side). Never edit `__generated__/`.
 - Relay keys records by `id` alone, regardless of type. Don't select `id` on a non-node type whose id can collide with a node's — alias it (see the model sync query).
 - Operations live as per-operation modules in `src/relay/`; convert ids with `encodeGlobalId` / `decodeGlobalId` (`relay/globalId.ts`).
 - **Routes**: file-based in `src/routes/` (`createFileRoute('/path')`). `routeTree.gen.ts` is generated — never edit it.

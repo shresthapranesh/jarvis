@@ -20,15 +20,15 @@ RUN pnpm build
 
 
 ##############################
-# Stage 2 — build Rust edge  #
+# Stage 2 — build the server #
 ##############################
-# The edge owns port 8000 and proxies what it hasn't taken over yet to the
-# Python server behind it. See edge/README.md.
+# The Rust server (edge/): the API, the agent loop, the scheduler, the bots.
+# See edge/README.md.
 FROM rust:1.88-slim-bookworm AS edge
 WORKDIR /app/edge
 COPY edge/Cargo.toml edge/Cargo.lock ./
 COPY edge/src ./src
-# The model catalog Python loads; the edge compiles it in (src/catalog.rs).
+# The built-in model catalog, compiled in (src/catalog.rs).
 COPY core/builtin_models.json /app/core/builtin_models.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/edge/target \
@@ -36,9 +36,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && cp target/release/jarvis-edge /usr/local/bin/jarvis-edge
 
 
-#################################
-# Stage 3 — python runtime/app  #
-#################################
+#################################################
+# Stage 3 — runtime: the server, and the Python  #
+# the agent's notebook kernels run on            #
+#################################################
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS runtime
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -76,8 +77,8 @@ COPY . .
 COPY --from=frontend /app/static/dist /app/static/dist
 COPY --from=edge /usr/local/bin/jarvis-edge /usr/local/bin/jarvis-edge
 
-# Run unprivileged. /data holds the SQLite DBs + artifacts/documents — mount a
-# volume there to persist them across container restarts.
+# Run unprivileged. /data holds the SQLite DB + artifacts — mount a volume
+# there to persist them across container restarts.
 RUN useradd --create-home --uid 10001 appuser \
  && mkdir -p /data \
  && chown -R appuser:appuser /app /data
@@ -88,7 +89,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"
 
-# The edge binds 0.0.0.0 INSIDE the container; publish to 127.0.0.1 on the host
-# (compose). Python stays on 127.0.0.1:8001, reachable only through the edge.
-ENV JARVIS_EDGE_BIND=0.0.0.0:8000
-CMD ["edge/serve.sh"]
+# The server binds 0.0.0.0 INSIDE the container; publish to 127.0.0.1 on the
+# host (compose). It reads the system prompt and runs kernels from /app.
+ENV JARVIS_EDGE_BIND=0.0.0.0:8000 \
+    JARVIS_APP_DIR=/app
+CMD ["jarvis-edge"]

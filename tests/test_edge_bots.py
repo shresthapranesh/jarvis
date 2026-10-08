@@ -345,11 +345,9 @@ async def test_telegram_voice_notes_and_photos_are_text_only(bots, chat, work_di
     assert _rows(work_dir / "database.db", "SELECT id FROM jobs") == []
 
 
-async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_factory, edge_binary, chat, monkeypatch):
+async def test_telegram_writes_what_python_writes(database, work_dir, tmp_path_factory, edge_binary, chat):
     """The edge's bot on a copy of the test database writes what Python's
     handlers wrote. Nothing runs the turn."""
-    from types import SimpleNamespace
-
     await _allow()
     b_dir = tmp_path_factory.mktemp("twin")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
@@ -358,33 +356,8 @@ async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_fac
     dirs = (str(work_dir), str(b_dir))
     tables = ("conversations", "messages", "jobs")
 
-    async def python() -> dict[str, list]:
-        from server import telegram_bot
-
-        class Bot:
-            async def send_message(self, **_: Any) -> Any:
-                return SimpleNamespace(message_id=1)
-
-            async def edit_message_text(self, **_: Any) -> None: ...
-
-            async def send_chat_action(self, **_: Any) -> None: ...
-
-        def update(chat_id: int, **message: Any) -> Any:
-            fields = {"text": None, "photo": [], "caption": None, "voice": None, "audio": None, **message}
-            return SimpleNamespace(message=SimpleNamespace(chat_id=chat_id, **fields),
-                                   effective_user=SimpleNamespace(id=42))
-
-        context = SimpleNamespace(bot=Bot())
-        before = asyncio.all_tasks()
-        await telegram_bot.handle_message(update(100, text="hello"), context)
-        await telegram_bot.handle_unsupported(update(101, photo=[object()], caption="what is this"), context)
-        await telegram_bot.handle_unsupported(update(102, voice=object()), context)
-        for task in asyncio.all_tasks() - before:  # the reply streams, waiting on runs nobody claims
-            task.cancel()
-        a = _dump(work_dir / "database.db")
-        return {t: _mask(a[t], SESSION_START, dirs) for t in tables}
-
-    want = await recorded(python)
+    # What Python's `handle_message` / `handle_unsupported` wrote for the same three.
+    want = await recorded()
 
     async with _run_edge(edge_binary, b_dir, b_dir / "database.db", chat.env()):
         chat.telegram(_tg_message("hello", chat_id=100))

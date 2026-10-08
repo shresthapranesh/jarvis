@@ -32,7 +32,7 @@ import httpx
 import pytest
 
 from edge_support import _free_port, _relay_text, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
-from python_golden import RECORD, portable, recorded
+from python_golden import portable, recorded
 
 pytest.importorskip("mcp.server.fastmcp")
 
@@ -52,11 +52,8 @@ SERVERS = {
 
 @pytest.fixture
 def isolated(monkeypatch):
-    """Only the `mcp.servers` setting configures anything, on either side."""
-    monkeypatch.setattr("core.mcp._load_from_files", lambda *_a, **_k: {})
-    monkeypatch.setattr("core.mcp._load_from_env", lambda *_a, **_k: {})
-    monkeypatch.setattr("core.mcp._default_load_mode", "always")
-    monkeypatch.delenv("JARVIS_EDGE_URL", raising=False)
+    """Only the `mcp.servers` setting configures anything."""
+    monkeypatch.delenv("JARVIS_MCP_SERVERS", raising=False)
     monkeypatch.delenv("JARVIS_MCP_DEFAULT_LOAD", raising=False)
 
 
@@ -72,22 +69,6 @@ def _put(db: Path, key: str, value: str) -> None:
         c.commit()
 
 
-async def _python(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-    from db import async_session
-    from server.graphql.extensions import SESSION_LOCK_KEY
-    from server.graphql.schema import schema
-
-    async with async_session() as s:
-        res = await schema.execute(
-            query, variable_values=variables,
-            context_value={"session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": "human"},
-        )
-    out: dict[str, Any] = {"data": res.data}
-    if res.errors:
-        out["errors"] = [{"message": e.message, "path": e.path} for e in res.errors]
-    return out
-
-
 class McpTwin:
     """The edge on a copy of the test database; Python's answers recorded."""
 
@@ -99,11 +80,8 @@ class McpTwin:
             _put(d / "database.db", key, value)
 
     async def run(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-        async def python_side() -> Any:
-            answer = await _python(query, variables)
-            return portable(answer), portable(_settings(self.a_dir / "database.db"))
-
-        python, settings = await recorded(python_side)
+        # Python's answer and the settings it left.
+        python, settings = await recorded()
         resp = await self.edge.post("/graphql", json={"query": query, "variables": variables or {}})
         assert resp.status_code == 200
         body = resp.json()
@@ -115,40 +93,16 @@ class McpTwin:
         return python
 
 
-async def _python_manager(monkeypatch) -> Any:
-    """Python's manager, loaded from the merged config as the lifespan loads it."""
-    from core.mcp import (
-        McpManager,
-        get_mcp_load_modes_from_db,
-        get_mcp_servers_from_db,
-        load_mcp_server_configs_with_db,
-    )
-    from db import async_session
-
-    async with async_session() as s:
-        merged = load_mcp_server_configs_with_db(
-            db_cfg=await get_mcp_servers_from_db(s), load_modes=await get_mcp_load_modes_from_db(s)
-        )
-    mgr = McpManager(connections=merged)
-    await mgr.initialize(merged)
-    monkeypatch.setattr("core.mcp._mcp_manager", mgr)
-    return mgr
-
-
 @contextlib.asynccontextmanager
 async def _twin(work_dir: Path, b_dir: Path, edge_binary: Path, monkeypatch, servers: dict[str, Any], **env: str):
     _put(work_dir / "database.db", "mcp.servers", json.dumps(servers))
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
             contextlib.closing(sqlite3.connect(b_dir / "database.db")) as dst:
         src.backup(dst)
-    # Python's side is only run when recording it.
-    mgr = await _python_manager(monkeypatch) if RECORD else None
     # HOME and the edge's working directory hold no mcp.json.
     async with _run_edge(edge_binary, b_dir, b_dir / "database.db", {"HOME": str(b_dir), **env}) as client:
         client.timeout = httpx.Timeout(120)
         yield McpTwin(client, work_dir, b_dir)
-    if mgr is not None:
-        await mgr.close()
 
 
 @pytest.fixture

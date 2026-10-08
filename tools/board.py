@@ -15,87 +15,10 @@ from langchain_core.tools import tool
 
 from db.engine import async_session
 from db.ops import (
-    create_board_task as _create,
     list_board_tasks as _list,
     update_board_task,
 )
 from tools.context import current_ctx
-
-
-async def create_task(
-    title: str,
-    body: str,
-    priority: int = 0,
-    depends_on: str | None = None,
-    model: str | None = None,
-    skill: str | None = None,
-    start: bool = True,
-    decompose: bool = False,
-) -> str:
-    """Create a durable task on the shared task board.
-
-    The task runs in the background on its own agent loop and conversation,
-    independent of this chat — use it to queue follow-up work or fan a big job
-    into pieces. For an in-conversation checklist use write_todos instead.
-
-    Args:
-        title: Short imperative title.
-        body: Full instructions for the executing agent.
-        priority: Higher runs first. Default 0.
-        depends_on: Comma-separated ids of tasks that must finish first; their
-                    completion summaries are handed to this task as context.
-        model: Model id; None = default.
-        skill: Saved skill name the task's agent should follow.
-        start: False parks it in todo until a human readies it. Ignored when
-               depends_on is set.
-        decompose: Have a planner split it into parallel subtasks; the task
-                   itself runs last as the synthesis step. Cannot be combined
-                   with depends_on.
-    """
-    parent_ids = [p.strip() for p in (depends_on or "").split(",") if p.strip()]
-    if decompose and parent_ids:
-        return "Error: decompose cannot be combined with depends_on."
-    status = "todo" if decompose else ("ready" if start else "todo")
-    try:
-        async with async_session() as session:
-            task = await _create(
-                session,
-                title=title,
-                body=body,
-                status=status,
-                priority=priority,
-                created_by="agent",
-                model=model,
-                skill=skill,
-                parent_ids=parent_ids,
-            )
-    except ValueError as exc:
-        return f"Error: {exc}"
-    # Lazy imports: tools must not import server modules at load time
-    # (core.agents imports this file; server imports core.agents).
-    if decompose:
-        from server.task_board_runtime import decompose_board_task
-        try:
-            subtasks = await decompose_board_task(task.id)
-        except ValueError as exc:
-            return (
-                f"Created board task '{task.title}' (id={task.id}, status=todo) "
-                f"but decomposition failed: {exc}. The task is parked in todo."
-            )
-        sub_lines = "\n".join(f"  - {s.title} (id={s.id})" for s in subtasks)
-        return (
-            f"Created board task '{task.title}' (id={task.id}) and split it into "
-            f"{len(subtasks)} subtasks that run first:\n{sub_lines}\n"
-            "The original task runs last with their results."
-        )
-    if task.status == "ready":
-        from server.task_board_runtime import dispatch_board_tasks
-        await dispatch_board_tasks()
-    return (
-        f"Created board task '{task.title}' (id={task.id}, status={task.status}"
-        + (f", depends on {len(parent_ids)} task(s)" if parent_ids else "")
-        + ")."
-    )
 
 
 async def list_tasks(status: str | None = None) -> str:

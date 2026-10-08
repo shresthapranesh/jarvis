@@ -10,7 +10,6 @@ time. These tests pin both halves to one resolved timezone.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -59,29 +58,3 @@ def test_triggers_are_bound_to_the_resolved_timezone(scheduler, monkeypatch):
     monkeypatch.setenv("JARVIS_TIMEZONE", "Asia/Kathmandu")
     trigger = scheduler._cron("0 9 * * 1")
     assert str(trigger.timezone) == "Asia/Kathmandu"
-
-
-def test_next_run_display_matches_when_the_job_actually_fires(scheduler, monkeypatch):
-    """The regression itself: `_compute_next_run_at` used UTC while the trigger
-    ran on local time, so the card showed a time the job never fires at."""
-    from server.automation_runtime import _compute_next_run_at
-
-    monkeypatch.setenv("JARVIS_TIMEZONE", "Asia/Kathmandu")
-    tz = ZoneInfo("Asia/Kathmandu")
-
-    auto = type("Auto", (), {"schedule": "0 9 * * *", "enabled": True})()
-    shown = _compute_next_run_at(auto)
-    assert shown is not None
-
-    fires_at = scheduler._cron("0 9 * * *").get_next_fire_time(None, datetime.now(tz))
-    assert datetime.fromisoformat(shown) == fires_at
-    # 09:00 in Kathmandu — not 09:00 UTC, which is 14:45 local.
-    assert datetime.fromisoformat(shown).astimezone(tz).hour == 9
-    assert datetime.fromisoformat(shown).astimezone(timezone.utc).hour != 9
-
-
-def test_disabled_or_unscheduled_automation_has_no_next_run(scheduler):
-    from server.automation_runtime import _compute_next_run_at
-
-    assert _compute_next_run_at(type("A", (), {"schedule": None, "enabled": True})()) is None
-    assert _compute_next_run_at(type("A", (), {"schedule": "0 9 * * *", "enabled": False})()) is None

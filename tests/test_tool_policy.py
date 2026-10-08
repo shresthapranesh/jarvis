@@ -16,7 +16,6 @@ subtly wrong and impossible to notice from the UI:
 
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 
@@ -124,53 +123,6 @@ async def test_disabled_tool_is_not_bound(database):
 
 # ── The gate ─────────────────────────────────────────────────────────────────
 
-async def test_resolving_the_row_releases_the_waiter(database):
-    from core.approvals import resolve
-    from core.tool_gate import create_gate_request, wait_for_gate
-    from db import async_session
-
-    async with async_session() as session:
-        row = await create_gate_request(
-            session, tool_key="bound:run_cell", tool_name="run_cell",
-            args={"code": "print(1)"}, conversation_id="conv-1",
-        )
-    approval_id = row.id
-
-    waiter = asyncio.create_task(wait_for_gate(approval_id, timeout=10))
-    await asyncio.sleep(0)  # let the waiter register before the answer lands
-
-    async with async_session() as session:
-        resolved = await resolve(session, approval_id, "approve")
-    assert resolved.status == "approved"
-
-    approved, answer = await asyncio.wait_for(waiter, timeout=5)
-    assert approved is True
-    assert answer == "approve"
-
-
-async def test_denial_is_denial_not_ambiguity(database):
-    """`is_affirmative_answer` denies anything it cannot read as a yes, and the
-    gate must inherit that: running a gated tool on an unparseable reply is the
-    wrong default."""
-    from core.approvals import resolve
-    from core.tool_gate import create_gate_request, wait_for_gate
-    from db import async_session
-
-    async with async_session() as session:
-        row = await create_gate_request(
-            session, tool_key="sdk:delete_skill", tool_name="jarvis.delete_skill",
-            args={"skill_id": "s-1"}, conversation_id="conv-1",
-        )
-
-    waiter = asyncio.create_task(wait_for_gate(row.id, timeout=10))
-    await asyncio.sleep(0)
-    async with async_session() as session:
-        await resolve(session, row.id, "what does it do?")
-
-    approved, _ = await asyncio.wait_for(waiter, timeout=5)
-    assert approved is False
-
-
 async def test_gate_shows_up_as_blocking_in_the_inbox(database):
     """Not `deferred`: something *is* waiting on this one, and the inbox says
     "runs on approval" only for requests where approving performs the work."""
@@ -189,27 +141,6 @@ async def test_gate_shows_up_as_blocking_in_the_inbox(database):
     assert rows[0].parent_id == "conv-1"
 
 
-async def test_open_gate_holds_the_kernel_cell(database):
-    """`run_cell`'s 60s timeout is suspended only while a request is actually
-    open — otherwise a genuinely hung cell would never be interrupted."""
-    from core.approvals import resolve
-    from core.tool_gate import create_gate_request, has_open_gate
-    from db import async_session
-
-    assert await has_open_gate("conv-1") is False
-    async with async_session() as session:
-        row = await create_gate_request(
-            session, tool_key="sdk:create_task", tool_name="jarvis.create_task",
-            args={}, conversation_id="conv-1",
-        )
-    assert await has_open_gate("conv-1") is True
-    assert await has_open_gate("conv-2") is False
-
-    async with async_session() as session:
-        await resolve(session, row.id, "deny")
-    assert await has_open_gate("conv-1") is False
-
-
 # ── The gate in the agent loop ───────────────────────────────────────────────
 
 def _one_call_agent(tool, call):
@@ -225,57 +156,6 @@ def _one_call_agent(tool, call):
         return [AIMessage(content="", tool_calls=[call])]
 
     return Agent("test", step, [tool], gate=make_tool_gate([tool]))
-
-
-async def test_denied_call_is_answered_and_never_executed(database):
-    from langchain_core.messages import ToolMessage
-    from langchain_core.tools import tool
-
-    from core.agent_loop import Thread
-    from core.approvals import resolve
-    from core.tool_policy import set_tool_policy
-    from db import async_session
-
-    ran: list[str] = []
-
-    @tool
-    async def dangerous(target: str) -> str:
-        """Do something that wants a human's say-so first."""
-        ran.append(target)
-        return "done"
-
-    async with async_session() as session:
-        await set_tool_policy(session, "bound:dangerous", approval=True)
-
-    call = {"name": "dangerous", "args": {"target": "prod"}, "id": "call-1", "type": "tool_call"}
-    agent = _one_call_agent(dangerous, call)
-    thread = Thread()
-    task = asyncio.create_task(agent.ainvoke({"messages": [("user", "go")]}, thread=thread))
-    # The row appears once the loop blocks; answer it the way a human would.
-    row = None
-    for _ in range(50):
-        await asyncio.sleep(0.05)
-        async with async_session() as session:
-            from db import ops
-
-            rows = await ops.list_approvals(session)
-            if rows:
-                row = rows[0]
-                break
-    assert row is not None, "the gated call should have recorded a request"
-    async with async_session() as session:
-        await resolve(session, row.id, "deny")
-
-    await asyncio.wait_for(task, timeout=10)
-    assert ran == [], "a denied tool must not run"
-    answers = [m for m in thread.messages if isinstance(m, ToolMessage)]
-    assert len(answers) == 1
-    answer = answers[0]
-    # The pairing matters more than the text: an unanswered tool_use is what
-    # breaks the *next* provider call.
-    assert answer.tool_call_id == "call-1"
-    assert answer.status == "error"
-    assert "Denied by a human" in answer.content
 
 
 async def test_ungated_calls_pass_straight_through(database):
@@ -296,50 +176,6 @@ async def test_ungated_calls_pass_straight_through(database):
 
 
 # ── Reaching the conversation, not just the inbox ────────────────────────────
-
-async def test_request_reaches_the_live_run_from_outside_the_graph(database):
-    """A gate created by a resolver (the SDK's `requestToolApproval`, or
-    `callMcpTool`) must still show up in the conversation it is blocking.
-
-    Announcing from the caller only covered the graph-bound path, so an SDK or
-    MCP call blocked the run with nothing on screen and the request visible
-    only in `/approvals`.
-    """
-    import json as _json
-
-    from core.state import TaskState, _tasks
-    from core.tool_gate import create_gate_request
-    from db import async_session
-
-    state = TaskState(kind="chat", parent_id="conv-live")
-    _tasks["task-live"] = state
-    try:
-        async with async_session() as session:
-            row = await create_gate_request(
-                session, tool_key="sdk:delete_skill", tool_name="jarvis.delete_skill",
-                args={"skill_id": "s-1"}, conversation_id="conv-live",
-            )
-        # …and the row is stamped with the run, so the inbox can name it.
-        assert row.task_id == "task-live"
-
-        assert [e["event"] for e in state.events] == ["approval_request"]
-        payload = _json.loads(state.events[0]["data"])
-        assert payload["approval_id"] == row.id
-        assert payload["tool"] == "jarvis.delete_skill"
-        assert payload["args"] == {"skill_id": "s-1"}
-
-        # Answering from the inbox has to clear the inline prompt too.
-        from core.approvals import resolve
-
-        async with async_session() as session:
-            await resolve(session, row.id, "approve")
-        assert [e["event"] for e in state.events] == [
-            "approval_request", "approval_resolved",
-        ]
-        assert _json.loads(state.events[1]["data"])["approved"] is True
-    finally:
-        _tasks.pop("task-live", None)
-
 
 async def test_no_live_run_is_not_an_error(database):
     """Board tasks, automations and CLI runs gate the same way; a request with

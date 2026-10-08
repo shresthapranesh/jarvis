@@ -98,24 +98,3 @@ async def test_the_database_refuses_a_second_running_job_on_a_thread(
             conn.execute("UPDATE jobs SET status = 'running' WHERE id = ?", (second,))
         # Jobs without a thread hold no lease.
         conn.execute("UPDATE jobs SET status = 'running' WHERE thread_id IS NULL")
-
-
-async def test_chat_turns_and_board_runs_enqueue_on_their_thread(jarvis, work_dir: Path):
-    from db import async_session
-    from db.models import BoardTask
-    from server.chat_runtime import enqueue_chat_task
-    from server.task_board_runtime import dispatch_board_tasks
-
-    async with async_session() as session:
-        from db.ops import get_or_create_conversation
-
-        conv = await get_or_create_conversation(session, None, "gemini-2.5-flash", "t")
-        chat_id = await enqueue_chat_task(session, "hi", "gemini-2.5-flash", conv.id)
-        session.add(BoardTask(id="card", title="card", status="ready"))
-        await session.commit()
-    await dispatch_board_tasks()
-
-    with sqlite3.connect(work_dir / "database.db") as conn:
-        threads = dict(conn.execute("SELECT kind, thread_id FROM jobs").fetchall())
-    assert threads == {"chat": conv.id, "board_task": "boardtask_card"}
-    assert chat_id

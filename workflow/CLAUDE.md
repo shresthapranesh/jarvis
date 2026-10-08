@@ -1,7 +1,7 @@
 # workflow/ — graph executor
 
 - **Ported to the edge** (`edge/src/agent/workflow/`): the engine, every node type, the templates, the job handler and `run_workflow` — a change here is made in both. The edge runs a workflow when every model its graph can call is one it calls; otherwise Python does. See `edge/README.md` → Workflows for the named departures.
-- Definitions are JSON (`Workflow.definition`: `nodes` + `edges`). `engine.py:execute_workflow(run_id, definition, inputs, task_state)` runs BFS; `server/workflow_runtime.py` is the job handler.
+- Definitions are JSON (`Workflow.definition`: `nodes` + `edges`). `engine.py:execute_workflow(run_id, definition, inputs, task_state)` runs BFS; the server's port is `edge/src/agent/workflow/`, which runs every workflow now.
 - Node types (`nodes.py`, `NODE_REGISTRY`): `start`, `agent`, `conditional`, `router`, `map`, `refine`, `sequential`, `parallel`, `loop`, `approval`, `human_input`, `planner` (alias `plan`).
 - **Adding a node type**: subclass `BaseNode` with `node_type` and `execute()`, register in `NODE_REGISTRY`, emit events with `_emit(task_state, "event", **data)` — never append to `task_state.events`. Nodes that call an LLM follow the sanitization rule in the root CLAUDE.md.
 - **Per-node resilience** (handled in `engine.py:_run_node`): `timeout_seconds`, `retries` (0–10), `retry_delay_seconds`, `on_error` (`error` | `continue` | `skip`), `fallback_output`. Emits `node_retry` between attempts; checks `task_state.cancelled` while sleeping.

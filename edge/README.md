@@ -1,173 +1,117 @@
 # jarvis-edge
 
-The Rust front of the jarvis server. Phase 1 of moving off Python: the edge owns
-the public port, answers the GraphQL operations that have been ported, and
-reverse-proxies everything else to the Python server behind it. Rust owns
-the database reads, GraphQL, the job queue's triggers, the event stream and
-every timer; Python is reduced to a worker that runs agent jobs, and with
-`JARVIS_WORKER_CMD` set the edge starts it when there is work and stops it when
-idle — so an idle box runs no Python at all (see "The worker").
+The jarvis server and command line, in Rust: the GraphQL API and its live
+streams, the agent loop that runs every chat turn, automation, board task and
+workflow, the scheduler, the Telegram and Discord bots, MCP, the live browser
+view and the REST routes. Only the agent's notebook kernels run Python — the
+agent writes Python in `run_cell`, and the `jarvis` SDK it calls there
+(`tools/sdk.py`) is Python.
 
 ```
-browser / SDK ──▶ edge :8000 ──(ported operation)──▶ SQLite
-                       │
-                       └──(everything else)──▶ Python :8001
+browser / SDK / bots ──▶ jarvis-edge :8000 ──▶ SQLite (database.db)
+                                │
+                                ├──▶ model providers, MCP servers, the browser (CDP)
+                                └──▶ ipykernel processes (the agent's notebooks)
 ```
+
+It began as an edge in front of the Python server, taking over one operation
+at a time; the name stayed. The Python server is gone (see `ROADMAP.md`).
 
 ## Running it
 
 ```bash
-# The edge on :8000 (what vite and the jarvis SDK already target), starting
-# Python on :8001 when it's needed and stopping it after 5 idle minutes:
-cd edge && JARVIS_APP_DIR=.. JARVIS_WORKER_CMD='exec .venv/bin/uvicorn server.entrypoint:app --port $JARVIS_BACKEND_PORT' cargo run
-
-# …or run Python yourself (always on, with --reload), and the edge in front:
-JARVIS_EDGE_URL=http://127.0.0.1:8000 uv run uvicorn server.entrypoint:app --reload --port 8001
-cd edge && cargo run
+# The server on :8000 (what vite and the jarvis SDK target):
+cd edge && JARVIS_APP_DIR=.. cargo run
 ```
-
-Docker runs the first way via `edge/serve.sh`. Python on its own on :8000
-still works, since the edge is a strict front and nothing in Python depends on
-it.
 
 | env | default | |
 |---|---|---|
-| `JARVIS_EDGE_BIND` | `127.0.0.1:8000` | edge listen address |
-| `JARVIS_BACKEND_URL` | `http://127.0.0.1:8001` | the Python server |
-| `JARVIS_EDGE_LOG` | `info` | `error`…`trace`, the edge's own logs only |
-| `DATABASE_URL` / `WORK_DIR` | as `core/config.py` | same database file as Python |
-| `ARTIFACTS_DIR` | as `core/config.py` | same files as Python |
-| `JARVIS_WORKER_CMD` | unset | the command that runs Python (via `sh -c`, in `JARVIS_APP_DIR`); set, the edge owns the worker |
-| `JARVIS_WORKER_IDLE` | `300` | seconds idle before the worker is stopped; `0` keeps it up (restarted if it dies) |
-| `JARVIS_APP_DIR` | the current directory | the jarvis checkout: where the worker runs, and `static/dist`, the SPA the edge serves |
-| `JARVIS_AGENT_RUNTIME` | `edge` | `python` leaves every chat turn to Python; otherwise the edge runs the ones it can (see "The agent loop") |
+| `JARVIS_EDGE_BIND` | `127.0.0.1:8000` | listen address |
+| `JARVIS_EDGE_LOG` | `info` | `error`…`trace` |
+| `DATABASE_URL` / `WORK_DIR` | as `core/config.py` | the database file the kernels' SDK reads too |
+| `ARTIFACTS_DIR` | as `core/config.py` | artifact files |
+| `JARVIS_APP_DIR` | the current directory | the jarvis checkout: `core/system_prompt.md`, the Python kernels run on (`tools/`, `.venv`), and `static/dist`, the SPA served here |
+| `JARVIS_KERNEL_PYTHON` | `$JARVIS_APP_DIR/.venv/bin/python`, else `python3` | the interpreter kernels and code automations run on |
+| `JARVIS_RUN_JOBS` | on | `0` queues runs without running them — for tests that look at what a write queued |
 
 The built-in model list is compiled in from `core/builtin_models.json`, so
-rebuild the edge after editing it.
+rebuild after editing it.
 
 The same binary is the command line (`src/cli/`, see below): `jarvis-edge`
 with no command serves, `jarvis-edge start [--host] [--port] [--debug]` too.
 
-## Routing
+What isn't an API route is the SPA: the build's files under
+`$JARVIS_APP_DIR/static/dist`, else its `index.html` for the client-side
+router (`web.rs`). `/health` answers `{"status":"ok"}`.
 
-An operation is answered by the edge only when **every root field it selects**
-is defined in the edge's schema. The schema reads its root fields back from its
-own SDL, so the routing table can't drift from the code. Everything else goes
-to Python:
+## GraphQL (`src/graphql.rs`, `src/gql/`)
 
-- the queries and mutations not yet ported,
-- introspection,
-- `node(id:)` when the id names a type the edge can't resolve.
+`POST /graphql` executes queries and mutations; `GET /graphql` is the
+subscription WebSocket (graphql-ws and graphql-transport-ws). The schema is
+what the Python (Strawberry) schema was, field for field —
+`tests/test_edge_parity.py` checks every type, field and argument it had —
+and `frontend/schema.graphql` is exported from it (`pnpm schema`, which runs
+`--print-schema`). Introspection is on.
 
-Splitting one operation across both servers is never attempted.
+- **A request Strawberry refused before executing** gets its 400 and its
+  words: a body that isn't JSON or isn't sent as `application/json`
+  (multipart included: uploads aren't enabled), a batch ("Batching is not
+  enabled"), a `query`, `variables` or `extensions` of the wrong type, no
+  query, an `operationName` naming no operation. A parse or validation error
+  is executing's, as in Python.
+- **Who is asking**: the `jarvis` SDK sends `X-Jarvis-Caller: agent` and names
+  its conversation in `X-Jarvis-Conversation`; everything else is a human. An
+  agent's delete of a workflow, skill or automation, and its `callMcpTool`,
+  may need a human's approval first (see "Approvals").
+- **Wire formats are Python's** (`src/gql/codec.rs`): global ids are
+  `base64("Type:id")`, `DateTime` is `isoformat()` (which drops a zero
+  fraction), message cursors are urlsafe `base64("{iso}|{id}")`. A write
+  leaves a row exactly as SQLAlchemy did: `uuid4()` ids, its stored
+  timestamp text, `updated_at` bumped by hand where `onupdate=_now` would
+  have, ORM cascades spelled out as explicit DELETEs — including the ones
+  that *don't* happen (a memory's access log outlives it; foreign keys are
+  off).
 
-A request that isn't a well-formed operation is answered here, never
-proxied (`graphql.rs`, `gql/router.rs`): what Strawberry refuses before
-executing gets its 400 and its words — a body that isn't JSON or isn't sent
-as `application/json` (multipart included: uploads aren't enabled), a batch
-("Batching is not enabled"), a `query`, `variables` or `extensions` of the
-wrong type, no query, an `operationName` naming no operation. A parse or
-validation error is executing's, as in Python — every type under an owned
-root field is ported whole, so it is the request's error — and so is a
-subscription sent over HTTP. A field that may defer (`DEFERRING_FIELDS`)
-beside another is refused with a GraphQL error: deferring re-runs the whole
-operation in Python, which would write the others twice.
+## Runs (`src/runs.rs`, `src/gql/start.rs`, `src/gql/runs.rs`)
 
-## The worker link (`/internal/worker`)
+A run is a `jobs` row the agent loop claims and the run in the registry its
+subscribers watch.
 
-Runs still execute in Python, but the edge starts them and serves everyone
-watching them. Python dials a loopback-only WebSocket on the edge
-(`core/edge_link.py`, when `JARVIS_EDGE_URL` is set) and reports its run
-registry: each run's registration, every event `emit_event` appends (raw
-`{"event", "data"}` records), state changes (done, cancelled, interrupt, token
-counters) and removal, plus `holds` — why it mustn't be stopped for being
-idle (see "The worker"). The edge keeps a mirror (`src/runs.rs`) and steers
-back over the same socket (protocol 4):
-
-| edge → worker | |
-|---|---|
-| `cancel` | the in-process half of a stop |
-| `wake` | a job was just committed; claim it now, not at the next poll |
-| `adopt_queued` | re-read the conversation's queued messages (see below) |
-| `call` → `reply` | run a function that needs the run's in-memory state — `queue_message`, `unqueue_message`, `resume_workflow_run`, `resolve_workflow_approval` — and return its result or the error message Python's resolver would raise; and `drain` / `undrain`, which stop and restart job claims before an idle stop |
-
-- **Nothing is durable on the link.** Every (re)connect starts with a
-  snapshot of `_tasks` including each run's full event history, which
-  reconciles everything: an edge restart, a dropped link, a worker restart.
-  `hello.instance` says whether a reconnect is the same process (runs carry
-  over, subscribers keep their place) or a new one (every mirrored run is
-  gone; its subscribers end with the DB fallback).
-- **Events are raw; typing is the edge's.** The same `done` record is a
-  `DoneEvent` to `taskEvents` and an `AutomationDoneEvent` to
-  `automationRunEvents`, so each subscription coerces (`src/gql/events.rs`),
-  keeping Python's `data.get` / truthiness / `str()` semantics and
-  `json.dumps` byte for byte for the fields that embed JSON text
-  (`src/pyjson.rs`).
-- **The registration race.** A run Python starts itself is handed out over
-  one channel and reported over another. A subscription for an unknown run whose DB row still
-  says "in progress" waits up to 2 s for it to register.
-- **Only while linked — or owned.** The subscription socket, `runningTasks`,
-  the stop mutations and the triggers are served by the edge while a worker
-  is linked, or always when the edge owns the worker (no worker up then means
-  no run in flight, and a trigger's job starts one). Otherwise they go to
-  Python as before.
-
-### Runs the edge starts
-
-`startTask`, `runWorkflow` and `triggerAutomation` (`src/gql/start.rs`) write
-what Python's `register_*` functions wrote — the conversation, the user
-message, the domain row the run reports into, and the `jobs` row — in one
-transaction. The run's model is resolved here too (`src/catalog.rs`), from the
-same `core/builtin_models.json` Python loads plus the `models.custom` and
-`default.model` settings rows.
-
-Python's triggers registered a `TaskState` before committing, so a subscriber
-could never miss the run. The edge does the same in its own mirror: the run is
-**pending** — the edge's, not yet any worker's — until a worker claims the job
-and registers it. Then:
-
-- **The claim continues the run.** The worker creates the run's state from
-  the job (`get_or_create_task_state(job=...)`): started at the job's
-  `created_at`, so queue wait still counts, and already cancelled if a stop
-  arrived first. Its event 0 is appended after anything the edge emitted
-  while the run was pending (`worker_base`), so a subscriber's cursor carries
-  across. The trigger's label stands.
-- **A pending run is the edge's to answer for.** A message queued onto it is
-  a `queued` row plus a `queued_message` event the edge emits; the worker's
-  chat handler adopts queued rows at claim. If the claim and the queue cross,
-  the edge sends `adopt_queued` (with the ids it couldn't announce itself), so
-  the worker reads the conversation again. A pending run has no interrupt to
-  answer.
-- **A stop on a pending run is durable**: `cancel_requested` on the still-
-  pending job, rather than Python's pending → `cancelled`, which left the
-  `TaskState` and the message row in progress forever. The worker that claims
-  it runs it already cancelled, so it finishes as stopped with its rows
-  written.
-- **A pending run survives a new worker process** — no worker had it — and
-  leaves the mirror only when its job ends unclaimed (a 5 s sweep against
-  `jobs`, for a handler that returned before registering, say).
+- **Starting one** — `startTask`, `runWorkflow`, `triggerAutomation`, a
+  schedule firing, a board dispatch, a bot's message — writes the
+  conversation, the user message, the row the run reports into and the job
+  in one transaction. The run is registered *before* the commit, so a
+  subscriber that gets its id back can't miss it, then the loop is woken.
+  The run's model is resolved here (`src/catalog.rs`): the built-ins plus
+  the `models.custom` and `default.model` settings, a removed model falling
+  back to the default.
+- **A message for a busy conversation** joins the run already going: a
+  `queued` row and a `queued_message` event, taken in before the run's next
+  model call. `unqueueMessage` withdraws it until then.
+- **Subscriptions** (`taskEvents`, `automationRunEvents`, `boardTaskEvents`,
+  `workflowRunEvents`) replay a run's events from the first and follow it to
+  its end. Each coerces the raw `{"event", "data"}` records as Python's did
+  (`src/gql/events.rs`), with `data.get` / truthiness / `str()` semantics and
+  `json.dumps` byte for byte for fields that embed JSON text
+  (`src/pyjson.rs`). A run that isn't live answers from its row; a row still
+  marked in progress waits up to 2 s for its run first. A finished run
+  lingers 5 s for a late subscriber.
+- **Stops** set the run's flag, which the turn checks between steps, and the
+  job's `cancel_requested`, which the loop polls — so a run stopped before
+  it was claimed starts cancelled and finishes as stopped, its rows written.
+- `runningTasks` lists the registry.
 
 ## The scheduler (`src/schedule.rs`, `src/cron.rs`)
 
-Every timer the Python server ran is the edge's, so that between jobs Python
-has nothing to do:
+Every timer the Python server ran, ported:
 
 | timer | when | does |
 |---|---|---|
 | each enabled automation | its cron schedule | enqueues an `automation` job |
-| board dispatch | every 15 s, and when Python sends `dispatch` | `dispatch_board_tasks`, in the edge |
-| memory consolidation | `0 */6 * * *` | the sweep in the edge (`src/consolidate/`), if due |
-| project memory | every 30 min | the sweep in the edge (`src/consolidate/`), if due |
-| memory-activity prune | `0 4 * * *` | deletes old access-log rows, in the edge |
-
-Python behind the edge (`JARVIS_EDGE_URL` set — `core/edge_link.py:behind_edge`)
-registers none of these, nor the idle-kernel reaper: the kernels are the
-edge's too (see "The kernels"). Its `dispatch_board_tasks()` sends `dispatch` instead of claiming
-cards itself, `_register_scheduler_job` / `_remove_scheduler_job` send
-`schedules`. The memory sweeps run in the edge unless the agent loop is off
-(`JARVIS_AGENT_RUNTIME=python`); then they are queued as `maintenance` jobs
-for Python's worker (`core/scheduler.py:MAINTENANCE_TASKS`), as before. The decision is configuration, not
-link state, so a reconnecting link can't leave both sides firing.
+| board dispatch | every 15 s, and after a board write that readies a card | `dispatch_board_tasks` |
+| memory consolidation | `0 */6 * * *` | the sweep (`src/consolidate/`), if due |
+| project memory | every 30 min | the sweep (`src/consolidate/`), if due |
+| memory-activity prune | `0 4 * * *` | deletes old access-log rows |
 
 - **Cron is APScheduler's, not a library's.** `cron.rs` ports
   `CronTrigger.from_crontab` (after `normalize_crontab`) with Python's
@@ -181,43 +125,36 @@ link state, so a reconnecting link can't leave both sides firing.
   missed while the edge was down is caught up.
 - **A schedule is re-checked at fire time** against the row, so one disabled
   or deleted a moment ago doesn't fire from a stale copy. Schedules reload
-  300 ms after `schedules` and every 60 s regardless.
+  300 ms after an automation write and every 60 s regardless.
 - **The zone** is the `scheduler.timezone` setting, else `JARVIS_TIMEZONE`,
   else `TZ`, else the system zone, else UTC — read at startup, as Python reads
   it.
-- **Maintenance jobs coalesce**: none is enqueued while one for the same
-  sweep is pending or running, so a machine that was off doesn't come back to
-  a backlog.
-- **…and wait for work** (`Scheduler::maintenance_due`), because a job starts
-  Python. Each sweep's own first checks, read from the same rows: a message
+- **Maintenance waits for work** (`Scheduler::maintenance_due`), because a
+  pass calls a model. Each sweep's own first checks, read from the same rows: a message
   past the memory watermark whose first isn't a reply still being written; a
   project with new messages that has been quiet 15 minutes (or waited a day)
   and holds 600+ characters. The watermarks are `kv_store` rows in
   `database.db`. Where unsure (an unreadable watermark, a
-  failed read) the answer is yes, and Python decides as before.
-  `tests/test_edge_supervisor.py` diffs every gate against the sweep it
+  failed read) the answer is yes, and the sweep decides.
+  `tests/test_edge_serving.py` diffs every gate against Python's sweep it
   guards, through `jarvis-edge --maintenance-due`. One thing waits longer: the
   first-run seeding of discrete memory from the old blob now happens with the
   first pass that has a message to read.
 
 ## The bots (`src/bots/`)
 
-The Telegram and Discord bots (`server/telegram_bot.py`,
-`server/discord_bot.py`) run here, so an idle box with a bot connected runs
-no Python. Each starts when its token is set (`TELEGRAM_BOT_TOKEN`,
-`DISCORD_BOT_TOKEN`); Python behind the edge starts neither, by
-configuration, as with the timers.
+Ports of Python's `telegram_bot.py` and `discord_bot.py`. Each starts when
+its token is set (`TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`).
 
 - **A message is a `startTask`.** It goes through the same `start_chat`
   (`src/gql/start.rs`), with the bot's surface and its conversation id
   (`telegram_<chat>`, `discord_<channel>`): a run already going on that chat
-  takes it as a queued message (and the bot says so), otherwise a new run is
-  mirrored as pending and its job wakes the worker. The rows are diffed
-  against Python's own handlers (`tests/test_edge_bots.py`).
-- **The reply follows the mirror**: `token` events from the main agent,
-  edited into the chat at most once a second, created on the first text —
-  never a placeholder — and finished when the run is done (or leaves the
-  mirror).
+  takes it as a queued message (and the bot says so), otherwise a new run
+  starts. The rows are diffed against Python's own handlers, recorded
+  (`tests/test_edge_bots.py`).
+- **The reply follows the run**: `token` events from the main agent, edited
+  into the chat at most once a second, created on the first text — never a
+  placeholder — and finished when the run is done (or leaves the registry).
 - **Telegram** is the Bot API, long-polled; pending updates are dropped at
   start. `TELEGRAM_PROXY_URL` (or `HTTPS_PROXY` / `ALL_PROXY`) proxies it.
 - **Discord** is the v10 gateway (heartbeat, zombie detection, resume, and a
@@ -225,64 +162,16 @@ configuration, as with the timers.
   plus REST, retried on 429. Replies never ping anyone.
 - **A voice note** is answered "Voice notes aren't supported — send text
   instead." (as Python's bots answer it); nothing transcribes audio.
-- **Notifications** (automation and workflow results) still go out from
-  Python, now as plain Bot API / REST calls with the same tokens — no
-  connected bot needed.
+- **Notifications** (automation and workflow results, `src/notify.rs`) are
+  plain Bot API / REST calls with the same tokens — no connected bot needed.
 - `TELEGRAM_API_URL`, `DISCORD_API_URL` and `DISCORD_GATEWAY_URL` point the
   bots at another server; the tests' fake uses them.
 
-## The worker (`src/supervisor.rs`)
-
-With `JARVIS_WORKER_CMD` set the edge owns the Python process: it runs the
-command (in its own process group, with `JARVIS_EDGE_URL` and
-`JARVIS_BACKEND_PORT` set) when there is work, and stops it when there has
-been none for `JARVIS_WORKER_IDLE` seconds. Idle, jarvis is the edge alone.
-
-**What starts it**: a request the edge proxies (REST it hasn't ported, GraphQL
-it defers) — which waits for it, 2–3 s on a laptop; a job a worker could claim
-now, or one a dead worker left `running` — not one the edge's own agent loop
-runs (`jobs.runtime`); and the edge's own start, so the
-startup sweeps run and a broken command shows up at once. A run the edge
-starts itself needs nothing more: its job kicks the supervisor, and the run is
-pending in the mirror until the new worker claims it.
-
-**What keeps it up**: a proxied request or socket in progress (a log stream
-holds it while someone watches), a run in the mirror that isn't the edge's
-own, a claimable or running job (again, not the edge's), and the worker's `holds` (none today: a conversation's notebook is the
-edge's, so it no longer keeps Python up — see "The kernels").
-A connected chat bot holds nothing: the bots are the edge's (see "The bots"). Ready means `/health` answers and the link has said hello.
-
-**How it stops**: `call drain` — the worker stops claiming and waits out a
-claim in flight — then one last look at the job table and the mirror. Work
-that slipped in means `undrain`; otherwise SIGTERM to the group (uvicorn's
-graceful shutdown: kernels, MCP servers, the link) and SIGKILL after 30 s. The
-next worker is started with `JARVIS_EDGE_RESPAWN=1`, which tells its startup
-that nothing crashed: it skips the incognito sweep, which would otherwise
-delete an incognito chat open in a tab between turns. The zombie sweep needs
-no flag — a row whose job is still pending was never claimed, and is skipped
-(`cleanup_zombie_running_rows`).
-
-**When it fails**: a command that won't start, isn't ready in 120 s, or dies
-within a minute of starting backs off exponentially to a minute; requests meanwhile
-get a 503 naming the reason.
-
-**What a page load needs without it** is served here: the SPA from
-`$JARVIS_APP_DIR/static/dist` (every GET that isn't one of Python's routes —
-`proxy.rs:python_get_route`, checked against the app's route table by the
-tests), `/health`, and the queries the chat page makes — `models`, `todos`
-and `browserAvailable`. A resolver that meets data only Python reads
-faithfully (a `models.custom` row Python itself would fail on) returns an
-`edgeDefer` error,
-and `graphql.rs` answers the whole operation in Python instead.
-
 ## The kernels (`src/kernels/`)
 
-Phase 2c. The agent's notebooks — one `ipykernel` per session key (a
-conversation, or a worker's own key), started on its first cell — are the
-edge's children, not Python's. Python behind the edge runs `run_cell` here, so
-an idle worker is stopped while a notebook keeps its variables, and the next
-turn's worker finds them. A port of `core/kernels.py`; **a change to either is
-made in both.**
+The agent's notebooks — one `ipykernel` per session key (a conversation, or a
+worker's own key), started on its first cell — are the server's children. A
+port of `core/kernels.py`; **a change to either is made in both.**
 
 - **The wire** (`wire.rs`, `kernel.rs`): the Jupyter messaging protocol over
   ZeroMQ — the pure-Rust `zeromq` crate, so no libzmq to build — on `ipc`
@@ -300,27 +189,22 @@ made in both.**
   the session, held while a tool approval for the conversation is open (the
   `approvals` row, up to 30 minutes), 12 live kernels at most (least recently
   used goes), and one idle 30 minutes reaped (checked every 10).
-- **`POST /internal/kernels/run`** `{key, code, timeout?, conversation_id?,
-  project_id?}` → `{output}` or a 500 `{error}`; **`/shutdown`** `{key}`.
-  Loopback only, `application/json` only, and refused with an `Origin` — a web
-  page can't make a browser send that cross-site without a preflight, which
-  nothing answers. Python's side is `core/kernels.py:EdgeKernels`, what
-  `get_kernel_registry()` returns when `JARVIS_EDGE_URL` is set.
-- **A caller that goes away** (a cancelled run closes its request) drops the
-  handler, which interrupts the cell; the session's next cell first waits for
-  that interrupt to land. A request the kernel receives before it has raised
-  is aborted (`stop_on_error`) and would read as no output at all — Python's
-  cancel path has that race.
+- **A cell whose run stops** is interrupted; the session's next cell first
+  waits for that interrupt to land. A request the kernel receives before it
+  has raised is aborted (`stop_on_error`) and would read as no output at all
+  — Python's cancel path has that race.
+- **`--kernel-cells`** drives the kernels from stdin, one JSON command per
+  line (`{key, code, timeout?, conversation_id?, project_id?}` or
+  `{shutdown: key}`); `tests/test_edge_kernels.py` diffs it against
+  `core/kernels.py`.
 - **Departures**, named in `tests/test_edge_kernels.py`: stdin is never
   offered, so `input()` raises at once (Python's client offered it with nobody
   to answer, and the cell hung until its timeout).
 
 ## MCP (`src/mcp/`)
 
-The MCP servers are the edge's, so a configured server no longer sends turns
-to Python, and Python behind the edge launches none. A port of `core/mcp.py`
-and of what `langchain_mcp_adapters` does for it; **a change to either is made
-in both.**
+A port of `core/mcp.py` and of what `langchain_mcp_adapters` does for it;
+**a change to either is made in both.**
 
 - **Config** (`config.rs`): `JARVIS_MCP_SERVERS` < the first `mcp.json` that
   names a server (`~/.jarvis/`, then the checkout) < the `mcp.servers`
@@ -352,14 +236,6 @@ in both.**
   own, keyed for policy as `tool_key_for` keys them (`mcp:<server>/<tool>`),
   gated like any bound tool, run with no timeout; a `lazy` server is named in
   the `mcp_servers` prompt segment (`agent/prompt.rs`).
-- **`POST /internal/mcp/state`** → `{default_load_mode, servers: [{name,
-  config, load_mode, loaded, tools: [{name, description, input_schema}]}]}`;
-  **`/call`** `{server, tool, args, timeout?}` → `{blocks, artifact,
-  is_error, text}` or a 500 `{error}`. Guarded as the kernel endpoints are.
-  Python's side is `core/mcp.py:EdgeMcp`, what `get_mcp_manager()` returns
-  when `JARVIS_EDGE_URL` is set: it keeps a copy of the state for binding and
-  the prompt, re-read when the edge tells it (`apply_setting` on
-  `mcp.servers`) after a reload or a mode change.
 - **Departures**, named in `tests/test_edge_mcp.py`: a deleted
   `mcp.default_load_mode` falls back at once (Python kept the last one it
   synced until a restart); a tool's structured output isn't validated against
@@ -368,14 +244,12 @@ in both.**
 
 ## The agent loop (`src/agent/`)
 
-Phase 2d: chat turns, automation runs, board tasks and workflow runs run in the edge, so
-none of them needs Python at all. On by
-default (`JARVIS_AGENT_RUNTIME=python` turns it off).
+Every chat turn, automation run, board task and workflow run.
 
 - **The turn** (`turn.rs`) is `_run_agent_task` and `core/agent_loop.py`:
   the prompt into the thread and the plan reset, then model step, tool
-  batch, repeat. Each message is written as it arrives, so a handover or a
-  re-claim goes on from the rows (`thread.rs`, the transcript tables). Stops,
+  batch, repeat. Each message is written as it arrives, so a re-claim after
+  a crash goes on from the rows (`thread.rs`, the transcript tables). Stops,
   the budget, the step limit, messages queued mid-run, and the leftover
   queue starting the next turn all behave as Python's.
 - **The prompt** (`prompt.rs`) is `model_request_node`'s: the system prompt
@@ -429,14 +303,16 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   written; the board budget applies. **A change to
   `server/task_board_runtime.py` or `tools/board.py` is made in both.**
 - **Stops through the job**: a running job's `cancel_requested` is polled
-  every 5 s (`watch_queue_cancel`), so a stop that only reached the job —
-  Python's `stopBoardTask`, served when no worker is linked — still stops the
-  edge's run. The edge's own `stopBoardTask` stops it at once.
+  every 5 s (`watch_queue_cancel`), so a stop that only reached the job (one
+  written before the run was taken, or by another process) still stops the
+  run. `stopBoardTask` stops it at once.
 - **Tools** (`tools.rs`): the schemas are Python's own, exported to
   `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
-  tests/test_edge_loop.py -k schemas`). The edge runs `run_cell` (its own
-  kernels), the todo tools, `remember` and `write_artifact`; an unknown tool
-  gets ToolNode's error.
+  tests/test_edge_loop.py -k schemas`). An unknown tool gets ToolNode's
+  error; arguments a tool's signature won't take get `invoke_tool`'s, read
+  as Pydantic's lax mode reads them (`tools::Args`: extra keys ignored, an
+  integer from a whole float or a numeric string, a boolean from 0/1 or a
+  word), so the model can fix its call.
 - **Artifacts** (`artifacts.rs`) port `write_artifact`: a markdown body or a
   file the agent wrote (a relative path from the checkout, as Python's
   working directory), the live file plus one copy per version, the rows, and
@@ -448,42 +324,26 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
 - **Events and steps** (`events.rs`): tokens batched as `TokenCoalescer`
   does, each step's row written before its event.
 
-- **Routing** (`route.rs`), when a run is queued (`startTask`,
-  `triggerAutomation`, `runWorkflow`, a schedule firing, a board dispatch):
-  unless `JARVIS_AGENT_RUNTIME=python`, every chat turn, automation run,
-  workflow run and board task is the edge's — its job gets `runtime = 'edge'`
-  and its run is mirrored as the edge's own. A model the edge can't call
-  (Bedrock with credentials only boto3 reads, a provider nobody configured)
-  fails the run with the reason, as a model Python can't call fails there.
+- **A model the server can't call** (Bedrock with credentials only boto3
+  read, a provider nobody configured) fails the run with the reason.
 - **A run that can't start** — a chat job without its payload, an
   unreadable thread, an automation of an unknown input type (failed as
   Python's handler fails it), a row or task the database won't give up —
   fails: its row records the error, the run ends `error`, and so does its job
   (`Agent::fail_start`, `queue::fail`). So does a prompt that can't be built
   (`prompt::Unbuilt`: `system_prompt.md` unreadable, a context read failing).
-- **Claiming** (`queue.rs`) is `SqliteJobQueue._claim` plus `runtime =
-  'edge'`, under the same thread lease, so a conversation's turns still run
-  one at a time whichever side runs each. The lock is renewed at a third of
-  its 300 s TTL; a lost lock abandons the turn.
-- **Python leaves edge jobs alone**: its claim and lock reaper skip them, its
-  startup sweep doesn't take their rows (or their open tool approvals) for a
-  crashed run's, and the supervisor doesn't start or keep Python for them.
-- **Handing over**: the job goes back to pending with `runtime` cleared and
-  the run pending in the mirror, so a worker's claim continues it — events
-  after the edge's, as for any pending run. A turn the edge had started
-  carries `payload.handoff = {text, step_seq, steps, usage}`: Python then
-  runs the tool calls the edge recorded but didn't run, and goes on from
-  there (`chat_job_handler`), its text, step rows and spend continuing the
-  edge's. A turn goes over only when its next step needs what only Python
-  has: arguments that aren't plainly valid.
+- **Claiming** (`queue.rs`) is `SqliteJobQueue._claim`, under the same
+  thread lease, so a conversation's turns run one at a time. The lock is
+  renewed at a third of its 300 s TTL; a lost lock abandons the turn. Jobs
+  the Python worker queued before it went (`runtime` unset) are claimed like
+  any other.
 - **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
   roles in `core/agents.py` — change both): `spawn_workers` runs its tasks at
   once, each on the run's model with its role's prompt and tools (the file
   and artifact tools are `files.rs`, `artifacts.rs`, ports of
   `tools/files.py`, `tools/artifacts.py`), a
-  history in memory and a kernel of its own. A worker can't be handed over,
-  so it answers unknown tools, bad arguments (worded as `invoke_tool` words
-  them) and gates itself. Its events reach the turn as notes, written and
+  history in memory and a kernel of its own. It answers unknown tools, bad
+  arguments (`tools::Args`) and gates itself. Its events reach the turn as notes, written and
   announced in order — all but `worker_token` as `subagent` steps of
   `<role>:<idx>` — and its model and tool calls count against the run's
   budget and usage. A stop drops the workers at once (Python lets an
@@ -495,22 +355,26 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   waits on the row, polled every 1.5 s, for `JARVIS_TOOL_GATE_TIMEOUT` (30
   minutes) before it expires as denied. Every gate in a batch is answered, in
   order, before anything runs; a denied call is answered with the denial.
-  The answer comes through `resolveApproval` (`src/gql/approval.rs`), which
-  the edge serves for a gate, a board task's question, and a deferred action
-  (`core/approvals.py:ACTIONS` — a denial closes the row; an approved delete
-  of a workflow, automation or skill runs here before the row closes, so a
-  failure leaves it answerable; so does an approved MCP call, through the
-  edge's MCP client), and a request a workflow the edge runs is paused on. A
-  workflow a linked worker runs, paused on a future, or a gate a worker's
-  run is waiting on, is deferred to Python before anything is written —
-  which is why it's owned only alone in an operation. A request no live run
-  is waiting on is closed `expired` with Python's "no longer waiting". `requestToolApproval`, the
-  SDK's request from a kernel, is the edge's on the same terms.
-  Throughput measured before a handover isn't carried.
+  The answer comes through `resolveApproval` (`src/gql/approval.rs`): for a
+  gate, a board task's question, a paused workflow node, or a deferred
+  action. A request no live run is waiting on is closed `expired` with
+  Python's "no longer waiting". `requestToolApproval` is the SDK's request
+  from a kernel, on the same terms.
+- **Deferred actions** (`approval::gate_action`, a port of
+  `core/approvals.py:gate_action` and `ACTIONS`): an agent's (`X-Jarvis-Caller:
+  agent`) `deleteWorkflow`, `deleteSkill`, `deleteAutomation` or `callMcpTool`,
+  when `approval.required_actions` names it (`all`, or a comma list), is
+  recorded instead of performed — an `approvals` row with the action and its
+  payload, announced on the conversation's live run — and the mutation fails
+  with "Approval required: …". An open request for the same action and
+  payload is reused, so an agent retrying doesn't fill the inbox. Approving
+  runs the action before the row closes, so a failure leaves it answerable;
+  denying closes it. Off by default. An agent's `callMcpTool` passes its
+  per-tool policy (Settings → Tools) first.
 - **Workflows** (`src/agent/workflow/`, ports of `workflow/engine.py`,
   `workflow/nodes.py`, `core/workflow_template.py`,
   `server/workflow_runtime.py` and `tools/workflows.py:run_workflow` — change
-  both): `runWorkflow` queues an edge job when the loop is on. The engine
+  both): `runWorkflow` queues its job. The engine
   runs the graph in
   frontiers, prunes a conditional's or router's unchosen branches, and gives
   each node its retries, timeout and `on_error`; templates are Jinja
@@ -532,27 +396,25 @@ default (`JARVIS_AGENT_RUNTIME=python` turns it off).
   orphaned request is expired, not left pending; an edge naming no node
   fails the run at once. Tested in `tests/test_edge_workflow.py` (edge only,
   not diffed).
-- **Recovery**: at start the edge re-queues its jobs a previous edge left
-  running; with the loop off, it hands every live edge job to Python. Python
-  running without the edge adopts them (`db/ops.py:adopt_edge_jobs`). Then
-  it sweeps what a crash left behind (`sweep.rs`, ports of Python's startup
-  sweeps — change both): a message, automation run or workflow run still
-  `running` with no live job is an error, a board task `running` with none
-  is `ready` again (`cleanup_zombie_running_rows`); a pending tool gate or
-  paused node whose waiter died is `expired`, unless a linked Python's live
-  run holds it (`reconcile_startup`); and incognito conversations no live
-  chat job belongs to are deleted (`sweep_ephemeral_conversations`). Only
-  with the loop on: off, Python runs every run, and its own start sweeps.
+- **Recovery**: at start the jobs a previous process left running are
+  pending again, then what a crash left behind is swept up (`sweep.rs`,
+  ports of Python's startup sweeps): a message, automation run or workflow
+  run still `running` with no live job is an error, a board task `running`
+  with none is `ready` again (`cleanup_zombie_running_rows`); a pending tool
+  gate or paused node is `expired` — its waiter died, and a re-claimed run
+  asks again (`reconcile_startup`); and incognito conversations no live chat
+  job belongs to are deleted (`sweep_ephemeral_conversations`).
+  `--startup-sweep` does just this and exits, for the tests.
 
-Tested in `tests/test_edge_agent.py` (routing, the queue, the handover's
-Python side) and `tests/test_edge_loop.py`, which runs scripted turns
-through both runtimes against one fake Ollama and diffs the events a
-subscriber gets, the step rows, the message, the thread and every model
-request. Departures are named there.
+Tested in `tests/test_edge_agent.py` (the queue, recovery, runs that can't
+start) and `tests/test_edge_loop.py`, which runs scripted turns against a
+fake Ollama and diffs the events a subscriber gets, the step rows, the
+message, the thread and every model request against Python's runs of the
+same turns, recorded. Departures are named there.
 
 ## The LLM layer (`src/llm/`)
 
-Phase 2b: model calls from Rust, which the agent loop (`src/agent/`) makes.
+Model calls, which the agent loop (`src/agent/`) makes.
 `--llm-shape` and `--llm-call` drive it alone, reading one request as JSON
 on stdin.
 
@@ -585,9 +447,9 @@ on stdin.
     with their null branches stripped. The reply is AWS event-stream frames,
     CRC-checked. Departures: the reasoning is recorded as thinking (LangChain
     kept it opaque), the provider as `bedrock`, the stop reason as the finish
-    reason. A turn whose AWS credentials come from a source only boto3 reads
+    reason. A turn whose AWS credentials come from a source only boto3 read
     (assume-role, SSO, web identity, `credential_process`, a container role)
-    stays Python's.
+    fails with the reason.
   - `google.rs`: Gemini's `streamGenerateContent`.
   - `ollama.rs`: Ollama's `/api/chat`. Tool schemas as the `ollama`
     client's `Tool` model keeps them (an optional argument is `{}`).
@@ -640,15 +502,12 @@ their raw flags and skip it.
   memory (`agent::workflow::run_once`, the workflow agent node's loop, last
   reply returned): no conversation, its own kernel, shut down after; the
   prompt is read from `JARVIS_APP_DIR`.
-- **Python only for its agent loop.** `run` with `JARVIS_AGENT_RUNTIME=python`
-  runs through `$JARVIS_APP_DIR/main.py` (exec'd). Everything else the edge
-  answers itself, failing with the reason where Python would have answered
-  something: a `models.custom` row that won't load, a provider listing or
-  probe it can't read (credentials only boto3 reads), an `AGENTS.md` row or
-  file that isn't text; `run` on a model it can't call fails the call. Every
-  command first creates or migrates the database (`schema.rs`), as
-  `main.py`'s `init_db` does, and `memory *` copies the LangGraph store
-  over first, once, as `main.py` does.
+- **Failures say why** where Python would have answered something: a
+  `models.custom` row that won't load, an `AGENTS.md` row or file that isn't
+  text; `run` on a model it can't call fails the call. Every command first
+  creates or migrates the database (`schema.rs`), as `main.py`'s `init_db`
+  does, and `memory *` copies the LangGraph store over first, once, as
+  `main.py` does.
 - **Output.** The same words as `main.py`, plain: tables are aligned columns,
   a panel is its title and text, `run` prints the reply's Markdown as is.
   Colour only on a terminal without `NO_COLOR`. `memory reset` asks
@@ -663,148 +522,67 @@ their raw flags and skip it.
   `test_edge_loop.py` and `model sync` on the fake providers of
   `test_edge_model_sync.py`.
 
-## Contracts with the Python side
+## What's shared with Python
 
-- **The edge owns the schema** (`src/schema.rs`). At start, and before a
+- **The schema is the server's** (`src/schema.rs`). At start, and before a
   command-line command, it creates every table missing from `schema.sql` —
-  what `Base.metadata.create_all` makes, captured from `db/models.py` — then
+  what `Base.metadata.create_all` made, captured from `db/models.py` — then
   runs its port of `db/engine.py:_migrate` (columns, indexes, the artifact
-  backfill, the FTS5 mirrors) and the one-time LangGraph store import, as
-  `Database.init` + `import_store_once` do for Python alone. Python still
-  runs its own on start (it finds nothing to do behind the edge), so a
-  schema change is made in `db/models.py` + `_migrate` and here:
-  re-capture `schema.sql` and port the migration step;
-  `tests/test_edge_schema.py` diffs the two over fresh and old databases.
-  The file is opened with Python's pragmas, plus `foreign_keys = OFF`,
-  which sqlx would otherwise turn on.
-- **Wire formats match byte for byte** (`src/gql/codec.rs`):
-  - global ids are `base64("Type:id")`
-  - `DateTime` is Python's `isoformat()`, which drops a zero fraction
-  - message cursors are urlsafe `base64("{iso}|{id}")`
-- **`/server-logs` peer check.** Python's localhost-only check sees every
-  proxied request as 127.0.0.1, so the edge enforces it on the real peer.
-- **REST the edge serves** (`src/rest.rs`, `src/logs.rs` — ports of
-  `routes_artifacts.py` and `routes_logs.py`; change both). Downloads answer as Starlette's
-  `FileResponse`: its headers (ETag = md5 of `"{st_mtime}-{size}"`), one byte
-  range, `HEAD` left to Python (FastAPI's 405); several ranges, a range number
-  only `int()` reads, or a path that isn't a file are proxied. The log viewer is
-  one buffer: the edge's `tracing` events plus the records a linked worker
-  sends over the link (`type: "log"`), its pre-link backfill included — so
-  opening it never starts Python. Diffed in `tests/test_edge_rest.py`.
+  backfill, the FTS5 mirrors) and the one-time LangGraph store import. The
+  kernels' SDK reads the same file through `db/models.py`, so a schema change
+  is made in `db/models.py` + `_migrate` and here: re-capture `schema.sql`
+  and port the migration step; `tests/test_edge_schema.py` diffs the two
+  over fresh and old databases. The file is opened with Python's pragmas,
+  plus `foreign_keys = OFF`, which sqlx would otherwise turn on.
+- **Exported from Python**: the bound tools' schemas (`src/agent/tools.json`)
+  and the SDK catalogue the `tools` query lists (`src/gql/sdk_tools.json`) —
+  re-export after changing a tool or an SDK function (see their tests). The
+  built-in models (`core/builtin_models.json`) and the system prompt
+  (`core/system_prompt.md`) are read from the checkout.
+- **REST** (`src/rest.rs`, `src/logs.rs` — ports of `routes_artifacts.py` and
+  `routes_logs.py`). Downloads answer as Starlette's `FileResponse` did: its
+  headers (ETag = md5 of `"{st_mtime}-{size}"`), one byte range, `HEAD` a
+  405; several ranges, or a range number only `int()` reads, get the whole
+  file, and a path that isn't a file is missing. The log viewer is the
+  server's `tracing` events as Python's handler shaped records, refused to a
+  cross-origin page and to anything but a loopback peer. Diffed in
+  `tests/test_edge_rest.py`.
 - **`/ws/browser`** (`src/browser/` — ports of `routes_browser.py`,
   `core/browser_stream.py` and `tools/browser.py`'s `ensure_running`; change
-  both). The live view never starts Python: the edge finds the browser (or
-  launches one, as the kernel would), attaches its own CDP client to the tab
-  Playwright calls `pages[0]` (the first page `Target.setAutoAttach` reports),
-  and fans the screencast out — one cast while anyone watches, newest frame
-  only, the last frame for a late joiner. The messages are Python's, byte for
-  byte. Departures: a closed tab or browser ends the stream with
-  `unavailable`/`"the browser went away"` (Python kept sending `idle`), and the
-  next viewer attaches afresh; an attach that runs out its 15 s says so (Python
-  sent an empty reason); a page in a non-default browser context isn't skipped.
-  Tested against a fake DevTools browser in `tests/test_edge_browser.py`.
+  both). The server finds the browser (or launches one, as the kernel would),
+  attaches its own CDP client to the tab Playwright calls `pages[0]` (the
+  first page `Target.setAutoAttach` reports), and fans the screencast out —
+  one cast while anyone watches, newest frame only, the last frame for a late
+  joiner. The messages are Python's, byte for byte. Departures: a closed tab
+  or browser ends the stream with `unavailable`/`"the browser went away"`
+  (Python kept sending `idle`), and the next viewer attaches afresh; an attach
+  that runs out its 15 s says so (Python sent an empty reason); a page in a
+  non-default browser context isn't skipped. Tested against a fake DevTools
+  browser in `tests/test_edge_browser.py`.
 
-## Porting a domain
+## Tests
 
-1. Port the type and its query resolvers under `src/gql/`, and add the query
-   object to `Query` in `src/gql/mod.rs`. Port **every** field of a type: a
-   partly ported type makes owned operations fail validation, and the edge
-   answers that failure itself.
-2. If the type is a Relay `Node`, add it to `Node` and `NODE_TYPES` in
-   `src/gql/node.rs`.
-3. Add the frontend operations that are now owned to `PARITY_OPERATIONS` in
-   `tests/test_edge_parity.py`, with a test that seeds rows and diffs Python
-   against the edge. `test_every_claimed_frontend_query_is_diffed` fails until
-   you do.
-4. `uv run pytest tests/test_edge_parity.py` and `cargo test` in `edge/`.
+`tests/test_edge_*.py` drive the binary. Most diff it against what the Python
+server answered for the same scenario, recorded while it existed
+(`tests/python_golden.py`, `tests/golden/python/`): an operation's answer,
+every table and artifact file after a mutation, a run's events, rows and
+model requests. A deliberate change to an answer is a change to the
+recording, made by hand and said in the commit. Some still diff against
+Python code that remains — the LLM request shaping (`test_edge_llm.py`), the
+kernels (`test_edge_kernels.py`), the CLI (`test_edge_cli.py`), the cron
+engine (`test_edge_schedule.py`), the schema (`test_edge_schema.py`) — and
+`cargo test` runs the unit tests.
 
-## What the edge serves
+Test hooks keep raw flags and skip the CLI: `--print-schema`,
+`--cron-next`, `--guess-type`, `--llm-shape`, `--llm-call`,
+`--maintenance-due`, `--maintenance-run`, `--init-db`, `--startup-sweep`,
+`--kernel-cells`, `--replay-events`.
 
-Every query that reads only the database and files:
+## What stays in Python
 
-| Domain | Root fields |
-|---|---|
-| conversations | `conversations`, `conversation` (+ the message connection) |
-| projects | `projects`, `project` |
-| artifacts & documents | `artifacts`, `artifact`, `artifactVersions`, `documents` |
-| automations | `automations` (with `nextRunAt`), `automation`, `automationRuns` |
-| task board | `boardTasks`, `boardTask` |
-| workflows | `workflows`, `workflow`, `workflowRuns`, `workflowRun` |
-| lists | `notificationChannels`, `skills`, `pendingApprovals` |
-| tools | `tools` — bound tools as `core/tool_policy.py` lists them, the SDK from `gql/sdk_tools.json` (Python's catalogue, golden-tested), and each MCP server's loaded tools |
-| MCP | `mcpServers`, `mcpTools` — the configured servers (env, the first `mcp.json`, the `mcp.servers` setting, the load-mode overrides) and what the edge's MCP client loaded from them (`src/mcp/`, see "MCP") |
-| settings | `settings`, `setting` — the `KNOWN_SETTINGS` registry (`gql/settings.rs`), endpoint API keys redacted |
-| memory | `memories`, `memoryActivities`, `memoryUsage`, `agentMemory` (the `AGENTS.md` blob in `kv_store`, the legacy `/AGENTS.md` copied over on first touch) |
-| chat page | `models` (endpoint names from `models.endpoints` as providers; keys never sent), `todos` (`thread_state`), `browserAvailable` (an http CDP endpoint) |
-| model sync | `modelSync` — each provider's listing and, with `probe`, a one-token call per catalog model (`src/discovery.rs`, a port of `core/model_discovery.py`; Bedrock signed with SigV4 by `src/aws.rs`, credentials from the environment, the shared files' static keys or the instance role). Listings run at once; skip reasons are Python's word for word. An AWS credential source boto3 alone reads (assume-role, SSO, web identity, `credential_process`, a container role), or a reply Python would fail on, sends the query to Python |
-| Relay | `node` for every Node type |
-
-Mutations that only write rows and files:
-
-| Domain | Root fields |
-|---|---|
-| conversations | `updateConversation` (a model checked against the catalog), `deleteConversation`, `discardConversation` |
-| task board | `createBoardTask`, `updateBoardTask`, `setBoardTaskStatus`, `answerBoardTask`, `deleteBoardTask` — a card made ready runs a dispatch pass at once; `decomposeBoardTask` — the planner called through `src/llm/` on the task's model, or the whole operation sent to Python when the agent loop is off or doesn't serve that model |
-| automations | `createAutomation`, `updateAutomation`, `deleteAutomation` (human callers) — the scheduler reloads at once |
-| projects | `createProject`, `updateProject`, `deleteProject`, `setConversationProject` |
-| artifacts & documents | `updateArtifact`, `restoreArtifactVersion`, `deleteArtifact`, `deleteDocument` |
-| workflows | `createWorkflow`, `updateWorkflow`, `deleteWorkflow` (human callers) |
-| lists | `createNotificationChannel`, `updateNotificationChannel`, `deleteNotificationChannel`, `createSkill`, `updateSkill`, `deleteSkill` (human callers) — a skill's description embedded, or saved unembedded if the embedder fails |
-| memory | `addMemory` (merged into a near-duplicate), `updateMemoryItem`, `deleteMemory` — embedded by `agent/embed.rs`; an embedder that fails sends the operation to Python before anything is written; `updateMemory`, `deleteAgentMemory` (the blob) |
-| models | `addModel`, `updateModel`, `addDiscoveredModels`, `removeModel`, `setDefaultModel`, `addEndpoint`, `updateEndpoint`, `removeEndpoint` (`gql/models.rs`) — `models.custom` / `models.endpoints` rewritten as Python's `json.dumps` writes them; a catalog Python would fail to load, or a stored window it would fail to convert, sent to Python before anything is written; a linked worker re-reads the catalog (`apply_setting`) |
-| tools | `setToolPolicy` — only non-default entries stored; a linked worker drops its policy and agent caches |
-| MCP | `addMcpServer`, `updateMcpServer`, `removeMcpServer`, `reloadMcpServers`, `setMcpServerLoadMode`, `setMcpDefaultLoadMode` — the `mcp.*` settings written as Python writes them, the servers reconnected, a linked worker told; `callMcpTool` — an agent's call checked against its tool policy and, if gated, waiting on a human; a config or arguments that aren't JSON, an agent's call while `call_mcp_tool` is an approval-required action, or a gate a worker's run would show sent to Python before anything is written |
-| settings | `setSetting`, `deleteSetting` — every key applied here: an `mcp.*` key reconnects the MCP servers; the embedding model, the catalog and the tool policy re-read by a linked worker (link `call` `apply_setting`); invalid JSON for a json key sent to Python before anything is written |
-| runs (worker linked or owned) | `stopRunningTask`, `stopTask`, `stopAutomationRun`, `stopWorkflowRun`, `stopBoardTask` |
-| starting runs (worker linked or owned) | `startTask`, `runWorkflow`, `triggerAutomation` |
-| steering runs (worker linked or owned) | `queueMessage`, `unqueueMessage`, `resumeWorkflowRun`, `resolveWorkflowApproval` — through `call` once a worker has the run |
-| approvals (worker linked or owned) | `resolveApproval` (a tool gate, a board question, a deferred delete), `requestToolApproval` (the agent's) — see "The agent loop"; `browserActivity` (the agent's kernel announcing a browse: a `browser_step` on the conversation's live run, the operation sent to Python when a worker has that run) |
-
-And while a worker is linked, or the edge owns it: every subscription
-(`taskEvents`, `automationRunEvents`, `boardTaskEvents`, `workflowRunEvents`)
-and `runningTasks`, from the run mirror.
-
-Some are owned per call (`router.rs:Walk::field_rule`): `deleteWorkflow`,
-`deleteSkill` and `deleteAutomation` go to Python when the caller is the agent
-(`X-Jarvis-Caller: agent` — approval-gated there).
-
-The automation writes (`gql/automation.rs`) port `mutations/automation.py`
-with `db/ops.py`'s automation CRUD: a schedule is validated by `cron.rs`
-(what `_cron` builds is what fires — "invalid cron expression", as Python
-words every refusal), an update writes every field as Python's `setattr` loop
-does (one left out is cleared), and a delete takes the runs and a stateful
-automation's `automation_{id}` conversation with it. Each one tells the
-scheduler to reload (`Scheduler::schedules_changed`) after its commit. **A
-change to either side is made in both.**
-
-Deleting a conversation (`conversation.rs:delete_conversation`, shared with
-`deleteBoardTask`) ports `db/ops.py:delete_conversation`: the ORM cascades as
-explicit DELETEs (messages and their steps, artifacts and their versions,
-documents and their chunks, episodes), the transcript thread with the blobs
-no other thread names, then the files and the conversation's notebook. **A
-change to either is made in both.**
-
-`stopBoardTask` ports `stop_board_task`: the worker or the edge's loop is told
-at once, the job is cancelled, and a job no one had claimed yet ends the card
-(blocked, "stopped by user") and the mirrored run here.
-
-A write must leave a row exactly as SQLAlchemy would: `uuid4()` ids, its
-stored timestamp text, `updated_at` bumped by hand where `onupdate=_now`
-would have, and ORM cascades spelled out as explicit DELETEs — including
-the ones that *don't* happen (a memory's access log outlives it, because
-foreign keys are off). The mutation tests run each mutation through Python
-on one database and the edge on a copy, then diff every table and file.
-
-## What stays in Python, and why
-
-These answer from state the Python process holds, not from rows. Each one
-moves when the thing it reads moves.
-
-| Root field | Reads | Moves with |
-|---|---|---|
-| `modelSync` with an AWS credential source the edge doesn't read (the edge defers those per call) | boto3's credential chain | the Bedrock client |
-
-| Mutations | Touch | Move with |
-|---|---|---|
-| `resolveApproval`, `resumeWorkflowRun`, `resolveWorkflowApproval` for a workflow Python runs; `resolveApproval` or `requestToolApproval` (or a gated `callMcpTool`) for a worker's run (the edge defers those per call) | a future in a running workflow; a worker's run stream | Python's workflow runs |
-| `callMcpTool` by the agent while `call_mcp_tool` is in `approval.required_actions` (deferred per call) | `gate_action`'s deferred request | the deferred-action gate |
+The agent's notebook kernels, and what they import: the `jarvis` SDK
+(`tools/sdk.py`), `tools/research.py` and `tools/browser.py`, and the parts of
+`core/` and `db/` those reach. Python's agent runtime — `core/agents.py`, the
+loop, the workflow engine, the Python CLI — no longer serves anything; it
+stays only while tests diff against it, and goes with the decision on what
+the kernel keeps (`ROADMAP.md`).

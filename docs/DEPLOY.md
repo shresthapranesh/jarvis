@@ -51,10 +51,10 @@ docker run -d --name jarvis \
 The config/model CLIs run inside the container and persist to `/data`:
 
 ```bash
-docker compose exec jarvis python main.py model set-default anthropic:claude-...
-docker compose exec jarvis python main.py model list
+docker compose exec jarvis jarvis-edge model set-default anthropic:claude-...
+docker compose exec jarvis jarvis-edge model list
 # Bot allowlists (bots reject everyone until set):
-docker compose exec jarvis python main.py config set telegram.allowed_users "123,456"
+docker compose exec jarvis jarvis-edge config set telegram.allowed_users "123,456"
 ```
 
 ## Configuration notes

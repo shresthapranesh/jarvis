@@ -53,33 +53,6 @@ async def test_resolve_model_uses_catalog_seed_when_unconfigured():
     assert await resolve_model(None) == DEFAULT_MODEL
 
 
-async def test_automation_without_model_runs_on_configured_default():
-    """The regression: a null-model automation used to run on the seed model.
-
-    Covers `_resolve_model`, which feeds the agent, the stateful conversation
-    row, and the `task created: … model=` log line — a bare `model=-` there is
-    what hid the wrong-provider run in the first place.
-    """
-    from db import async_session
-    from db.models import Automation
-    from server.automation_runtime import _resolve_model
-
-    await _set_operator_default(OPERATOR_DEFAULT)
-
-    unset = Automation(id="a-unset", name="unset", input_type="prompt", model=None)
-    assert await _resolve_model(unset) == OPERATOR_DEFAULT
-
-    explicit = Automation(
-        id="a-explicit", name="explicit", input_type="prompt",
-        model="google_genai:gemini-2.0-flash",
-    )
-    assert await _resolve_model(explicit) == "google_genai:gemini-2.0-flash"
-
-    # Session-passing overload resolves identically.
-    async with async_session() as s:
-        assert await _resolve_model(unset, s) == OPERATOR_DEFAULT
-
-
 # ── A stored id can outlive the model it names ────────────────────────────────
 #
 # The catalog is editable at runtime (Settings → Models, `main.py model remove`)
@@ -136,12 +109,3 @@ async def test_build_agent_degrades_instead_of_raising_on_a_stale_id():
     from core.agents import build_agent
 
     assert build_agent(STALE) is not None
-
-
-async def test_automation_with_a_removed_model_runs_on_the_default():
-    from db.models import Automation
-    from server.automation_runtime import _resolve_model
-
-    await _set_operator_default(OPERATOR_DEFAULT)
-    auto = Automation(id="a-stale", name="stale", input_type="prompt", model=STALE)
-    assert await _resolve_model(auto) == OPERATOR_DEFAULT
