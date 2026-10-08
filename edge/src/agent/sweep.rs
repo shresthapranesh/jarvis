@@ -1,14 +1,12 @@
 //! What a start finds a crash left behind, cleaned up once after
-//! `queue::recover` with the agent loop on (off, Python runs every run and
-//! its own start sweeps) — ports of what Python runs at its own start
-//! (`server/entrypoint.py` lifespan): `db/ops.py:cleanup_zombie_running_rows`,
-//! `core/approvals.py:reconcile_startup` and
-//! `db/ops.py:sweep_ephemeral_conversations`. A change to either side is
-//! made in both.
+//! `queue::recover` — ports of what Python ran at its start:
+//! `db/ops.py:cleanup_zombie_running_rows`, `core/approvals.py:reconcile_startup`
+//! and `db/ops.py:sweep_ephemeral_conversations`.
 //!
 //! A run row is a zombie when no live job — pending or running — stands
-//! behind it: after `recover` the edge's interrupted jobs are pending again
-//! and will be re-claimed, and a linked Python's running jobs are its own.
+//! behind it: after `recover` the interrupted jobs are pending again and
+//! will be re-claimed. A gate's or a paused node's request is always gone:
+//! its waiter was in the process that died, and a re-claimed run asks again.
 
 use sqlx::SqlitePool;
 
@@ -77,17 +75,14 @@ async fn zombies(pool: &SqlitePool) -> sqlx::Result<Vec<(&'static str, u64)>> {
 }
 
 /// `reconcile_startup`: a pending request whose waiter died with the last
-/// edge — a tool gate, a paused workflow node — can't be answered any more.
-/// A deferred action waits for nobody and a board task's block is a column
-/// on the task, so both stay; so does a request a linked Python's live run
-/// is waiting on.
+/// process — a tool gate, a paused workflow node — can't be answered any
+/// more. A deferred action waits for nobody and a board task's block is a
+/// column on the task, so both stay.
 async fn approvals(pool: &SqlitePool) -> sqlx::Result<u64> {
     let now = now_stored();
     let expired = sqlx::query(
         "UPDATE approvals SET status = 'expired', result = 'The run was lost when the server restarted.', \
-         resolved_at = ?, updated_at = ? WHERE status = 'pending' AND action IS NULL AND board_task_id IS NULL \
-         AND (task_id IS NULL OR task_id NOT IN \
-         (SELECT id FROM jobs WHERE runtime IS NULL AND status IN ('pending', 'running')))",
+         resolved_at = ?, updated_at = ? WHERE status = 'pending' AND action IS NULL AND board_task_id IS NULL",
     )
     .bind(&now)
     .bind(&now)

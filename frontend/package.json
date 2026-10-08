@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "relay": "relay-compiler",
     "relay:watch": "relay-compiler --watch",
-    "schema": "cd .. && uv run python -m server.graphql.export_schema > frontend/schema.graphql",
+    "schema": "cargo run --quiet --manifest-path ../edge/Cargo.toml -- --print-schema > schema.graphql",
     "typecheck": "pnpm relay && tsc -b"
   },
   "dependencies": {

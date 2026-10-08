@@ -3,10 +3,8 @@
 
 One fake server plays every provider — Google, Anthropic, Bedrock (checking
 each SigV4 signature with botocore's own signer), Ollama, OpenRouter, the
-operator's endpoints, and the EC2 metadata service. Python runs the query
-in-process, the edge over the same database with a dead backend, and the two
-answers are diffed: an operation the edge handed to Python would come back
-502, so "served by the edge" is asserted, not assumed.
+operator's endpoints, and the EC2 metadata service. The edge's answers are
+diffed against Python's, recorded while it existed (`python_golden.py`).
 
 Skipped when `cargo` isn't installed.
 """
@@ -26,6 +24,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import pytest
 
 from edge_support import _relay_text, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from python_golden import recorded
 
 SECRET = "fake-secret"
 IMDS_SECRET = "imds-secret"
@@ -364,7 +363,7 @@ async def _python(query: str, variables: dict[str, Any]) -> dict[str, Any]:
 
 async def _edge(client, query: str, variables: dict[str, Any]) -> dict[str, Any]:
     resp = await client.post("/graphql", json={"query": query, "variables": variables}, timeout=60)
-    assert resp.status_code == 200, f"edge proxied instead of answering ({resp.status_code})"
+    assert resp.status_code == 200
     body = resp.json()
     out: dict[str, Any] = {"data": body.get("data")}
     if body.get("errors"):
@@ -372,14 +371,27 @@ async def _edge(client, query: str, variables: dict[str, Any]) -> dict[str, Any]
     return out
 
 
+_PORT = re.compile(r"(127\.0\.0\.1|localhost):\d+")
+
+
+def _unport(value: Any) -> Any:
+    """The fake provider's and the closed ports differ from run to run."""
+    return json.loads(_PORT.sub(r"\1:<port>", json.dumps(value)))
+
+
 async def _both(client, variables: dict[str, Any], query: str = SYNC) -> dict[str, Any]:
-    python = await _python(query, variables)
-    edge = await _edge(client, query, variables)
+    """The edge's answer, diffed against Python's recorded one."""
+    python = await recorded(lambda: _unport_async(_python(query, variables)))
+    edge = _unport(await _edge(client, query, variables))
     if edge != python and (edge["data"] and python["data"]):
         for e, p in zip(edge["data"]["modelSync"], python["data"]["modelSync"], strict=True):
             assert e == p, variables
     assert edge == python, variables
     return python
+
+
+async def _unport_async(answer: Any) -> Any:
+    return _unport(await answer)
 
 
 def _reports(answer: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -484,9 +496,13 @@ async def test_probes_match_python(catalog, fake, edge_binary, work_dir, tmp_pat
     assert all(fake.signatures)
 
 
-async def test_a_credential_only_python_reads_goes_to_python(catalog, fake, edge_binary, work_dir, tmp_path, monkeypatch):
+async def test_a_credential_source_the_edge_does_not_read_is_skipped(catalog, fake, edge_binary, work_dir, tmp_path,
+                                                                      monkeypatch):
+    """SSO, assume-role and the other sources only boto3 read: Bedrock is
+    skipped, and the report says why."""
     (tmp_path / "aws-config").write_text("[profile sso]\nsso_start_url = https://example.awsapps.com/start\n")
     env = _env(monkeypatch, tmp_path, {"AWS_PROFILE": "sso"})
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env) as client:
-        resp = await client.post("/graphql", json={"query": SYNC, "variables": {"provider": "bedrock", "probe": False}})
-    assert resp.status_code == 502  # deferred to the (dead) Python backend
+        answer = await _edge(client, SYNC, {"provider": "bedrock", "probe": False})
+    [report] = answer["data"]["modelSync"]
+    assert report["skipped"].startswith("AWS credentials: ")

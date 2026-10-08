@@ -1,11 +1,12 @@
-//! The REST routes the edge serves itself, ahead of the proxy:
-//! `GET /artifacts/{id}/raw` (`server/routes_artifacts.py`) and the log
-//! viewer's `/server-logs` (`routes_logs.py`, here `logs.rs`). Change both.
+//! The REST routes: `GET /artifacts/{id}/raw` (a port of
+//! `server/routes_artifacts.py`) and the log viewer's `/server-logs` (of
+//! `routes_logs.py`, here `logs.rs`).
 //!
-//! A download answers as Starlette's `FileResponse` does: its headers, a
-//! single byte range. (`HEAD` is FastAPI's 405, so Python's.) Whatever the edge doesn't reproduce — several ranges, a
-//! range number Python's `int()` would read some other way, a path that isn't
-//! a regular file — goes to Python untouched.
+//! A download answers as Starlette's `FileResponse` did: its headers, a
+//! single byte range. `HEAD` is a 405, as FastAPI's GET routes answer it.
+//! Several ranges, or a range number Python's `int()` would have read some
+//! other way, get the whole file — a server may ignore `Range` — and a path
+//! that isn't a regular file is missing.
 
 use std::path::{Path, PathBuf};
 
@@ -23,14 +24,14 @@ use crate::pystr;
 /// `FileResponse.chunk_size`.
 const CHUNK: usize = 64 * 1024;
 
-/// The response, or the request back for the proxy.
+/// The response, or the request back when it is for no route here.
 pub async fn serve(state: &AppState, req: Request) -> Result<Response, Request> {
     let path = req.uri().path().to_string();
-    // FastAPI's GET routes answer HEAD with a 405: Python's to give.
-    if *req.method() == Method::GET {
-        if let Some(id) = raw_id(&path, "/artifacts/") {
-            return artifact(&state.pool, &id, req).await;
-        }
+    if let Some(id) = raw_id(&path, "/artifacts/") {
+        return Ok(match *req.method() {
+            Method::GET => artifact(&state.pool, &id, req).await,
+            _ => json_response(StatusCode::METHOD_NOT_ALLOWED, &json!({"detail": "Method Not Allowed"})),
+        });
     }
     match (req.method().clone(), path.as_str()) {
         (Method::GET, "/server-logs") => Ok(crate::logs::list(req.headers())),
@@ -63,16 +64,16 @@ fn resolve(stored: &str) -> PathBuf {
     if path.is_absolute() { path.to_path_buf() } else { crate::config::app_dir().join(path) }
 }
 
-async fn artifact(pool: &SqlitePool, id: &str, req: Request) -> Result<Response, Request> {
+async fn artifact(pool: &SqlitePool, id: &str, req: Request) -> Response {
     let row: Option<(String, String, Option<String>, String)> =
         match sqlx::query_as("SELECT title, filename, mime_type, kind FROM artifacts WHERE id = ?").bind(id).fetch_optional(pool).await {
             Ok(row) => row,
-            Err(_) => return Err(req),
+            Err(e) => return json_response(StatusCode::INTERNAL_SERVER_ERROR, &json!({"error": e.to_string()})),
         };
-    let Some((title, filename, mime_type, kind)) = row else { return Ok(not_found("not found")) };
+    let Some((title, filename, mime_type, kind)) = row else { return not_found("not found") };
     let path = resolve(&filename);
-    if tokio::fs::metadata(&path).await.is_err() {
-        return Ok(not_found("file missing"));
+    if !tokio::fs::metadata(&path).await.is_ok_and(|m| m.is_file()) {
+        return not_found("file missing");
     }
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let media_type = mime_type
@@ -129,11 +130,11 @@ fn stat(meta: &std::fs::Metadata) -> Stat {
 }
 
 enum Ranges {
+    /// No range, or one this serves whole: several, or a number only
+    /// Python's `int()` would have read.
     Whole,
     One(u64, u64),
     Reply(Response),
-    /// Several, or a number only Python's `int()` reads: Python answers.
-    Python,
 }
 
 fn plain(status: StatusCode, text: &str) -> Response {
@@ -168,8 +169,8 @@ fn ranges(headers: &HeaderMap, st: &Stat) -> Ranges {
         let (start_s, end_s) = (pystr::strip(start_s), pystr::strip(end_s));
         let plain_digits = |s: &str| s.is_empty() || number(s).is_some();
         if !plain_digits(start_s) || !plain_digits(end_s) {
-            // `int()` takes signs, underscores, other digits — or skips it.
-            return Ranges::Python;
+            // `int()` takes signs, underscores, other digits: the whole file.
+            return Ranges::Whole;
         }
         let start = match number(start_s) {
             Some(s) => s,
@@ -200,22 +201,20 @@ fn ranges(headers: &HeaderMap, st: &Stat) -> Ranges {
     }
     match out.as_slice() {
         [(start, end)] => Ranges::One(*start, *end),
-        _ => Ranges::Python,
+        _ => Ranges::Whole,
     }
 }
 
-async fn file_response(path: &Path, media_type: &str, filename: &str, disposition: &str, req: Request) -> Result<Response, Request> {
+async fn file_response(path: &Path, media_type: &str, filename: &str, disposition: &str, req: Request) -> Response {
     let meta = match tokio::fs::metadata(path).await {
         Ok(m) if m.is_file() => m,
-        // Python's `FileResponse` raises on it; let it.
-        _ => return Err(req),
+        _ => return not_found("file missing"),
     };
     let st = stat(&meta);
     let (start, end, status) = match ranges(req.headers(), &st) {
         Ranges::Whole => (0, st.size, StatusCode::OK),
         Ranges::One(start, end) => (start, end, StatusCode::PARTIAL_CONTENT),
-        Ranges::Reply(response) => return Ok(response),
-        Ranges::Python => return Err(req),
+        Ranges::Reply(response) => return response,
     };
     let quoted = quote(filename);
     let content_disposition = if quoted != filename {
@@ -239,9 +238,9 @@ async fn file_response(path: &Path, media_type: &str, filename: &str, dispositio
     if status == StatusCode::PARTIAL_CONTENT {
         out = out.header(header::CONTENT_RANGE, format!("bytes {start}-{}/{}", end - 1, st.size));
     }
-    let Ok(mut file) = tokio::fs::File::open(path).await else { return Err(req) };
+    let Ok(mut file) = tokio::fs::File::open(path).await else { return not_found("file missing") };
     if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
-        return Err(req);
+        return not_found("file missing");
     }
     let reader = file.take(end - start);
     let body = Body::from_stream(futures_util::stream::unfold(reader, |mut reader| async move {
@@ -255,7 +254,7 @@ async fn file_response(path: &Path, media_type: &str, filename: &str, dispositio
             Err(e) => Some((Err(e), reader)),
         }
     }));
-    Ok(out.body(body).expect("a file response"))
+    out.body(body).expect("a file response")
 }
 
 /// `datetime.now(timezone.utc).isoformat()`.

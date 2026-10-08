@@ -1,9 +1,8 @@
-"""The edge's agent loop and Python sharing one job queue (phase 2d).
+"""The agent loop's jobs (`edge/src/agent/`): every turn is the edge's to
+run, a start recovers the jobs the last process left and sweeps up what a
+crash left behind, and a run that can't start fails with the reason.
 
-A job whose `runtime` is the edge's is the edge's alone: Python never claims
-it, reaps its lock, or takes its rows for a crashed run's when it starts. The
-edge hands a turn over by clearing `runtime` and leaving a `handoff` in the
-payload; Python then continues the turn instead of starting it again.
+Skipped when `cargo` isn't installed.
 """
 
 from __future__ import annotations
@@ -14,282 +13,23 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
-from agent_harness import ModelCall, tool_call
 from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
-from test_agent_golden import GOOGLE, script  # noqa: F401 — the fixture
+
+GOOGLE = "google_genai:gemma-4-31b-it"
 
 
 async def _edge_job(session, job_id: str, *, status: str, kind: str = "chat", **fields) -> None:
+    """A job as an earlier edge wrote it, `runtime` and all."""
     from db.models import EDGE_RUNTIME, Job
 
     session.add(Job(id=job_id, kind=kind, payload="{}", status=status, runtime=EDGE_RUNTIME, **fields))
-
-
-async def test_python_never_claims_or_reaps_an_edge_job(database):
-    from core.queue import SqliteJobQueue
-    from db import async_session
-    from db.models import Job
-
-    queue = SqliteJobQueue()
-    async with async_session() as s:
-        await _edge_job(s, "edge-pending", status="pending")
-        await _edge_job(
-            s, "edge-expired", status="running", locked_by="edge:1",
-            locked_until=datetime.now(timezone.utc) - timedelta(minutes=5),
-        )
-        await s.commit()
-    assert await queue.claim(["chat"], worker_id="w") is None
-    assert await queue.reap_expired_locks() == 0
-    async with async_session() as s:
-        job = await s.get(Job, "edge-expired")
-        assert job is not None and (job.status, job.locked_by) == ("running", "edge:1")
-
-    # Handed over: runtime cleared, it is Python's like any other.
-    async with async_session() as s:
-        job = await s.get(Job, "edge-pending")
-        assert job is not None
-        job.runtime = None
-        await s.commit()
-    claimed = await queue.claim(["chat"], worker_id="w")
-    assert claimed is not None and claimed.id == "edge-pending"
-
-
-async def test_python_starting_leaves_the_edges_runs_alone(database):
-    from core.approvals import reconcile_startup
-    from db import async_session
-    from db.models import Approval, Conversation, Job, Message
-    from db.ops import cleanup_zombie_running_rows
-
-    async with async_session() as s:
-        s.add(Conversation(id="c", title="t", model="m"))
-        s.add_all([
-            Message(id="edge-run", conversation_id="c", role="assistant", content="", status="running"),
-            Message(id="py-run", conversation_id="c", role="assistant", content="", status="running"),
-        ])
-        await _edge_job(s, "edge-run", status="running", locked_by="edge:1", thread_id="c")
-        s.add(Job(id="py-run", kind="chat", payload="{}", status="running", locked_by="w"))
-        s.add_all([
-            Approval(id="gate-edge", source="chat", status="pending", task_id="edge-run", tool="run_cell"),
-            Approval(id="gate-py", source="chat", status="pending", task_id="py-run", tool="run_cell"),
-        ])
-        await s.commit()
-        await cleanup_zombie_running_rows(s)
-    await reconcile_startup()
-    async with async_session() as s:
-        edge_msg, py_msg = await s.get(Message, "edge-run"), await s.get(Message, "py-run")
-        edge_job, py_job = await s.get(Job, "edge-run"), await s.get(Job, "py-run")
-        edge_gate, py_gate = await s.get(Approval, "gate-edge"), await s.get(Approval, "gate-py")
-        assert edge_msg and py_msg and edge_job and py_job and edge_gate and py_gate
-        assert (edge_msg.status, edge_job.status, edge_job.locked_by) == ("running", "running", "edge:1")
-        assert (py_msg.status, py_job.status) == ("error", "pending")
-        assert (edge_gate.status, py_gate.status) == ("pending", "expired")
-
-
-async def test_a_handed_over_turn_continues_where_the_edge_left_it(jarvis, script):  # noqa: F811
-    """The edge took the turn as far as a tool batch, ran one of its two
-    calls, and handed it over: Python runs the other call, then the model."""
-    from sqlalchemy import select
-
-    from core.state import _tasks
-    from core.transcript_store import apply_messages, load_thread, set_todos
-    from db import async_session
-    from db.models import Conversation, Job, Message, Step
-    from server.chat_runtime import chat_job_handler, user_message_id
-
-    task_id, conv_id = "turn-1", "conv-1"
-    prompt = HumanMessage(content="plan it", id=user_message_id(task_id))
-    reply = AIMessage(content="On it. ", id="ai-1", tool_calls=[
-        tool_call("write_todos", {"todos": ["One", "Two"]}, "c1"),
-        tool_call("set_todo_status", {"index": 1, "status": "done"}, "c2"),
-    ])
-    first = ToolMessage("Updated todo list (2 items).", tool_call_id="c1", name="write_todos", id="t-1")
-    handoff = {
-        "text": "On it. ",
-        "step_seq": 2,
-        "steps": 1,
-        "usage": {"input_tokens": 500, "output_tokens": 20, "llm_calls": 1, "tool_calls": 1},
-    }
-    async with async_session() as s:
-        s.add(Conversation(id=conv_id, title="t", model=GOOGLE))
-        s.add(Message(id="u-1", conversation_id=conv_id, role="user", content="plan it"))
-        s.add(Message(id=task_id, conversation_id=conv_id, role="assistant", content="", model=GOOGLE,
-                      status="running"))
-        s.add(Job(id=task_id, kind="chat", thread_id=conv_id, payload=json.dumps({
-            "query": "plan it", "model": GOOGLE, "conv_id": conv_id, "handoff": handoff,
-        })))
-        await s.commit()
-        await apply_messages(s, conv_id, [prompt, reply, first])
-        await set_todos(s, conv_id, [{"text": "One", "status": "pending"}, {"text": "Two", "status": "pending"}])
-
-    def respond(call: ModelCall) -> AIMessage:
-        return AIMessage(content="Done.")
-
-    script.responder = respond
-    job = await jarvis.queue.claim(kinds=["chat"], worker_id="test", ttl_seconds=600)
-    assert job is not None and job.id == task_id
-    await chat_job_handler(job)
-    state = _tasks[task_id]
-
-    # c2 ran here — c1 didn't run again — and the model saw both results.
-    [call] = script.calls
-    results = [m for m in call.messages if isinstance(m, ToolMessage)]
-    assert [(m.tool_call_id, m.content) for m in results] == [
-        ("c1", "Updated todo list (2 items)."), ("c2", "Set todo 1 to 'done'."),
-    ]
-    async with async_session() as s:
-        thread = await load_thread(s, conv_id)
-        msg = await s.get(Message, task_id)
-        steps = (await s.execute(select(Step).where(Step.message_id == task_id).order_by(Step.seq))).scalars().all()
-    assert [m.id for m in thread.messages[:3]] == [prompt.id, "ai-1", "t-1"]
-    assert sum(isinstance(m, HumanMessage) for m in thread.messages) == 1
-    # The plan the edge wrote stands; the prompt isn't sent again.
-    assert thread.todos == [{"text": "One", "status": "pending"}, {"text": "Two", "status": "done"}]
-    assert not any(e["event"] == "todos_updated" and json.loads(e["data"])["todos"] == [] for e in state.events)
-    # The turn's text, step rows and usage run on from the edge's.
-    assert msg is not None and (msg.status, msg.content) == ("done", "On it. Done.")
-    assert [(st.seq, st.node) for st in steps] == [(2, "tools"), (3, "model_request")]
-    assert msg.input_tokens is not None and msg.input_tokens > 500
-    assert state.llm_calls == 2 and state.tool_calls >= 1
-
-
-async def test_a_handed_over_automation_run_continues_where_the_edge_left_it(jarvis, script):  # noqa: F811
-    """A stateful automation's run, handed over after its first model step:
-    Python runs the recorded call, then the model, and finishes the run —
-    without writing the prompt into the conversation a second time."""
-    from sqlalchemy import select
-
-    from core.transcript_store import apply_messages, load_thread
-    from db import async_session
-    from db.models import Automation, AutomationRun, Conversation, Job, Message
-    from db.ops import automation_conversation_id
-    from server.automation_runtime import automation_job_handler
-
-    run_id, auto_id = "run-1", "auto-1"
-    conv_id = automation_conversation_id(auto_id)
-    prompt = HumanMessage(content="check the tea", id="u-1")
-    reply = AIMessage(content="Checking. ", id="ai-1", tool_calls=[tool_call("write_todos", {"todos": ["Look"]}, "c1")])
-    handoff = {"text": "Checking. ", "step_seq": 0, "steps": 1,
-               "usage": {"input_tokens": 300, "output_tokens": 10, "llm_calls": 1, "tool_calls": 0}}
-    async with async_session() as s:
-        s.add(Automation(id=auto_id, name="Tea", input_type="prompt", prompt_text="check the tea", model=GOOGLE,
-                         stateful=True))
-        s.add(Conversation(id=conv_id, title="Tea", model=GOOGLE, surface="automation"))
-        s.add(Message(id="m-1", conversation_id=conv_id, role="user", content="check the tea"))
-        s.add(AutomationRun(id=run_id, automation_id=auto_id, triggered_by="schedule", status="running"))
-        s.add(Job(id=run_id, kind="automation", payload=json.dumps({
-            "automation_id": auto_id, "triggered_by": "schedule", "handoff": handoff})))
-        await s.commit()
-        await apply_messages(s, conv_id, [prompt, reply])
-
-    script.responder = lambda call: AIMessage(content="Still warm.")
-    job = await jarvis.queue.claim(kinds=["automation"], worker_id="test", ttl_seconds=600)
-    assert job is not None and job.id == run_id
-    await automation_job_handler(job)
-
-    [call] = script.calls
-    assert [(m.tool_call_id, m.content) for m in call.messages if isinstance(m, ToolMessage)] == [
-        ("c1", "Updated todo list (1 item)."),
-    ]
-    async with async_session() as s:
-        thread = await load_thread(s, conv_id)
-        run = await s.get(AutomationRun, run_id)
-        messages = (await s.execute(
-            select(Message.role, Message.content, Message.status)
-            .where(Message.conversation_id == conv_id).order_by(Message.created_at)
-        )).all()
-    assert sum(isinstance(m, HumanMessage) for m in thread.messages) == 1
-    assert run is not None and (run.status, run.output) == ("done", "Checking. Still warm.")
-    assert [tuple(m) for m in messages] == [
-        ("user", "check the tea", "done"), ("assistant", "Checking. Still warm.", "done"),
-    ]
-
-
-async def test_a_handed_over_board_run_continues_where_the_edge_left_it(jarvis, script):  # noqa: F811
-    """A board run handed over after its first model step: Python runs the
-    recorded complete_task, then the model, without writing the prompt into
-    the task's conversation again; the task keeps the tool's summary."""
-    from sqlalchemy import select
-
-    from core.transcript_store import apply_messages, load_thread
-    from db import async_session
-    from db.models import BoardTask, Conversation, Job, Message
-    from db.ops import board_task_conversation_id
-    from server.task_board_runtime import board_task_job_handler
-
-    run_id, task_id = "run-b", "task-b"
-    conv_id = board_task_conversation_id(task_id)
-    prompt = HumanMessage(content="do the task", id="u-1")
-    reply = AIMessage(content="Doing. ", id="ai-1",
-                      tool_calls=[tool_call("complete_task", {"summary": "Did it."}, "c1")])
-    handoff = {"text": "Doing. ", "step_seq": 0, "steps": 1,
-               "usage": {"input_tokens": 300, "output_tokens": 10, "llm_calls": 1, "tool_calls": 0}}
-    async with async_session() as s:
-        s.add(BoardTask(id=task_id, title="T", status="running", job_id=run_id, model=GOOGLE))
-        s.add(Conversation(id=conv_id, title="T", model=GOOGLE, surface="task"))
-        s.add(Message(id="m-1", conversation_id=conv_id, role="user", content="do the task"))
-        s.add(Job(id=run_id, kind="board_task", thread_id=conv_id,
-                  payload=json.dumps({"task_id": task_id, "handoff": handoff})))
-        await s.commit()
-        await apply_messages(s, conv_id, [prompt, reply])
-
-    script.responder = lambda call: AIMessage(content="All set.")
-    job = await jarvis.queue.claim(kinds=["board_task"], worker_id="test", ttl_seconds=600)
-    assert job is not None and job.id == run_id
-    await board_task_job_handler(job)
-
-    [call] = script.calls
-    assert [(m.tool_call_id, m.content) for m in call.messages if isinstance(m, ToolMessage)] == [
-        ("c1", "Task marked done. Wrap up with a short final reply."),
-    ]
-    async with async_session() as s:
-        thread = await load_thread(s, conv_id)
-        task = await s.get(BoardTask, task_id)
-        messages = (await s.execute(
-            select(Message.role, Message.content).where(Message.conversation_id == conv_id).order_by(Message.created_at)
-        )).all()
-    assert sum(isinstance(m, HumanMessage) for m in thread.messages) == 1
-    assert task is not None and (task.status, task.summary) == ("done", "Did it.")
-    assert [tuple(m) for m in messages] == [("user", "do the task"), ("assistant", "Doing. All set.")]
-
-
-async def test_a_reclaimed_turn_never_runs_a_tool_twice(jarvis, script):  # noqa: F811
-    """Without a handoff — a crash, not a handover — the unanswered call is
-    repaired as an orphan, as before, not run."""
-    from core.transcript_store import apply_messages
-    from db import async_session
-    from db.models import Conversation, Job, Message
-    from server.chat_runtime import chat_job_handler, user_message_id
-
-    task_id, conv_id = "turn-2", "conv-2"
-    async with async_session() as s:
-        s.add(Conversation(id=conv_id, title="t", model=GOOGLE))
-        s.add(Message(id=task_id, conversation_id=conv_id, role="assistant", content="", model=GOOGLE,
-                      status="running"))
-        s.add(Job(id=task_id, kind="chat", thread_id=conv_id, payload=json.dumps({
-            "query": "plan it", "model": GOOGLE, "conv_id": conv_id,
-        })))
-        await s.commit()
-        await apply_messages(s, conv_id, [
-            HumanMessage(content="plan it", id=user_message_id(task_id)),
-            AIMessage(content="", id="ai-1", tool_calls=[tool_call("write_todos", {"todos": ["X"]}, "c1")]),
-        ])
-
-    script.responder = lambda call: AIMessage(content="Done.")
-    job = await jarvis.queue.claim(kinds=["chat"], worker_id="test", ttl_seconds=600)
-    assert job is not None
-    await chat_job_handler(job)
-    [call] = script.calls
-    [result] = [m for m in call.messages if isinstance(m, ToolMessage)]
-    assert result.tool_call_id == "c1" and "Updated todo list" not in str(result.content)
 
 
 # ── the edge's side ──────────────────────────────────────────────────────────
 
 START = """mutation($input: StartTaskInput!) {
   startTask(input: $input) { taskId conversationId queued } }"""
-EDGE_ON = {"JARVIS_AGENT_RUNTIME": "edge"}
+EDGE_ON = {"JARVIS_RUN_JOBS": "1"}
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -339,9 +79,8 @@ async def _start(client, **input) -> str:
 
 
 async def test_the_edge_takes_every_turn(database, work_dir: Path, edge_binary: Path):
-    """Every turn is the edge's to run. Here one's model is unreachable, and
-    the other's — Bedrock with credentials only boto3 reads — can't be called:
-    both fail in the edge, which records why."""
+    """Here one turn's model is unreachable, and the other's — Bedrock with
+    credentials only boto3 read — can't be called: both fail, and say why."""
     from db import async_session
     from db.models import ConfigSetting, Message
 
@@ -355,7 +94,7 @@ async def test_the_edge_takes_every_turn(database, work_dir: Path, edge_binary: 
 
         for task_id in (served, bedrock):
             job = await _finished(task_id)
-            assert (job.runtime, job.attempts, job.status) == ("edge", 1, "done")
+            assert (job.attempts, job.status) == (1, "done")
             async with async_session() as s:
                 message = await s.get(Message, task_id)
                 assert message is not None and message.status == "error"
@@ -364,22 +103,13 @@ async def test_the_edge_takes_every_turn(database, work_dir: Path, edge_binary: 
             message = await s.get(Message, bedrock)
             assert message is not None and "unsupported AWS credentials (web identity credentials)" in message.content
 
-        # A configured MCP server is the edge's too: the turn stays here.
+        # A configured MCP server is the edge's too.
         async with async_session() as s:
             s.add(ConfigSetting(key="mcp.servers", value=json.dumps({"fs": {"command": "x"}})))
             await s.commit()
         with_mcp = await _start(client, query="hello", model="ollama:llama3.3")
         job = await _finished(with_mcp)
-        assert (job.runtime, job.status) == ("edge", "done")
-
-    # With the agent loop off, no turn is the edge's.
-    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir)) as client:
-        async with async_session() as s:
-            await s.delete(await s.get(ConfigSetting, "mcp.servers"))
-            await s.commit()
-        resp = await client.post("/graphql", json={"query": START, "variables": {"input": {"query": "x"}}})
-        # Without a worker or the agent loop, starting a run is Python's.
-        assert resp.status_code != 200 or "errors" in resp.json()
+        assert job.status == "done"
 
 
 async def test_an_edge_start_recovers_the_jobs_the_last_one_left(database, work_dir: Path, edge_binary: Path):
@@ -402,40 +132,24 @@ async def test_an_edge_start_recovers_the_jobs_the_last_one_left(database, work_
             job.payload = json.dumps({"query": "hi", "model": GOOGLE, "conv_id": f"c-{job_id}"})
             await s.commit()
 
-    # Serving: the dead edge's job is claimed again, and run here (its
-    # model has no key in a test, so it fails — here).
+    # The dead process's job is claimed again, and run (its model has no key
+    # in a test, so it fails — here).
     await seed("left-running")
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, EDGE_ON)):
         job = await _finished("left-running")
-        assert (job.runtime, job.attempts, job.status) == ("edge", 2, "done")
+        assert (job.attempts, job.status) == (2, "done")
 
-    # Not serving: every edge job goes to Python untouched.
-    await seed("loop-off")
+    # Queued without running them, the start still recovers it.
+    await seed("not-run")
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir)):
-        job = await _settled("loop-off")
-        assert (job.runtime, job.attempts) == (None, 1)
-
-
-async def test_python_without_the_edge_adopts_its_jobs(database):
-    from db import async_session
-    from db.ops import adopt_edge_jobs
-
-    async with async_session() as s:
-        await _edge_job(s, "e-pending", status="pending")
-        await _edge_job(s, "e-running", status="running", locked_by="edge-1")
-        await _edge_job(s, "e-done", status="done")
-        await s.commit()
-        assert await adopt_edge_jobs(s) == 2
-    for job_id, runtime in (("e-pending", None), ("e-running", None), ("e-done", "edge")):
-        job = await _job(job_id)
-        assert job is not None and job.runtime == runtime, job_id
+        job = await _settled("not-run")
+        assert job.attempts == 1
 
 
 async def test_a_run_that_cannot_start_fails_in_the_edge(database, work_dir: Path, edge_binary: Path):
-    """What Python's handler would raise on fails here instead: a chat job
-    with no payload fails, its message saying why; an automation of an input
-    type nobody knows fails its run, as Python's `_run_automation_inner`
-    does."""
+    """A chat job with no payload fails, its message saying why; an
+    automation of an input type nobody knows fails its run, as Python's
+    `_run_automation_inner` did."""
     from db import async_session
     from db.models import Automation, AutomationRun, Conversation, Job, Message
 
@@ -455,9 +169,9 @@ async def test_a_run_that_cannot_start_fails_in_the_edge(database, work_dir: Pat
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, EDGE_ON)):
         why = "the chat job has no query, model or conversation"
         job = await _finished("bare")
-        assert (job.runtime, job.status, job.last_error) == ("edge", "error", why)
+        assert (job.status, job.last_error) == ("error", why)
         job = await _finished("odd-run")
-        assert (job.runtime, job.status) == ("edge", "done")
+        assert job.status == "done"
     async with async_session() as s:
         message = await s.get(Message, "bare")
         assert message is not None and (message.status, message.content) == ("error", f"The run failed before completing: {why}")
@@ -466,11 +180,10 @@ async def test_a_run_that_cannot_start_fails_in_the_edge(database, work_dir: Pat
 
 
 async def test_an_edge_start_sweeps_what_a_crash_left(database, work_dir: Path, edge_binary: Path):
-    """Python's startup sweeps, run by the edge at its start with the agent
-    loop on (`sweep.rs`): a run row no live job stands behind is an error, a
-    board task with none is ready again; a request whose waiter died expires —
-    a deferred action, a board task's question and a linked Python's live
-    run's stay; an incognito conversation no live chat job belongs to is
+    """Python's startup sweeps, run at start (`sweep.rs`): a run row no live
+    job stands behind is an error, a board task with none is ready again; a
+    request whose waiter died expires — a deferred action and a board task's
+    question stay; an incognito conversation no live chat job belongs to is
     deleted."""
     from db import async_session
     from db.models import (
@@ -482,25 +195,24 @@ async def test_an_edge_start_sweeps_what_a_crash_left(database, work_dir: Path, 
             s.add(Conversation(id=cid, title="t", model=GOOGLE, ephemeral=ephemeral))
         for mid, cid in (("m-dead", "c"), ("m-live", "c"), ("m-e", "e-live")):
             s.add(Message(id=mid, conversation_id=cid, role="assistant", content="", status="running"))
-        # A linked Python's jobs: one queued, one running.
+        # Queued jobs: their rows wait for them.
         s.add(Job(id="m-live", kind="chat", payload="{}", status="pending"))
         s.add(Job(id="m-e", kind="chat", payload="{}", status="pending"))
-        s.add(Job(id="py-run", kind="chat", payload="{}", status="running", locked_by="py"))
         s.add(Automation(id="au", name="a", input_type="prompt"))
         s.add(AutomationRun(id="ar-dead", automation_id="au", status="running", triggered_by="manual"))
         s.add(Workflow(id="wf", name="w"))
         s.add(WorkflowRun(id="wr-dead", workflow_id="wf", status="running"))
         s.add(BoardTask(id="bt-dead", title="dead", status="running", job_id="gone"))
-        s.add(BoardTask(id="bt-live", title="live", status="running", job_id="py-run"))
+        s.add(BoardTask(id="bt-live", title="live", status="running", job_id="m-live"))
         s.add(Approval(id="gate-dead", source="tool", task_id="m-dead"))
         s.add(Approval(id="gate-kernel", source="tool"))
         s.add(Approval(id="node-dead", source="workflow", kind="input", task_id="wr-dead"))
         s.add(Approval(id="deferred", source="chat", action="delete_skill", action_payload='{"skill_id": "x"}'))
         s.add(Approval(id="board", source="board_task", kind="input", board_task_id="bt-live"))
-        s.add(Approval(id="py-gate", source="tool", task_id="py-run"))
+        s.add(Approval(id="live-gate", source="tool", task_id="m-live"))
         await s.commit()
 
-    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir, EDGE_ON)):
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", _edge_env(work_dir)):
         # The incognito sweep is the last.
         deadline = time.monotonic() + 10
         while True:
@@ -518,10 +230,12 @@ async def test_an_edge_start_sweeps_what_a_crash_left(database, work_dir: Path, 
         dead, live = await s.get(BoardTask, "bt-dead"), await s.get(BoardTask, "bt-live")
         # Ready again — and maybe already dispatched anew, under a new job.
         assert dead.job_id != "gone"
-        assert (live.status, live.job_id) == ("running", "py-run")
+        assert (live.status, live.job_id) == ("running", "m-live")
+        # A queued run's gate expires too: its waiter is gone, and the run
+        # asks again when it runs.
         approvals = {a: (await s.get(Approval, a)).status for a in
-                     ("gate-dead", "gate-kernel", "node-dead", "deferred", "board", "py-gate")}
+                     ("gate-dead", "gate-kernel", "node-dead", "deferred", "board", "live-gate")}
         assert approvals == {"gate-dead": "expired", "gate-kernel": "expired", "node-dead": "expired",
-                             "deferred": "pending", "board": "pending", "py-gate": "pending"}
+                             "deferred": "pending", "board": "pending", "live-gate": "expired"}
         assert (await s.get(Approval, "gate-dead")).result == "The run was lost when the server restarted."
         assert await s.get(Conversation, "e-live") is not None

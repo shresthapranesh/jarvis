@@ -69,6 +69,9 @@ const HOOKS: &[&str] = &[
     "--llm-call",
     "--maintenance-due",
     "--maintenance-run",
+    "--startup-sweep",
+    "--kernel-cells",
+    "--replay-events",
     "--init-db",
 ];
 
@@ -82,23 +85,68 @@ fn main() {
     }
 }
 
+/// The schema over `pool` with nothing running behind it — for the hooks
+/// that print it or replay a run through it.
+fn bare_schema(pool: sqlx::SqlitePool, runs: Arc<runs::Registry>) -> gql::EdgeSchema {
+    let data = gql::EdgeData {
+        artifacts_dir: Default::default(),
+        tz: chrono_tz::Tz::UTC,
+        http: reqwest::Client::new(),
+        scheduler: schedule::Scheduler::new(pool.clone(), runs.clone(), chrono_tz::Tz::UTC),
+        kernels: kernels::Kernels::new(
+            kernels::Launch { python: Default::default(), dir: Default::default(), env: vec![] },
+            ".".as_ref(),
+            pool.clone(),
+        ),
+        mcp: mcp::Mcp::new(pool.clone(), Default::default()),
+    };
+    gql::build(pool, data, runs)
+}
+
+/// `--replay-events`: for each stdin line, `{"id", "kind", "events",
+/// "query", "variables"}`, a finished run of those raw `{"event", "data"}`
+/// records registered, and the subscription's results printed as one JSON
+/// array — so every coercer can be diffed against Python's over the same
+/// records.
+async fn replay_events() {
+    use std::io::BufRead;
+    for line in std::io::stdin().lock().lines() {
+        let case: serde_json::Value = serde_json::from_str(&line.expect("stdin")).expect("a JSON case");
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");
+        let registry: Arc<runs::Registry> = Default::default();
+        let meta = runs::Meta {
+            kind: case["kind"].as_str().unwrap_or("chat").into(),
+            label: "run".into(),
+            parent_id: None,
+            started_at: "2026-01-01T00:00:00+00:00".into(),
+        };
+        let run = registry.pre_register(case["id"].as_str().expect("id"), meta);
+        run.update(|st| {
+            st.events.extend(case["events"].as_array().expect("events").iter().cloned());
+            st.fields.done = true;
+        });
+        let schema = bare_schema(pool, registry);
+        let request = async_graphql::Request::new(case["query"].as_str().expect("query"))
+            .variables(async_graphql::Variables::from_json(case["variables"].clone()));
+        use futures_util::StreamExt;
+        let results: Vec<serde_json::Value> = schema
+            .execute_stream(request)
+            .map(|r| serde_json::to_value(r).expect("a response serializes"))
+            .collect()
+            .await;
+        println!("{}", serde_json::Value::Array(results));
+    }
+}
+
 async fn serve() {
     // The parity tests diff this against the Python schema's SDL.
     if std::env::args().any(|a| a == "--print-schema") {
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").expect("in-memory pool");
-        let data = gql::EdgeData {
-            artifacts_dir: Default::default(),
-            tz: chrono_tz::Tz::UTC,
-            http: reqwest::Client::new(),
-            scheduler: schedule::Scheduler::new(pool.clone(), Default::default(), chrono_tz::Tz::UTC),
-            kernels: kernels::Kernels::new(
-                kernels::Launch { python: Default::default(), dir: Default::default(), env: vec![] },
-                ".".as_ref(),
-                pool.clone(),
-            ),
-            mcp: mcp::Mcp::new(pool.clone(), Default::default()),
-        };
-        print!("{}", gql::build(pool, data, Default::default()).sdl());
+        print!("{}", bare_schema(pool, Default::default()).sdl());
+        return;
+    }
+    if std::env::args().any(|a| a == "--replay-events") {
+        replay_events().await;
         return;
     }
 
@@ -202,6 +250,25 @@ async fn serve() {
         println!("{out}");
         return;
     }
+    // `--startup-sweep`: what a start recovers and sweeps, then exit — for
+    // the tests that seed a database, sweep it, and copy it.
+    if std::env::args().any(|a| a == "--startup-sweep") {
+        let launch = kernels::Launch { python: config.kernel_python.clone(), dir: config.app_dir.clone(), env: vec![] };
+        let kernels = kernels::Kernels::new(launch, &config.app_dir, pool.clone());
+        agent::recover(&pool, &kernels, &config.artifacts_dir).await;
+        return;
+    }
+    // `--kernel-cells`: the notebooks, driven from stdin — one JSON command
+    // per line, `{"key", "code", "timeout"?, "conversation_id"?,
+    // "project_id"?}` to run a cell or `{"shutdown": key}`, each answered
+    // with one JSON line. The kernel tests diff this against `core/kernels.py`.
+    if std::env::args().any(|a| a == "--kernel-cells") {
+        let launch = kernels::Launch { python: config.kernel_python.clone(), dir: config.app_dir.clone(), env: vec![] };
+        let kernels = kernels::Kernels::new(launch, &config.app_dir, pool.clone());
+        kernel_cells(&kernels).await;
+        kernels.shutdown_all().await;
+        return;
+    }
     let http = reqwest::Client::new();
     let runs: Arc<runs::Registry> = Default::default();
     let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz);
@@ -291,6 +358,35 @@ async fn sweep_pending_runs(runs: Arc<runs::Registry>, pool: sqlx::SqlitePool) {
     loop {
         tick.tick().await;
         runs.sweep_pending(&pool).await;
+    }
+}
+
+async fn kernel_cells(kernels: &kernels::Kernels) {
+    use std::io::{BufRead, Write};
+    for line in std::io::stdin().lock().lines() {
+        let cmd: serde_json::Value = serde_json::from_str(&line.expect("stdin")).expect("a JSON command");
+        let text = |key: &str| cmd[key].as_str().map(str::to_string);
+        let out = if let Some(key) = text("shutdown") {
+            kernels.shutdown(&key).await;
+            serde_json::json!({"ok": true})
+        } else {
+            let (key, code) = (text("key").expect("key"), text("code").expect("code"));
+            let timeout = cmd["timeout"].as_f64().filter(|t| t.is_finite() && *t > 0.0).unwrap_or(60.0);
+            let (conversation_id, project_id) = (text("conversation_id"), text("project_id"));
+            let cell = kernels::Cell {
+                code: &code,
+                timeout: std::time::Duration::from_secs_f64(timeout),
+                conversation_id: conversation_id.as_deref(),
+                project_id: project_id.as_deref(),
+            };
+            match kernels.run(&key, &cell).await {
+                Ok(output) => serde_json::json!({"output": output}),
+                Err(error) => serde_json::json!({"error": error}),
+            }
+        };
+        let mut stdout = std::io::stdout().lock();
+        let _ = writeln!(stdout, "{out}");
+        let _ = stdout.flush();
     }
 }
 

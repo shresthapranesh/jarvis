@@ -6,10 +6,6 @@ use sqlx::{Row, SqlitePool};
 
 use crate::gql::codec::now_stored;
 
-/// `Job.runtime` as every job is written now. Jobs Python queued before it
-/// went have none, and are claimed all the same.
-pub const EDGE: &str = "edge";
-
 /// How long a claim holds before it must be renewed — the Python worker's TTL.
 pub const LOCK_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 

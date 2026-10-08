@@ -1,0 +1,1151 @@
+{
+ "test_an_instance_role_signs_like_boto3": [
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "bedrock:anthropic.claude-3-haiku-20240307-v1:0"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:amazon.nova-pro-v1:0",
+        "label": "Nova Pro (Amazon)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:meta.llama",
+        "label": "meta.llama (Bedrock)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       }
+      ],
+      "offered": 3,
+      "probed": true,
+      "provider": "bedrock",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "bedrock:anthropic.claude-3-haiku-20240307-v1:0",
+        "reason": "An error occurred (ValidationException) when calling the Converse operation: The provided model identifier is invalid."
+       }
+      ],
+      "windows": []
+     }
+    ]
+   }
+  }
+ ],
+ "test_failures_match_python": [
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "anthropic",
+      "skipped": "ANTHROPIC_API_KEY is not set",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "bedrock",
+      "skipped": "ListFoundationModels failed (us-east-1): The config profile (nope) could not be found",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "google_genai",
+      "skipped": "GOOGLE_API_KEY is not set",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "ollama",
+      "skipped": "could not reach ollama at http://127.0.0.1:<port>: [Errno 61] Connection refused",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "openrouter",
+      "skipped": "could not reach OpenRouter: Server error '503 Service Unavailable' for url 'http://127.0.0.1:<port>/openrouter-down/models'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503",
+      "unreachable": [],
+      "windows": []
+     }
+    ]
+   }
+  }
+ ],
+ "test_listings_match_python": [
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "anthropic:claude-sonnet-4-6"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "anthropic:claude-new",
+        "label": "claude-new",
+        "likelyChat": true,
+        "provider": "anthropic"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "anthropic",
+      "skipped": null,
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "bedrock:anthropic.claude-3-haiku-20240307-v1:0"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:amazon.nova-pro-v1:0",
+        "label": "Nova Pro (Amazon)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:meta.llama",
+        "label": "meta.llama (Bedrock)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "bedrock",
+      "skipped": null,
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "down",
+      "skipped": "could not list down's models at http://127.0.0.1:<port>/v1: [Errno 61] Connection refused",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "google_genai:gemini-3.1-flash-lite",
+       "google_genai:gemma-4-26b-a4b-it"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "google_genai:gemini-2.5-flash-preview-tts",
+        "label": "TTS",
+        "likelyChat": false,
+        "provider": "google_genai"
+       },
+       {
+        "contextWindow": null,
+        "description": "new",
+        "id": "google_genai:gemini-9",
+        "label": "gemini-9",
+        "likelyChat": true,
+        "provider": "google_genai"
+       }
+      ],
+      "offered": 5,
+      "probed": false,
+      "provider": "google_genai",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": true,
+        "catalogWindow": null,
+        "id": "google_genai:gemma-4-31b-it",
+        "label": "Gemma 4 31B (Google)",
+        "provider": "google_genai",
+        "providerWindow": 131072
+       },
+       {
+        "builtin": true,
+        "catalogWindow": 1048576,
+        "id": "google_genai:gemini-2.0-flash",
+        "label": "Gemini 2.0 Flash (Google)",
+        "provider": "google_genai",
+        "providerWindow": 999999
+       }
+      ]
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [
+       {
+        "contextWindow": 4096,
+        "description": null,
+        "id": "local:m-ctx",
+        "label": "m-ctx",
+        "likelyChat": true,
+        "provider": "local"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "local:tts-1",
+        "label": "tts-1",
+        "likelyChat": true,
+        "provider": "local"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "local",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": null,
+        "id": "local:qwen-7b",
+        "label": "Qwen",
+        "provider": "local",
+        "providerWindow": 32768
+       }
+      ]
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "missing",
+      "skipped": "could not list missing's models at http://127.0.0.1:<port>/missing: Client error '404 Not Found' for url 'http://127.0.0.1:<port>/missing/models'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "moved",
+      "skipped": "could not list moved's models at http://127.0.0.1:<port>/moved: Redirect response '301 Moved Permanently' for url 'http://127.0.0.1:<port>/moved/models'\nRedirect location: 'https://elsewhere.example/v1/models'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/301",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "ollama:gemma4:26b",
+       "ollama:qwen3:32b"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "ollama:mistral:7b",
+        "label": "mistral:7b (Ollama)",
+        "likelyChat": true,
+        "provider": "ollama"
+       }
+      ],
+      "offered": 2,
+      "probed": false,
+      "provider": "ollama",
+      "skipped": null,
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "openrouter:gone/model"
+      ],
+      "newModels": [
+       {
+        "contextWindow": 8192,
+        "description": null,
+        "id": "openrouter:free/model:free",
+        "label": "free/model:free",
+        "likelyChat": true,
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": 32768,
+        "description": null,
+        "id": "openrouter:google/img",
+        "label": "google/img",
+        "likelyChat": false,
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "openrouter:x/veo-3",
+        "label": "x/veo-3",
+        "likelyChat": false,
+        "provider": "openrouter"
+       }
+      ],
+      "offered": 4,
+      "probed": false,
+      "provider": "openrouter",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": 100000,
+        "id": "openrouter:anthropic/claude-x",
+        "label": "Claude X (mine)",
+        "provider": "openrouter",
+        "providerWindow": 200000
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "anthropic:claude-sonnet-4-6"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "label": "claude-new",
+        "likelyChat": true,
+        "modelId": "anthropic:claude-new",
+        "provider": "anthropic"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "anthropic",
+      "skipped": null,
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "bedrock:anthropic.claude-3-haiku-20240307-v1:0"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "label": "Nova Pro (Amazon)",
+        "likelyChat": true,
+        "modelId": "bedrock:amazon.nova-pro-v1:0",
+        "provider": "bedrock"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "label": "meta.llama (Bedrock)",
+        "likelyChat": true,
+        "modelId": "bedrock:meta.llama",
+        "provider": "bedrock"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "bedrock",
+      "skipped": null,
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "down",
+      "skipped": "could not list down's models at http://127.0.0.1:<port>/v1: [Errno 61] Connection refused",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "google_genai:gemini-3.1-flash-lite",
+       "google_genai:gemma-4-26b-a4b-it"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "label": "TTS",
+        "likelyChat": false,
+        "modelId": "google_genai:gemini-2.5-flash-preview-tts",
+        "provider": "google_genai"
+       },
+       {
+        "contextWindow": null,
+        "description": "new",
+        "label": "gemini-9",
+        "likelyChat": true,
+        "modelId": "google_genai:gemini-9",
+        "provider": "google_genai"
+       }
+      ],
+      "offered": 5,
+      "probed": false,
+      "provider": "google_genai",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": true,
+        "catalogWindow": null,
+        "label": "Gemma 4 31B (Google)",
+        "modelId": "google_genai:gemma-4-31b-it",
+        "provider": "google_genai",
+        "providerWindow": 131072
+       },
+       {
+        "builtin": true,
+        "catalogWindow": 1048576,
+        "label": "Gemini 2.0 Flash (Google)",
+        "modelId": "google_genai:gemini-2.0-flash",
+        "provider": "google_genai",
+        "providerWindow": 999999
+       }
+      ]
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [
+       {
+        "contextWindow": 4096,
+        "description": null,
+        "label": "m-ctx",
+        "likelyChat": true,
+        "modelId": "local:m-ctx",
+        "provider": "local"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "label": "tts-1",
+        "likelyChat": true,
+        "modelId": "local:tts-1",
+        "provider": "local"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "local",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": null,
+        "label": "Qwen",
+        "modelId": "local:qwen-7b",
+        "provider": "local",
+        "providerWindow": 32768
+       }
+      ]
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "missing",
+      "skipped": "could not list missing's models at http://127.0.0.1:<port>/missing: Client error '404 Not Found' for url 'http://127.0.0.1:<port>/missing/models'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "moved",
+      "skipped": "could not list moved's models at http://127.0.0.1:<port>/moved: Redirect response '301 Moved Permanently' for url 'http://127.0.0.1:<port>/moved/models'\nRedirect location: 'https://elsewhere.example/v1/models'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/301",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "ollama:gemma4:26b",
+       "ollama:qwen3:32b"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "label": "mistral:7b (Ollama)",
+        "likelyChat": true,
+        "modelId": "ollama:mistral:7b",
+        "provider": "ollama"
+       }
+      ],
+      "offered": 2,
+      "probed": false,
+      "provider": "ollama",
+      "skipped": null,
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "openrouter:gone/model"
+      ],
+      "newModels": [
+       {
+        "contextWindow": 8192,
+        "description": null,
+        "label": "free/model:free",
+        "likelyChat": true,
+        "modelId": "openrouter:free/model:free",
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": 32768,
+        "description": null,
+        "label": "google/img",
+        "likelyChat": false,
+        "modelId": "openrouter:google/img",
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "label": "x/veo-3",
+        "likelyChat": false,
+        "modelId": "openrouter:x/veo-3",
+        "provider": "openrouter"
+       }
+      ],
+      "offered": 4,
+      "probed": false,
+      "provider": "openrouter",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": 100000,
+        "label": "Claude X (mine)",
+        "modelId": "openrouter:anthropic/claude-x",
+        "provider": "openrouter",
+        "providerWindow": 200000
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "google_genai:gemini-3.1-flash-lite",
+       "google_genai:gemma-4-26b-a4b-it"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "google_genai:gemini-2.5-flash-preview-tts",
+        "label": "TTS",
+        "likelyChat": false,
+        "provider": "google_genai"
+       },
+       {
+        "contextWindow": null,
+        "description": "new",
+        "id": "google_genai:gemini-9",
+        "label": "gemini-9",
+        "likelyChat": true,
+        "provider": "google_genai"
+       }
+      ],
+      "offered": 5,
+      "probed": false,
+      "provider": "google_genai",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": true,
+        "catalogWindow": null,
+        "id": "google_genai:gemma-4-31b-it",
+        "label": "Gemma 4 31B (Google)",
+        "provider": "google_genai",
+        "providerWindow": 131072
+       },
+       {
+        "builtin": true,
+        "catalogWindow": 1048576,
+        "id": "google_genai:gemini-2.0-flash",
+        "label": "Gemini 2.0 Flash (Google)",
+        "provider": "google_genai",
+        "providerWindow": 999999
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [
+       {
+        "contextWindow": 4096,
+        "description": null,
+        "id": "local:m-ctx",
+        "label": "m-ctx",
+        "likelyChat": true,
+        "provider": "local"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "local:tts-1",
+        "label": "tts-1",
+        "likelyChat": true,
+        "provider": "local"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "local",
+      "skipped": null,
+      "unreachable": [],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": null,
+        "id": "local:qwen-7b",
+        "label": "Qwen",
+        "provider": "local",
+        "providerWindow": 32768
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "bedrock:anthropic.claude-3-haiku-20240307-v1:0"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:amazon.nova-pro-v1:0",
+        "label": "Nova Pro (Amazon)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:meta.llama",
+        "label": "meta.llama (Bedrock)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       }
+      ],
+      "offered": 3,
+      "probed": false,
+      "provider": "bedrock",
+      "skipped": null,
+      "unreachable": [],
+      "windows": []
+     }
+    ]
+   }
+  },
+  {
+   "data": null,
+   "errors": [
+    {
+     "message": "No discovery adapter for 'meta' — discoverable: anthropic, bedrock, down, google_genai, local, missing, moved, ollama, openrouter",
+     "path": [
+      "modelSync"
+     ]
+    }
+   ]
+  },
+  {
+   "data": null,
+   "errors": [
+    {
+     "message": "Unknown provider 'nope' — must be one of: anthropic, bedrock, down, google_genai, local, meta, missing, moved, ollama, openrouter",
+     "path": [
+      "modelSync"
+     ]
+    }
+   ]
+  },
+  {
+   "data": null,
+   "errors": [
+    {
+     "message": "Unknown provider '' — must be one of: anthropic, bedrock, down, google_genai, local, meta, missing, moved, ollama, openrouter",
+     "path": [
+      "modelSync"
+     ]
+    }
+   ]
+  }
+ ],
+ "test_probes_match_python": [
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "google_genai:gemini-3.1-flash-lite",
+       "google_genai:gemma-4-26b-a4b-it"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "google_genai:gemini-2.5-flash-preview-tts",
+        "label": "TTS",
+        "likelyChat": false,
+        "provider": "google_genai"
+       },
+       {
+        "contextWindow": null,
+        "description": "new",
+        "id": "google_genai:gemini-9",
+        "label": "gemini-9",
+        "likelyChat": true,
+        "provider": "google_genai"
+       }
+      ],
+      "offered": 5,
+      "probed": true,
+      "provider": "google_genai",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "google_genai:gemini-2.0-flash",
+        "reason": "Error calling model 'gemini-2.0-flash' (NOT_FOUND): 404 NOT_FOUND. {'error': {'code': 404, 'message': 'models/gemini-2.0-flash is not found', 'status': 'NOT_FOU…"
+       }
+      ],
+      "windows": [
+       {
+        "builtin": true,
+        "catalogWindow": null,
+        "id": "google_genai:gemma-4-31b-it",
+        "label": "Gemma 4 31B (Google)",
+        "provider": "google_genai",
+        "providerWindow": 131072
+       },
+       {
+        "builtin": true,
+        "catalogWindow": 1048576,
+        "id": "google_genai:gemini-2.0-flash",
+        "label": "Gemini 2.0 Flash (Google)",
+        "provider": "google_genai",
+        "providerWindow": 999999
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "anthropic:claude-sonnet-4-6"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "anthropic:claude-new",
+        "label": "claude-new",
+        "likelyChat": true,
+        "provider": "anthropic"
+       }
+      ],
+      "offered": 3,
+      "probed": true,
+      "provider": "anthropic",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "anthropic:claude-sonnet-4-6",
+        "reason": "Error code: 404 - {'type': 'error', 'error': {'type': 'not_found_error', 'message': 'model: claude-sonnet-4-6'}}"
+       }
+      ],
+      "windows": []
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "bedrock:anthropic.claude-3-haiku-20240307-v1:0"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:amazon.nova-pro-v1:0",
+        "label": "Nova Pro (Amazon)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "bedrock:meta.llama",
+        "label": "meta.llama (Bedrock)",
+        "likelyChat": true,
+        "provider": "bedrock"
+       }
+      ],
+      "offered": 3,
+      "probed": true,
+      "provider": "bedrock",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "bedrock:anthropic.claude-3-haiku-20240307-v1:0",
+        "reason": "An error occurred (ValidationException) when calling the Converse operation: The provided model identifier is invalid."
+       }
+      ],
+      "windows": []
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "ollama:gemma4:26b",
+       "ollama:qwen3:32b"
+      ],
+      "newModels": [
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "ollama:mistral:7b",
+        "label": "mistral:7b (Ollama)",
+        "likelyChat": true,
+        "provider": "ollama"
+       }
+      ],
+      "offered": 2,
+      "probed": true,
+      "provider": "ollama",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "ollama:qwen3:32b",
+        "reason": "model 'qwen3:32b' not found (status code: 404)"
+       }
+      ],
+      "windows": []
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [
+       "openrouter:gone/model"
+      ],
+      "newModels": [
+       {
+        "contextWindow": 8192,
+        "description": null,
+        "id": "openrouter:free/model:free",
+        "label": "free/model:free",
+        "likelyChat": true,
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": 32768,
+        "description": null,
+        "id": "openrouter:google/img",
+        "label": "google/img",
+        "likelyChat": false,
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "openrouter:x/veo-3",
+        "label": "x/veo-3",
+        "likelyChat": false,
+        "provider": "openrouter"
+       }
+      ],
+      "offered": 4,
+      "probed": true,
+      "provider": "openrouter",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "openrouter:gone/model",
+        "reason": "Error code: 404 - {'error': {'message': 'The model `gone/model` does not exist', 'type': 'invalid_request_error', 'code': 'model_not_found'}}"
+       }
+      ],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": 100000,
+        "id": "openrouter:anthropic/claude-x",
+        "label": "Claude X (mine)",
+        "provider": "openrouter",
+        "providerWindow": 200000
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [
+       {
+        "contextWindow": 4096,
+        "description": null,
+        "id": "local:m-ctx",
+        "label": "m-ctx",
+        "likelyChat": true,
+        "provider": "local"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "local:tts-1",
+        "label": "tts-1",
+        "likelyChat": true,
+        "provider": "local"
+       }
+      ],
+      "offered": 3,
+      "probed": true,
+      "provider": "local",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "local:qwen-7b",
+        "reason": "Error code: 404 - {'error': {'message': 'The model `qwen-7b` does not exist', 'type': 'invalid_request_error', 'code': 'model_not_found'}}"
+       }
+      ],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": null,
+        "id": "local:qwen-7b",
+        "label": "Qwen",
+        "provider": "local",
+        "providerWindow": 32768
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "test_refusals_match_python": [
+  {
+   "data": {
+    "modelSync": [
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "anthropic",
+      "skipped": "models.list failed: Error code: 401 - {'type': 'error', 'error': {'type': 'authentication_error', 'message': 'invalid x-api-key'}}",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "bedrock",
+      "skipped": "ListFoundationModels failed (us-west-2): Unable to locate credentials",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "google_genai",
+      "skipped": "ListModels failed (403): {\"error\": {\"code\": 403, \"message\": \"bad key\", \"status\": \"PERMISSION_DENIED\"}}",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [],
+      "newModels": [],
+      "offered": 0,
+      "probed": false,
+      "provider": "ollama",
+      "skipped": "could not reach ollama at http://127.0.0.1:<port>/ollama: Server error '500 Internal Server Error' for url 'http://127.0.0.1:<port>/ollama/api/tags'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
+      "unreachable": [],
+      "windows": []
+     },
+     {
+      "clean": false,
+      "missing": [
+       "openrouter:gone/model"
+      ],
+      "newModels": [
+       {
+        "contextWindow": 8192,
+        "description": null,
+        "id": "openrouter:free/model:free",
+        "label": "free/model:free",
+        "likelyChat": true,
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": 32768,
+        "description": null,
+        "id": "openrouter:google/img",
+        "label": "google/img",
+        "likelyChat": false,
+        "provider": "openrouter"
+       },
+       {
+        "contextWindow": null,
+        "description": null,
+        "id": "openrouter:x/veo-3",
+        "label": "x/veo-3",
+        "likelyChat": false,
+        "provider": "openrouter"
+       }
+      ],
+      "offered": 4,
+      "probed": true,
+      "provider": "openrouter",
+      "skipped": null,
+      "unreachable": [
+       {
+        "id": "openrouter:anthropic/claude-x",
+        "reason": "OPENROUTER_API_KEY is not set (required for 'openrouter:anthropic/claude-x')"
+       },
+       {
+        "id": "openrouter:gone/model",
+        "reason": "OPENROUTER_API_KEY is not set (required for 'openrouter:gone/model')"
+       }
+      ],
+      "windows": [
+       {
+        "builtin": false,
+        "catalogWindow": 100000,
+        "id": "openrouter:anthropic/claude-x",
+        "label": "Claude X (mine)",
+        "provider": "openrouter",
+        "providerWindow": 200000
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

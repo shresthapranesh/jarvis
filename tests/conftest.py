@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 
+# Python's recorded answers, for the tests that diff the Rust server.
+pytest_plugins = ["python_golden"]
+
 
 def _reset_globals() -> None:
     """Drop every process-level singleton a test may have installed."""

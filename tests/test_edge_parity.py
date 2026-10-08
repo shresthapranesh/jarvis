@@ -1,15 +1,11 @@
-"""The Rust edge must answer exactly what the Python schema answers.
+"""The Rust server must answer exactly what the Python schema answered.
 
-The edge (`edge/`) serves a growing slice of the GraphQL API and proxies the
-rest to Python, so for every operation it claims, the two servers have to be
-indistinguishable to the frontend: same JSON, same global ids, same timestamp
-strings, same cursors. These tests seed one database, ask both servers the
-frontend's *real* Relay operations (read from `frontend/src/__generated__`),
-and diff the results.
-
-The edge is started with its backend pointed at a closed port, so an operation
-it proxies instead of answering comes back as a 502 — "served by the edge" is
-asserted, not assumed.
+The two servers had to be indistinguishable to the frontend: same JSON, same
+global ids, same timestamp strings, same cursors. These tests seed one
+database, ask the frontend's *real* Relay operations (read from
+`frontend/src/__generated__`), and diff the answers — and, after a mutation,
+every row and artifact file — against Python's, recorded while it existed
+(`python_golden.py`).
 
 Skipped when `cargo` isn't installed.
 """
@@ -22,14 +18,15 @@ import json
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
-from edge_support import GENERATED, _gid, _relay_text, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from edge_support import GENERATED, _gid, _relay_text, _run_edge, edge_binary, startup_sweep  # noqa: F401 — edge_binary is a fixture
+from python_golden import recorded
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -71,6 +68,10 @@ PARITY_OPERATIONS = {
 }
 
 
+# Stamps from this session are the test's own writes (see `_mask`).
+SESSION_START = datetime.now(timezone.utc).replace(microsecond=0)
+
+
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
 
@@ -83,6 +84,10 @@ def one_zone(monkeypatch):
 
 @pytest.fixture
 async def edge(database, work_dir: Path, edge_binary: Path, one_zone):
+    """The edge on the test database. Tests ask for it before they seed, so
+    its startup sweep finds nothing and the rows stay as seeded."""
+    global _dirs
+    _dirs = (str(work_dir),)
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
         yield client
 
@@ -155,18 +160,25 @@ async def _edge(client: httpx.AsyncClient, query: str, variables: dict[str, Any]
     return await client.post("/graphql", json={"query": query, "variables": variables or {}})
 
 
+# The running test's work dir, which answers carry in artifact paths.
+_dirs: tuple[str, ...] = ()
+
+
 async def _assert_same(client: httpx.AsyncClient, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-    expected = await _python(query, variables)
+    async def python() -> dict[str, Any]:
+        return _mask(await _python(query, variables), SESSION_START, _dirs)
+
+    expected = await recorded(python)
     resp = await _edge(client, query, variables)
-    assert resp.status_code == 200, f"edge proxied instead of answering ({resp.status_code})"
-    assert resp.json() == expected
+    assert resp.status_code == 200
+    assert _mask(resp.json(), SESSION_START, _dirs) == expected
     return expected
 
 
 # ── parity ───────────────────────────────────────────────────────────────────
 
 
-async def test_conversation_list(seeded, edge):
+async def test_conversation_list(edge, seeded):
     data = await _assert_same(edge, _relay_text("ConversationListQuery"))
     ids = [c["id"] for c in data["data"]["conversations"]]
     # Pinned first, ephemeral and non-web conversations hidden.
@@ -176,11 +188,11 @@ async def test_conversation_list(seeded, edge):
 
 
 @pytest.mark.parametrize("surface", ["null", '"telegram"', '"web"', '"nowhere"'])
-async def test_conversation_list_surface_argument(seeded, edge, surface):
+async def test_conversation_list_surface_argument(edge, seeded, surface):
     await _assert_same(edge, f"{{ conversations(surface: {surface}) {{ id surface ephemeral model projectId }} }}")
 
 
-async def test_conversation_page_paginates_identically(seeded, edge):
+async def test_conversation_page_paginates_identically(edge, seeded):
     query = _relay_text("ConversationPageQuery")
     variables = {"id": _gid("Conversation", seeded["conversation"]), "count": 2, "cursor": None}
     pages = 0
@@ -194,7 +206,7 @@ async def test_conversation_page_paginates_identically(seeded, edge):
     assert pages == 3  # 5 messages, 2 per page — the tie straddles a boundary
 
 
-async def test_conversation_page_refetch_via_node(seeded, edge):
+async def test_conversation_page_refetch_via_node(edge, seeded):
     await _assert_same(
         edge,
         _relay_text("ConversationPageRefetchQuery"),
@@ -202,7 +214,7 @@ async def test_conversation_page_refetch_via_node(seeded, edge):
     )
 
 
-async def test_conversation_with_project(seeded, edge):
+async def test_conversation_with_project(edge, seeded):
     await _assert_same(
         edge,
         _relay_text("ConversationPageQuery"),
@@ -210,17 +222,17 @@ async def test_conversation_with_project(seeded, edge):
     )
 
 
-async def test_missing_conversation_is_null(seeded, edge):
+async def test_missing_conversation_is_null(edge, seeded):
     await _assert_same(edge, "query($id: ID!) { conversation(id: $id) { id } }", {"id": _gid("Conversation", "nope")})
 
 
-async def test_projects(seeded, edge):
+async def test_projects(edge, seeded):
     await _assert_same(edge, _relay_text("ProjectsQuery"))
     await _assert_same(edge, _relay_text("ProjectQuery"), {"id": _gid("Project", seeded["project"])})
     await _assert_same(edge, _relay_text("ProjectQuery"), {"id": _gid("Project", "p2")})
 
 
-async def test_node_resolves_messages_and_projects(seeded, edge):
+async def test_node_resolves_messages_and_projects(edge, seeded):
     query = """query($id: ID!) { node(id: $id) { __typename id
         ... on Message { role content steps { id seq subagent data createdAt } }
         ... on Project { name conversationCount } } }"""
@@ -309,9 +321,12 @@ async def domains(database, work_dir: Path) -> dict[str, str]:
         ])
         s.add_all([
             Approval(id="ap-block", source="chat", kind="approval", question="delete?", label="Delete", tool="rm",
-                     args_json='{"p": 1}', parent_id="c1", requested_at=_ts(2026, 6, 1, 1, 0, 0, 5)),
-            Approval(id="ap-deferred", source="deferred", action="delete_workflow", requested_at=_ts(2026, 6, 1, 2)),
-            Approval(id="ap-done", source="chat", status="approved", requested_at=_ts(2026, 6, 1, 3)),
+                     args_json='{"p": 1}', parent_id="c1", requested_at=_ts(2026, 6, 1, 1, 0, 0, 5),
+                     updated_at=_ts(2026, 6, 1, 1, 0, 0, 5)),
+            Approval(id="ap-deferred", source="deferred", action="delete_workflow", requested_at=_ts(2026, 6, 1, 2),
+                     updated_at=_ts(2026, 6, 1, 2)),
+            Approval(id="ap-done", source="chat", status="approved", requested_at=_ts(2026, 6, 1, 3),
+                     updated_at=_ts(2026, 6, 1, 3)),
         ])
         s.add_all([
             Memory(id="mem-core", kind="core", text="name is Sam", updated_at=_ts(2026, 7, 1)),
@@ -324,7 +339,7 @@ async def domains(database, work_dir: Path) -> dict[str, str]:
     return {}
 
 
-async def test_artifacts(domains, edge):
+async def test_artifacts(edge, domains):
     await _assert_same(edge, _relay_text("ArtifactListQuery"), {"conversationId": None})
     await _assert_same(edge, _relay_text("ArtifactListQuery"), {"conversationId": "c1"})
     for raw in ("a-crlf", "a-binary", "a-missing", "nope"):
@@ -333,12 +348,12 @@ async def test_artifacts(domains, edge):
     await _assert_same(edge, """query { artifacts { id versionCount content versions { version content } } }""")
 
 
-async def test_automation_runs(domains, edge):
+async def test_automation_runs(edge, domains):
     for automation in ("au-and", "au-weekdays", "au-hook"):
         await _assert_same(edge, _relay_text("AutomationRunsQuery"), {"automationId": _gid("Automation", automation)})
 
 
-async def test_automations(domains, edge):
+async def test_automations(edge, domains):
     """Including `nextRunAt`, which is the edge's scheduler's answer now:
     day-of-month AND day-of-week, Unix weekdays, a disabled schedule, and one
     that doesn't parse."""
@@ -353,7 +368,7 @@ async def test_automations(domains, edge):
                        {"id": _gid("Automation", "au-weekdays")})
 
 
-async def test_board(domains, edge):
+async def test_board(edge, domains):
     for include in (False, True):
         await _assert_same(edge, _relay_text("BoardTasksQuery"), {"includeArchived": include})
     fields = "id title parentIds childIds conversationId runId startedAt finishedAt"
@@ -362,21 +377,21 @@ async def test_board(domains, edge):
     await _assert_same(edge, f'query($id: ID!) {{ node(id: $id) {{ ... on BoardTask {{ {fields} }} }} }}', {"id": _gid("BoardTask", "b-root")})
 
 
-async def test_workflows(domains, edge):
+async def test_workflows(edge, domains):
     await _assert_same(edge, _relay_text("WorkflowListQuery"))
     await _assert_same(edge, _relay_text("WorkflowDetailQuery"), {"id": _gid("Workflow", "w1")})
     await _assert_same(edge, _relay_text("WorkflowRunsQuery"), {"workflowId": _gid("Workflow", "w1")})
     await _assert_same(edge, _relay_text("WorkflowRunDetailQuery"), {"id": _gid("WorkflowRun", "wr2")})
 
 
-async def test_small_lists(domains, edge):
+async def test_small_lists(edge, domains):
     await _assert_same(edge, _relay_text("NotificationChannelsQuery"))
     await _assert_same(edge, _relay_text("SkillsQuery"))
     data = await _assert_same(edge, _relay_text("PendingApprovalsQuery"))
     assert [a["id"] for a in data["data"]["pendingApprovals"]] == ["ap-deferred", "ap-block"]
 
 
-async def test_memories(domains, edge):
+async def test_memories(edge, domains):
     await _assert_same(edge, _relay_text("MemoriesQuery"))
     full = "id kind text updatedAt lastUsedAt useCount activities(limit: 1) { id memoryId conversationId kind score query source accessedAt }"
     await _assert_same(edge, f'{{ memories(kind: "fact") {{ {full} }} }}')
@@ -388,7 +403,7 @@ async def test_memories(domains, edge):
     ("Artifact", "a-crlf"), ("Automation", "au-and"), ("AutomationRun", "r-err"),
     ("Workflow", "w2"), ("WorkflowRun", "wr1"), ("NotificationChannel", "n1"), ("Skill", "s2"),
 ])
-async def test_node_resolves_every_type(domains, edge, type_name, raw):
+async def test_node_resolves_every_type(edge, domains, type_name, raw):
     await _assert_same(edge, "query($id: ID!) { node(id: $id) { __typename id } }", {"id": _gid(type_name, raw)})
 
 
@@ -401,13 +416,19 @@ async def test_node_resolves_every_type(domains, edge, type_name, raw):
 # "now" timestamps — is masked.
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
-_STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(\+00:00)?$")
+_STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?([+-]\d{2}:\d{2})?$")
 # An `isoformat()` stamp inside a longer string — a JSON document's field.
 _EMBEDDED_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00")
 
 
+# Seeds dated relative to now (a run "a day ago") are this far back at most.
+RECENT = timedelta(days=30)
+
+
 def _mask(value: Any, since: datetime, dirs: tuple[str, ...]) -> Any:
-    """Replace what legitimately differs between the two runs."""
+    """Replace what legitimately differs between the recording and this run:
+    paths, fresh uuids, and stamps written during the session (`<now>`) or
+    seeded relative to it (`<recent>`)."""
     import base64
 
     if isinstance(value, dict):
@@ -419,9 +440,11 @@ def _mask(value: Any, since: datetime, dirs: tuple[str, ...]) -> Any:
     for d in dirs:
         value = value.replace(d, "<dir>")
     if m := _STAMP.match(value):
-        stamp = datetime.fromisoformat(f"{m[1]}T{m[2]}{m[3] or ''}").replace(tzinfo=timezone.utc)
+        stamp = datetime.fromisoformat(f"{m[1]}T{m[2]}{m[3] or ''}{m[4] or '+00:00'}")
         if stamp >= since:
             return "<now>"
+        if stamp >= since - RECENT:
+            return "<recent>"
     value = _EMBEDDED_STAMP.sub(lambda m: "<now>" if datetime.fromisoformat(m[0]) >= since else m[0], value)
     with contextlib.suppress(Exception):
         decoded = base64.b64decode(value, validate=True).decode()
@@ -447,47 +470,58 @@ def _files(directory: Path) -> dict[str, bytes]:
 
 
 class Twin:
-    """Python on the test database, the edge on a copy of it."""
+    """The edge on a copy of the test database; Python's answers recorded."""
 
     def __init__(self, edge: httpx.AsyncClient, a_dir: Path, b_dir: Path):
         self.edge, self.a_dir, self.b_dir = edge, a_dir, b_dir
         self.dirs = (str(a_dir), str(b_dir))
-        # Anything stamped after the copy was taken was written by a mutation
-        # under test, on both sides, milliseconds apart.
-        self.since = datetime.now(timezone.utc).replace(microsecond=0)
+        # Python's last answer unmasked, while recording: the ids it minted,
+        # for a test to hand back to it. None on replay.
+        self.raw: dict[str, Any] | None = None
+        # Anything stamped during this session was written by the test — a
+        # seed's default, or a mutation — at a time no recording can share.
+        self.since = SESSION_START
 
     async def run(
         self, query: str, variables: dict[str, Any] | None = None, *, edge_variables: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Run on both sides and diff. `edge_variables` is for ids each side
-        minted for itself (a run's, a queued message's)."""
-        from db import async_session
-        from server.graphql.extensions import SESSION_LOCK_KEY
-        from server.graphql.schema import schema
-
+        """Run on the edge and diff the answer, every table and the artifact
+        files against Python's. `edge_variables` is for ids each side minted
+        for itself (a run's, a queued message's)."""
         since = self.since
-        async with async_session() as s:
-            res = await schema.execute(
-                query, variable_values=variables,
-                context_value={"session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": "human"},
-            )
-        python = {"data": res.data}
-        if res.errors:
-            python["errors"] = [{"message": e.message, "path": e.path} for e in res.errors]
+
+        async def python_side() -> tuple[Any, Any, Any]:
+            from db import async_session
+            from server.graphql.extensions import SESSION_LOCK_KEY
+            from server.graphql.schema import schema
+
+            async with async_session() as s:
+                res = await schema.execute(
+                    query, variable_values=variables,
+                    context_value={"session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": "human"},
+                )
+            python = {"data": res.data}
+            if res.errors:
+                python["errors"] = [{"message": e.message, "path": e.path} for e in res.errors]
+            self.raw = python
+            dump = _dump(self.a_dir / "database.db")
+            return _mask(python, since, self.dirs), _mask(dump, since, self.dirs), _files(self.a_dir / "artifacts")
+
+        python, tables, files = await recorded(python_side)
 
         edge_vars = variables if edge_variables is None else edge_variables
         resp = await self.edge.post("/graphql", json={"query": query, "variables": edge_vars or {}})
-        assert resp.status_code == 200, f"edge proxied instead of answering ({resp.status_code})"
+        assert resp.status_code == 200
         body = resp.json()
         edge = {"data": body.get("data")}
         if body.get("errors"):
             edge["errors"] = [{"message": e["message"], "path": e.get("path")} for e in body["errors"]]
 
-        assert _mask(edge, since, self.dirs) == _mask(python, since, self.dirs), query
-        a, b = _dump(self.a_dir / "database.db"), _dump(self.b_dir / "database.db")
-        for table in a:
-            assert _mask(b[table], since, self.dirs) == _mask(a[table], since, self.dirs), f"{table} after {query}"
-        assert _files(self.b_dir / "artifacts") == _files(self.a_dir / "artifacts"), f"files after {query}"
+        assert _mask(edge, since, self.dirs) == python, query
+        b = _dump(self.b_dir / "database.db")
+        for table in tables:
+            assert _mask(b[table], since, self.dirs) == tables[table], f"{table} after {query}"
+        assert _files(self.b_dir / "artifacts") == files, f"files after {query}"
         return python
 
 
@@ -510,6 +544,8 @@ async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: P
         # A started server's database: the LangGraph store import has run.
         await import_store_once(s, str(work_dir / "checkpoints.db"))
 
+    # As the edge's start would leave it, on both sides.
+    startup_sweep(edge_binary, work_dir, work_dir / "database.db")
     b_dir = tmp_path_factory.mktemp("twin")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
             contextlib.closing(sqlite3.connect(b_dir / "database.db")) as dst:
@@ -813,23 +849,16 @@ async def test_a_failing_embedder_fails_memory_writes(database, work_dir: Path, 
         assert c.execute("SELECT embedding FROM skills WHERE name = 'n'").fetchall() == [(None,)]
 
 
-async def test_a_decomposition_the_edge_does_not_plan_goes_to_python(domains, edge):
-    """The planner is a model call: with the agent loop off (as here),
-    `decomposeBoardTask` is Python's — decided after the checks, before
-    anything is written."""
+async def test_a_decomposition_is_checked_before_planning(edge, domains):
+    """`decomposeBoardTask` refuses a task that isn't waiting before any
+    model call, as Python refused it."""
     q = 'mutation($id: ID!) { decomposeBoardTask(id: $id) { id } }'
-    assert (await _edge(edge, q, {"id": _gid("BoardTask", "b-b")})).status_code == 502
-    done = await _edge(edge, q, {"id": _gid("BoardTask", "b-a")})  # refused here, as Python refuses it
+    done = await _edge(edge, q, {"id": _gid("BoardTask", "b-a")})
     assert done.json()["errors"][0]["message"] == "only waiting (todo/ready/blocked) tasks can be decomposed"
 
 
-async def test_a_consolidation_the_edge_does_not_call_goes_to_python(seeded, edge):
-    """The consolidation passes are model calls: with the agent loop off (as
-    here), they are Python's — an unknown project refused first, as Python
-    refuses it."""
-    assert (await _edge(edge, "mutation { consolidateMemory }")).status_code == 502
+async def test_a_consolidation_of_an_unknown_project_is_refused(edge, seeded):
     q = "mutation($id: ID!) { consolidateProjectMemory(id: $id) }"
-    assert (await _edge(edge, q, {"id": _gid("Project", "p2")})).status_code == 502
     refused = await _edge(edge, q, {"id": _gid("Project", "nope")})
     assert refused.json()["errors"][0]["message"] == "project not found"
 
@@ -901,8 +930,8 @@ async def test_setting_reads_and_writes(twin, monkeypatch):
 
 
 async def test_managed_settings_overridden(twin):
-    """`allowManaged: true` writes another tab's key; applying it is the
-    edge's, and a linked Python is told (`mcp.*` keys: `test_edge_mcp.py`)."""
+    """`allowManaged: true` writes another tab's key (`mcp.*` keys:
+    `test_edge_mcp.py`)."""
     set_ = "mutation($k: String!, $v: String!) { setSetting(key: $k, value: $v, allowManaged: true) { note setting { key value } } }"
     for key, value in (("tools.policy", "{}"), ("models.custom", "[]"), ("default.model", "ollama:x")):
         await twin.run(set_, {"k": key, "v": value})
@@ -911,49 +940,19 @@ async def test_managed_settings_overridden(twin):
         await twin.run(delete, {"k": key})
 
 
-async def test_settings_python_words_go_to_python(seeded, edge):
-    """Invalid JSON for a json key is Python's: the decoder's error is its to
-    word. Nothing is written first."""
+async def test_settings_refuse_invalid_json(edge, seeded, work_dir: Path):
+    """Invalid JSON for a json key is refused with the parser's reason, and
+    nothing is written."""
+    import sqlite3
+
     set_ = "mutation($k: String!, $v: String!, $a: Boolean!) { setSetting(key: $k, value: $v, allowManaged: $a) { note } }"
-    assert (await _edge(edge, set_, {"k": "tools.policy", "v": "{", "a": True})).status_code == 502
+    body = (await _edge(edge, set_, {"k": "tools.policy", "v": "{", "a": True})).json()
+    assert body["errors"][0]["message"].startswith("tools.policy must be valid JSON: ")
+    with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
+        assert c.execute("SELECT count(*) FROM config_settings WHERE key = 'tools.policy'").fetchone() == (0,)
+    # Two writes in one operation are both answered.
     both = 'mutation { setSetting(key: "a", value: "b") { note } deleteSetting(key: "a") { note } }'
-    refused = await _edge(edge, both)  # a deferring field is owned only alone
-    assert refused.json()["errors"][0]["message"] == "setSetting must be the only field in its operation"
-
-
-async def test_an_embedding_model_set_through_the_edge_reaches_a_linked_python(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
-    """Python caches the embedding model, the catalog and the tool policy in
-    process; a linked one is told."""
-    from core import embeddings, edge_link
-    from core.edge_link import EdgeLink
-    from test_edge_runs import _edge_owns_runs, _until
-
-    monkeypatch.setattr(embeddings, "_embedding_model_override", None)
-    async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
-        link = EdgeLink(f"ws://127.0.0.1:{client.base_url.port}/internal/worker")
-        link.start()
-        monkeypatch.setattr(edge_link, "_link", link)
-        try:
-            await _until(lambda: _edge_owns_runs(client))
-            q = 'mutation { setSetting(key: "embedding.model", value: "models/linked") { note } }'
-            assert (await _edge(client, q)).status_code == 200
-            assert embeddings._effective_model() == "models/linked"
-            q = 'mutation { deleteSetting(key: "embedding.model") { note } }'
-            assert (await _edge(client, q)).json()["data"]["deleteSetting"]["note"].startswith("Deleted. Applied.")
-            assert embeddings._embedding_model_override is None
-            # The catalog and the tool policy, which Python caches too.
-            from core import model_catalog, tool_policy
-
-            monkeypatch.setattr(model_catalog, "_custom_models", ())
-            q = 'mutation { addModel(id: "ollama:linked", label: "L") { default } }'
-            assert (await _edge(client, q)).status_code == 200
-            assert model_catalog.is_valid_model("ollama:linked")
-            tool_policy.invalidate_cache({})
-            q = 'mutation { setToolPolicy(key: "bound:run_cell", enabled: false) { key } }'
-            assert (await _edge(client, q)).status_code == 200
-            assert not tool_policy.is_enabled("bound:run_cell")
-        finally:
-            await link.stop()
+    assert "errors" not in (await _edge(edge, both)).json()
 
 
 CATALOG = "{ default providers discoverableProviders available { id label provider builtin contextWindow } endpoints { name baseUrl hasKey } }"
@@ -1076,10 +1075,10 @@ async def test_tool_inventory_and_policy(twin):
         await twin.run(policy, vars_)
 
 
-async def test_catalog_writes_python_must_answer(seeded, edge, work_dir: Path):
-    """A catalog row Python would fail to load, or a stored window it would
-    fail to convert, is its error to word. Each goes to Python before
-    anything is written."""
+async def test_an_unreadable_catalog_refuses_writes(edge, seeded, work_dir: Path):
+    """A `models.custom` row that isn't a model, or a stored window that isn't
+    a whole number, refuses the write with the reason — before anything is
+    written."""
     import sqlite3
 
     def put(key: str, value: str) -> None:
@@ -1090,20 +1089,45 @@ async def test_catalog_writes_python_must_answer(seeded, edge, work_dir: Path):
 
     put("models.custom", json.dumps([{"id": "ollama:w", "label": "W", "context_window": "lots"}]))
     q = 'mutation { updateModel(id: "ollama:w", label: "x") { default } }'
-    assert (await _edge(edge, q)).status_code == 502
+    assert "context_window" in (await _edge(edge, q)).json()["errors"][0]["message"]
     put("models.custom", json.dumps([{"id": "ollama:w", "label": 5}]))
-    assert (await _edge(edge, 'mutation { addModel(id: "ollama:y", label: "y") { default } }')).status_code == 502
+    body = (await _edge(edge, 'mutation { addModel(id: "ollama:y", label: "y") { default } }')).json()
+    assert body["errors"][0]["message"].startswith("the custom models setting (models.custom) can't be read: ")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
         stored = c.execute("SELECT value FROM config_settings WHERE key = 'models.custom'").fetchone()
     assert json.loads(stored[0]) == [{"id": "ollama:w", "label": 5}]
 
 
-async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
-    # An agent's delete is approval-gated in Python; a human's isn't.
-    for mutation in ("deleteWorkflow", "deleteSkill", "deleteAutomation"):
-        q = f'mutation {{ {mutation}(id: "{_gid("Workflow", "nope")}") }}'
-        assert (await edge.post("/graphql", json={"query": q}, headers={"X-Jarvis-Caller": "agent"})).status_code == 502
-        assert (await edge.post("/graphql", json={"query": q})).status_code == 200
+async def test_an_agents_deletes_wait_for_approval(edge, domains, work_dir: Path):
+    """With `approval.required_actions` gating them, an agent's delete is
+    recorded for a human instead of performed — once, however often it is
+    retried — and runs when approved. A human's delete is its own approval."""
+    import sqlite3
+
+    agent = {"X-Jarvis-Caller": "agent"}
+    missing = f'mutation {{ deleteWorkflow(id: "{_gid("Workflow", "nope")}") }}'
+    body = (await edge.post("/graphql", json={"query": missing}, headers=agent)).json()
+    assert body["errors"][0]["message"] == "workflow not found"
+
+    await _edge(edge, 'mutation { setSetting(key: "approval.required_actions", value: "all") { note } }')
+    delete = 'mutation($id: ID!) { deleteSkill(id: $id) }'
+    skill = _gid("Skill", "s1")
+    asked = [(await edge.post("/graphql", json={"query": delete, "variables": {"id": skill}}, headers=agent)).json()
+             for _ in range(2)]
+    for body in asked:
+        assert body["errors"][0]["message"].startswith("Approval required: Delete skill ")
+    assert asked[0] == asked[1]
+    with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
+        [(approval_id, action, payload)] = c.execute(
+            "SELECT id, action, action_payload FROM approvals WHERE status = 'pending' AND action = 'delete_skill'").fetchall()
+        assert c.execute("SELECT count(*) FROM skills WHERE id = 's1'").fetchone() == (1,)
+    assert (action, json.loads(payload)["skill_id"]) == ("delete_skill", "s1")
+
+    resolve = 'mutation($id: String!) { resolveApproval(id: $id, answer: "yes") { status result } }'
+    done = (await _edge(edge, resolve, {"id": approval_id})).json()
+    assert done == {"data": {"resolveApproval": {"status": "approved", "result": "Deleted."}}}
+    with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as c:
+        assert c.execute("SELECT count(*) FROM skills WHERE id = 's1'").fetchone() == (0,)
 
 
 # ── routing ──────────────────────────────────────────────────────────────────
@@ -1112,21 +1136,16 @@ async def test_conditionally_owned_mutations_are_proxied(seeded, edge):
 @pytest.mark.parametrize(
     "query",
     [
-        # A root field the edge doesn't know (Python answers with its error).
         "{ notARootField { ready } }",
-        # One owned root field and one not: the whole operation goes to Python.
         "{ conversations { id } notARootField { ready } }",
-        # A mutation the edge doesn't know.
         'mutation { notAMutation { ready } }',
-        # The run mirror isn't current without a worker.
-        'mutation { stopBoardTask(id: "x") }',
-        # A node id of a type the edge can't resolve.
-        '{ node(id: "UnVubmluZ1Rhc2s6YWJj") { id } }',
     ],
 )
-async def test_unowned_operations_are_proxied(seeded, edge, query):
+async def test_unknown_fields_are_validation_errors(edge, seeded, query):
     resp = await _edge(edge, query)
-    assert resp.status_code == 502  # the dead backend — i.e. it was proxied
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["data"] is None and "Unknown field" in body["errors"][0]["message"]
 
 
 @pytest.mark.parametrize(
@@ -1147,20 +1166,24 @@ async def test_unowned_operations_are_proxied(seeded, edge, query):
         {"json": {"query": "query A { conversations { id } }", "operationName": 5}},
     ],
 )
-async def test_requests_strawberry_refuses_are_refused_here(seeded, edge, request_):
-    """What Strawberry refuses before executing gets its 400 and its words
-    from the edge, never proxied."""
-    from fastapi import FastAPI
+async def test_requests_strawberry_refuses_are_refused(edge, seeded, request_):
+    """What Strawberry refused before executing gets its 400 and its words."""
 
-    from server.graphql.router import router
+    async def python() -> tuple[int, str]:
+        from fastapi import FastAPI
 
-    app = FastAPI()
-    app.include_router(router, prefix="/graphql")
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://python") as python:
-        expected = await python.post("/graphql", **request_)
+        from server.graphql.router import router
+
+        app = FastAPI()
+        app.include_router(router, prefix="/graphql")
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://python") as client:
+            expected = await client.post("/graphql", **request_)
+        return expected.status_code, expected.text
+
+    expected = await recorded(python)
     resp = await edge.post("/graphql", **request_)
-    assert expected.status_code == 400
-    assert (resp.status_code, resp.text) == (expected.status_code, expected.text)
+    assert expected[0] == 400
+    assert (resp.status_code, resp.text) == expected
 
 
 @pytest.mark.parametrize(
@@ -1171,19 +1194,11 @@ async def test_requests_strawberry_refuses_are_refused_here(seeded, edge, reques
         'subscription { taskEvents(taskId: "x") { __typename } }',  # over HTTP
     ],
 )
-async def test_errors_executing_reports_are_answered_here(seeded, edge, query):
+async def test_errors_executing_reports_are_answered_here(edge, seeded, query):
     resp = await _edge(edge, query)
     assert resp.status_code == 200
     body = resp.json()
     assert body["data"] is None and body["errors"]
-
-
-async def test_a_deferring_field_beside_another_is_refused(seeded, edge):
-    """Deferring re-runs the whole operation in Python, which would answer
-    the other field twice; it is refused instead."""
-    resp = await _edge(edge, "{ models { default } modelSync { provider } }")
-    assert resp.status_code == 200
-    assert resp.json() == {"data": None, "errors": [{"message": "modelSync must be the only field in its operation"}]}
 
 
 # ── schema contract ──────────────────────────────────────────────────────────
@@ -1205,38 +1220,43 @@ def _input_signature(field) -> tuple[str, Any]:
     return str(field.type), None if field.default_value is Undefined else field.default_value
 
 
-def test_edge_schema_is_a_subset_of_python(edge_binary):
-    """Every type and field the edge defines exists in Python with the same
-    type and arguments — the edge may lag Python, never contradict it."""
+def test_the_frontend_compiles_against_this_schema(edge_binary):
+    """`frontend/schema.graphql` is the server's schema; `pnpm schema`
+    re-exports it after a change."""
+    printed = subprocess.run([str(edge_binary), "--print-schema"], capture_output=True, text=True, check=True).stdout
+    assert (ROOT / "frontend" / "schema.graphql").read_text() == printed, "run `pnpm schema` in frontend/"
+
+
+async def test_the_schema_keeps_every_field_python_had(edge_binary):
+    """Every type, field and argument the Python schema had is still here
+    with the same type — the frontend, the bots and the SDK were written
+    against it."""
     from graphql import GraphQLInputObjectType, GraphQLInterfaceType, GraphQLObjectType, build_schema
 
-    from server.graphql.schema import schema
+    def python_sdl() -> str:
+        from server.graphql.schema import schema
+
+        return schema.as_str()
 
     rust = build_schema(subprocess.run([str(edge_binary), "--print-schema"], capture_output=True, text=True, check=True).stdout)
-    python = build_schema(schema.as_str())
+    python = build_schema(await recorded(python_sdl))
 
-    for name, rtype in rust.type_map.items():
+    for name, ptype in python.type_map.items():
         if name.startswith("__"):
             continue
-        if isinstance(rtype, GraphQLInputObjectType):
-            ptype = python.type_map.get(name)
-            assert isinstance(ptype, GraphQLInputObjectType), f"input {name} is not in the Python schema"
+        rtype = rust.type_map.get(name)
+        if isinstance(ptype, GraphQLInputObjectType):
+            assert isinstance(rtype, GraphQLInputObjectType), f"input {name} is gone"
             assert {f: _input_signature(v) for f, v in rtype.fields.items()} == {
                 f: _input_signature(v) for f, v in ptype.fields.items()
             }, f"input {name} differs"
             continue
-        if not isinstance(rtype, (GraphQLObjectType, GraphQLInterfaceType)):
+        if not isinstance(ptype, (GraphQLObjectType, GraphQLInterfaceType)):
             continue
-        ptype = python.type_map.get(name)
-        assert ptype is not None, f"{name} is not in the Python schema"
-        for fname, rfield in rtype.fields.items():
-            assert fname in ptype.fields, f"{name}.{fname} is not in the Python schema"
-            assert _signature(rfield) == _signature(ptype.fields[fname]), f"{name}.{fname} differs"
-        # A non-root type is fully ported or not at all: the edge answers a
-        # validation failure itself, so a missing field would fail an owned
-        # operation Python would answer.
-        if name not in ("Query", "Mutation"):
-            assert set(rtype.fields) == set(ptype.fields), f"{name} is partially ported"
+        assert rtype is not None, f"{name} is gone"
+        for fname, pfield in ptype.fields.items():
+            assert fname in rtype.fields, f"{name}.{fname} is gone"
+            assert _signature(rtype.fields[fname]) == _signature(pfield), f"{name}.{fname} differs"
 
 
 def test_every_claimed_frontend_query_is_diffed(edge_binary):

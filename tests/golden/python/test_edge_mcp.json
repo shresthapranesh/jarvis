@@ -1,0 +1,3133 @@
+{
+ "test_an_approved_deferred_call_runs_on_the_edge": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "resolveApproval": {
+       "result": "echo: approved",
+       "status": "approved"
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "resolveApproval": {
+       "result": "MCP tool failed: Error executing tool explode: boom from the server",
+       "status": "approved"
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "MCP server 'echo' has no tool 'nope'. Available: echo, add, explode",
+       "path": [
+        "resolveApproval"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[echo-add-{\"a\": 2, \"b\": 3}]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "5",
+       "isError": false
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[echo-echo-[1]]": [
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "args_json must be a JSON object",
+       "path": [
+        "callMcpTool"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[echo-echo-{\"text\": \"via graphql\"}]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "echo: via graphql",
+       "isError": false
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[echo-echo-{\"wrong\": 1}]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "Error executing tool echo: 1 validation error for echoArguments\ntext\n  Field required [type=missing, input_value={'wrong': 1}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
+       "isError": true
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[echo-explode-{}]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "Error executing tool explode: boom from the server",
+       "isError": true
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[echo-nope-{}]": [
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "MCP server 'echo' has no tool 'nope'. Available: echo, add, explode",
+       "path": [
+        "callMcpTool"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[nope-echo-{}]": [
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "Unknown MCP server 'nope'. Configured: echo, other",
+       "path": [
+        "callMcpTool"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_call_mcp_tool[other-ping-]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "pong",
+       "isError": false
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_load_modes": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "setMcpServerLoadMode": {
+       "command": "<python>",
+       "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"always\"}",
+       "enabled": true,
+       "loadMode": "always",
+       "name": "echo",
+       "toolCount": 3,
+       "tools": [
+        "echo",
+        "add",
+        "explode"
+       ],
+       "transport": "stdio",
+       "url": null
+      }
+     }
+    },
+    [
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "setMcpServerLoadMode": {
+       "command": "<python>",
+       "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+       "enabled": true,
+       "loadMode": "lazy",
+       "name": "other",
+       "toolCount": 1,
+       "tools": [
+        "ping"
+       ],
+       "transport": "stdio",
+       "url": null
+      }
+     }
+    },
+    [
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\", \"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "mode must be one of always, lazy",
+       "path": [
+        "setMcpServerLoadMode"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\", \"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "MCP server 'nope' is not configured",
+       "path": [
+        "setMcpServerLoadMode"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\", \"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpServers": [
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"always\"}",
+        "enabled": true,
+        "loadMode": "always",
+        "name": "echo",
+        "toolCount": 3,
+        "tools": [
+         "echo",
+         "add",
+         "explode"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "other",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\", \"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "setMcpDefaultLoadMode": "lazy"
+     }
+    },
+    [
+     [
+      "mcp.default_load_mode",
+      "lazy"
+     ],
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\", \"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "mode must be one of always, lazy",
+       "path": [
+        "setMcpDefaultLoadMode"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.default_load_mode",
+      "lazy"
+     ],
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\", \"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpServers": [
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"always\"}",
+        "enabled": true,
+        "loadMode": "always",
+        "name": "echo",
+        "toolCount": 3,
+        "tools": [
+         "echo",
+         "add",
+         "explode"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "other",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.default_load_mode",
+      "lazy"
+     ],
+     [
+      "mcp.load_modes",
+      "{\"echo\": \"always\", \"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_mcp_settings_are_applied": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "setSetting": {
+       "note": "Applied. Reconnected 2 MCP server(s).",
+       "setting": {
+        "key": "mcp.load_modes",
+        "value": "{\"other\": \"lazy\"}"
+       }
+      }
+     }
+    },
+    [
+     [
+      "mcp.load_modes",
+      "{\"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpServers": [
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "echo",
+        "toolCount": 3,
+        "tools": [
+         "echo",
+         "add",
+         "explode"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "other",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.load_modes",
+      "{\"other\": \"lazy\"}"
+     ],
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "deleteSetting": {
+       "note": "Deleted. Applied. Reconnected 2 MCP server(s)."
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_network_transports[sse-<lambda>]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpTools": [
+       {
+        "inputSchema": "{\"properties\": {\"text\": {\"title\": \"Text\", \"type\": \"string\"}}, \"required\": [\"text\"], \"title\": \"echoArguments\", \"type\": \"object\"}",
+        "name": "echo"
+       },
+       {
+        "inputSchema": "{\"properties\": {}, \"title\": \"explodeArguments\", \"type\": \"object\"}",
+        "name": "explode"
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/sse\", \"transport\": \"sse\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "echo: over the wire",
+       "isError": false
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/sse\", \"transport\": \"sse\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "Error executing tool explode: boom over the wire",
+       "isError": true
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/sse\", \"transport\": \"sse\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_network_transports[streamable-http-<lambda>]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpTools": [
+       {
+        "inputSchema": "{\"properties\": {\"text\": {\"title\": \"Text\", \"type\": \"string\"}}, \"required\": [\"text\"], \"title\": \"echoArguments\", \"type\": \"object\"}",
+        "name": "echo"
+       },
+       {
+        "inputSchema": "{\"properties\": {}, \"title\": \"explodeArguments\", \"type\": \"object\"}",
+        "name": "explode"
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/mcp\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "echo: over the wire",
+       "isError": false
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/mcp\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "Error executing tool explode: boom over the wire",
+       "isError": true
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/mcp\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_network_transports[streamable-http-json-<lambda>]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpTools": [
+       {
+        "inputSchema": "{\"properties\": {\"text\": {\"title\": \"Text\", \"type\": \"string\"}}, \"required\": [\"text\"], \"title\": \"echoArguments\", \"type\": \"object\"}",
+        "name": "echo"
+       },
+       {
+        "inputSchema": "{\"properties\": {}, \"title\": \"explodeArguments\", \"type\": \"object\"}",
+        "name": "explode"
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/mcp\", \"transport\": \"streamable_http\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "echo: over the wire",
+       "isError": false
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/mcp\", \"transport\": \"streamable_http\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "Error executing tool explode: boom over the wire",
+       "isError": true
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"http://127.0.0.1:<port>/mcp\", \"transport\": \"streamable_http\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_network_transports[websocket-<lambda>]": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpTools": [
+       {
+        "inputSchema": "{\"properties\": {\"text\": {\"title\": \"Text\", \"type\": \"string\"}}, \"required\": [\"text\"], \"title\": \"echoArguments\", \"type\": \"object\"}",
+        "name": "echo"
+       },
+       {
+        "inputSchema": "{\"properties\": {}, \"title\": \"explodeArguments\", \"type\": \"object\"}",
+        "name": "explode"
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"ws://127.0.0.1:<port>/ws\", \"transport\": \"websocket\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "echo: over the wire",
+       "isError": false
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"ws://127.0.0.1:<port>/ws\", \"transport\": \"websocket\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "callMcpTool": {
+       "content": "Error executing tool explode: boom over the wire",
+       "isError": true
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"web\": {\"url\": \"ws://127.0.0.1:<port>/ws\", \"transport\": \"websocket\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_server_mutations": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "addMcpServer": {
+       "command": "<python>",
+       "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}",
+       "enabled": true,
+       "loadMode": "always",
+       "name": "second",
+       "toolCount": 1,
+       "tools": [
+        "ping"
+       ],
+       "transport": "stdio",
+       "url": null
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "addMcpServer": {
+       "command": "/nonexistent/mcp",
+       "config": "{\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}",
+       "enabled": true,
+       "loadMode": "always",
+       "name": "broken",
+       "toolCount": 0,
+       "tools": [],
+       "transport": "stdio",
+       "url": null
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"broken\": {\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "config_json must be a JSON object (connection dict)",
+       "path": [
+        "addMcpServer"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"broken\": {\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "config_json must be a JSON object",
+       "path": [
+        "updateMcpServer"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"broken\": {\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "invalid config for server 'servers'",
+       "path": [
+        "addMcpServer"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"broken\": {\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "updateMcpServer": {
+       "command": "<python>",
+       "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}",
+       "enabled": true,
+       "loadMode": "lazy",
+       "name": "second",
+       "toolCount": 1,
+       "tools": [
+        "ping"
+       ],
+       "transport": "stdio",
+       "url": null
+      }
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}, \"broken\": {\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "reloadMcpServers": [
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "echo",
+        "toolCount": 3,
+        "tools": [
+         "echo",
+         "add",
+         "explode"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}",
+        "enabled": true,
+        "loadMode": "always",
+        "name": "other",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "second",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "/nonexistent/mcp",
+        "config": "{\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}",
+        "enabled": true,
+        "loadMode": "always",
+        "name": "broken",
+        "toolCount": 0,
+        "tools": [],
+        "transport": "stdio",
+        "url": null
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}, \"broken\": {\"command\": \"/nonexistent/mcp\", \"args\": [], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "removeMcpServer": true
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": null,
+     "errors": [
+      {
+       "message": "MCP server 'never' not found in DB (found: ['echo', 'other', 'second'])",
+       "path": [
+        "removeMcpServer"
+       ]
+      }
+     ]
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpServers": [
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "echo",
+        "toolCount": 3,
+        "tools": [
+         "echo",
+         "add",
+         "explode"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}",
+        "enabled": true,
+        "loadMode": "always",
+        "name": "other",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "second",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}, \"second\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"x-jarvis-load\": \"lazy\", \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_servers_and_tools": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpServers": [
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}",
+        "enabled": true,
+        "loadMode": "lazy",
+        "name": "echo",
+        "toolCount": 3,
+        "tools": [
+         "echo",
+         "add",
+         "explode"
+        ],
+        "transport": "stdio",
+        "url": null
+       },
+       {
+        "command": "<python>",
+        "config": "{\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}",
+        "enabled": true,
+        "loadMode": "always",
+        "name": "other",
+        "toolCount": 1,
+        "tools": [
+         "ping"
+        ],
+        "transport": "stdio",
+        "url": null
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpTools": [
+       {
+        "description": "Return the text you were given.",
+        "inputSchema": "{\"properties\": {\"text\": {\"title\": \"Text\", \"type\": \"string\"}}, \"required\": [\"text\"], \"title\": \"echoArguments\", \"type\": \"object\"}",
+        "name": "echo",
+        "server": "echo"
+       },
+       {
+        "description": "Add two integers.",
+        "inputSchema": "{\"properties\": {\"a\": {\"title\": \"A\", \"type\": \"integer\"}, \"b\": {\"title\": \"B\", \"type\": \"integer\"}}, \"required\": [\"a\", \"b\"], \"title\": \"addArguments\", \"type\": \"object\"}",
+        "name": "add",
+        "server": "echo"
+       },
+       {
+        "description": "Always fails — exercises the MCP error path.",
+        "inputSchema": "{\"properties\": {}, \"title\": \"explodeArguments\", \"type\": \"object\"}",
+        "name": "explode",
+        "server": "echo"
+       },
+       {
+        "description": "Return pong.",
+        "inputSchema": "{\"properties\": {}, \"title\": \"pingArguments\", \"type\": \"object\"}",
+        "name": "ping",
+        "server": "other"
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpTools": [
+       {
+        "description": "Return the text you were given.",
+        "name": "echo"
+       },
+       {
+        "description": "Add two integers.",
+        "name": "add"
+       },
+       {
+        "description": "Always fails — exercises the MCP error path.",
+        "name": "explode"
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "mcpTools": []
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  }
+ ],
+ "test_tool_inventory_lists_mcp_tools": [
+  {
+   "$tuple": [
+    {
+     "data": {
+      "tools": [
+       {
+        "available": true,
+        "description": "Run Python in the conversation's stateful kernel — the door to the jarvis SDK.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:run_cell",
+        "inPrompt": true,
+        "key": "bound:run_cell",
+        "kind": "bound",
+        "name": "run_cell",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Save a versioned deliverable (markdown or an on-disk file) to the side panel.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:write_artifact",
+        "inPrompt": true,
+        "key": "bound:write_artifact",
+        "kind": "bound",
+        "name": "write_artifact",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Replace the run's task list (a graph state delta).",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:write_todos",
+        "inPrompt": true,
+        "key": "bound:write_todos",
+        "kind": "bound",
+        "name": "write_todos",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Advance one todo item (a graph state delta).",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:set_todo_status",
+        "inPrompt": true,
+        "key": "bound:set_todo_status",
+        "kind": "bound",
+        "name": "set_todo_status",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Run parallel role-templated subagents on this conversation's model.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:spawn_workers",
+        "inPrompt": true,
+        "key": "bound:spawn_workers",
+        "kind": "bound",
+        "name": "spawn_workers",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Invoke a saved workflow graph as a sub-agent.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:run_workflow",
+        "inPrompt": true,
+        "key": "bound:run_workflow",
+        "kind": "bound",
+        "name": "run_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Write a long-term memory item. Bound only when an embedder is configured.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:remember",
+        "inPrompt": true,
+        "key": "bound:remember",
+        "kind": "bound",
+        "name": "remember",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Finish the current board task. Bound only inside a board run.",
+        "detail": "board runs only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:complete_task",
+        "inPrompt": true,
+        "key": "bound:complete_task",
+        "kind": "bound",
+        "name": "complete_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Block the current board task or ask its owner a question. Board runs only.",
+        "detail": "board runs only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:block_task",
+        "inPrompt": true,
+        "key": "bound:block_task",
+        "kind": "bound",
+        "name": "block_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Saved artifacts, newest first — current conversation unless all_conversations.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:list_artifacts",
+        "inPrompt": false,
+        "key": "sdk:list_artifacts",
+        "kind": "sdk",
+        "name": "jarvis.list_artifacts",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Markdown content of an artifact — latest, or a specific version.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:read_artifact",
+        "inPrompt": false,
+        "key": "sdk:read_artifact",
+        "kind": "sdk",
+        "name": "jarvis.read_artifact",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Version history for an artifact, oldest first.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:list_artifact_versions",
+        "inPrompt": false,
+        "key": "sdk:list_artifact_versions",
+        "kind": "sdk",
+        "name": "jarvis.list_artifact_versions",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Past conversations that mention `query`, best match first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:search_conversations",
+        "inPrompt": false,
+        "key": "sdk:search_conversations",
+        "kind": "sdk",
+        "name": "jarvis.search_conversations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "The last `limit` messages of a conversation, oldest first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:read_conversation",
+        "inPrompt": false,
+        "key": "sdk:read_conversation",
+        "kind": "sdk",
+        "name": "jarvis.read_conversation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "The other conversations in this project, most recently active first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:list_conversations",
+        "inPrompt": false,
+        "key": "sdk:list_conversations",
+        "kind": "sdk",
+        "name": "jarvis.list_conversations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All automations with id, name, input_type, schedule, enabled.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automations",
+        "inPrompt": false,
+        "key": "sdk:list_automations",
+        "kind": "sdk",
+        "name": "jarvis.list_automations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create an automation — a task that runs on a cron schedule or on demand.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:create_automation",
+        "inPrompt": false,
+        "key": "sdk:create_automation",
+        "kind": "sdk",
+        "name": "jarvis.create_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update an automation. Pass only the fields to change.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:update_automation",
+        "inPrompt": false,
+        "key": "sdk:update_automation",
+        "kind": "sdk",
+        "name": "jarvis.update_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete an automation by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:delete_automation",
+        "inPrompt": false,
+        "key": "sdk:delete_automation",
+        "kind": "sdk",
+        "name": "jarvis.delete_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Board tasks (durable background work items), highest priority first.",
+        "detail": "",
+        "enabled": true,
+        "group": "board",
+        "id": "sdk:list_tasks",
+        "inPrompt": false,
+        "key": "sdk:list_tasks",
+        "kind": "sdk",
+        "name": "jarvis.list_tasks",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create a durable board task that runs in the background on its own agent.",
+        "detail": "",
+        "enabled": true,
+        "group": "board",
+        "id": "sdk:create_task",
+        "inPrompt": false,
+        "key": "sdk:create_task",
+        "kind": "sdk",
+        "name": "jarvis.create_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All saved workflows with id, name, description.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:list_workflows",
+        "inPrompt": false,
+        "key": "sdk:list_workflows",
+        "kind": "sdk",
+        "name": "jarvis.list_workflows",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "A workflow including its full `definition` JSON (nodes + edges).",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:read_workflow",
+        "inPrompt": false,
+        "key": "sdk:read_workflow",
+        "kind": "sdk",
+        "name": "jarvis.read_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create a workflow — a graph of nodes for multi-step pipelines.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:create_workflow",
+        "inPrompt": false,
+        "key": "sdk:create_workflow",
+        "kind": "sdk",
+        "name": "jarvis.create_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update a workflow. Pass only what changes: name, description, definition.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:update_workflow",
+        "inPrompt": false,
+        "key": "sdk:update_workflow",
+        "kind": "sdk",
+        "name": "jarvis.update_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a workflow by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:delete_workflow",
+        "inPrompt": false,
+        "key": "sdk:delete_workflow",
+        "kind": "sdk",
+        "name": "jarvis.delete_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All skills with id, name, description, enabled (bodies not included).",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:list_skills",
+        "inPrompt": false,
+        "key": "sdk:list_skills",
+        "kind": "sdk",
+        "name": "jarvis.list_skills",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Load a saved skill's full body — the procedure to follow.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:use_skill",
+        "inPrompt": false,
+        "key": "sdk:use_skill",
+        "kind": "sdk",
+        "name": "jarvis.use_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Save a reusable procedure you can reload later with use_skill(name).",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:create_skill",
+        "inPrompt": false,
+        "key": "sdk:create_skill",
+        "kind": "sdk",
+        "name": "jarvis.create_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update a skill. Pass only what changes: name, description, body, enabled.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:update_skill",
+        "inPrompt": false,
+        "key": "sdk:update_skill",
+        "kind": "sdk",
+        "name": "jarvis.update_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a skill by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:delete_skill",
+        "inPrompt": false,
+        "key": "sdk:delete_skill",
+        "kind": "sdk",
+        "name": "jarvis.delete_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Top-k long-term memory facts for `query` by cosine similarity.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:search_memory",
+        "inPrompt": false,
+        "key": "sdk:search_memory",
+        "kind": "sdk",
+        "name": "jarvis.search_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Read or update the shared memory of this conversation's project.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:project_memory",
+        "inPrompt": false,
+        "key": "sdk:project_memory",
+        "kind": "sdk",
+        "name": "jarvis.project_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "List connected MCP servers: name, load mode, and tool count.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_servers",
+        "inPrompt": false,
+        "key": "sdk:mcp_servers",
+        "kind": "sdk",
+        "name": "jarvis.mcp_servers",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Tool names + descriptions for one MCP server (or all of them).",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_tools",
+        "inPrompt": false,
+        "key": "sdk:mcp_tools",
+        "kind": "sdk",
+        "name": "jarvis.mcp_tools",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Full description + JSON argument schema for one MCP tool.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_help",
+        "inPrompt": false,
+        "key": "sdk:mcp_help",
+        "kind": "sdk",
+        "name": "jarvis.mcp_help",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Call one MCP tool and return its output as text.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_call",
+        "inPrompt": false,
+        "key": "sdk:mcp_call",
+        "kind": "sdk",
+        "name": "jarvis.mcp_call",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Return the text you were given.",
+        "detail": "",
+        "enabled": true,
+        "group": "echo",
+        "id": "mcp:echo/echo",
+        "inPrompt": false,
+        "key": "mcp:echo/echo",
+        "kind": "mcp",
+        "name": "echo",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Add two integers.",
+        "detail": "",
+        "enabled": true,
+        "group": "echo",
+        "id": "mcp:echo/add",
+        "inPrompt": false,
+        "key": "mcp:echo/add",
+        "kind": "mcp",
+        "name": "add",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Always fails — exercises the MCP error path.",
+        "detail": "",
+        "enabled": true,
+        "group": "echo",
+        "id": "mcp:echo/explode",
+        "inPrompt": false,
+        "key": "mcp:echo/explode",
+        "kind": "mcp",
+        "name": "explode",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Return pong.",
+        "detail": "",
+        "enabled": true,
+        "group": "other",
+        "id": "mcp:other/ping",
+        "inPrompt": true,
+        "key": "mcp:other/ping",
+        "kind": "mcp",
+        "name": "ping",
+        "requiresApproval": false
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "setToolPolicy": [
+       {
+        "available": true,
+        "description": "Run Python in the conversation's stateful kernel — the door to the jarvis SDK.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:run_cell",
+        "inPrompt": true,
+        "key": "bound:run_cell",
+        "kind": "bound",
+        "name": "run_cell",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Save a versioned deliverable (markdown or an on-disk file) to the side panel.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:write_artifact",
+        "inPrompt": true,
+        "key": "bound:write_artifact",
+        "kind": "bound",
+        "name": "write_artifact",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Replace the run's task list (a graph state delta).",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:write_todos",
+        "inPrompt": true,
+        "key": "bound:write_todos",
+        "kind": "bound",
+        "name": "write_todos",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Advance one todo item (a graph state delta).",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:set_todo_status",
+        "inPrompt": true,
+        "key": "bound:set_todo_status",
+        "kind": "bound",
+        "name": "set_todo_status",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Run parallel role-templated subagents on this conversation's model.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:spawn_workers",
+        "inPrompt": true,
+        "key": "bound:spawn_workers",
+        "kind": "bound",
+        "name": "spawn_workers",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Invoke a saved workflow graph as a sub-agent.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:run_workflow",
+        "inPrompt": true,
+        "key": "bound:run_workflow",
+        "kind": "bound",
+        "name": "run_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Write a long-term memory item. Bound only when an embedder is configured.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:remember",
+        "inPrompt": true,
+        "key": "bound:remember",
+        "kind": "bound",
+        "name": "remember",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Finish the current board task. Bound only inside a board run.",
+        "detail": "board runs only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:complete_task",
+        "inPrompt": true,
+        "key": "bound:complete_task",
+        "kind": "bound",
+        "name": "complete_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Block the current board task or ask its owner a question. Board runs only.",
+        "detail": "board runs only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:block_task",
+        "inPrompt": true,
+        "key": "bound:block_task",
+        "kind": "bound",
+        "name": "block_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Saved artifacts, newest first — current conversation unless all_conversations.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:list_artifacts",
+        "inPrompt": false,
+        "key": "sdk:list_artifacts",
+        "kind": "sdk",
+        "name": "jarvis.list_artifacts",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Markdown content of an artifact — latest, or a specific version.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:read_artifact",
+        "inPrompt": false,
+        "key": "sdk:read_artifact",
+        "kind": "sdk",
+        "name": "jarvis.read_artifact",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Version history for an artifact, oldest first.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:list_artifact_versions",
+        "inPrompt": false,
+        "key": "sdk:list_artifact_versions",
+        "kind": "sdk",
+        "name": "jarvis.list_artifact_versions",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Past conversations that mention `query`, best match first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:search_conversations",
+        "inPrompt": false,
+        "key": "sdk:search_conversations",
+        "kind": "sdk",
+        "name": "jarvis.search_conversations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "The last `limit` messages of a conversation, oldest first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:read_conversation",
+        "inPrompt": false,
+        "key": "sdk:read_conversation",
+        "kind": "sdk",
+        "name": "jarvis.read_conversation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "The other conversations in this project, most recently active first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:list_conversations",
+        "inPrompt": false,
+        "key": "sdk:list_conversations",
+        "kind": "sdk",
+        "name": "jarvis.list_conversations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All automations with id, name, input_type, schedule, enabled.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automations",
+        "inPrompt": false,
+        "key": "sdk:list_automations",
+        "kind": "sdk",
+        "name": "jarvis.list_automations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create an automation — a task that runs on a cron schedule or on demand.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:create_automation",
+        "inPrompt": false,
+        "key": "sdk:create_automation",
+        "kind": "sdk",
+        "name": "jarvis.create_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update an automation. Pass only the fields to change.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:update_automation",
+        "inPrompt": false,
+        "key": "sdk:update_automation",
+        "kind": "sdk",
+        "name": "jarvis.update_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete an automation by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:delete_automation",
+        "inPrompt": false,
+        "key": "sdk:delete_automation",
+        "kind": "sdk",
+        "name": "jarvis.delete_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Board tasks (durable background work items), highest priority first.",
+        "detail": "",
+        "enabled": true,
+        "group": "board",
+        "id": "sdk:list_tasks",
+        "inPrompt": false,
+        "key": "sdk:list_tasks",
+        "kind": "sdk",
+        "name": "jarvis.list_tasks",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create a durable board task that runs in the background on its own agent.",
+        "detail": "",
+        "enabled": true,
+        "group": "board",
+        "id": "sdk:create_task",
+        "inPrompt": false,
+        "key": "sdk:create_task",
+        "kind": "sdk",
+        "name": "jarvis.create_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All saved workflows with id, name, description.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:list_workflows",
+        "inPrompt": false,
+        "key": "sdk:list_workflows",
+        "kind": "sdk",
+        "name": "jarvis.list_workflows",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "A workflow including its full `definition` JSON (nodes + edges).",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:read_workflow",
+        "inPrompt": false,
+        "key": "sdk:read_workflow",
+        "kind": "sdk",
+        "name": "jarvis.read_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create a workflow — a graph of nodes for multi-step pipelines.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:create_workflow",
+        "inPrompt": false,
+        "key": "sdk:create_workflow",
+        "kind": "sdk",
+        "name": "jarvis.create_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update a workflow. Pass only what changes: name, description, definition.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:update_workflow",
+        "inPrompt": false,
+        "key": "sdk:update_workflow",
+        "kind": "sdk",
+        "name": "jarvis.update_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a workflow by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:delete_workflow",
+        "inPrompt": false,
+        "key": "sdk:delete_workflow",
+        "kind": "sdk",
+        "name": "jarvis.delete_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All skills with id, name, description, enabled (bodies not included).",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:list_skills",
+        "inPrompt": false,
+        "key": "sdk:list_skills",
+        "kind": "sdk",
+        "name": "jarvis.list_skills",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Load a saved skill's full body — the procedure to follow.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:use_skill",
+        "inPrompt": false,
+        "key": "sdk:use_skill",
+        "kind": "sdk",
+        "name": "jarvis.use_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Save a reusable procedure you can reload later with use_skill(name).",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:create_skill",
+        "inPrompt": false,
+        "key": "sdk:create_skill",
+        "kind": "sdk",
+        "name": "jarvis.create_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update a skill. Pass only what changes: name, description, body, enabled.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:update_skill",
+        "inPrompt": false,
+        "key": "sdk:update_skill",
+        "kind": "sdk",
+        "name": "jarvis.update_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a skill by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:delete_skill",
+        "inPrompt": false,
+        "key": "sdk:delete_skill",
+        "kind": "sdk",
+        "name": "jarvis.delete_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Top-k long-term memory facts for `query` by cosine similarity.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:search_memory",
+        "inPrompt": false,
+        "key": "sdk:search_memory",
+        "kind": "sdk",
+        "name": "jarvis.search_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Read or update the shared memory of this conversation's project.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:project_memory",
+        "inPrompt": false,
+        "key": "sdk:project_memory",
+        "kind": "sdk",
+        "name": "jarvis.project_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "List connected MCP servers: name, load mode, and tool count.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_servers",
+        "inPrompt": false,
+        "key": "sdk:mcp_servers",
+        "kind": "sdk",
+        "name": "jarvis.mcp_servers",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Tool names + descriptions for one MCP server (or all of them).",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_tools",
+        "inPrompt": false,
+        "key": "sdk:mcp_tools",
+        "kind": "sdk",
+        "name": "jarvis.mcp_tools",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Full description + JSON argument schema for one MCP tool.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_help",
+        "inPrompt": false,
+        "key": "sdk:mcp_help",
+        "kind": "sdk",
+        "name": "jarvis.mcp_help",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Call one MCP tool and return its output as text.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_call",
+        "inPrompt": false,
+        "key": "sdk:mcp_call",
+        "kind": "sdk",
+        "name": "jarvis.mcp_call",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Return the text you were given.",
+        "detail": "",
+        "enabled": true,
+        "group": "echo",
+        "id": "mcp:echo/echo",
+        "inPrompt": false,
+        "key": "mcp:echo/echo",
+        "kind": "mcp",
+        "name": "echo",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Add two integers.",
+        "detail": "",
+        "enabled": false,
+        "group": "echo",
+        "id": "mcp:echo/add",
+        "inPrompt": false,
+        "key": "mcp:echo/add",
+        "kind": "mcp",
+        "name": "add",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Always fails — exercises the MCP error path.",
+        "detail": "",
+        "enabled": true,
+        "group": "echo",
+        "id": "mcp:echo/explode",
+        "inPrompt": false,
+        "key": "mcp:echo/explode",
+        "kind": "mcp",
+        "name": "explode",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Return pong.",
+        "detail": "",
+        "enabled": true,
+        "group": "other",
+        "id": "mcp:other/ping",
+        "inPrompt": true,
+        "key": "mcp:other/ping",
+        "kind": "mcp",
+        "name": "ping",
+        "requiresApproval": false
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ],
+     [
+      "tools.policy",
+      "{\"mcp:echo/add\": {\"enabled\": false, \"approval\": false}}"
+     ]
+    ]
+   ]
+  },
+  {
+   "$tuple": [
+    {
+     "data": {
+      "setToolPolicy": [
+       {
+        "available": true,
+        "description": "Run Python in the conversation's stateful kernel — the door to the jarvis SDK.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:run_cell",
+        "inPrompt": true,
+        "key": "bound:run_cell",
+        "kind": "bound",
+        "name": "run_cell",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Save a versioned deliverable (markdown or an on-disk file) to the side panel.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:write_artifact",
+        "inPrompt": true,
+        "key": "bound:write_artifact",
+        "kind": "bound",
+        "name": "write_artifact",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Replace the run's task list (a graph state delta).",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:write_todos",
+        "inPrompt": true,
+        "key": "bound:write_todos",
+        "kind": "bound",
+        "name": "write_todos",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Advance one todo item (a graph state delta).",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:set_todo_status",
+        "inPrompt": true,
+        "key": "bound:set_todo_status",
+        "kind": "bound",
+        "name": "set_todo_status",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Run parallel role-templated subagents on this conversation's model.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:spawn_workers",
+        "inPrompt": true,
+        "key": "bound:spawn_workers",
+        "kind": "bound",
+        "name": "spawn_workers",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Invoke a saved workflow graph as a sub-agent.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:run_workflow",
+        "inPrompt": true,
+        "key": "bound:run_workflow",
+        "kind": "bound",
+        "name": "run_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Write a long-term memory item. Bound only when an embedder is configured.",
+        "detail": "",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:remember",
+        "inPrompt": true,
+        "key": "bound:remember",
+        "kind": "bound",
+        "name": "remember",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Finish the current board task. Bound only inside a board run.",
+        "detail": "board runs only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:complete_task",
+        "inPrompt": true,
+        "key": "bound:complete_task",
+        "kind": "bound",
+        "name": "complete_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Block the current board task or ask its owner a question. Board runs only.",
+        "detail": "board runs only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:block_task",
+        "inPrompt": true,
+        "key": "bound:block_task",
+        "kind": "bound",
+        "name": "block_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Saved artifacts, newest first — current conversation unless all_conversations.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:list_artifacts",
+        "inPrompt": false,
+        "key": "sdk:list_artifacts",
+        "kind": "sdk",
+        "name": "jarvis.list_artifacts",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Markdown content of an artifact — latest, or a specific version.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:read_artifact",
+        "inPrompt": false,
+        "key": "sdk:read_artifact",
+        "kind": "sdk",
+        "name": "jarvis.read_artifact",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Version history for an artifact, oldest first.",
+        "detail": "",
+        "enabled": true,
+        "group": "artifacts",
+        "id": "sdk:list_artifact_versions",
+        "inPrompt": false,
+        "key": "sdk:list_artifact_versions",
+        "kind": "sdk",
+        "name": "jarvis.list_artifact_versions",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Past conversations that mention `query`, best match first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:search_conversations",
+        "inPrompt": false,
+        "key": "sdk:search_conversations",
+        "kind": "sdk",
+        "name": "jarvis.search_conversations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "The last `limit` messages of a conversation, oldest first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:read_conversation",
+        "inPrompt": false,
+        "key": "sdk:read_conversation",
+        "kind": "sdk",
+        "name": "jarvis.read_conversation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "The other conversations in this project, most recently active first.",
+        "detail": "",
+        "enabled": true,
+        "group": "conversations",
+        "id": "sdk:list_conversations",
+        "inPrompt": false,
+        "key": "sdk:list_conversations",
+        "kind": "sdk",
+        "name": "jarvis.list_conversations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All automations with id, name, input_type, schedule, enabled.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automations",
+        "inPrompt": false,
+        "key": "sdk:list_automations",
+        "kind": "sdk",
+        "name": "jarvis.list_automations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create an automation — a task that runs on a cron schedule or on demand.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:create_automation",
+        "inPrompt": false,
+        "key": "sdk:create_automation",
+        "kind": "sdk",
+        "name": "jarvis.create_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update an automation. Pass only the fields to change.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:update_automation",
+        "inPrompt": false,
+        "key": "sdk:update_automation",
+        "kind": "sdk",
+        "name": "jarvis.update_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete an automation by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:delete_automation",
+        "inPrompt": false,
+        "key": "sdk:delete_automation",
+        "kind": "sdk",
+        "name": "jarvis.delete_automation",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Board tasks (durable background work items), highest priority first.",
+        "detail": "",
+        "enabled": true,
+        "group": "board",
+        "id": "sdk:list_tasks",
+        "inPrompt": false,
+        "key": "sdk:list_tasks",
+        "kind": "sdk",
+        "name": "jarvis.list_tasks",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create a durable board task that runs in the background on its own agent.",
+        "detail": "",
+        "enabled": true,
+        "group": "board",
+        "id": "sdk:create_task",
+        "inPrompt": false,
+        "key": "sdk:create_task",
+        "kind": "sdk",
+        "name": "jarvis.create_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All saved workflows with id, name, description.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:list_workflows",
+        "inPrompt": false,
+        "key": "sdk:list_workflows",
+        "kind": "sdk",
+        "name": "jarvis.list_workflows",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "A workflow including its full `definition` JSON (nodes + edges).",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:read_workflow",
+        "inPrompt": false,
+        "key": "sdk:read_workflow",
+        "kind": "sdk",
+        "name": "jarvis.read_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Create a workflow — a graph of nodes for multi-step pipelines.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:create_workflow",
+        "inPrompt": false,
+        "key": "sdk:create_workflow",
+        "kind": "sdk",
+        "name": "jarvis.create_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update a workflow. Pass only what changes: name, description, definition.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:update_workflow",
+        "inPrompt": false,
+        "key": "sdk:update_workflow",
+        "kind": "sdk",
+        "name": "jarvis.update_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a workflow by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "workflows",
+        "id": "sdk:delete_workflow",
+        "inPrompt": false,
+        "key": "sdk:delete_workflow",
+        "kind": "sdk",
+        "name": "jarvis.delete_workflow",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "All skills with id, name, description, enabled (bodies not included).",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:list_skills",
+        "inPrompt": false,
+        "key": "sdk:list_skills",
+        "kind": "sdk",
+        "name": "jarvis.list_skills",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Load a saved skill's full body — the procedure to follow.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:use_skill",
+        "inPrompt": false,
+        "key": "sdk:use_skill",
+        "kind": "sdk",
+        "name": "jarvis.use_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Save a reusable procedure you can reload later with use_skill(name).",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:create_skill",
+        "inPrompt": false,
+        "key": "sdk:create_skill",
+        "kind": "sdk",
+        "name": "jarvis.create_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Update a skill. Pass only what changes: name, description, body, enabled.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:update_skill",
+        "inPrompt": false,
+        "key": "sdk:update_skill",
+        "kind": "sdk",
+        "name": "jarvis.update_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a skill by id.",
+        "detail": "",
+        "enabled": true,
+        "group": "skills",
+        "id": "sdk:delete_skill",
+        "inPrompt": false,
+        "key": "sdk:delete_skill",
+        "kind": "sdk",
+        "name": "jarvis.delete_skill",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Top-k long-term memory facts for `query` by cosine similarity.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:search_memory",
+        "inPrompt": false,
+        "key": "sdk:search_memory",
+        "kind": "sdk",
+        "name": "jarvis.search_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Read or update the shared memory of this conversation's project.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:project_memory",
+        "inPrompt": false,
+        "key": "sdk:project_memory",
+        "kind": "sdk",
+        "name": "jarvis.project_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "List connected MCP servers: name, load mode, and tool count.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_servers",
+        "inPrompt": false,
+        "key": "sdk:mcp_servers",
+        "kind": "sdk",
+        "name": "jarvis.mcp_servers",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Tool names + descriptions for one MCP server (or all of them).",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_tools",
+        "inPrompt": false,
+        "key": "sdk:mcp_tools",
+        "kind": "sdk",
+        "name": "jarvis.mcp_tools",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Full description + JSON argument schema for one MCP tool.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_help",
+        "inPrompt": false,
+        "key": "sdk:mcp_help",
+        "kind": "sdk",
+        "name": "jarvis.mcp_help",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Call one MCP tool and return its output as text.",
+        "detail": "",
+        "enabled": true,
+        "group": "mcp",
+        "id": "sdk:mcp_call",
+        "inPrompt": false,
+        "key": "sdk:mcp_call",
+        "kind": "sdk",
+        "name": "jarvis.mcp_call",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Return the text you were given.",
+        "detail": "",
+        "enabled": true,
+        "group": "echo",
+        "id": "mcp:echo/echo",
+        "inPrompt": false,
+        "key": "mcp:echo/echo",
+        "kind": "mcp",
+        "name": "echo",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Add two integers.",
+        "detail": "",
+        "enabled": false,
+        "group": "echo",
+        "id": "mcp:echo/add",
+        "inPrompt": false,
+        "key": "mcp:echo/add",
+        "kind": "mcp",
+        "name": "add",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Always fails — exercises the MCP error path.",
+        "detail": "",
+        "enabled": true,
+        "group": "echo",
+        "id": "mcp:echo/explode",
+        "inPrompt": false,
+        "key": "mcp:echo/explode",
+        "kind": "mcp",
+        "name": "explode",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Return pong.",
+        "detail": "",
+        "enabled": true,
+        "group": "other",
+        "id": "mcp:other/ping",
+        "inPrompt": true,
+        "key": "mcp:other/ping",
+        "kind": "mcp",
+        "name": "ping",
+        "requiresApproval": true
+       }
+      ]
+     }
+    },
+    [
+     [
+      "mcp.servers",
+      "{\"echo\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/echo_mcp_server.py\"], \"transport\": \"stdio\", \"x-jarvis-load\": \"lazy\"}, \"other\": {\"command\": \"<python>\", \"args\": [\"<repo>/tests/fixtures/other_mcp_server.py\"], \"transport\": \"stdio\"}}"
+     ],
+     [
+      "migration.artifact_message_ids",
+      "1"
+     ],
+     [
+      "tools.policy",
+      "{\"mcp:echo/add\": {\"enabled\": false, \"approval\": false}, \"mcp:other/ping\": {\"enabled\": true, \"approval\": true}}"
+     ]
+    ]
+   ]
+  }
+ ]
+}

@@ -37,7 +37,7 @@ async def edge(database, work_dir: Path, fake: FakeOllama, edge_binary: Path):
         s.add(ConfigSetting(key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}])))
         s.add(ConfigSetting(key="default.model", value=MODEL))
         await s.commit()
-    env = {"JARVIS_AGENT_RUNTIME": "edge", "OLLAMA_HOST": fake.url, "HOME": str(work_dir), "JARVIS_APP_DIR": str(REPO),
+    env = {"JARVIS_RUN_JOBS": "1", "OLLAMA_HOST": fake.url, "HOME": str(work_dir), "JARVIS_APP_DIR": str(REPO),
            "JARVIS_BROWSER_CDP_URL": "http://127.0.0.1:1"}
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env) as client:
         yield client
@@ -108,10 +108,10 @@ async def test_a_branching_graph_runs_in_the_edge(edge, fake, work_dir):
     events = await _subscribe(edge, run_id)
 
     db = work_dir / "database.db"
-    [(status, outputs, results, runtime)] = _rows(
-        db, "SELECT r.status, r.outputs, r.node_results, j.runtime FROM workflow_runs r JOIN jobs j ON j.id = r.id "
+    [(status, outputs, results, job)] = _rows(
+        db, "SELECT r.status, r.outputs, r.node_results, j.status FROM workflow_runs r JOIN jobs j ON j.id = r.id "
             "WHERE r.id = ?", run_id)
-    assert (status, runtime) == ("done", "edge")
+    assert (status, job) == ("done", "done")
     assert json.loads(outputs) == {"result": "Polished."}
     records = json.loads(results)
     assert [(r["node_id"], r["status"]) for r in records] == [("s", "done"), ("a", "done"), ("c", "done"), ("t", "done")]
@@ -175,7 +175,7 @@ async def test_a_run_paused_on_people_is_answered_through_the_edge(edge, fake, w
     assert not fake.requests
 
 
-async def test_run_workflow_from_a_chat_turn_stays_in_the_edge(edge, fake, work_dir):
+async def test_run_workflow_from_a_chat_turn(edge, fake, work_dir):
     wid = await _workflow({"nodes": [{"id": "n", "type": "agent", "config": {"prompt_template": "Say {{topic}}"}}],
                            "edges": []})
     fake.reset([
@@ -187,8 +187,6 @@ async def test_run_workflow_from_a_chat_turn_stays_in_the_edge(edge, fake, work_
     db = work_dir / "database.db"
     await _until(db, "SELECT 1 FROM jobs WHERE id = ? AND status = 'done'", started["taskId"])
 
-    [(runtime,)] = _rows(db, "SELECT runtime FROM jobs WHERE id = ?", started["taskId"])
-    assert runtime == "edge", "the turn went to Python"
     [(content,)] = _rows(db, "SELECT content FROM messages WHERE id = ?", started["taskId"])
     assert content == "Done."
     assert fake.requests[1]["messages"][-1]["content"] == "Say hi"

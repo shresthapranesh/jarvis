@@ -1,0 +1,1527 @@
+{
+ "test_a_finished_run_replays_identically[automation]": [
+  {
+   "$tuple": [
+    [
+     {
+      "data": "{\"text\": \"Hello, w\\u00f6rld \\ud83d\\udc4b\", \"source\": \"main\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"no source\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"hmm\"}",
+      "event": "thinking_token"
+     },
+     {
+      "data": "{\"node\": \"tools\", \"source\": \"main\", \"subagent\": null, \"data\": {\"tool\": \"run_cell\", \"args\": {\"code\": \"print('\\u00e9')\", \"n\": 1.0, \"big\": 1e-05}}}",
+      "event": "step"
+     },
+     {
+      "data": "{\"node\": \"model\", \"source\": \"subagent\", \"subagent\": \"researcher:0\", \"data\": \"already text\"}",
+      "event": "step"
+     },
+     {
+      "data": "{\"url\": \"https://example.com/\\u00e4\", \"phase\": \"done\", \"source\": \"main\"}",
+      "event": "browser_step"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\"}",
+      "event": "worker_start"
+     },
+     {
+      "data": "{\"idx\": \"3\", \"role\": \"coder\", \"node\": \"tools\", \"data\": [1, 2.5, null]}",
+      "event": "worker_step"
+     },
+     {
+      "data": "{\"idx\": 1.9, \"text\": \"w\"}",
+      "event": "worker_token"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\", \"result\": \"found\"}",
+      "event": "worker_done"
+     },
+     {
+      "data": "{\"id\": \"a1\", \"title\": \"Notes\", \"action\": \"created\", \"kind\": null, \"preview\": \"# Notes\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"id\": \"a2\", \"title\": \"Chart\", \"action\": \"updated\", \"kind\": \"image\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"todos\": [{\"text\": \"plan\", \"status\": \"done\"}, {\"text\": \"do\"}, {\"no\": \"text\"}, \"junk\"], \"source\": \"main\"}",
+      "event": "todos_updated"
+     },
+     {
+      "data": "{\"message_id\": \"q1\", \"text\": \"also this\", \"position\": 1}",
+      "event": "queued_message"
+     },
+     {
+      "data": "{\"message_id\": \"q1\"}",
+      "event": "queued_withdrawn"
+     },
+     {
+      "data": "{\"message_ids\": [\"q2\", 3]}",
+      "event": "queued_consumed"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"reason\": \"deletes\", \"args\": {\"path\": \"/tmp/x\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"gate\", \"reason\": \"r\", \"args\": \"{}\", \"approval_id\": \"ap1\", \"deferred\": true}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"approved\": 1, \"answer\": \"yes\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"parent_run_id\": \"p\", \"child_event\": \"node_done\", \"node_id\": \"n1\", \"output\": {\"x\": 0.1}}",
+      "event": "workflow_event"
+     },
+     {
+      "data": "{\"reason\": \"tokens\", \"limit\": 100, \"used\": 101.5}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 10, \"output_tokens\": 5, \"total_tokens\": 15, \"llm_calls\": 1, \"tool_calls\": 0, \"snapshot\": {\"elapsed_seconds\": 1.25}}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"ttft_ms\": 350.0, \"llm_ms\": null, \"prefill_tps\": \"41.5\", \"eval_tps\": 38.123456789, \"llm_calls\": 1}",
+      "event": "perf_update"
+     },
+     {
+      "data": "{\"x\": 1}",
+      "event": "not_a_chat_event"
+     },
+     {
+      "data": "{\"message\": \"All done \\u2713\", \"conversation_id\": \"c1\"}",
+      "event": "done"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"node_type\": \"agent\", \"label\": \"Research\"}",
+      "event": "node_start"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"text\": \"t\"}",
+      "event": "node_token"
+     },
+     {
+      "data": "{\"node_id\": \"c\", \"verdict\": true}",
+      "event": "node_condition"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"output\": {\"result\": \"ok\", \"score\": 0.5, \"nested\": {\"a\": [1]}}}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n2\", \"output\": null}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n3\", \"error\": \"boom\"}",
+      "event": "node_error"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"total\": \"3\"}",
+      "event": "map_start"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"index\": 0, \"result\": {\"v\": 1}}",
+      "event": "map_item_done"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": {\"k\": \"v\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": \"raw\", \"node_id\": \"ap\"}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"approved\": true, \"answer\": \"yes\", \"node_id\": \"\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\", \"question\": \"q\"}",
+      "event": "interrupt"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\"}",
+      "event": "interrupt_resolved"
+     },
+     {
+      "data": "{\"reason\": \"calls\", \"snapshot\": {\"calls\": 9}}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 1, \"output_tokens\": 2, \"total_tokens\": 3, \"llm_calls\": 1, \"tool_calls\": 0}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"attempt\": 1, \"max_retries\": 3, \"error\": \"flaky\"}",
+      "event": "node_retry"
+     },
+     {
+      "data": "{\"text\": \"not a workflow event\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"outputs\": {\"answer\": 42}, \"run_id\": \"wr\"}",
+      "event": "workflow_done"
+     }
+    ],
+    [
+     {
+      "data": {
+       "automationRunEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "Hello, wörld 👋"
+       }
+      }
+     },
+     {
+      "data": {
+       "automationRunEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "no source"
+       }
+      }
+     },
+     {
+      "data": {
+       "automationRunEvents": {
+        "__typename": "AutomationDoneEvent",
+        "output": null,
+        "runId": ""
+       }
+      }
+     },
+     {
+      "data": {
+       "automationRunEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "not a workflow event"
+       }
+      }
+     }
+    ]
+   ]
+  }
+ ],
+ "test_a_finished_run_replays_identically[board]": [
+  {
+   "$tuple": [
+    [
+     {
+      "data": "{\"text\": \"Hello, w\\u00f6rld \\ud83d\\udc4b\", \"source\": \"main\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"no source\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"hmm\"}",
+      "event": "thinking_token"
+     },
+     {
+      "data": "{\"node\": \"tools\", \"source\": \"main\", \"subagent\": null, \"data\": {\"tool\": \"run_cell\", \"args\": {\"code\": \"print('\\u00e9')\", \"n\": 1.0, \"big\": 1e-05}}}",
+      "event": "step"
+     },
+     {
+      "data": "{\"node\": \"model\", \"source\": \"subagent\", \"subagent\": \"researcher:0\", \"data\": \"already text\"}",
+      "event": "step"
+     },
+     {
+      "data": "{\"url\": \"https://example.com/\\u00e4\", \"phase\": \"done\", \"source\": \"main\"}",
+      "event": "browser_step"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\"}",
+      "event": "worker_start"
+     },
+     {
+      "data": "{\"idx\": \"3\", \"role\": \"coder\", \"node\": \"tools\", \"data\": [1, 2.5, null]}",
+      "event": "worker_step"
+     },
+     {
+      "data": "{\"idx\": 1.9, \"text\": \"w\"}",
+      "event": "worker_token"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\", \"result\": \"found\"}",
+      "event": "worker_done"
+     },
+     {
+      "data": "{\"id\": \"a1\", \"title\": \"Notes\", \"action\": \"created\", \"kind\": null, \"preview\": \"# Notes\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"id\": \"a2\", \"title\": \"Chart\", \"action\": \"updated\", \"kind\": \"image\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"todos\": [{\"text\": \"plan\", \"status\": \"done\"}, {\"text\": \"do\"}, {\"no\": \"text\"}, \"junk\"], \"source\": \"main\"}",
+      "event": "todos_updated"
+     },
+     {
+      "data": "{\"message_id\": \"q1\", \"text\": \"also this\", \"position\": 1}",
+      "event": "queued_message"
+     },
+     {
+      "data": "{\"message_id\": \"q1\"}",
+      "event": "queued_withdrawn"
+     },
+     {
+      "data": "{\"message_ids\": [\"q2\", 3]}",
+      "event": "queued_consumed"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"reason\": \"deletes\", \"args\": {\"path\": \"/tmp/x\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"gate\", \"reason\": \"r\", \"args\": \"{}\", \"approval_id\": \"ap1\", \"deferred\": true}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"approved\": 1, \"answer\": \"yes\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"parent_run_id\": \"p\", \"child_event\": \"node_done\", \"node_id\": \"n1\", \"output\": {\"x\": 0.1}}",
+      "event": "workflow_event"
+     },
+     {
+      "data": "{\"reason\": \"tokens\", \"limit\": 100, \"used\": 101.5}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 10, \"output_tokens\": 5, \"total_tokens\": 15, \"llm_calls\": 1, \"tool_calls\": 0, \"snapshot\": {\"elapsed_seconds\": 1.25}}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"ttft_ms\": 350.0, \"llm_ms\": null, \"prefill_tps\": \"41.5\", \"eval_tps\": 38.123456789, \"llm_calls\": 1}",
+      "event": "perf_update"
+     },
+     {
+      "data": "{\"x\": 1}",
+      "event": "not_a_chat_event"
+     },
+     {
+      "data": "{\"message\": \"All done \\u2713\", \"conversation_id\": \"c1\"}",
+      "event": "done"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"node_type\": \"agent\", \"label\": \"Research\"}",
+      "event": "node_start"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"text\": \"t\"}",
+      "event": "node_token"
+     },
+     {
+      "data": "{\"node_id\": \"c\", \"verdict\": true}",
+      "event": "node_condition"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"output\": {\"result\": \"ok\", \"score\": 0.5, \"nested\": {\"a\": [1]}}}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n2\", \"output\": null}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n3\", \"error\": \"boom\"}",
+      "event": "node_error"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"total\": \"3\"}",
+      "event": "map_start"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"index\": 0, \"result\": {\"v\": 1}}",
+      "event": "map_item_done"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": {\"k\": \"v\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": \"raw\", \"node_id\": \"ap\"}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"approved\": true, \"answer\": \"yes\", \"node_id\": \"\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\", \"question\": \"q\"}",
+      "event": "interrupt"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\"}",
+      "event": "interrupt_resolved"
+     },
+     {
+      "data": "{\"reason\": \"calls\", \"snapshot\": {\"calls\": 9}}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 1, \"output_tokens\": 2, \"total_tokens\": 3, \"llm_calls\": 1, \"tool_calls\": 0}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"attempt\": 1, \"max_retries\": 3, \"error\": \"flaky\"}",
+      "event": "node_retry"
+     },
+     {
+      "data": "{\"text\": \"not a workflow event\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"outputs\": {\"answer\": 42}, \"run_id\": \"wr\"}",
+      "event": "workflow_done"
+     }
+    ],
+    [
+     {
+      "data": {
+       "boardTaskEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "Hello, wörld 👋"
+       }
+      }
+     },
+     {
+      "data": {
+       "boardTaskEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "no source"
+       }
+      }
+     },
+     {
+      "data": {
+       "boardTaskEvents": {
+        "__typename": "AutomationDoneEvent",
+        "output": null,
+        "runId": ""
+       }
+      }
+     },
+     {
+      "data": {
+       "boardTaskEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "not a workflow event"
+       }
+      }
+     }
+    ]
+   ]
+  }
+ ],
+ "test_a_finished_run_replays_identically[chat]": [
+  {
+   "$tuple": [
+    [
+     {
+      "data": "{\"text\": \"Hello, w\\u00f6rld \\ud83d\\udc4b\", \"source\": \"main\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"no source\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"hmm\"}",
+      "event": "thinking_token"
+     },
+     {
+      "data": "{\"node\": \"tools\", \"source\": \"main\", \"subagent\": null, \"data\": {\"tool\": \"run_cell\", \"args\": {\"code\": \"print('\\u00e9')\", \"n\": 1.0, \"big\": 1e-05}}}",
+      "event": "step"
+     },
+     {
+      "data": "{\"node\": \"model\", \"source\": \"subagent\", \"subagent\": \"researcher:0\", \"data\": \"already text\"}",
+      "event": "step"
+     },
+     {
+      "data": "{\"url\": \"https://example.com/\\u00e4\", \"phase\": \"done\", \"source\": \"main\"}",
+      "event": "browser_step"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\"}",
+      "event": "worker_start"
+     },
+     {
+      "data": "{\"idx\": \"3\", \"role\": \"coder\", \"node\": \"tools\", \"data\": [1, 2.5, null]}",
+      "event": "worker_step"
+     },
+     {
+      "data": "{\"idx\": 1.9, \"text\": \"w\"}",
+      "event": "worker_token"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\", \"result\": \"found\"}",
+      "event": "worker_done"
+     },
+     {
+      "data": "{\"id\": \"a1\", \"title\": \"Notes\", \"action\": \"created\", \"kind\": null, \"preview\": \"# Notes\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"id\": \"a2\", \"title\": \"Chart\", \"action\": \"updated\", \"kind\": \"image\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"todos\": [{\"text\": \"plan\", \"status\": \"done\"}, {\"text\": \"do\"}, {\"no\": \"text\"}, \"junk\"], \"source\": \"main\"}",
+      "event": "todos_updated"
+     },
+     {
+      "data": "{\"message_id\": \"q1\", \"text\": \"also this\", \"position\": 1}",
+      "event": "queued_message"
+     },
+     {
+      "data": "{\"message_id\": \"q1\"}",
+      "event": "queued_withdrawn"
+     },
+     {
+      "data": "{\"message_ids\": [\"q2\", 3]}",
+      "event": "queued_consumed"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"reason\": \"deletes\", \"args\": {\"path\": \"/tmp/x\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"gate\", \"reason\": \"r\", \"args\": \"{}\", \"approval_id\": \"ap1\", \"deferred\": true}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"approved\": 1, \"answer\": \"yes\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"parent_run_id\": \"p\", \"child_event\": \"node_done\", \"node_id\": \"n1\", \"output\": {\"x\": 0.1}}",
+      "event": "workflow_event"
+     },
+     {
+      "data": "{\"reason\": \"tokens\", \"limit\": 100, \"used\": 101.5}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 10, \"output_tokens\": 5, \"total_tokens\": 15, \"llm_calls\": 1, \"tool_calls\": 0, \"snapshot\": {\"elapsed_seconds\": 1.25}}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"ttft_ms\": 350.0, \"llm_ms\": null, \"prefill_tps\": \"41.5\", \"eval_tps\": 38.123456789, \"llm_calls\": 1}",
+      "event": "perf_update"
+     },
+     {
+      "data": "{\"x\": 1}",
+      "event": "not_a_chat_event"
+     },
+     {
+      "data": "{\"message\": \"All done \\u2713\", \"conversation_id\": \"c1\"}",
+      "event": "done"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"node_type\": \"agent\", \"label\": \"Research\"}",
+      "event": "node_start"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"text\": \"t\"}",
+      "event": "node_token"
+     },
+     {
+      "data": "{\"node_id\": \"c\", \"verdict\": true}",
+      "event": "node_condition"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"output\": {\"result\": \"ok\", \"score\": 0.5, \"nested\": {\"a\": [1]}}}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n2\", \"output\": null}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n3\", \"error\": \"boom\"}",
+      "event": "node_error"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"total\": \"3\"}",
+      "event": "map_start"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"index\": 0, \"result\": {\"v\": 1}}",
+      "event": "map_item_done"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": {\"k\": \"v\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": \"raw\", \"node_id\": \"ap\"}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"approved\": true, \"answer\": \"yes\", \"node_id\": \"\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\", \"question\": \"q\"}",
+      "event": "interrupt"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\"}",
+      "event": "interrupt_resolved"
+     },
+     {
+      "data": "{\"reason\": \"calls\", \"snapshot\": {\"calls\": 9}}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 1, \"output_tokens\": 2, \"total_tokens\": 3, \"llm_calls\": 1, \"tool_calls\": 0}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"attempt\": 1, \"max_retries\": 3, \"error\": \"flaky\"}",
+      "event": "node_retry"
+     },
+     {
+      "data": "{\"text\": \"not a workflow event\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"outputs\": {\"answer\": 42}, \"run_id\": \"wr\"}",
+      "event": "workflow_done"
+     }
+    ],
+    [
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "Hello, wörld 👋"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "no source"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ThinkingTokenEvent",
+        "source": "main",
+        "text": "hmm"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "StepEvent",
+        "data": "{\"tool\": \"run_cell\", \"args\": {\"code\": \"print('\\u00e9')\", \"n\": 1.0, \"big\": 1e-05}}",
+        "node": "tools",
+        "source": "main",
+        "subagent": null
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "StepEvent",
+        "data": "already text",
+        "node": "model",
+        "source": "subagent",
+        "subagent": "researcher:0"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "BrowserStepEvent",
+        "phase": "done",
+        "source": "main",
+        "url": "https://example.com/ä"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "WorkerStartEvent",
+        "idx": 2,
+        "role": "researcher",
+        "task": "look"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "WorkerStepEvent",
+        "data": "[1, 2.5, null]",
+        "idx": 3,
+        "node": "tools",
+        "role": "coder"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "WorkerTokenEvent",
+        "idx": 1,
+        "text": "w"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "WorkerDoneEvent",
+        "idx": 2,
+        "result": "found",
+        "role": "researcher",
+        "status": "done",
+        "task": "look"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ArtifactEvent",
+        "action": "created",
+        "artifactId": "a1",
+        "kind": "markdown",
+        "preview": "# Notes",
+        "title": "Notes"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ArtifactEvent",
+        "action": "updated",
+        "artifactId": "a2",
+        "kind": "image",
+        "preview": null,
+        "title": "Chart"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "TodosUpdatedEvent",
+        "source": "main",
+        "todos": [
+         {
+          "status": "done",
+          "text": "plan"
+         },
+         {
+          "status": "pending",
+          "text": "do"
+         }
+        ]
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "QueuedMessageEvent",
+        "messageId": "q1",
+        "position": 1,
+        "text": "also this"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "QueuedWithdrawnEvent",
+        "messageId": "q1"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "QueuedConsumedEvent",
+        "messageIds": [
+         "q2",
+         "3"
+        ]
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ApprovalRequestEvent",
+        "approvalId": null,
+        "args": "{\"path\": \"/tmp/x\"}",
+        "deferred": false,
+        "reason": "deletes",
+        "tool": "rm"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ApprovalRequestEvent",
+        "approvalId": "ap1",
+        "args": "{}",
+        "deferred": true,
+        "reason": "r",
+        "tool": "gate"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ApprovalResolvedEvent",
+        "answer": "yes",
+        "approved": true,
+        "tool": "rm"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "WorkflowToolEvent",
+        "childEvent": "node_done",
+        "data": "{\"node_id\": \"n1\", \"output\": {\"x\": 0.1}}",
+        "parentRunId": "p"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "BudgetExceededEvent",
+        "reason": "tokens",
+        "snapshot": "{\"limit\": 100, \"used\": 101.5}"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "BudgetUpdateEvent",
+        "inputTokens": 10,
+        "llmCalls": 1,
+        "outputTokens": 5,
+        "snapshot": "{\"elapsed_seconds\": 1.25}",
+        "toolCalls": 0,
+        "totalTokens": 15
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "PerfUpdateEvent",
+        "evalTps": 38.123456789,
+        "llmCalls": 1,
+        "llmMs": null,
+        "prefillTps": 41.5,
+        "snapshot": "{\"ttft_ms\": 350.0, \"llm_ms\": null, \"prefill_tps\": \"41.5\", \"eval_tps\": 38.123456789, \"llm_calls\": 1}",
+        "ttftMs": 350.0
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "DoneEvent",
+        "conversationId": "c1",
+        "message": "All done ✓"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ApprovalRequestEvent",
+        "approvalId": null,
+        "args": "{\"k\": \"v\"}",
+        "deferred": false,
+        "reason": "ok?",
+        "tool": "approve"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ApprovalRequestEvent",
+        "approvalId": null,
+        "args": "raw",
+        "deferred": false,
+        "reason": "ok?",
+        "tool": "approve"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "ApprovalResolvedEvent",
+        "answer": "yes",
+        "approved": true,
+        "tool": "approve"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "BudgetExceededEvent",
+        "reason": "calls",
+        "snapshot": "{\"calls\": 9}"
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "BudgetUpdateEvent",
+        "inputTokens": 1,
+        "llmCalls": 1,
+        "outputTokens": 2,
+        "snapshot": "{\"input_tokens\": 1, \"output_tokens\": 2, \"total_tokens\": 3, \"llm_calls\": 1, \"tool_calls\": 0}",
+        "toolCalls": 0,
+        "totalTokens": 3
+       }
+      }
+     },
+     {
+      "data": {
+       "taskEvents": {
+        "__typename": "TokenEvent",
+        "source": "main",
+        "text": "not a workflow event"
+       }
+      }
+     }
+    ]
+   ]
+  }
+ ],
+ "test_a_finished_run_replays_identically[workflow]": [
+  {
+   "$tuple": [
+    [
+     {
+      "data": "{\"text\": \"Hello, w\\u00f6rld \\ud83d\\udc4b\", \"source\": \"main\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"no source\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"text\": \"hmm\"}",
+      "event": "thinking_token"
+     },
+     {
+      "data": "{\"node\": \"tools\", \"source\": \"main\", \"subagent\": null, \"data\": {\"tool\": \"run_cell\", \"args\": {\"code\": \"print('\\u00e9')\", \"n\": 1.0, \"big\": 1e-05}}}",
+      "event": "step"
+     },
+     {
+      "data": "{\"node\": \"model\", \"source\": \"subagent\", \"subagent\": \"researcher:0\", \"data\": \"already text\"}",
+      "event": "step"
+     },
+     {
+      "data": "{\"url\": \"https://example.com/\\u00e4\", \"phase\": \"done\", \"source\": \"main\"}",
+      "event": "browser_step"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\"}",
+      "event": "worker_start"
+     },
+     {
+      "data": "{\"idx\": \"3\", \"role\": \"coder\", \"node\": \"tools\", \"data\": [1, 2.5, null]}",
+      "event": "worker_step"
+     },
+     {
+      "data": "{\"idx\": 1.9, \"text\": \"w\"}",
+      "event": "worker_token"
+     },
+     {
+      "data": "{\"idx\": 2, \"role\": \"researcher\", \"task\": \"look\", \"result\": \"found\"}",
+      "event": "worker_done"
+     },
+     {
+      "data": "{\"id\": \"a1\", \"title\": \"Notes\", \"action\": \"created\", \"kind\": null, \"preview\": \"# Notes\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"id\": \"a2\", \"title\": \"Chart\", \"action\": \"updated\", \"kind\": \"image\"}",
+      "event": "artifact"
+     },
+     {
+      "data": "{\"todos\": [{\"text\": \"plan\", \"status\": \"done\"}, {\"text\": \"do\"}, {\"no\": \"text\"}, \"junk\"], \"source\": \"main\"}",
+      "event": "todos_updated"
+     },
+     {
+      "data": "{\"message_id\": \"q1\", \"text\": \"also this\", \"position\": 1}",
+      "event": "queued_message"
+     },
+     {
+      "data": "{\"message_id\": \"q1\"}",
+      "event": "queued_withdrawn"
+     },
+     {
+      "data": "{\"message_ids\": [\"q2\", 3]}",
+      "event": "queued_consumed"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"reason\": \"deletes\", \"args\": {\"path\": \"/tmp/x\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"gate\", \"reason\": \"r\", \"args\": \"{}\", \"approval_id\": \"ap1\", \"deferred\": true}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"rm\", \"approved\": 1, \"answer\": \"yes\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"parent_run_id\": \"p\", \"child_event\": \"node_done\", \"node_id\": \"n1\", \"output\": {\"x\": 0.1}}",
+      "event": "workflow_event"
+     },
+     {
+      "data": "{\"reason\": \"tokens\", \"limit\": 100, \"used\": 101.5}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 10, \"output_tokens\": 5, \"total_tokens\": 15, \"llm_calls\": 1, \"tool_calls\": 0, \"snapshot\": {\"elapsed_seconds\": 1.25}}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"ttft_ms\": 350.0, \"llm_ms\": null, \"prefill_tps\": \"41.5\", \"eval_tps\": 38.123456789, \"llm_calls\": 1}",
+      "event": "perf_update"
+     },
+     {
+      "data": "{\"x\": 1}",
+      "event": "not_a_chat_event"
+     },
+     {
+      "data": "{\"message\": \"All done \\u2713\", \"conversation_id\": \"c1\"}",
+      "event": "done"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"node_type\": \"agent\", \"label\": \"Research\"}",
+      "event": "node_start"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"text\": \"t\"}",
+      "event": "node_token"
+     },
+     {
+      "data": "{\"node_id\": \"c\", \"verdict\": true}",
+      "event": "node_condition"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"output\": {\"result\": \"ok\", \"score\": 0.5, \"nested\": {\"a\": [1]}}}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n2\", \"output\": null}",
+      "event": "node_done"
+     },
+     {
+      "data": "{\"node_id\": \"n3\", \"error\": \"boom\"}",
+      "event": "node_error"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"total\": \"3\"}",
+      "event": "map_start"
+     },
+     {
+      "data": "{\"node_id\": \"m\", \"index\": 0, \"result\": {\"v\": 1}}",
+      "event": "map_item_done"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": {\"k\": \"v\"}}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"reason\": \"ok?\", \"args\": \"raw\", \"node_id\": \"ap\"}",
+      "event": "approval_request"
+     },
+     {
+      "data": "{\"tool\": \"approve\", \"approved\": true, \"answer\": \"yes\", \"node_id\": \"\"}",
+      "event": "approval_resolved"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\", \"question\": \"q\"}",
+      "event": "interrupt"
+     },
+     {
+      "data": "{\"interrupt_id\": \"i\"}",
+      "event": "interrupt_resolved"
+     },
+     {
+      "data": "{\"reason\": \"calls\", \"snapshot\": {\"calls\": 9}}",
+      "event": "budget_exceeded"
+     },
+     {
+      "data": "{\"input_tokens\": 1, \"output_tokens\": 2, \"total_tokens\": 3, \"llm_calls\": 1, \"tool_calls\": 0}",
+      "event": "budget_update"
+     },
+     {
+      "data": "{\"node_id\": \"n1\", \"attempt\": 1, \"max_retries\": 3, \"error\": \"flaky\"}",
+      "event": "node_retry"
+     },
+     {
+      "data": "{\"text\": \"not a workflow event\"}",
+      "event": "token"
+     },
+     {
+      "data": "{\"outputs\": {\"answer\": 42}, \"run_id\": \"wr\"}",
+      "event": "workflow_done"
+     }
+    ],
+    [
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowApprovalRequestEvent",
+        "args": "{\"path\": \"/tmp/x\"}",
+        "nodeId": "rm",
+        "reason": "deletes",
+        "tool": "rm"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowApprovalRequestEvent",
+        "args": "{}",
+        "nodeId": "gate",
+        "reason": "r",
+        "tool": "gate"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowApprovalResolvedEvent",
+        "answer": "yes",
+        "approved": true,
+        "nodeId": "rm",
+        "tool": "rm"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowBudgetExceededEvent",
+        "reason": "tokens",
+        "snapshot": "{}"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowBudgetUpdateEvent",
+        "inputTokens": 10,
+        "llmCalls": 1,
+        "outputTokens": 5,
+        "snapshot": "{\"elapsed_seconds\": 1.25}",
+        "toolCalls": 0,
+        "totalTokens": 15
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowNodeStartEvent",
+        "label": "Research",
+        "nodeId": "n1",
+        "nodeType": "agent"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowNodeTokenEvent",
+        "nodeId": "n1",
+        "text": "t"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowNodeConditionEvent",
+        "nodeId": "c",
+        "verdict": "True"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowNodeDoneEvent",
+        "nodeId": "n1",
+        "output": {
+         "nested": {
+          "a": [
+           1
+          ]
+         },
+         "result": "ok",
+         "score": 0.5
+        }
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowNodeDoneEvent",
+        "nodeId": "n2",
+        "output": {}
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowNodeErrorEvent",
+        "error": "boom",
+        "nodeId": "n3"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowMapStartEvent",
+        "nodeId": "m",
+        "total": 3
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowMapItemDoneEvent",
+        "index": 0,
+        "nodeId": "m",
+        "result": {
+         "v": 1
+        }
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowApprovalRequestEvent",
+        "args": "{\"k\": \"v\"}",
+        "nodeId": "approve",
+        "reason": "ok?",
+        "tool": "approve"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowApprovalRequestEvent",
+        "args": "raw",
+        "nodeId": "ap",
+        "reason": "ok?",
+        "tool": "approve"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowApprovalResolvedEvent",
+        "answer": "yes",
+        "approved": true,
+        "nodeId": "approve",
+        "tool": "approve"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowInterruptEvent",
+        "interruptId": "i",
+        "question": "q"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowInterruptResolvedEvent",
+        "interruptId": "i"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowBudgetExceededEvent",
+        "reason": "calls",
+        "snapshot": "{\"calls\": 9}"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowBudgetUpdateEvent",
+        "inputTokens": 1,
+        "llmCalls": 1,
+        "outputTokens": 2,
+        "snapshot": "{}",
+        "toolCalls": 0,
+        "totalTokens": 3
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowNodeRetryEvent",
+        "attempt": 1,
+        "error": "flaky",
+        "maxRetries": 3,
+        "nodeId": "n1"
+       }
+      }
+     },
+     {
+      "data": {
+       "workflowRunEvents": {
+        "__typename": "WorkflowDoneEvent",
+        "outputs": {
+         "answer": 42
+        },
+        "runId": "wr"
+       }
+      }
+     }
+    ]
+   ]
+  }
+ ],
+ "test_an_in_progress_row_that_never_registers_falls_back": [
+  [
+   {
+    "data": {
+     "taskEvents": {
+      "__typename": "ErrorEvent",
+      "error": "task interrupted (server restarted)"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { automationRunEvents(runId: $id) { __typename\\n  ... on TokenEvent { text source } ... on AutomationDoneEvent { output runId }\\n  ... on AutomationStoppedEvent { output runId } ... on ErrorEvent { error } } }-ar-done]": [
+  [
+   {
+    "data": {
+     "automationRunEvents": {
+      "__typename": "AutomationDoneEvent",
+      "output": "out",
+      "runId": "ar-done"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { automationRunEvents(runId: $id) { __typename\\n  ... on TokenEvent { text source } ... on AutomationDoneEvent { output runId }\\n  ... on AutomationStoppedEvent { output runId } ... on ErrorEvent { error } } }-ar-err]": [
+  [
+   {
+    "data": {
+     "automationRunEvents": {
+      "__typename": "ErrorEvent",
+      "error": "unknown error"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { automationRunEvents(runId: $id) { __typename\\n  ... on TokenEvent { text source } ... on AutomationDoneEvent { output runId }\\n  ... on AutomationStoppedEvent { output runId } ... on ErrorEvent { error } } }-missing]": [
+  [
+   {
+    "data": {
+     "automationRunEvents": {
+      "__typename": "ErrorEvent",
+      "error": "run not found"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { boardTaskEvents(runId: $id) { __typename\\n  ... on TokenEvent { text source } ... on AutomationDoneEvent { output runId }\\n  ... on AutomationStoppedEvent { output runId } ... on ErrorEvent { error } } }-job-blocked]": [
+  [
+   {
+    "data": {
+     "boardTaskEvents": {
+      "__typename": "ErrorEvent",
+      "error": "blocked"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { boardTaskEvents(runId: $id) { __typename\\n  ... on TokenEvent { text source } ... on AutomationDoneEvent { output runId }\\n  ... on AutomationStoppedEvent { output runId } ... on ErrorEvent { error } } }-job-done]": [
+  [
+   {
+    "data": {
+     "boardTaskEvents": {
+      "__typename": "AutomationDoneEvent",
+      "output": "did it",
+      "runId": "job-done"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { boardTaskEvents(runId: $id) { __typename\\n  ... on TokenEvent { text source } ... on AutomationDoneEvent { output runId }\\n  ... on AutomationStoppedEvent { output runId } ... on ErrorEvent { error } } }-missing]": [
+  [
+   {
+    "data": {
+     "boardTaskEvents": {
+      "__typename": "ErrorEvent",
+      "error": "run not found"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { taskEvents(taskId: $id) { __typename\\n  ... on TokenEvent { text source } ... on ThinkingTokenEvent { text source }\\n  ... on StepEvent { node source subagent data } ... on BrowserStepEvent { url phase source }\\n  ... on WorkerStartEvent { idx role task } ... on WorkerStepEvent { idx role node data }\\n  ... on WorkerTokenEvent { idx text } ... on WorkerDoneEvent { idx role task status result }\\n  ... on ArtifactEvent { artifactId title action kind preview }\\n  ... on TodosUpdatedEvent { todos { text status } source }\\n  ... on QueuedMessageEvent { messageId text position } ... on QueuedWithdrawnEvent { messageId }\\n  ... on QueuedConsumedEvent { messageIds }\\n  ... on ApprovalRequestEvent { tool reason args approvalId deferred }\\n  ... on ApprovalResolvedEvent { tool approved answer }\\n  ... on WorkflowToolEvent { parentRunId childEvent data }\\n  ... on BudgetExceededEvent { reason snapshot }\\n  ... on BudgetUpdateEvent { inputTokens outputTokens totalTokens llmCalls toolCalls snapshot }\\n  ... on PerfUpdateEvent { ttftMs llmMs prefillTps evalTps llmCalls snapshot }\\n  ... on DoneEvent { message conversationId } ... on StoppedEvent { message conversationId }\\n  ... on ErrorEvent { error } } }-m-done]": [
+  [
+   {
+    "data": {
+     "taskEvents": {
+      "__typename": "DoneEvent",
+      "conversationId": "c1",
+      "message": "answer"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { taskEvents(taskId: $id) { __typename\\n  ... on TokenEvent { text source } ... on ThinkingTokenEvent { text source }\\n  ... on StepEvent { node source subagent data } ... on BrowserStepEvent { url phase source }\\n  ... on WorkerStartEvent { idx role task } ... on WorkerStepEvent { idx role node data }\\n  ... on WorkerTokenEvent { idx text } ... on WorkerDoneEvent { idx role task status result }\\n  ... on ArtifactEvent { artifactId title action kind preview }\\n  ... on TodosUpdatedEvent { todos { text status } source }\\n  ... on QueuedMessageEvent { messageId text position } ... on QueuedWithdrawnEvent { messageId }\\n  ... on QueuedConsumedEvent { messageIds }\\n  ... on ApprovalRequestEvent { tool reason args approvalId deferred }\\n  ... on ApprovalResolvedEvent { tool approved answer }\\n  ... on WorkflowToolEvent { parentRunId childEvent data }\\n  ... on BudgetExceededEvent { reason snapshot }\\n  ... on BudgetUpdateEvent { inputTokens outputTokens totalTokens llmCalls toolCalls snapshot }\\n  ... on PerfUpdateEvent { ttftMs llmMs prefillTps evalTps llmCalls snapshot }\\n  ... on DoneEvent { message conversationId } ... on StoppedEvent { message conversationId }\\n  ... on ErrorEvent { error } } }-m-err]": [
+  [
+   {
+    "data": {
+     "taskEvents": {
+      "__typename": "ErrorEvent",
+      "error": "task interrupted (server restarted)"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { taskEvents(taskId: $id) { __typename\\n  ... on TokenEvent { text source } ... on ThinkingTokenEvent { text source }\\n  ... on StepEvent { node source subagent data } ... on BrowserStepEvent { url phase source }\\n  ... on WorkerStartEvent { idx role task } ... on WorkerStepEvent { idx role node data }\\n  ... on WorkerTokenEvent { idx text } ... on WorkerDoneEvent { idx role task status result }\\n  ... on ArtifactEvent { artifactId title action kind preview }\\n  ... on TodosUpdatedEvent { todos { text status } source }\\n  ... on QueuedMessageEvent { messageId text position } ... on QueuedWithdrawnEvent { messageId }\\n  ... on QueuedConsumedEvent { messageIds }\\n  ... on ApprovalRequestEvent { tool reason args approvalId deferred }\\n  ... on ApprovalResolvedEvent { tool approved answer }\\n  ... on WorkflowToolEvent { parentRunId childEvent data }\\n  ... on BudgetExceededEvent { reason snapshot }\\n  ... on BudgetUpdateEvent { inputTokens outputTokens totalTokens llmCalls toolCalls snapshot }\\n  ... on PerfUpdateEvent { ttftMs llmMs prefillTps evalTps llmCalls snapshot }\\n  ... on DoneEvent { message conversationId } ... on StoppedEvent { message conversationId }\\n  ... on ErrorEvent { error } } }-missing]": [
+  [
+   {
+    "data": {
+     "taskEvents": {
+      "__typename": "ErrorEvent",
+      "error": "task not found"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { workflowRunEvents(runId: $id) { __typename\\n  ... on WorkflowNodeStartEvent { nodeId nodeType label } ... on WorkflowNodeTokenEvent { nodeId text }\\n  ... on WorkflowNodeConditionEvent { nodeId verdict } ... on WorkflowNodeDoneEvent { nodeId output }\\n  ... on WorkflowNodeErrorEvent { nodeId error } ... on WorkflowMapStartEvent { nodeId total }\\n  ... on WorkflowMapItemDoneEvent { nodeId index result }\\n  ... on WorkflowApprovalRequestEvent { tool reason args nodeId }\\n  ... on WorkflowApprovalResolvedEvent { tool approved answer nodeId }\\n  ... on WorkflowInterruptEvent { interruptId question } ... on WorkflowInterruptResolvedEvent { interruptId }\\n  ... on WorkflowBudgetExceededEvent { reason snapshot }\\n  ... on WorkflowBudgetUpdateEvent { inputTokens outputTokens totalTokens llmCalls toolCalls snapshot }\\n  ... on WorkflowNodeRetryEvent { nodeId attempt maxRetries error }\\n  ... on WorkflowDoneEvent { outputs runId } ... on WorkflowErrorEvent { error runId }\\n  ... on WorkflowStoppedEvent { runId } } }-missing]": [
+  [
+   {
+    "data": {
+     "workflowRunEvents": {
+      "__typename": "WorkflowErrorEvent",
+      "error": "run not found",
+      "runId": "missing"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { workflowRunEvents(runId: $id) { __typename\\n  ... on WorkflowNodeStartEvent { nodeId nodeType label } ... on WorkflowNodeTokenEvent { nodeId text }\\n  ... on WorkflowNodeConditionEvent { nodeId verdict } ... on WorkflowNodeDoneEvent { nodeId output }\\n  ... on WorkflowNodeErrorEvent { nodeId error } ... on WorkflowMapStartEvent { nodeId total }\\n  ... on WorkflowMapItemDoneEvent { nodeId index result }\\n  ... on WorkflowApprovalRequestEvent { tool reason args nodeId }\\n  ... on WorkflowApprovalResolvedEvent { tool approved answer nodeId }\\n  ... on WorkflowInterruptEvent { interruptId question } ... on WorkflowInterruptResolvedEvent { interruptId }\\n  ... on WorkflowBudgetExceededEvent { reason snapshot }\\n  ... on WorkflowBudgetUpdateEvent { inputTokens outputTokens totalTokens llmCalls toolCalls snapshot }\\n  ... on WorkflowNodeRetryEvent { nodeId attempt maxRetries error }\\n  ... on WorkflowDoneEvent { outputs runId } ... on WorkflowErrorEvent { error runId }\\n  ... on WorkflowStoppedEvent { runId } } }-wr-done]": [
+  [
+   {
+    "data": {
+     "workflowRunEvents": {
+      "__typename": "WorkflowDoneEvent",
+      "outputs": {
+       "k": [
+        1,
+        2.0
+       ]
+      },
+      "runId": "wr-done"
+     }
+    }
+   }
+  ]
+ ],
+ "test_fallbacks_for_runs_not_live[subscription($id: String!) { workflowRunEvents(runId: $id) { __typename\\n  ... on WorkflowNodeStartEvent { nodeId nodeType label } ... on WorkflowNodeTokenEvent { nodeId text }\\n  ... on WorkflowNodeConditionEvent { nodeId verdict } ... on WorkflowNodeDoneEvent { nodeId output }\\n  ... on WorkflowNodeErrorEvent { nodeId error } ... on WorkflowMapStartEvent { nodeId total }\\n  ... on WorkflowMapItemDoneEvent { nodeId index result }\\n  ... on WorkflowApprovalRequestEvent { tool reason args nodeId }\\n  ... on WorkflowApprovalResolvedEvent { tool approved answer nodeId }\\n  ... on WorkflowInterruptEvent { interruptId question } ... on WorkflowInterruptResolvedEvent { interruptId }\\n  ... on WorkflowBudgetExceededEvent { reason snapshot }\\n  ... on WorkflowBudgetUpdateEvent { inputTokens outputTokens totalTokens llmCalls toolCalls snapshot }\\n  ... on WorkflowNodeRetryEvent { nodeId attempt maxRetries error }\\n  ... on WorkflowDoneEvent { outputs runId } ... on WorkflowErrorEvent { error runId }\\n  ... on WorkflowStoppedEvent { runId } } }-wr-err]": [
+  [
+   {
+    "data": {
+     "workflowRunEvents": {
+      "__typename": "WorkflowErrorEvent",
+      "error": "bad",
+      "runId": "wr-err"
+     }
+    }
+   }
+  ]
+ ]
+}

@@ -1,905 +1,1159 @@
+"""
+One row of the inventory; `id` is the policy key.
+"""
 type AgentTool {
-  id: ID!
-  key: String!
-  kind: String!
-  name: String!
-  description: String!
-  group: String!
-  enabled: Boolean!
-  requiresApproval: Boolean!
-  inPrompt: Boolean!
-  available: Boolean!
-  detail: String!
+	id: ID!
+	key: String!
+	kind: String!
+	name: String!
+	description: String!
+	group: String!
+	enabled: Boolean!
+	requiresApproval: Boolean!
+	inPrompt: Boolean!
+	available: Boolean!
+	detail: String!
 }
 
 type ApprovalRequestEvent {
-  tool: String!
-  reason: String!
-  args: String!
-  approvalId: String
-  deferred: Boolean!
+	tool: String!
+	reason: String!
+	args: String!
+	approvalId: String
+	deferred: Boolean!
 }
 
 type ApprovalResolvedEvent {
-  tool: String!
-  approved: Boolean!
-  answer: String!
+	tool: String!
+	approved: Boolean!
+	answer: String!
 }
 
 type Artifact implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  title: String!
-  filename: String!
-  kind: String!
-  mimeType: String
-  conversationId: String
-  messageId: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
-  content: String!
-  versions: [ArtifactVersion!]!
-  versionCount: Int!
+	title: String!
+	filename: String!
+	kind: String!
+	mimeType: String
+	conversationId: String
+	messageId: String
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	id: ID!
+	"""
+	File-backed body, read on demand so list queries stay cheap. Binary
+	kinds read as "" — their bytes come from the raw download endpoint.
+	"""
+	content: String!
+	versions: [ArtifactVersion!]!
+	"""
+	Counts `{id}_v*` files in the artifacts directory, as the Python
+	resolver globs — not the version rows.
+	"""
+	versionCount: Int!
 }
 
 type ArtifactEvent {
-  artifactId: String!
-  title: String!
-  action: String!
-  kind: String!
-  preview: String
+	artifactId: String!
+	title: String!
+	action: String!
+	kind: String!
+	preview: String
 }
 
 type ArtifactVersion {
-  id: String!
-  artifactId: String!
-  version: Int!
-  title: String!
-  filename: String!
-  createdAt: DateTime!
-  content: String!
+	id: String!
+	artifactId: String!
+	version: Int!
+	title: String!
+	filename: String!
+	createdAt: DateTime!
+	content: String!
 }
 
 type Automation implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  name: String!
-  description: String
-  inputType: String!
-  promptText: String
-  model: String
-  codeText: String
-  webhookUrl: String
-  webhookMethod: String
-  webhookHeaders: String
-  webhookBody: String
-  schedule: String
-  enabled: Boolean!
-  stateful: Boolean!
-  conversationId: String
-  notifications: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
-  nextRunAt: String
-  lastRunStatus: String
-  lastRunAt: String
-  successCount7d: Int
-  totalCount7d: Int
+	name: String!
+	description: String
+	inputType: String!
+	promptText: String
+	model: String
+	codeText: String
+	webhookUrl: String
+	webhookMethod: String
+	webhookHeaders: String
+	webhookBody: String
+	schedule: String
+	enabled: Boolean!
+	stateful: Boolean!
+	notifications: String
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	lastRunStatus: String
+	lastRunAt: String
+	successCount7d: Int
+	totalCount7d: Int
+	id: ID!
+	"""
+	The conversation backing a stateful automation's shared thread.
+	"""
+	conversationId: String
+	nextRunAt: String
 }
 
 type AutomationDoneEvent {
-  output: String
-  runId: String!
+	output: String
+	runId: String!
 }
 
 union AutomationEvent = TokenEvent | AutomationDoneEvent | AutomationStoppedEvent | ErrorEvent
 
 input AutomationInput {
-  name: String!
-  inputType: String!
-  description: String = null
-  promptText: String = null
-  model: String = null
-  codeText: String = null
-  webhookUrl: String = null
-  webhookMethod: String = null
-  webhookHeaders: String = null
-  webhookBody: String = null
-  schedule: String = null
-  enabled: Boolean! = true
-  stateful: Boolean! = false
-  notifications: String = null
+	name: String!
+	"""
+	"prompt" | "code" | "webhook" | "monitor"
+	"""
+	inputType: String!
+	description: String
+	promptText: String
+	model: String
+	codeText: String
+	webhookUrl: String
+	webhookMethod: String
+	"""
+	JSON string
+	"""
+	webhookHeaders: String
+	webhookBody: String
+	"""
+	cron expression
+	"""
+	schedule: String
+	enabled: Boolean! = true
+	"""
+	prompt type only: share one thread across runs
+	"""
+	stateful: Boolean! = false
+	"""
+	JSON string
+	"""
+	notifications: String
 }
 
 type AutomationRun implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  automationId: String!
-  status: String!
-  triggeredBy: String!
-  output: String
-  error: String
-  startedAt: DateTime!
-  finishedAt: DateTime
+	automationId: String!
+	status: String!
+	triggeredBy: String!
+	output: String
+	error: String
+	startedAt: DateTime!
+	finishedAt: DateTime
+	id: ID!
 }
 
 type AutomationStoppedEvent {
-  output: String
-  runId: String!
+	output: String
+	runId: String!
 }
 
 type BoardTask implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  title: String!
-  body: String
-  status: String!
-  priority: Int!
-  createdBy: String!
-  model: String
-  skill: String
-  blockedReason: String
-  blockedKind: String
-  failureCount: Int!
-  summary: String
-  resultMetadata: String
-  conversationId: String!
-  runId: String
-  parentIds: [String!]!
-  childIds: [String!]!
-  createdAt: DateTime!
-  updatedAt: DateTime!
-  startedAt: DateTime
-  finishedAt: DateTime
+	title: String!
+	body: String
+	status: String!
+	priority: Int!
+	createdBy: String!
+	model: String
+	skill: String
+	blockedReason: String
+	blockedKind: String
+	failureCount: Int!
+	summary: String
+	resultMetadata: String
+	"""
+	Job id of the current or latest dispatch — the key for boardTaskEvents.
+	"""
+	runId: String
+	"""
+	Raw ids of linked tasks. Filled by `boardTasks` / `boardTask`; empty
+	when resolved through `node`, as Python's `resolve_node` leaves them.
+	"""
+	parentIds: [String!]!
+	childIds: [String!]!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	startedAt: DateTime
+	finishedAt: DateTime
+	id: ID!
+	"""
+	The conversation holding the task's run transcript.
+	"""
+	conversationId: String!
 }
 
 input BoardTaskInput {
-  title: String!
-  body: String = null
-  priority: Int! = 0
-  model: String = null
-  skill: String = null
-  parentIds: [ID!] = null
-  start: Boolean! = true
+	title: String!
+	body: String
+	priority: Int! = 0
+	model: String
+	skill: String
+	parentIds: [ID!]
+	"""
+	False parks the new task in "todo" instead of dispatching it.
+	"""
+	start: Boolean! = true
 }
 
 input BoardTaskUpdateInput {
-  title: String = null
-  body: String = null
-  priority: Int = null
-  model: String = null
-  skill: String = null
-  parentIds: [ID!] = null
+	title: String
+	body: String
+	priority: Int
+	model: String
+	skill: String
+	"""
+	When provided, REPLACES the task's parent links (empty list clears them).
+	"""
+	parentIds: [ID!]
 }
 
 type BrowserStepEvent {
-  url: String!
-  phase: String!
-  source: String!
+	url: String!
+	phase: String!
+	source: String!
 }
 
 type BudgetExceededEvent {
-  reason: String!
-  snapshot: String!
+	reason: String!
+	snapshot: String!
 }
 
 type BudgetUpdateEvent {
-  inputTokens: Int!
-  outputTokens: Int!
-  totalTokens: Int!
-  llmCalls: Int!
-  toolCalls: Int!
-  snapshot: String!
+	inputTokens: Int!
+	outputTokens: Int!
+	totalTokens: Int!
+	llmCalls: Int!
+	toolCalls: Int!
+	snapshot: String!
 }
 
 union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  title: String
-  model: String!
-  surface: String!
-  pinned: Boolean!
-  ephemeral: Boolean!
-  projectId: String
-  createdAt: DateTime!
-  project: Project
-  messageCount: Int!
-  messages(last: Int! = 10, before: String = null): MessageConnection!
+	title: String
+	model: String!
+	surface: String!
+	pinned: Boolean!
+	ephemeral: Boolean!
+	projectId: String
+	createdAt: DateTime!
+	id: ID!
+	project: Project
+	messageCount: Int!
+	"""
+	Backward-paginated message connection. Newest-N older than the cursor,
+	returned oldest-first; `(created_at, id)` keeps the order stable when
+	two messages share a timestamp.
+	"""
+	messages(last: Int! = 10, before: String): MessageConnection!
 }
 
-"""Date with time (isoformat)"""
 scalar DateTime
 
 type DiscoveredModel {
-  id: String!
-  label: String!
-  provider: String!
-  contextWindow: Int
-  description: String
-  likelyChat: Boolean!
+	id: String!
+	label: String!
+	provider: String!
+	contextWindow: Int
+	description: String
+	likelyChat: Boolean!
 }
 
 input DiscoveredModelInput {
-  id: String!
-  label: String!
-  provider: String = null
-  contextWindow: Int = null
+	id: String!
+	label: String!
+	provider: String
+	contextWindow: Int
 }
 
 type DoneEvent {
-  message: String!
-  conversationId: String!
+	message: String!
+	conversationId: String!
 }
 
 type ErrorEvent {
-  error: String!
+	error: String!
 }
 
 """
-The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
+A scalar that can represent any JSON value.
 """
-scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
+scalar JSON
 
 type McpServer {
-  name: String!
-  config: String!
-  transport: String!
-  command: String
-  url: String
-  toolCount: Int!
-  enabled: Boolean!
-  loadMode: String!
-  tools: [String!]!
+	name: String!
+	config: String!
+	transport: String!
+	command: String
+	url: String
+	toolCount: Int!
+	enabled: Boolean!
+	loadMode: String!
+	tools: [String!]!
 }
 
+"""
+One tool exposed by a connected MCP server.
+"""
 type McpTool {
-  name: String!
-  server: String!
-  description: String!
-  inputSchema: String!
+	name: String!
+	server: String!
+	description: String!
+	"""
+	JSON string — only worth selecting when you are about to call the tool.
+	"""
+	inputSchema: String!
 }
 
+"""
+Outcome of one `callMcpTool` invocation.
+"""
 type McpToolResult {
-  content: String!
-  isError: Boolean!
+	content: String!
+	isError: Boolean!
 }
 
+"""
+The agent's free-text memory blob.
+"""
 type Memory {
-  content: String!
-  exists: Boolean!
-  modifiedAt: String
+	content: String!
+	exists: Boolean!
+	modifiedAt: String
 }
 
 type MemoryActivity {
-  id: String!
-  memoryId: String!
-  conversationId: String
-  kind: String!
-  score: Float
-  query: String
-  source: String!
-  accessedAt: String!
+	id: String!
+	memoryId: String!
+	conversationId: String
+	kind: String!
+	score: Float
+	query: String
+	source: String!
+	accessedAt: String!
 }
 
+"""
+One discrete memory (kind = core | fact). Raw DB id; `updatedAt` is a
+plain string here, not the `DateTime` scalar, as in the Python type.
+"""
 type MemoryItem {
-  id: String!
-  kind: String!
-  text: String!
-  updatedAt: String!
-  lastUsedAt: String
-  useCount: Int!
-  activities(limit: Int! = 20): [MemoryActivity!]!
+	id: String!
+	kind: String!
+	text: String!
+	updatedAt: String!
+	"""
+	When this memory was last surfaced.
+	"""
+	lastUsedAt: String
+	"""
+	How many times this memory was surfaced.
+	"""
+	useCount: Int!
+	"""
+	Recent audit log entries for this memory.
+	"""
+	activities(limit: Int! = 20): [MemoryActivity!]!
 }
 
 type Message implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  role: String!
-  content: String!
-  model: String
-  status: String!
-  inputTokens: Int
-  outputTokens: Int
-  ttftMs: Float
-  llmMs: Float
-  prefillTps: Float
-  evalTps: Float
-  durationMs: Float
-  createdAt: DateTime!
-  steps: [Step!]!
+	role: String!
+	content: String!
+	model: String
+	status: String!
+	inputTokens: Int
+	outputTokens: Int
+	ttftMs: Float
+	llmMs: Float
+	prefillTps: Float
+	evalTps: Float
+	durationMs: Float
+	createdAt: DateTime!
+	"""
+	Loaded alongside the page (`with_steps`), ordered by `seq`.
+	"""
+	steps: [Step!]!
+	id: ID!
 }
 
 type MessageConnection {
-  edges: [MessageEdge!]!
-  pageInfo: PageInfo!
+	edges: [MessageEdge!]!
+	pageInfo: PageInfo!
 }
 
 type MessageEdge {
-  node: Message!
-  cursor: String!
+	node: Message!
+	cursor: String!
 }
 
 type ModelCatalog {
-  default: String!
-  available: [ModelSpec!]!
-  providers: [String!]!
-  discoverableProviders: [String!]!
-  endpoints: [ModelEndpoint!]!
+	default: String!
+	available: [ModelSpec!]!
+	providers: [String!]!
+	discoverableProviders: [String!]!
+	endpoints: [ModelEndpoint!]!
 }
 
+"""
+An endpoint as it may leave the server: whether it has a key, never the key.
+"""
 type ModelEndpoint {
-  name: String!
-  baseUrl: String!
-  hasKey: Boolean!
+	name: String!
+	baseUrl: String!
+	hasKey: Boolean!
 }
 
 type ModelSpec {
-  id: String!
-  label: String!
-  provider: String!
-  builtin: Boolean!
-  contextWindow: Int
+	id: String!
+	label: String!
+	provider: String!
+	builtin: Boolean!
+	contextWindow: Int
 }
 
 type ModelSyncReport {
-  provider: String!
-  offered: Int!
-  skipped: String
-  probed: Boolean!
-  missing: [String!]!
-  unreachable: [UnreachableModel!]!
-  windows: [WindowFinding!]!
-  newModels: [DiscoveredModel!]!
-  clean: Boolean!
+	provider: String!
+	"""
+	What the provider offered; 0 with `skipped` set means discovery never ran.
+	"""
+	offered: Int!
+	"""
+	Why the provider was skipped: every list below is empty for lack of
+	data, not for lack of drift.
+	"""
+	skipped: String
+	probed: Boolean!
+	missing: [String!]!
+	unreachable: [UnreachableModel!]!
+	windows: [WindowFinding!]!
+	newModels: [DiscoveredModel!]!
+	"""
+	True only when discovery ran and found nothing to report.
+	"""
+	clean: Boolean!
 }
 
 type Mutation {
-  updateMemory(content: String!): Memory!
-  deleteAgentMemory: Memory!
-  consolidateMemory(model: String = null): String!
-  addMemory(text: String!, kind: String! = "fact"): MemoryItem!
-  updateMemoryItem(id: String!, text: String!, kind: String = null): MemoryItem!
-  deleteMemory(id: String!): Boolean!
-  startTask(input: StartTaskInput!): StartTaskPayload!
-  stopTask(taskId: String!): Boolean!
-  queueMessage(taskId: String!, query: String!): QueueMessagePayload!
-  unqueueMessage(taskId: String!, messageId: String!): Boolean!
-  updateConversation(id: ID!, title: String = null, model: String = null, pinned: Boolean = null): Conversation!
-  deleteConversation(id: ID!): Boolean!
-  discardConversation(id: ID!): Boolean!
-  updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!
-  restoreArtifactVersion(id: ID!, version: Int!): Artifact!
-  deleteArtifact(id: ID!): Boolean!
-  createAutomation(input: AutomationInput!): Automation!
-  updateAutomation(id: ID!, input: AutomationInput!): Automation!
-  deleteAutomation(id: ID!): Boolean!
-  triggerAutomation(id: ID!): String!
-  stopAutomationRun(runId: String!): Boolean!
-  createBoardTask(input: BoardTaskInput!): BoardTask!
-  updateBoardTask(id: ID!, input: BoardTaskUpdateInput!): BoardTask!
-  setBoardTaskStatus(id: ID!, status: String!): BoardTask!
-  decomposeBoardTask(id: ID!): [BoardTask!]!
-  answerBoardTask(id: ID!, answer: String!): BoardTask!
-  deleteBoardTask(id: ID!): Boolean!
-  stopBoardTask(id: ID!): Boolean!
-  createWorkflow(input: WorkflowCreateInput!): Workflow!
-  updateWorkflow(id: ID!, input: WorkflowUpdateInput!): Workflow!
-  deleteWorkflow(id: ID!): Boolean!
-  runWorkflow(id: ID!, inputs: JSON = null): String!
-  stopWorkflowRun(runId: String!): Boolean!
-  resumeWorkflowRun(runId: String!, answer: String!): Boolean!
-  resolveWorkflowApproval(runId: String!, approved: Boolean!, answer: String = null): Boolean!
-  createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!
-  updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!
-  deleteNotificationChannel(id: ID!): Boolean!
-  createProject(input: ProjectCreateInput!): Project!
-  updateProject(id: ID!, input: ProjectUpdateInput!): Project!
-  consolidateProjectMemory(id: ID!, model: String = null): String!
-  deleteProject(id: ID!): Boolean!
-  setConversationProject(conversationId: ID!, projectId: ID = null): Conversation!
-  createSkill(input: SkillCreateInput!): Skill!
-  updateSkill(id: ID!, input: SkillUpdateInput!): Skill!
-  deleteSkill(id: ID!): Boolean!
-  stopRunningTask(taskId: String!): StopRunningTaskPayload!
-  addMcpServer(name: String!, configJson: String!): McpServer!
-  updateMcpServer(name: String!, configJson: String!): McpServer!
-  removeMcpServer(name: String!): Boolean!
-  reloadMcpServers: [McpServer!]!
-  setMcpServerLoadMode(name: String!, mode: String!): McpServer!
-  setMcpDefaultLoadMode(mode: String!): String!
-  callMcpTool(server: String!, tool: String!, argsJson: String! = "{}", timeoutSeconds: Float! = 120): McpToolResult!
-  addModel(id: String!, label: String!, provider: String = null): ModelCatalog!
-  updateModel(id: String!, label: String!, provider: String = null): ModelCatalog!
-  addDiscoveredModels(models: [DiscoveredModelInput!]!): ModelCatalog!
-  removeModel(id: String!): ModelCatalog!
-  setDefaultModel(id: String!): ModelCatalog!
-  addEndpoint(name: String!, baseUrl: String!, apiKey: String = null): ModelCatalog!
-  updateEndpoint(name: String!, baseUrl: String!, apiKey: String = null, clearKey: Boolean! = false): ModelCatalog!
-  removeEndpoint(name: String!): ModelCatalog!
-  resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!
-  setToolPolicy(key: String!, enabled: Boolean = null, requiresApproval: Boolean = null): [AgentTool!]!
-  requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = "{}", conversationId: String = null): ToolApprovalRequest!
-  browserActivity(url: String!, phase: String! = "start", conversationId: String = null): Boolean!
-  setSetting(key: String!, value: String!, allowManaged: Boolean! = false): SettingWriteResult!
-  deleteSetting(key: String!, allowManaged: Boolean! = false): SettingWriteResult!
+	updateConversation(id: ID!, title: String, model: String, pinned: Boolean): Conversation!
+	deleteConversation(id: ID!): Boolean!
+	discardConversation(id: ID!): Boolean!
+	consolidateProjectMemory(id: ID!, model: String): String!
+	createProject(input: ProjectCreateInput!): Project!
+	updateProject(id: ID!, input: ProjectUpdateInput!): Project!
+	deleteProject(id: ID!): Boolean!
+	setConversationProject(conversationId: ID!, projectId: ID): Conversation!
+	createBoardTask(input: BoardTaskInput!): BoardTask!
+	decomposeBoardTask(id: ID!): [BoardTask!]!
+	updateBoardTask(id: ID!, input: BoardTaskUpdateInput!): BoardTask!
+	setBoardTaskStatus(id: ID!, status: String!): BoardTask!
+	answerBoardTask(id: ID!, answer: String!): BoardTask!
+	deleteBoardTask(id: ID!): Boolean!
+	stopBoardTask(id: ID!): Boolean!
+	createAutomation(input: AutomationInput!): Automation!
+	updateAutomation(id: ID!, input: AutomationInput!): Automation!
+	deleteAutomation(id: ID!): Boolean!
+	resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!
+	requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = "{}", conversationId: String): ToolApprovalRequest!
+	updateArtifact(id: ID!, title: String, content: String): Artifact!
+	restoreArtifactVersion(id: ID!, version: Int!): Artifact!
+	deleteArtifact(id: ID!): Boolean!
+	createWorkflow(input: WorkflowCreateInput!): Workflow!
+	updateWorkflow(id: ID!, input: WorkflowUpdateInput!): Workflow!
+	deleteWorkflow(id: ID!): Boolean!
+	createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!
+	updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!
+	deleteNotificationChannel(id: ID!): Boolean!
+	createSkill(input: SkillCreateInput!): Skill!
+	updateSkill(id: ID!, input: SkillUpdateInput!): Skill!
+	deleteSkill(id: ID!): Boolean!
+	"""
+	Write one config key. Keys owned by a dedicated tab are refused
+	unless `allowManaged`.
+	"""
+	setSetting(key: String!, value: String!, allowManaged: Boolean! = false): SettingWriteResult!
+	"""
+	Remove one config key, reverting it to its built-in default.
+	"""
+	deleteSetting(key: String!, allowManaged: Boolean! = false): SettingWriteResult!
+	"""
+	Add a custom model to the catalog. `provider` defaults to the id prefix.
+	"""
+	addModel(id: String!, label: String!, provider: String): ModelCatalog!
+	"""
+	Update a custom model's label/provider; the id can't change.
+	"""
+	updateModel(id: String!, label: String!, provider: String): ModelCatalog!
+	"""
+	Register models found by `modelSync` — every entry validated before
+	anything is written.
+	"""
+	addDiscoveredModels(models: [DiscoveredModelInput!]!): ModelCatalog!
+	"""
+	Remove a custom model; a default that named it goes back to the seed.
+	"""
+	removeModel(id: String!): ModelCatalog!
+	"""
+	Persist the default model used when a request names none.
+	"""
+	setDefaultModel(id: String!): ModelCatalog!
+	"""
+	Name an OpenAI-compatible server.
+	"""
+	addEndpoint(name: String!, baseUrl: String!, apiKey: String): ModelCatalog!
+	"""
+	Change an endpoint's URL or key; an absent key keeps the stored one.
+	"""
+	updateEndpoint(name: String!, baseUrl: String!, apiKey: String, clearKey: Boolean! = false): ModelCatalog!
+	"""
+	Remove an endpoint no custom model uses.
+	"""
+	removeEndpoint(name: String!): ModelCatalog!
+	"""
+	Set one tool's policy; returns the whole refreshed inventory. Only
+	non-default entries are stored.
+	"""
+	setToolPolicy(key: String!, enabled: Boolean, requiresApproval: Boolean): [AgentTool!]!
+	addMcpServer(name: String!, configJson: String!): McpServer!
+	updateMcpServer(name: String!, configJson: String!): McpServer!
+	removeMcpServer(name: String!): Boolean!
+	reloadMcpServers: [McpServer!]!
+	"""
+	Bind this server's tools to the agent (`always`) or not (`lazy`).
+	"""
+	setMcpServerLoadMode(name: String!, mode: String!): McpServer!
+	"""
+	Fallback mode for servers that don't declare one.
+	"""
+	setMcpDefaultLoadMode(mode: String!): String!
+	"""
+	Invoke one MCP tool by (server, tool) — the lazy path's execution end.
+	"""
+	callMcpTool(server: String!, tool: String!, argsJson: String! = "{}", timeoutSeconds: Float! = 120.0): McpToolResult!
+	"""
+	Whether it reached a run; false (no live run) is normal, not an error.
+	"""
+	browserActivity(url: String!, phase: String! = "start", conversationId: String): Boolean!
+	addMemory(text: String!, kind: String! = "fact"): MemoryItem!
+	updateMemoryItem(id: String!, text: String!, kind: String): MemoryItem!
+	updateMemory(content: String!): Memory!
+	consolidateMemory(model: String): String!
+	deleteAgentMemory: Memory!
+	deleteMemory(id: String!): Boolean!
+	stopRunningTask(taskId: String!): StopRunningTaskPayload!
+	stopTask(taskId: String!): Boolean!
+	stopAutomationRun(runId: String!): Boolean!
+	stopWorkflowRun(runId: String!): Boolean!
+	startTask(input: StartTaskInput!): StartTaskPayload!
+	"""
+	Queue a message for a run that is already in flight; delivered just
+	before its next LLM call.
+	"""
+	queueMessage(taskId: String!, query: String!): QueueMessagePayload!
+	"""
+	Withdraw a queued message. False if the run already delivered it.
+	"""
+	unqueueMessage(taskId: String!, messageId: String!): Boolean!
+	"""
+	Trigger a workflow run. `inputs` is a JSON object of node defaults.
+	Returns run_id; client subscribes to workflowRunEvents(runId).
+	"""
+	runWorkflow(id: ID!, inputs: JSON): String!
+	"""
+	Resume a workflow paused at an approval/human_input node.
+	"""
+	resumeWorkflowRun(runId: String!, answer: String!): Boolean!
+	"""
+	Resolve a pending approval node with an explicit approved bool.
+	"""
+	resolveWorkflowApproval(runId: String!, approved: Boolean!, answer: String): Boolean!
+	"""
+	Returns the run_id; client subscribes to automationRunEvents(runId).
+	"""
+	triggerAutomation(id: ID!): String!
 }
 
-"""An object with a Globally Unique ID"""
 interface Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
+	"""
+	The Globally Unique ID of this object
+	"""
+	id: ID!
 }
 
 type NotificationChannel implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  name: String!
-  type: String!
-  target: String!
-  createdAt: DateTime!
-  updatedAt: DateTime!
+	name: String!
+	type: String!
+	target: String!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	id: ID!
 }
 
 input NotificationChannelCreateInput {
-  name: String!
-  type: String!
-  target: String!
+	name: String!
+	type: String!
+	target: String!
 }
 
 input NotificationChannelUpdateInput {
-  name: String = null
-  type: String = null
-  target: String = null
+	name: String
+	type: String
+	target: String
 }
 
-"""Information to aid in pagination."""
 type PageInfo {
-  """When paginating forwards, are there more items?"""
-  hasNextPage: Boolean!
-
-  """When paginating backwards, are there more items?"""
-  hasPreviousPage: Boolean!
-
-  """When paginating backwards, the cursor to continue."""
-  startCursor: String
-
-  """When paginating forwards, the cursor to continue."""
-  endCursor: String
+	"""
+	When paginating forwards, are there more items?
+	"""
+	hasNextPage: Boolean!
+	"""
+	When paginating backwards, are there more items?
+	"""
+	hasPreviousPage: Boolean!
+	"""
+	When paginating backwards, the cursor to continue.
+	"""
+	startCursor: String
+	"""
+	When paginating forwards, the cursor to continue.
+	"""
+	endCursor: String
 }
 
+"""
+One outstanding human-in-the-loop request. Not a Node: nothing refetches
+a single approval.
+"""
 type PendingApproval {
-  id: String!
-  source: String!
-  kind: String!
-  question: String!
-  label: String!
-  tool: String
-  argsJson: String
-  requestedAt: DateTime!
-  deferred: Boolean!
-  parentId: String
-  boardTaskId: String
+	id: String!
+	source: String!
+	kind: String!
+	question: String!
+	label: String!
+	tool: String
+	argsJson: String
+	parentId: String
+	boardTaskId: String
+	"""
+	UTC-aware, so `+00:00` — SQLite hands back naive datetimes and the
+	Python type forces them aware.
+	"""
+	requestedAt: DateTime!
+	"""
+	True when approving is what performs the operation, because nothing
+	is blocked waiting on it.
+	"""
+	deferred: Boolean!
 }
 
 type PerfUpdateEvent {
-  ttftMs: Float
-  llmMs: Float
-  prefillTps: Float
-  evalTps: Float
-  llmCalls: Int!
-  snapshot: String!
+	ttftMs: Float
+	llmMs: Float
+	prefillTps: Float
+	evalTps: Float
+	llmCalls: Int!
+	snapshot: String!
 }
 
 type Project implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  name: String!
-  description: String
-  instructions: String!
-  memory: String!
-  createdAt: DateTime!
-  updatedAt: DateTime!
-  conversationCount: Int!
-  conversations: [Conversation!]!
+	name: String!
+	description: String
+	instructions: String!
+	memory: String!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	id: ID!
+	conversationCount: Int!
+	conversations: [Conversation!]!
 }
 
 input ProjectCreateInput {
-  name: String!
-  description: String = null
-  instructions: String! = ""
+	name: String!
+	description: String
+	instructions: String! = ""
 }
 
 input ProjectUpdateInput {
-  name: String = null
-  description: String = null
-  instructions: String = null
-  memory: String = null
+	name: String
+	description: String
+	instructions: String
+	memory: String
 }
 
 type Query {
-  models: ModelCatalog!
-  modelSync(provider: String = null, probe: Boolean! = false): [ModelSyncReport!]!
-  agentMemory: Memory!
-  memories(kind: String = null): [MemoryItem!]!
-  memoryActivities(memoryId: String!, limit: Int! = 50): [MemoryActivity!]!
-  memoryUsage: [MemoryItem!]!
-  node(
-    """The ID of the object."""
-    id: ID!
-  ): Node!
-  conversations(surface: String = "web"): [Conversation!]!
-  conversation(id: ID!): Conversation
-  todos(conversationId: String!): [TodoItem!]!
-  artifacts(conversationId: String = null): [Artifact!]!
-  artifact(id: ID!): Artifact
-  artifactVersions(artifactId: String!): [ArtifactVersion!]!
-  automations: [Automation!]!
-  automation(id: ID!): Automation
-  automationRuns(automationId: ID!): [AutomationRun!]!
-  boardTasks(includeArchived: Boolean! = false): [BoardTask!]!
-  boardTask(id: ID!): BoardTask
-  workflows: [Workflow!]!
-  workflow(id: ID!): Workflow
-  workflowRuns(workflowId: ID!): [WorkflowRun!]!
-  workflowRun(id: ID!): WorkflowRun
-  notificationChannels: [NotificationChannel!]!
-  projects: [Project!]!
-  project(id: ID!): Project
-  skills: [Skill!]!
-  runningTasks: [RunningTask!]!
-  mcpServers: [McpServer!]!
-  mcpTools(server: String = null): [McpTool!]!
-  pendingApprovals: [PendingApproval!]!
-  tools: [AgentTool!]!
-  browserAvailable: Boolean!
-  settings: [Setting!]!
-  setting(key: String!): Setting!
+	"""
+	The thread's todo list (`thread_state`).
+	"""
+	todos(conversationId: String!): [TodoItem!]!
+	"""
+	List conversations for one surface (default "web", so bot/automation
+	threads stay out of the sidebar). Pass surface: null to list all.
+	"""
+	conversations(surface: String = "web"): [Conversation!]!
+	conversation(id: ID!): Conversation
+	projects: [Project!]!
+	project(id: ID!): Project
+	artifacts(conversationId: String): [Artifact!]!
+	artifact(id: ID!): Artifact
+	artifactVersions(artifactId: String!): [ArtifactVersion!]!
+	automations: [Automation!]!
+	automation(id: ID!): Automation
+	automationRuns(automationId: ID!): [AutomationRun!]!
+	boardTasks(includeArchived: Boolean! = false): [BoardTask!]!
+	boardTask(id: ID!): BoardTask
+	workflows: [Workflow!]!
+	workflow(id: ID!): Workflow
+	workflowRuns(workflowId: ID!): [WorkflowRun!]!
+	workflowRun(id: ID!): WorkflowRun
+	notificationChannels: [NotificationChannel!]!
+	skills: [Skill!]!
+	"""
+	Everything currently awaiting a human, newest request first.
+	"""
+	pendingApprovals: [PendingApproval!]!
+	"""
+	Every stored setting, plus the known keys that aren't set yet.
+	"""
+	settings: [Setting!]!
+	"""
+	One key; an `isSet: false` row rather than null when absent.
+	"""
+	setting(key: String!): Setting!
+	"""
+	Discrete memory items (empty on keyless setups, which use the blob).
+	"""
+	memories(kind: String): [MemoryItem!]!
+	"""
+	Audit log for when a specific memory was surfaced.
+	"""
+	memoryActivities(memoryId: String!, limit: Int! = 50): [MemoryActivity!]!
+	"""
+	The legacy free-text blob (keyless fallback / pre-migration backup).
+	"""
+	agentMemory: Memory!
+	"""
+	Every memory, for the usage overview — same rows as `memories`.
+	"""
+	memoryUsage: [MemoryItem!]!
+	"""
+	All currently-tracked in-flight tasks, newest first.
+	"""
+	runningTasks: [RunningTask!]!
+	models: ModelCatalog!
+	"""
+	Diff the catalog against what each provider offers; `probe` also
+	makes a one-token call per catalog model.
+	"""
+	modelSync(provider: String, probe: Boolean! = false): [ModelSyncReport!]!
+	"""
+	Bound tools, `jarvis` SDK functions and MCP tools, with their policy.
+	"""
+	tools: [AgentTool!]!
+	mcpServers: [McpServer!]!
+	"""
+	Loaded MCP tools, optionally narrowed to one server.
+	"""
+	mcpTools(server: String): [McpTool!]!
+	"""
+	Never fails, and never launches a browser: a page load must not open
+	a window.
+	"""
+	browserAvailable: Boolean!
+	node(
+		"""
+		The ID of the object.
+		"""
+		id: ID!
+	): Node!
 }
 
 type QueueMessagePayload {
-  messageId: String!
-  position: Int!
+	messageId: String!
+	position: Int!
 }
 
 type QueuedConsumedEvent {
-  messageIds: [String!]!
+	messageIds: [String!]!
 }
 
 type QueuedMessageEvent {
-  messageId: String!
-  text: String!
-  position: Int!
+	messageId: String!
+	text: String!
+	position: Int!
 }
 
 type QueuedWithdrawnEvent {
-  messageId: String!
+	messageId: String!
 }
 
 type ResolveApprovalPayload {
-  id: String!
-  status: String!
-  result: String
+	id: String!
+	status: String!
+	"""
+	What resolving it produced.
+	"""
+	result: String
 }
 
 type RunningTask {
-  id: String!
-  kind: String!
-  label: String!
-  parentId: String
-  startedAt: DateTime!
-  hasInterrupt: Boolean!
-  cancelled: Boolean!
-  done: Boolean!
-  inputTokens: Int!
-  outputTokens: Int!
-  totalTokens: Int!
-  llmCalls: Int!
-  toolCalls: Int!
-  budgetExceeded: Boolean!
-  budgetReason: String
+	id: String!
+	kind: String!
+	label: String!
+	parentId: String
+	startedAt: DateTime!
+	hasInterrupt: Boolean!
+	cancelled: Boolean!
+	done: Boolean!
+	inputTokens: Int!
+	outputTokens: Int!
+	totalTokens: Int!
+	llmCalls: Int!
+	toolCalls: Int!
+	budgetExceeded: Boolean!
+	budgetReason: String
 }
 
+"""
+One row of `config_settings`, with its key's guidance. Not a Node; the
+plain `id` is `setting:{key}` so Relay normalizes a write's response.
+"""
 type Setting {
-  id: ID!
-  key: String!
-  value: String!
-  updatedAt: DateTime
-  isSet: Boolean!
-  label: String!
-  description: String!
-  managedBy: String!
-  kind: String!
-  choices: [String!]!
-  placeholder: String!
-  restartRequired: Boolean!
-  known: Boolean!
+	id: ID!
+	key: String!
+	value: String!
+	updatedAt: DateTime
+	"""
+	Whether a row actually exists.
+	"""
+	isSet: Boolean!
+	label: String!
+	description: String!
+	managedBy: String!
+	kind: String!
+	choices: [String!]!
+	placeholder: String!
+	restartRequired: Boolean!
+	"""
+	False for a free-form key the registry doesn't know.
+	"""
+	known: Boolean!
 }
 
+"""
+The written row, the refreshed list, and what applying it actually did.
+"""
 type SettingWriteResult {
-  setting: Setting!
-  settings: [Setting!]!
-  note: String!
+	setting: Setting!
+	settings: [Setting!]!
+	note: String!
 }
 
 type Skill implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  name: String!
-  description: String!
-  body: String!
-  enabled: Boolean!
-  createdAt: DateTime!
-  updatedAt: DateTime!
+	name: String!
+	description: String!
+	body: String!
+	enabled: Boolean!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	id: ID!
 }
 
 input SkillCreateInput {
-  name: String!
-  description: String!
-  body: String!
-  enabled: Boolean! = true
+	name: String!
+	description: String!
+	body: String!
+	enabled: Boolean! = true
 }
 
 input SkillUpdateInput {
-  name: String = null
-  description: String = null
-  body: String = null
-  enabled: Boolean = null
+	name: String
+	description: String
+	body: String
+	enabled: Boolean
 }
 
 input StartTaskInput {
-  query: String!
-  model: String = null
-  conversationId: String = null
-  projectId: String = null
-  ephemeral: Boolean! = false
+	query: String!
+	model: String
+	conversationId: String
+	projectId: String
+	ephemeral: Boolean! = false
 }
 
 type StartTaskPayload {
-  taskId: String!
-  conversationId: String!
-  queued: Boolean!
-  queuedMessageId: String
+	taskId: String!
+	conversationId: String!
+	queued: Boolean!
+	queuedMessageId: String
 }
 
 type Step {
-  id: String!
-  node: String!
-  source: String!
-  subagent: String
-  data: String
-  seq: Int!
-  createdAt: DateTime!
+	id: String!
+	node: String!
+	source: String!
+	subagent: String
+	data: String
+	seq: Int!
+	createdAt: DateTime!
 }
 
 type StepEvent {
-  node: String!
-  source: String!
-  subagent: String
-  data: String!
+	node: String!
+	source: String!
+	subagent: String
+	data: String!
 }
 
 type StopRunningTaskPayload {
-  ok: Boolean!
-  taskId: String!
-  kind: String!
+	ok: Boolean!
+	taskId: String!
+	kind: String!
 }
 
 type StoppedEvent {
-  message: String!
-  conversationId: String!
+	message: String!
+	conversationId: String!
 }
 
 type Subscription {
-  taskEvents(taskId: String!): ChatEvent!
-  automationRunEvents(runId: String!): AutomationEvent!
-  boardTaskEvents(runId: String!): AutomationEvent!
-  workflowRunEvents(runId: String!): WorkflowEvent!
+	"""
+	Stream events for a chat task.
+	"""
+	taskEvents(taskId: String!): ChatEvent!
+	automationRunEvents(runId: String!): AutomationEvent!
+	"""
+	Live events for one board-task run (run_id == BoardTask.runId).
+	"""
+	boardTaskEvents(runId: String!): AutomationEvent!
+	workflowRunEvents(runId: String!): WorkflowEvent!
 }
 
 type ThinkingTokenEvent {
-  text: String!
-  source: String!
+	text: String!
+	source: String!
 }
 
 type TodoItem {
-  text: String!
-  status: String!
+	text: String!
+	status: String!
 }
 
 type TodosUpdatedEvent {
-  todos: [TodoItem!]!
-  source: String!
+	todos: [TodoItem!]!
+	source: String!
 }
 
 type TokenEvent {
-  text: String!
-  source: String!
+	text: String!
+	source: String!
 }
 
+"""
+The durable request a gated SDK call blocks on.
+"""
 type ToolApprovalRequest {
-  id: String!
-  status: String!
+	id: String!
+	status: String!
 }
 
 type UnreachableModel {
-  id: String!
-  reason: String!
+	id: String!
+	reason: String!
 }
 
+"""
+A window the provider states that the catalog doesn't match: a backfill
+(`catalogWindow` null) or a disagreement.
+"""
 type WindowFinding {
-  id: String!
-  label: String!
-  provider: String!
-  catalogWindow: Int
-  providerWindow: Int!
-  builtin: Boolean!
+	id: String!
+	label: String!
+	provider: String!
+	catalogWindow: Int
+	providerWindow: Int!
+	builtin: Boolean!
 }
 
 type WorkerDoneEvent {
-  idx: Int!
-  role: String!
-  task: String!
-  status: String!
-  result: String!
+	idx: Int!
+	role: String!
+	task: String!
+	status: String!
+	result: String!
 }
 
 type WorkerStartEvent {
-  idx: Int!
-  role: String!
-  task: String!
+	idx: Int!
+	role: String!
+	task: String!
 }
 
 type WorkerStepEvent {
-  idx: Int!
-  role: String!
-  node: String!
-  data: String!
+	idx: Int!
+	role: String!
+	node: String!
+	data: String!
 }
 
 type WorkerTokenEvent {
-  idx: Int!
-  text: String!
+	idx: Int!
+	text: String!
 }
 
 type Workflow implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  name: String!
-  description: String
-  definition: String!
-  notifications: String
-  createdAt: DateTime!
-  updatedAt: DateTime!
+	name: String!
+	description: String
+	definition: String!
+	notifications: String
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	id: ID!
 }
 
 type WorkflowApprovalRequestEvent {
-  tool: String!
-  reason: String!
-  args: String!
-  nodeId: String!
+	tool: String!
+	reason: String!
+	args: String!
+	nodeId: String!
 }
 
 type WorkflowApprovalResolvedEvent {
-  tool: String!
-  approved: Boolean!
-  answer: String!
-  nodeId: String!
+	tool: String!
+	approved: Boolean!
+	answer: String!
+	nodeId: String!
 }
 
 type WorkflowBudgetExceededEvent {
-  reason: String!
-  snapshot: String
+	reason: String!
+	snapshot: String
 }
 
 type WorkflowBudgetUpdateEvent {
-  inputTokens: Int!
-  outputTokens: Int!
-  totalTokens: Int!
-  llmCalls: Int!
-  toolCalls: Int!
-  snapshot: String
+	inputTokens: Int!
+	outputTokens: Int!
+	totalTokens: Int!
+	llmCalls: Int!
+	toolCalls: Int!
+	snapshot: String
 }
 
 input WorkflowCreateInput {
-  name: String!
-  description: String = null
-  definition: String! = "{}"
-  notifications: String = null
+	name: String!
+	description: String
+	definition: String! = "{}"
+	notifications: String
 }
 
 type WorkflowDoneEvent {
-  outputs: JSON!
-  runId: String!
+	outputs: JSON!
+	runId: String!
 }
 
 type WorkflowErrorEvent {
-  error: String!
-  runId: String!
+	error: String!
+	runId: String!
 }
 
 union WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowApprovalRequestEvent | WorkflowApprovalResolvedEvent | WorkflowInterruptEvent | WorkflowInterruptResolvedEvent | WorkflowBudgetExceededEvent | WorkflowBudgetUpdateEvent | WorkflowNodeRetryEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent
 
 type WorkflowInterruptEvent {
-  interruptId: String!
-  question: String!
+	interruptId: String!
+	question: String!
 }
 
 type WorkflowInterruptResolvedEvent {
-  interruptId: String!
+	interruptId: String!
 }
 
 type WorkflowMapItemDoneEvent {
-  nodeId: String!
-  index: Int!
-  result: JSON!
+	nodeId: String!
+	index: Int!
+	result: JSON!
 }
 
 type WorkflowMapStartEvent {
-  nodeId: String!
-  total: Int!
+	nodeId: String!
+	total: Int!
 }
 
 type WorkflowNodeConditionEvent {
-  nodeId: String!
-  verdict: String!
+	nodeId: String!
+	verdict: String!
 }
 
 type WorkflowNodeDoneEvent {
-  nodeId: String!
-  output: JSON!
+	nodeId: String!
+	output: JSON!
 }
 
 type WorkflowNodeErrorEvent {
-  nodeId: String!
-  error: String!
+	nodeId: String!
+	error: String!
 }
 
 type WorkflowNodeRetryEvent {
-  nodeId: String!
-  attempt: Int!
-  maxRetries: Int!
-  error: String!
+	nodeId: String!
+	attempt: Int!
+	maxRetries: Int!
+	error: String!
 }
 
 type WorkflowNodeStartEvent {
-  nodeId: String!
-  nodeType: String!
-  label: String!
+	nodeId: String!
+	nodeType: String!
+	label: String!
 }
 
 type WorkflowNodeTokenEvent {
-  nodeId: String!
-  text: String!
+	nodeId: String!
+	text: String!
 }
 
 type WorkflowRun implements Node {
-  """The Globally Unique ID of this object"""
-  id: ID!
-  workflowId: String!
-  status: String!
-  inputs: String
-  outputs: String
-  nodeResults: String
-  error: String
-  startedAt: DateTime!
-  finishedAt: DateTime
+	workflowId: String!
+	status: String!
+	inputs: String
+	outputs: String
+	nodeResults: String
+	error: String
+	startedAt: DateTime!
+	finishedAt: DateTime
+	id: ID!
 }
 
 type WorkflowStoppedEvent {
-  runId: String!
+	runId: String!
 }
 
 type WorkflowToolEvent {
-  parentRunId: String!
-  childEvent: String!
-  data: String!
+	parentRunId: String!
+	childEvent: String!
+	data: String!
 }
 
 input WorkflowUpdateInput {
-  name: String = null
-  description: String = null
-  definition: String = null
-  notifications: String = null
+	name: String
+	description: String
+	definition: String
+	notifications: String
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: Query
+	mutation: Mutation
+	subscription: Subscription
 }
