@@ -2,12 +2,10 @@
 //! and `requestToolApproval` (`server/graphql/mutations/tool.py`) — a change
 //! to either is made in both.
 //!
-//! The edge answers what lives in rows: a tool gate (the waiter polls the
-//! row), a board task's question, and a deferred action — a denial, or an
-//! approved delete of a workflow, automation or skill, or MCP call
-//! (`ACTIONS`' executors). A request whose answer needs Python's memory — a
-//! workflow paused on a future, a gate whose run a worker has — is deferred to
-//! Python, before anything is written.
+//! Every answer lives in a row: a tool gate (the waiter polls the row), a
+//! board task's question, a paused workflow node, and a deferred action — a
+//! denial, or an approved delete of a workflow, automation or skill, or MCP
+//! call (`ACTIONS`' executors). `gate_action` records the deferred ones.
 
 use std::sync::Arc;
 
@@ -17,7 +15,7 @@ use sqlx::SqlitePool;
 
 use super::codec::now_stored;
 use super::router::Caller;
-use super::{EdgeData, RequestFrom, defer};
+use super::{EdgeData, RequestFrom};
 use crate::approvals;
 use crate::runs::{Registry, Run};
 
@@ -75,12 +73,132 @@ fn run_of(registry: &Registry, task_id: Option<&str>, parent_id: Option<&str>) -
     }
 }
 
-/// `_emit_to_run`: onto a live run's stream, and only one the edge appends
-/// to (the callers defer a worker's run to Python first).
+/// `_emit_to_run`: onto a live run's stream.
 fn emit(run: Option<&Arc<Run>>, event: &str, data: &Value) {
     if let Some(run) = run.filter(|r| !r.fields().done) {
         run.emit_local(event, data);
     }
+}
+
+// ── deferred actions ────────────────────────────────────────────────────────
+
+/// `core/approvals.py:ACTIONS`' gated names, label and question.
+const ACTIONS: &[&str] = &["delete_workflow", "delete_automation", "delete_skill", "call_mcp_tool"];
+
+fn action_label(action: &str) -> &'static str {
+    match action {
+        "delete_workflow" => "Delete workflow",
+        "delete_automation" => "Delete automation",
+        "delete_skill" => "Delete skill",
+        _ => "Call MCP tool",
+    }
+}
+
+fn describe_action(action: &str, payload: &Value) -> String {
+    let get = |key: &str| payload.get(key).filter(|v| crate::pyjson::truthy(v)).map(crate::pyjson::py_str);
+    let named = |thing: &str, id_key: &str| {
+        let name = get("name").or_else(|| get(id_key)).unwrap_or_else(|| "None".into());
+        format!("Delete {thing} {name}? This cannot be undone.")
+    };
+    match action {
+        "delete_workflow" => named("workflow", "workflow_id"),
+        "delete_automation" => named("automation", "automation_id"),
+        "delete_skill" => named("skill", "skill_id"),
+        _ => {
+            // `_describe_mcp_call`.
+            let args = payload.get("args").filter(|a| crate::pyjson::truthy(a)).cloned().unwrap_or_else(|| json!({}));
+            let mut rendered = crate::pyjson::dumps(&args);
+            if rendered.chars().count() > 300 {
+                rendered = rendered.chars().take(300).collect::<String>() + "…";
+            }
+            let field = |key: &str| payload.get(key).map_or_else(|| "None".into(), crate::pyjson::py_str);
+            format!("Call MCP tool {}.{} with {rendered}?", field("server"), field("tool"))
+        }
+    }
+}
+
+/// `required_actions`: the ones `approval.required_actions` names — none
+/// unless an operator opts in.
+async fn required_actions(pool: &SqlitePool) -> sqlx::Result<Vec<&'static str>> {
+    let Some(raw) = crate::catalog::setting(pool, "approval.required_actions").await? else { return Ok(vec![]) };
+    let names: Vec<&str> = raw.split(',').map(crate::pystr::strip).filter(|p| !p.is_empty()).collect();
+    if names.is_empty() || names.iter().all(|n| *n == "none") {
+        return Ok(vec![]);
+    }
+    if names.iter().all(|n| *n == "all") {
+        return Ok(ACTIONS.to_vec());
+    }
+    Ok(ACTIONS.iter().copied().filter(|a| names.contains(a)).collect())
+}
+
+/// `gate_action`: an agent's destructive call, recorded for a human instead
+/// of performed when the action is gated. `Ok` means go ahead; otherwise the
+/// error says what is now pending — an open duplicate's id rather than a new
+/// row, so an agent retrying in a loop doesn't fill the inbox.
+pub(super) async fn gate_action(ctx: &Context<'_>, action: &str, payload: Value) -> Result<()> {
+    let pool = ctx.data::<SqlitePool>()?;
+    if !required_actions(pool).await?.contains(&action) {
+        return Ok(());
+    }
+    let open: Vec<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT id, question, action_payload FROM approvals WHERE status = 'pending' AND action = ? \
+         ORDER BY requested_at DESC LIMIT 200",
+    )
+    .bind(action)
+    .fetch_all(pool)
+    .await?;
+    let duplicate = open.into_iter().find(|(_, _, p)| {
+        p.as_deref().and_then(|p| serde_json::from_str::<Value>(p).ok()).is_some_and(|p| p == payload)
+    });
+    let (id, question) = match duplicate {
+        Some((id, question, _)) => (id, question),
+        None => {
+            let parent = ctx.data::<RequestFrom>()?.conversation.clone();
+            let (id, now, question) = (super::codec::new_id(), now_stored(), describe_action(action, &payload));
+            let dumped = crate::pyjson::dumps(&payload);
+            let args_json: String = dumped.chars().take(2000).collect();
+            let label = action_label(action);
+            sqlx::query(
+                "INSERT INTO approvals (id, source, kind, status, question, label, tool, args_json, action, \
+                 action_payload, parent_id, requested_at, updated_at) \
+                 VALUES (?, 'chat', 'approval', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(&question)
+            .bind(label)
+            .bind(action)
+            .bind(&args_json)
+            .bind(action)
+            .bind(&dumped)
+            .bind(&parent)
+            .bind(&now)
+            .bind(&now)
+            .execute(pool)
+            .await?;
+            // `announce_request`: the conversation that asked is told it didn't happen.
+            let shown = match serde_json::from_str::<Value>(&args_json) {
+                Ok(v @ Value::Object(_)) => v,
+                _ => json!({}),
+            };
+            let run = live_run(ctx.data::<Arc<Registry>>()?, parent.as_deref());
+            emit(
+                run.as_ref(),
+                "approval_request",
+                &json!({
+                    "tool": action,
+                    "reason": format!("{label} was recorded, not performed \u{2014} it runs only once you approve it."),
+                    "args": shown,
+                    "approval_id": id,
+                    "deferred": true,
+                }),
+            );
+            (id, question)
+        }
+    };
+    Err(format!(
+        "Approval required: {question} (approval id {id}). It is now pending in /approvals; the action runs only once a human approves it."
+    )
+    .into())
 }
 
 /// `resolve_approval_row`: out of `pending`, unless it was answered a moment
@@ -108,12 +226,12 @@ async fn close(pool: &SqlitePool, id: &str, status: &str, answer: &str, result: 
 
 /// `core/approvals.py:ACTIONS[action].execute` for an approved deferred
 /// action — run before the row is closed, so a failure leaves it pending
-/// and answerable. A payload only Python would read (or fail on) faithfully
-/// goes to Python.
+/// and answerable.
 async fn execute(ctx: &Context<'_>, action: &str, payload: Option<&str>) -> Result<String> {
-    let payload: Value = serde_json::from_str(payload.unwrap_or("{}")).map_err(|_| defer("unreadable payload".into()))?;
+    let payload: Value = serde_json::from_str(payload.unwrap_or("{}"))
+        .map_err(|e| format!("the approval's payload is not valid JSON: {e}"))?;
     let id = |key: &str| -> Result<String> {
-        payload.get(key).and_then(Value::as_str).map(str::to_string).ok_or_else(|| defer(format!("payload without {key}")))
+        payload.get(key).and_then(Value::as_str).map(str::to_string).ok_or_else(|| format!("the approval's payload has no {key}").into())
     };
     let pool: &SqlitePool = ctx.data()?;
     let (deleted, gone) = match action {
@@ -162,9 +280,6 @@ impl ApprovalMutation {
         }
         if row.source == approvals::GATE_SOURCE {
             let run = run_of(registry, row.task_id.as_deref(), row.parent_id.as_deref());
-            if run.as_ref().is_some_and(|r| r.claimed()) {
-                return Err(defer("the gated run is a worker's".into()));
-            }
             let (status, result) =
                 if approved { ("approved", "Released the waiting call.") } else { ("denied", "The call was not run.") };
             close(pool, &id, status, answer, result).await?;
@@ -178,16 +293,12 @@ impl ApprovalMutation {
             let after = self::row(pool, &id).await?.ok_or("approval not found")?;
             return Ok(ResolveApprovalPayload { id, status: after.status, result: after.result });
         }
-        // A workflow the edge runs: its paused node reads the answer off the row.
-        if let Some(run) = row.task_id.as_deref().and_then(|t| registry.get(t)).filter(|r| r.edge_owned() && !r.fields().done) {
+        // A workflow run: its paused node reads the answer off the row.
+        if let Some(run) = row.task_id.as_deref().and_then(|t| registry.get(t)).filter(|r| !r.fields().done) {
             let status = if row.kind == "input" { "answered" } else if approved { "approved" } else { "denied" };
             close(pool, &id, status, answer, "Delivered to the run.").await?;
             run.emit_local("interrupt_resolved", &json!({"interrupt_id": row.interrupt_id}));
             return Ok(ResolveApprovalPayload { id, status: status.into(), result: Some("Delivered to the run.".into()) });
-        }
-        // A worker's paused run waits in Python.
-        if row.task_id.as_deref().and_then(|t| registry.get(t)).is_some_and(|r| r.claimed()) {
-            return Err(defer("a paused run waits in Python".into()));
         }
         // The run is gone (restart, crash, or it moved on): say so instead of
         // reporting success for an answer nobody received.
@@ -217,8 +328,7 @@ impl ApprovalMutation {
         let args = if args_json.is_empty() {
             json!({})
         } else {
-            // Python words the parse error from its own parser.
-            serde_json::from_str::<Value>(&args_json).map_err(|_| defer("args_json is not JSON".into()))?
+            serde_json::from_str::<Value>(&args_json).map_err(|e| format!("args_json is not valid JSON: {e}"))?
         };
         if !args.is_object() {
             return Err("args_json must be a JSON object".into());
@@ -226,9 +336,6 @@ impl ApprovalMutation {
         let conversation = conversation_id.filter(|c| !c.is_empty()).or_else(|| from.conversation.clone());
         let registry = ctx.data::<Arc<Registry>>()?;
         let run = live_run(registry, conversation.as_deref());
-        if run.as_ref().is_some_and(|r| r.claimed()) {
-            return Err(defer("the asking run is a worker's".into()));
-        }
         let request = approvals::create(
             ctx.data()?,
             &tool_key,

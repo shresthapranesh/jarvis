@@ -273,12 +273,19 @@ impl AutomationMutation {
         Automation::by_id(pool, &raw).await?.ok_or_else(|| "automation not found".into())
     }
 
-    // The human path only: an agent's delete is approval-gated, and the
-    // router sends it to Python (`router.rs`). Its runs go with it, as the
-    // ORM cascade takes them, and so does a stateful automation's
-    // conversation.
+    // An agent's delete may need a human's approval first (`gate_action`),
+    // asked before anything is unscheduled. Its runs go with it, as the ORM
+    // cascade takes them, and so does a stateful automation's conversation.
     async fn delete_automation(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
+        if ctx.data::<super::RequestFrom>()?.caller == super::router::Caller::Agent {
+            let pool: &SqlitePool = ctx.data()?;
+            let name: Option<String> =
+                sqlx::query_scalar("SELECT name FROM automations WHERE id = ?").bind(&raw).fetch_optional(pool).await?;
+            let name = name.ok_or("automation not found")?;
+            let payload = serde_json::json!({"automation_id": raw, "name": name});
+            super::approval::gate_action(ctx, "delete_automation", payload).await?;
+        }
         if !delete_automation(ctx.data()?, &raw, ctx.data()?).await? {
             return Err("automation not found".into());
         }

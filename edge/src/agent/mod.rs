@@ -1,26 +1,12 @@
-//! The edge's agent runtime (phase 2d): chat turns run here instead of in
-//! Python, so a conversation needs no Python process at all.
+//! The agent runtime: every chat turn, automation run, board task and
+//! workflow run.
 //!
-//! A turn is routed when it is queued (`route.rs`): one the edge can serve
-//! start to finish gets `jobs.runtime = 'edge'`, and its run is mirrored as
-//! the edge's own (`runs.rs`), so the supervisor doesn't start Python for
-//! it. This loop claims those jobs (`queue.rs`) under the same one-turn-per-
-//! conversation lease Python's workers use, renews their locks, and runs
-//! them. A turn that needs something only Python has is handed over: the job
-//! goes back to pending with `runtime` cleared and what the turn carried in
-//! its payload, and Python's chat handler continues it.
-//!
-//! Python never claims, reaps or sweeps an edge job. The edge recovers its
-//! own at start (`queue::recover`), and Python running without the edge
-//! adopts them (`db/ops.py:adopt_edge_jobs`).
-//!
-//! Workflow runs are claimed here too, and run by the edge's port of the
-//! workflow engine (`workflow/`).
-//!
-//! The turn itself (`turn.rs`) runs the model and the tools the edge has
-//! (`tools.rs`) against the transcript tables (`thread.rs`), with the
-//! prompt built as Python builds it (`prompt.rs`) and its events and step
-//! rows as Python emits them (`events.rs`).
+//! This loop claims jobs (`queue.rs`) under a one-turn-per-conversation
+//! lease, renews their locks, and runs them. The turn itself (`turn.rs`)
+//! runs the model and the bound tools (`tools.rs`) against the transcript
+//! tables (`thread.rs`), with the prompt built by `prompt.rs` and its events
+//! and step rows by `events.rs`. Workflow runs go to the workflow engine
+//! (`workflow/`).
 
 mod artifacts;
 mod automation;
@@ -31,7 +17,6 @@ mod files;
 mod prompt;
 mod queue;
 pub mod retrieve;
-pub mod route;
 mod summarize;
 mod sweep;
 mod thread;
@@ -45,7 +30,6 @@ pub use queue::EDGE as EDGE_RUNTIME;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde_json::Value;
 use sqlx::SqlitePool;
 use tokio::sync::Semaphore;
 
@@ -83,9 +67,6 @@ enum Outcome {
     Finished,
     /// Couldn't begin (`fail_start`): the job fails with this.
     Failed(String),
-    /// Python runs the rest: the job is released to it, carrying the turn so
-    /// far (`None`: nothing ran here, Python starts it from the beginning).
-    HandOver(Option<Value>),
 }
 
 impl Agent {
@@ -111,23 +92,14 @@ impl Agent {
         })
     }
 
-    /// Recover what a previous edge left and sweep up what a crash left
-    /// behind (`sweep.rs`), then claim and run edge jobs until the process
-    /// ends. With the agent loop off, only the recovery: every edge job goes
-    /// to Python, whose start sweeps.
+    /// Recover the jobs a previous process left running and sweep up what a
+    /// crash left behind (`sweep.rs`), then claim and run jobs until the
+    /// process ends.
     pub async fn run(self: Arc<Self>) {
-        let serving = route::enabled();
-        match queue::recover(&self.pool, serving).await {
+        match queue::recover(&self.pool).await {
             Ok(0) => {}
-            Ok(n) if serving => tracing::info!("agent: {n} job(s) a previous edge was running are pending again"),
-            Ok(n) => {
-                tracing::info!("agent: handed {n} edge job(s) to Python (JARVIS_AGENT_RUNTIME is not edge)");
-                self.runs.wake();
-            }
+            Ok(n) => tracing::info!("agent: {n} job(s) a previous process was running are pending again"),
             Err(e) => tracing::warn!("agent: recovering jobs: {e}"),
-        }
-        if !serving {
-            return;
         }
         // Before the first claim: a run claimed now is no zombie.
         sweep::run(&self.pool, &self.kernels, &self.artifacts_dir).await;
@@ -157,12 +129,7 @@ impl Agent {
     /// One claimed job, start to finish, its lock renewed meanwhile.
     async fn process(self: &Arc<Self>, job: Job) {
         let meta = self.meta(&job).await;
-        let Some(run) = self.runs.take(&job.id, || meta) else {
-            // A worker has the run under this id — not ours to touch.
-            tracing::warn!("agent: job {} is a worker's run; handing it back", job.id);
-            self.hand_over(&job, None, None).await;
-            return;
-        };
+        let run = self.runs.take(&job.id, || meta);
         let outcome = tokio::select! {
             outcome = self.serve(&job, &run) => outcome,
             () = self.keep_lock(&job.id) => {
@@ -181,7 +148,6 @@ impl Agent {
                 Ok(_) => self.runs.wake(),
                 Err(e) => tracing::error!("agent: failing job {}: {e}", job.id),
             },
-            Outcome::HandOver(carried) => self.hand_over(&job, Some(&run), carried).await,
         }
     }
 
@@ -232,9 +198,7 @@ impl Agent {
     }
 
     /// `board_task_job_handler`: a task that is gone, done or archived has
-    /// nothing to run; otherwise the claim is re-asserted and the task runs —
-    /// checked before anything is written, so a task Python takes instead
-    /// still has its answer.
+    /// nothing to run; otherwise the claim is re-asserted and the task runs.
     async fn serve_board(&self, job: &Job, run: &Arc<Run>) -> Outcome {
         let spec = match board::load(&self.pool, job).await {
             Ok(Some(spec)) => spec,
@@ -261,9 +225,8 @@ impl Agent {
         }
     }
 
-    /// `watch_queue_cancel`: a stop that reached only the job — through
-    /// Python, or a stop mutation the edge doesn't serve — still stops the
-    /// run. Polled as often as Python polls. Never returns.
+    /// `watch_queue_cancel`: a stop that reached only the job (one written
+    /// before the run was taken, say) still stops the run. Never returns.
     async fn watch_cancel(&self, id: &str, run: &Arc<Run>) {
         loop {
             tokio::time::sleep(CANCEL_POLL).await;
@@ -332,21 +295,8 @@ impl Agent {
         self.runs.retire(&run.id);
     }
 
-    /// Release the job to Python and wake it.
-    async fn hand_over(&self, job: &Job, run: Option<&Arc<Run>>, carried: Option<Value>) {
-        // Pending in the mirror first, so the worker's claim continues the run.
-        if let Some(run) = run {
-            self.runs.release(run);
-        }
-        match queue::release(&self.pool, job, &self.worker, carried).await {
-            Ok(true) => self.runs.wake(),
-            Ok(false) => tracing::warn!("agent: job {} was no longer ours to hand over", job.id),
-            Err(e) => tracing::error!("agent: handing job {} to Python: {e}", job.id),
-        }
-    }
-
-    /// Renew the job's lock at a third of its TTL, as the Python worker's
-    /// heartbeat does. Returns only when the lock is lost.
+    /// Renew the job's lock at a third of its TTL. Returns only when the
+    /// lock is lost.
     async fn keep_lock(&self, id: &str) {
         let every = queue::LOCK_TTL / 3;
         loop {
@@ -360,10 +310,10 @@ impl Agent {
         }
     }
 
-    /// The run as its trigger mirrored it, for one the mirror lost: the
-    /// edge restarted between the trigger and this claim.
-    /// A scheduled automation's run is first mirrored here: the schedule
-    /// enqueues it without one, as Python's handler registers it on claim.
+    /// The run as its trigger registered it, for one the registry lost: the
+    /// server restarted between the trigger and this claim. A scheduled
+    /// automation's run is first registered here: the schedule enqueues it
+    /// without one.
     async fn meta(&self, job: &Job) -> Meta {
         let (label, parent_id) = if job.kind == "board_task" {
             let id = job.payload["task_id"].as_str().unwrap_or_default().to_string();

@@ -232,7 +232,7 @@ impl ConversationQuery {
                 other => other?,
             };
         let raw = match row.flatten().filter(|raw| !raw.is_empty()) {
-            Some(raw) => serde_json::from_str(&raw).map_err(|e| super::defer(format!("todos: {e}")))?,
+            Some(raw) => serde_json::from_str(&raw).map_err(|e| format!("the stored todo list is not valid JSON: {e}"))?,
             None => Value::Array(vec![]),
         };
         let todos = crate::agent::tools::normalise_todos(raw.as_array().map_or(&[], Vec::as_slice));

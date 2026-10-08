@@ -1,7 +1,4 @@
 //! Relay's `node(id:)` — the refetch entrypoint `@refetchable` fragments use.
-//!
-//! The edge resolves the Node types in [`NODE_TYPES`]; for any other id the
-//! router sends the operation to Python (`router::owns_node_id`).
 
 use async_graphql::{Context, ID, Interface, Object, Result};
 use sqlx::SqlitePool;
@@ -14,22 +11,6 @@ use super::conversation::{Conversation, Message};
 use super::project::Project;
 use super::settings_lists::{NotificationChannel, Skill};
 use super::workflow::{Workflow, WorkflowRun};
-
-/// Node types this schema can resolve. Keep in step with [`Node`] and
-/// [`resolve`].
-pub const NODE_TYPES: &[&str] = &[
-    "Artifact",
-    "Automation",
-    "AutomationRun",
-    "BoardTask",
-    "Conversation",
-    "Message",
-    "NotificationChannel",
-    "Project",
-    "Skill",
-    "Workflow",
-    "WorkflowRun",
-];
 
 #[derive(Interface)]
 #[graphql(field(name = "id", ty = "ID", desc = "The Globally Unique ID of this object"))]

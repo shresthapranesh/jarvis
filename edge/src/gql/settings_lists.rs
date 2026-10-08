@@ -366,10 +366,17 @@ impl ListsMutation {
         Skill::by_id(pool, &raw).await?.ok_or_else(|| "skill not found".into())
     }
 
-    // The human path only: an agent's delete is approval-gated, and the
-    // router sends `X-Jarvis-Caller: agent` requests for it to Python.
+    // An agent's delete may need a human's approval first (`gate_action`).
     async fn delete_skill(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
+        let pool: &SqlitePool = ctx.data()?;
+        let name: Option<String> =
+            sqlx::query_scalar("SELECT name FROM skills WHERE id = ?").bind(&raw).fetch_optional(pool).await?;
+        let name = name.ok_or("skill not found")?;
+        if ctx.data::<super::RequestFrom>()?.caller == super::router::Caller::Agent {
+            let payload = serde_json::json!({"skill_id": raw, "name": name});
+            super::approval::gate_action(ctx, "delete_skill", payload).await?;
+        }
         if !delete_skill(ctx.data()?, &raw).await? {
             return Err("skill not found".into());
         }

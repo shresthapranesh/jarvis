@@ -69,8 +69,8 @@ pub enum Cmd {
 }
 
 pub async fn run(pool: &SqlitePool, cmd: Cmd) -> Done {
-    // `_run_db` hydrates the catalog first, and a catalog Python can't load
-    // fails there — before anything is written.
+    // The catalog is loaded first, so one that can't be read fails before
+    // anything is written.
     let (default, specs) = loaded(pool).await?;
     match cmd {
         Cmd::List => {
@@ -195,18 +195,13 @@ async fn sync(pool: &SqlitePool, specs: &[Spec], provider: Option<String>, probe
                 findings.push(Finding::Skipped(why));
                 continue;
             }
-            Err(discovery::Fail::Defer(why)) => return Err(Fail::Error(format!("model sync {prov}: {why}"))),
         };
         let report = discovery::build_report(prov, specs, &found);
         let mut unreachable = vec![];
         if probe {
             for spec in specs.iter().filter(|s| &s.provider == prov) {
-                match discovery::probe(spec, &ends).await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(why)) => unreachable.push((spec.id.clone(), why)),
-                    Err(discovery::Fail::Skip(why) | discovery::Fail::Defer(why)) => {
-                        return Err(Fail::Error(format!("probing {}: {why}", spec.id)));
-                    }
+                if let Err(why) = discovery::probe(spec, &ends).await {
+                    unreachable.push((spec.id.clone(), why));
                 }
             }
         }

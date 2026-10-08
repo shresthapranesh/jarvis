@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::codec::{DateTime, now_stored};
-use super::{EdgeData, defer};
+use super::EdgeData;
 
 /// One discrete memory (kind = core | fact). Raw DB id; `updatedAt` is a
 /// plain string here, not the `DateTime` scalar, as in the Python type.
@@ -134,8 +134,7 @@ async fn kv_get(tx: &mut Transaction<'_, Sqlite>, key: &str) -> Result<Option<Va
         .bind(key)
         .fetch_optional(&mut **tx)
         .await?;
-    // A value only Python reads faithfully (not JSON) is Python's to answer.
-    raw.map(|r| serde_json::from_str(&r).map_err(|_| defer("kv_store value is not JSON".into()))).transpose()
+    raw.map(|r| serde_json::from_str(&r).map_err(|e| format!("the stored memory is not valid JSON: {e}").into())).transpose()
 }
 
 /// `KvStore.aput`: insert, or replace the value (and bump `updated_at`).
@@ -207,12 +206,12 @@ impl MemoryQuery {
             Some(Value::Array(lines)) if lines.iter().all(Value::is_string) => {
                 lines.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n")
             }
-            Some(_) => return Err(defer("agent memory content Python would coerce".into())),
+            Some(other) => crate::pyjson::py_str(other),
         };
         let modified_at = match value.get("modified_at") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) => Some(s.clone()),
-            Some(_) => return Err(defer("agent memory modified_at Python would coerce".into())),
+            Some(other) => Some(crate::pyjson::py_str(other)),
         };
         Ok(Memory { content, exists: true, modified_at })
     }
@@ -292,11 +291,8 @@ impl MemoryMutation {
         Ok(Memory { content, exists: true, modified_at: Some(now) })
     }
 
-    // A consolidation pass now. With the agent loop off, Python's.
+    // A consolidation pass now.
     async fn consolidate_memory(&self, ctx: &Context<'_>, model: Option<String>) -> Result<String> {
-        if !crate::agent::route::enabled() {
-            return Err(defer("JARVIS_AGENT_RUNTIME=python".into()));
-        }
         let pool: &SqlitePool = ctx.data()?;
         Ok(crate::consolidate::memory::consolidate(pool, &ctx.data::<EdgeData>()?.http, model.as_deref()).await?)
     }

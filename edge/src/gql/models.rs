@@ -8,18 +8,15 @@
 //! (`crate::catalog`). A write rewrites one of those rows (`default.model`
 //! too), and a linked Python re-reads them into the caches it holds.
 
-use std::sync::Arc;
 
 use async_graphql::{Context, InputObject, Object, Result, SimpleObject};
 use serde_json::{Map, Value, json};
 use sqlx::{SqliteConnection, SqlitePool};
 
-use super::defer;
-use super::settings::{tell_worker, upsert};
+use super::settings::upsert;
 use crate::catalog;
 use crate::pyjson;
 use crate::pystr;
-use crate::runs::Registry;
 
 #[derive(SimpleObject)]
 pub struct ModelSpec {
@@ -60,8 +57,7 @@ async fn load(pool: &SqlitePool) -> Result<ModelCatalog> {
     let discoverable_providers = with_endpoints(catalog::DISCOVERABLE_PROVIDERS);
     let (default, specs) = catalog::catalog(pool)
         .await?
-        // A row Python itself would fail on: let it give its own error.
-        .map_err(|e| defer(format!("models.custom: {}", e.0)))?;
+        .map_err(|e| unreadable(&e.0))?;
     Ok(ModelCatalog {
         default,
         available: specs
@@ -138,9 +134,14 @@ pub(crate) fn has_id(row: &Map<String, Value>, id: &str) -> bool {
     row.get("id").and_then(Value::as_str) == Some(id)
 }
 
-/// Before a write: a catalog Python would fail to load is Python's to word.
+/// The custom models setting can't be read as a model list.
+pub(crate) fn unreadable(why: &str) -> async_graphql::Error {
+    format!("the custom models setting (models.custom) can't be read: {why}").into()
+}
+
+/// Before a write: the catalog as it stands must load.
 async fn loadable(pool: &SqlitePool) -> Result<()> {
-    catalog::catalog(pool).await?.map(|_| ()).map_err(|e| defer(format!("models.custom: {}", e.0)))
+    catalog::catalog(pool).await?.map(|_| ()).map_err(|e| unreadable(&e.0))
 }
 
 /// `_validated`: the normalized id and provider of a custom model.
@@ -167,8 +168,7 @@ async fn validated(pool: &SqlitePool, id: &str, provider: Option<&str>) -> Resul
     Ok((model_id.to_string(), prov.to_string()))
 }
 
-/// `int(x)` of a stored window, where Python's answer is plain; anything
-/// else (it would raise mid-batch) defers.
+/// `int(x)` of a stored window.
 fn py_int(v: &Value) -> Result<i64> {
     let plain = match v {
         Value::Bool(b) => Some(i64::from(*b)),
@@ -180,7 +180,7 @@ fn py_int(v: &Value) -> Result<i64> {
         }
         _ => None,
     };
-    plain.ok_or_else(|| defer(format!("context_window {v}")))
+    plain.ok_or_else(|| format!("context_window {v} is not a whole number").into())
 }
 
 /// `add_custom_model`: upsert by id, moved to the end. No window keeps the
@@ -234,10 +234,8 @@ pub struct DiscoveredModelInput {
 pub struct ModelsMutation;
 
 impl ModelsMutation {
-    /// Commit, tell a linked Python, and return the catalog as it now is
-    /// (`_catalog_changed`).
-    async fn changed(ctx: &Context<'_>, key: &str) -> Result<ModelCatalog> {
-        tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
+    /// The catalog as it now is (`_catalog_changed`).
+    async fn changed(ctx: &Context<'_>) -> Result<ModelCatalog> {
         load(ctx.data()?).await
     }
 
@@ -265,7 +263,7 @@ impl ModelsMutation {
         add_custom(&mut rows, &model_id, &label_or(label, &model_id), &prov, None)?;
         put_custom(&mut tx, rows).await?;
         tx.commit().await?;
-        Self::changed(ctx, CUSTOM).await
+        Self::changed(ctx).await
     }
 }
 
@@ -311,7 +309,7 @@ impl ModelsMutation {
         }
         put_custom(&mut tx, rows).await?;
         tx.commit().await?;
-        Self::changed(ctx, CUSTOM).await
+        Self::changed(ctx).await
     }
 
     /// Remove a custom model; a default that named it goes back to the seed.
@@ -334,7 +332,7 @@ impl ModelsMutation {
             upsert(&mut tx, DEFAULT, catalog::seed_model()).await?;
         }
         tx.commit().await?;
-        Self::changed(ctx, CUSTOM).await
+        Self::changed(ctx).await
     }
 
     /// Persist the default model used when a request names none.
@@ -347,7 +345,7 @@ impl ModelsMutation {
         let mut tx = crate::db::write_tx(pool).await?;
         upsert(&mut tx, DEFAULT, &id).await?;
         tx.commit().await?;
-        Self::changed(ctx, DEFAULT).await
+        Self::changed(ctx).await
     }
 
     /// Name an OpenAI-compatible server.
@@ -372,7 +370,7 @@ impl ModelsMutation {
         rows.push(row);
         put_endpoints(&mut tx, rows).await?;
         tx.commit().await?;
-        Self::changed(ctx, ENDPOINTS).await
+        Self::changed(ctx).await
     }
 
     /// Change an endpoint's URL or key; an absent key keeps the stored one.
@@ -399,7 +397,7 @@ impl ModelsMutation {
         }
         put_endpoints(&mut tx, rows).await?;
         tx.commit().await?;
-        Self::changed(ctx, ENDPOINTS).await
+        Self::changed(ctx).await
     }
 
     /// Remove an endpoint no custom model uses.
@@ -422,7 +420,7 @@ impl ModelsMutation {
         }
         put_endpoints(&mut tx, rows.into_iter().filter(|r| r.get("name") != Some(&json!(name))).collect()).await?;
         tx.commit().await?;
-        Self::changed(ctx, ENDPOINTS).await
+        Self::changed(ctx).await
     }
 }
 

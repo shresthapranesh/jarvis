@@ -5,24 +5,25 @@
 //! sees the same tool list whichever runtime calls it — and a cached prefix
 //! stays byte-stable when a conversation moves between them.
 //!
-//! The edge runs `run_cell`, `write_artifact`, the todo tools, `remember`,
-//! `spawn_workers` (`workers.rs`, whose roles' tools are in `tools.json` too)
-//! and the `always` MCP servers' tools (whose schemas are converted as
-//! `convert_to_openai_tool` converts them, `mcp::llm_tool`), a call a human
-//! must approve once they have (`Step::Gated`), and `run_workflow`
-//! (`workflow/`). A call whose arguments aren't plainly valid is Python's: the batch is
-//! handed over (`Plan::Python`) and Python runs it, validating and gating as
-//! it always has.
+//! The bound tools are `run_cell`, `write_artifact`, the todo tools,
+//! `remember`, `spawn_workers` (`workers.rs`, whose roles' tools are in
+//! `tools.json` too), `run_workflow` (`workflow/`), the board tools on a
+//! board run, and the `always` MCP servers' tools (whose schemas are
+//! converted as `convert_to_openai_tool` converts them, `mcp::llm_tool`). A
+//! call a human must approve waits for them (`Step::Gated`). A call naming no
+//! bound tool, or with arguments its signature won't take (`Args`), is
+//! answered with an error the model can fix (`Step::Refused`).
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sqlx::SqlitePool;
 
 use crate::llm::Tool;
 use crate::llm::transcript::ToolCall;
+use crate::pyjson;
 
 static SCHEMAS: LazyLock<Vec<Tool>> = LazyLock::new(|| {
     serde_json::from_str(include_str!("tools.json")).expect("tools.json is a list of tool schemas")
@@ -147,16 +148,6 @@ pub enum Native {
     Mcp { server: String, tool: String, args: Value },
 }
 
-/// How a batch of calls will run.
-#[derive(Debug, PartialEq)]
-pub enum Plan {
-    /// Every call is the edge's: unknown tools get ToolNode's error, the rest
-    /// run here.
-    Edge(Vec<Step>),
-    /// Something in it is Python's; the batch goes over whole.
-    Python(String),
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Step {
     Run(Native),
@@ -164,8 +155,9 @@ pub enum Step {
     Gated(Native),
     /// A gated call a human said no to (or let time out): its answer.
     Denied(String),
-    /// ToolNode's answer to a call naming no bound tool.
-    Unknown(String),
+    /// Answered with an error without running: ToolNode's for a call naming
+    /// no bound tool, `invoke_tool`'s for arguments that don't fit.
+    Refused(String),
 }
 
 /// `_UNKNOWN_TOOL`, naming each bound tool once.
@@ -179,95 +171,243 @@ pub fn unknown_tool(name: &str, bound: &[Tool]) -> String {
     format!("Error: {name} is not a valid tool, try one of [{}].", names.join(", "))
 }
 
-pub fn plan(calls: &[ToolCall], bound: &Toolset, policy: &Policy) -> Plan {
-    let mut steps = vec![];
-    for call in calls {
-        if !bound.schemas.iter().any(|t| t.name == call.name) {
-            steps.push(Step::Unknown(unknown_tool(&call.name, &bound.schemas)));
-            continue;
-        }
-        let found = match bound.mcp.get(&call.name) {
-            Some(server) => call.args.is_object().then(|| Native::Mcp {
-                server: server.clone(),
-                tool: call.name.clone(),
-                args: call.args.clone(),
-            }),
-            None => native(&call.name, &call.args),
-        };
-        match found {
-            Some(n) if policy.needs_approval(&call.name) => steps.push(Step::Gated(n)),
-            Some(n) => steps.push(Step::Run(n)),
-            None => return Plan::Python(format!("{} runs in Python", call.name)),
-        }
-    }
-    Plan::Edge(steps)
+/// What each call of a batch comes to.
+pub fn plan(calls: &[ToolCall], bound: &Toolset, policy: &Policy) -> Vec<Step> {
+    calls
+        .iter()
+        .map(|call| {
+            if !bound.schemas.iter().any(|t| t.name == call.name) {
+                return Step::Refused(unknown_tool(&call.name, &bound.schemas));
+            }
+            let found = match bound.mcp.get(&call.name) {
+                // The server checks the rest.
+                Some(server) if call.args.is_object() => {
+                    Ok(Native::Mcp { server: server.clone(), tool: call.name.clone(), args: call.args.clone() })
+                }
+                Some(_) => Err(bad_args(&call.name, &call.args, &["Input should be a valid dictionary".into()])),
+                None => native(&call.name, &call.args),
+            };
+            match found {
+                Ok(n) if policy.needs_approval(&call.name) => Step::Gated(n),
+                Ok(n) => Step::Run(n),
+                Err(error) => Step::Refused(error),
+            }
+        })
+        .collect()
 }
 
-/// The call as a native one, if its arguments are exactly what its schema
-/// asks for. Anything Pydantic would coerce, default or reject is left to
-/// Python, which says it the way the model has always been told.
-fn native(name: &str, args: &Value) -> Option<Native> {
-    let obj = args.as_object()?;
-    let only = |keys: &[&str]| obj.keys().all(|k| keys.contains(&k.as_str()));
-    match name {
-        "run_cell" if only(&["code"]) => Some(Native::RunCell { code: obj.get("code")?.as_str()?.to_string() }),
-        "write_todos" if only(&["todos"]) => {
-            let todos = obj.get("todos")?.as_array()?.iter().map(|t| t.as_str().map(str::to_string)).collect::<Option<_>>()?;
-            Some(Native::WriteTodos { todos })
+/// The call as its tool's signature takes it, or the error the model gets.
+fn native(name: &str, args: &Value) -> Result<Native, String> {
+    let Value::Object(obj) = args else {
+        return Err(bad_args(name, args, &["Input should be a valid dictionary".into()]));
+    };
+    let mut a = Args::new(obj);
+    let call = match name {
+        "run_cell" => Native::RunCell { code: a.str("code") },
+        "write_todos" => Native::WriteTodos { todos: a.str_list("todos") },
+        "set_todo_status" => {
+            Native::SetTodoStatus { index: a.int("index"), status: a.choice("status", &["pending", "in_progress", "done"]) }
         }
-        "set_todo_status" if only(&["index", "status"]) => {
-            let index = obj.get("index")?.as_i64()?;
-            let status = obj.get("status")?.as_str()?;
-            ["pending", "in_progress", "done"].contains(&status).then(|| Native::SetTodoStatus { index, status: status.into() })
+        "remember" => Native::Remember { text: a.str("text"), kind: a.str_or("kind", "fact") },
+        "write_artifact" => Native::WriteArtifact {
+            title: a.str("title"),
+            content: a.opt_str("content"),
+            file_path: a.opt_str("file_path"),
+            artifact_id: a.opt_str("artifact_id"),
+        },
+        "complete_task" => Native::CompleteTask { summary: a.str("summary"), metadata: a.opt_str("metadata") },
+        "block_task" => Native::BlockTask { reason: a.str("reason"), needs_input: a.bool("needs_input", false) },
+        "spawn_workers" => {
+            let raw = a.value("tasks");
+            let tasks = raw.and_then(super::workers::tasks);
+            if raw.is_some() && tasks.is_none() {
+                a.fail("tasks", "Input should be a list of objects, each with a string `task` and an optional string `role`");
+            }
+            Native::SpawnWorkers { tasks: tasks.unwrap_or_default() }
         }
-        "remember" if only(&["text", "kind"]) => {
-            let text = obj.get("text")?.as_str()?.to_string();
-            let kind = match obj.get("kind") {
-                None => "fact".to_string(),
-                Some(k) => k.as_str()?.to_string(),
-            };
-            Some(Native::Remember { text, kind })
+        "run_workflow" => Native::RunWorkflow { workflow_id: a.str("workflow_id"), inputs_json: a.opt_str("inputs_json") },
+        other => return Err(format!("Error: {other} has no handler.")),
+    };
+    a.finish(name, args, call)
+}
+
+/// `_BAD_ARGS`.
+fn bad_args(tool: &str, args: &Value, errors: &[String]) -> String {
+    format!(
+        "Error invoking tool '{tool}' with kwargs {} with error:\n {}\n Please fix the error and try again.",
+        pyjson::py_repr(args),
+        errors.join("\n")
+    )
+}
+
+/// A call's arguments read as its tool's signature takes them — Pydantic's
+/// lax mode: extra keys ignored, an integer from a whole float or a numeric
+/// string, a boolean from 0/1 or a word. What doesn't fit is collected, and
+/// the model is told all of it at once (`finish`).
+pub(super) struct Args<'v> {
+    args: &'v Map<String, Value>,
+    errors: Vec<String>,
+}
+
+impl<'v> Args<'v> {
+    pub fn new(args: &'v Map<String, Value>) -> Self {
+        Args { args, errors: vec![] }
+    }
+
+    /// The call, or `invoke_tool`'s answer naming everything that was wrong.
+    pub fn finish<T>(self, tool: &str, raw: &Value, call: T) -> Result<T, String> {
+        if self.errors.is_empty() { Ok(call) } else { Err(bad_args(tool, raw, &self.errors)) }
+    }
+
+    pub fn fail(&mut self, key: &str, msg: &str) {
+        self.errors.push(format!("{key}: {msg}"));
+    }
+
+    pub fn str(&mut self, key: &str) -> String {
+        match self.args.get(key) {
+            Some(Value::String(s)) => s.clone(),
+            None => {
+                self.fail(key, "Field required");
+                String::new()
+            }
+            Some(_) => {
+                self.fail(key, "Input should be a valid string");
+                String::new()
+            }
         }
-        "write_artifact" if only(&["title", "content", "file_path", "artifact_id"]) => {
-            // Each optional one a string or null; anything else is Pydantic's to word.
-            let opt = |key: &str| match obj.get(key) {
-                None | Some(Value::Null) => Some(None),
-                Some(Value::String(s)) => Some(Some(s.clone())),
-                Some(_) => None,
-            };
-            Some(Native::WriteArtifact {
-                title: obj.get("title")?.as_str()?.to_string(),
-                content: opt("content")?,
-                file_path: opt("file_path")?,
-                artifact_id: opt("artifact_id")?,
-            })
+    }
+
+    pub fn opt_str(&mut self, key: &str) -> Option<String> {
+        match self.args.get(key) {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => {
+                self.fail(key, "Input should be a valid string");
+                None
+            }
         }
-        "complete_task" if only(&["summary", "metadata"]) => {
-            let summary = obj.get("summary")?.as_str()?.to_string();
-            let metadata = match obj.get("metadata") {
-                None | Some(Value::Null) => None,
-                // Not JSON at all: Python words that error from its parser.
-                Some(m) => Some(m.as_str().filter(|m| serde_json::from_str::<Value>(m).is_ok())?.to_string()),
-            };
-            Some(Native::CompleteTask { summary, metadata })
+    }
+
+    pub fn opt_int(&mut self, key: &str) -> Option<i64> {
+        match self.args.get(key) {
+            None | Some(Value::Null) => None,
+            Some(v) => self.as_int(key, v),
         }
-        "block_task" if only(&["reason", "needs_input"]) => {
-            let reason = obj.get("reason")?.as_str()?.to_string();
-            let needs_input = match obj.get("needs_input") {
-                None => false,
-                Some(b) => b.as_bool()?,
-            };
-            Some(Native::BlockTask { reason, needs_input })
+    }
+
+    pub fn as_int(&mut self, key: &str, v: &Value) -> Option<i64> {
+        let n = match v {
+            Value::Bool(b) => Some(i64::from(*b)),
+            Value::Number(n) => match (n.as_i64(), n.as_f64()) {
+                (Some(i), _) => Some(i),
+                (None, Some(f)) if f.fract() == 0.0 && f.abs() < 9.2e18 => Some(f as i64),
+                (None, Some(_)) => {
+                    self.fail(key, "Input should be a valid integer, got a number with a fractional part");
+                    return None;
+                }
+                _ => None,
+            },
+            Value::String(s) => match s.trim().parse::<i64>() {
+                Ok(i) => Some(i),
+                Err(_) => {
+                    self.fail(key, "Input should be a valid integer, unable to parse string as an integer");
+                    return None;
+                }
+            },
+            _ => None,
+        };
+        if n.is_none() {
+            self.fail(key, "Input should be a valid integer");
         }
-        "spawn_workers" if only(&["tasks"]) => Some(Native::SpawnWorkers { tasks: super::workers::tasks(obj.get("tasks")?)? }),
-        "run_workflow" if only(&["workflow_id", "inputs_json"]) => {
-            let inputs_json = match obj.get("inputs_json") {
-                None | Some(Value::Null) => None,
-                Some(v) => Some(v.as_str()?.to_string()),
-            };
-            Some(Native::RunWorkflow { workflow_id: obj.get("workflow_id")?.as_str()?.to_string(), inputs_json })
+        n
+    }
+
+    pub fn bool(&mut self, key: &str, default: bool) -> bool {
+        const UNREADABLE: &str = "Input should be a valid boolean, unable to interpret input";
+        let b = match self.args.get(key) {
+            None => return default,
+            Some(Value::Bool(b)) => Some(*b),
+            Some(Value::Number(n)) => match n.as_f64() {
+                Some(0.0) => Some(false),
+                Some(1.0) => Some(true),
+                _ => {
+                    self.fail(key, UNREADABLE);
+                    return default;
+                }
+            },
+            Some(Value::String(s)) => match s.to_lowercase().as_str() {
+                "0" | "off" | "f" | "false" | "n" | "no" => Some(false),
+                "1" | "on" | "t" | "true" | "y" | "yes" => Some(true),
+                _ => {
+                    self.fail(key, UNREADABLE);
+                    return default;
+                }
+            },
+            Some(_) => None,
+        };
+        b.unwrap_or_else(|| {
+            self.fail(key, "Input should be a valid boolean");
+            default
+        })
+    }
+
+    pub fn int(&mut self, key: &str) -> i64 {
+        match self.args.get(key) {
+            None => {
+                self.fail(key, "Field required");
+                0
+            }
+            Some(v) => self.as_int(key, v).unwrap_or_default(),
         }
-        _ => None,
+    }
+
+    /// A string that must be one of `choices`.
+    pub fn choice(&mut self, key: &str, choices: &[&str]) -> String {
+        let value = self.str(key);
+        if self.args.get(key).is_some_and(Value::is_string) && !choices.contains(&value.as_str()) {
+            let quoted: Vec<String> = choices.iter().map(|c| format!("'{c}'")).collect();
+            let (last, rest) = quoted.split_last().expect("choices");
+            self.fail(key, &format!("Input should be {} or {last}", rest.join(", ")));
+        }
+        value
+    }
+
+    /// A string, `default` when absent.
+    pub fn str_or(&mut self, key: &str, default: &str) -> String {
+        if self.args.contains_key(key) { self.str(key) } else { default.to_string() }
+    }
+
+    /// A list of strings.
+    pub fn str_list(&mut self, key: &str) -> Vec<String> {
+        match self.args.get(key) {
+            None => {
+                self.fail(key, "Field required");
+                vec![]
+            }
+            Some(Value::Array(items)) => {
+                let mut out = vec![];
+                for (i, item) in items.iter().enumerate() {
+                    match item {
+                        Value::String(s) => out.push(s.clone()),
+                        _ => self.fail(&format!("{key}.{i}"), "Input should be a valid string"),
+                    }
+                }
+                out
+            }
+            Some(_) => {
+                self.fail(key, "Input should be a valid list");
+                vec![]
+            }
+        }
+    }
+
+    /// The raw value of a required key.
+    pub fn value(&mut self, key: &str) -> Option<&'v Value> {
+        let v = self.args.get(key);
+        if v.is_none() {
+            self.fail(key, "Field required");
+        }
+        v
     }
 }
 
@@ -337,43 +477,63 @@ mod tests {
     }
 
     #[test]
-    fn a_batch_is_the_edges_only_if_every_call_is() {
+    fn every_call_is_planned_on_its_own() {
         let policy = Policy::default();
         let tools = bound_for(&policy, false, &no_mcp());
-        let plan = plan(
+        let steps = plan(
             &[call("run_cell", json!({"code": "1"})), call("nope", json!({})), call("write_todos", json!({"todos": ["a"]}))],
             &tools,
             &policy,
         );
-        let Plan::Edge(steps) = plan else { panic!("{plan:?}") };
         assert_eq!(steps[0], Step::Run(Native::RunCell { code: "1".into() }));
         assert_eq!(
             steps[1],
-            Step::Unknown(
+            Step::Refused(
                 "Error: nope is not a valid tool, try one of [run_cell, write_artifact, write_todos, set_todo_status, \
                  spawn_workers, run_workflow, remember]."
                     .into()
             )
         );
-        assert_eq!(plan_one(call("spawn_workers", json!({"tasks": []})), &tools, &policy), Plan::Edge(vec![Step::Run(
-            Native::SpawnWorkers { tasks: vec![] }
-        )]));
-        assert_eq!(plan_one(call("run_workflow", json!({"workflow_id": "w"})), &tools, &policy), Plan::Edge(vec![Step::Run(
-            Native::RunWorkflow { workflow_id: "w".into(), inputs_json: None }
-        )]));
-        for python in [
-            call("spawn_workers", json!({"tasks": [{"task": 1}]})),
-            call("run_workflow", json!({"workflow_id": "w", "inputs_json": {"a": 1}})),
-            call("set_todo_status", json!({"index": "first", "status": "done"})),
-            call("set_todo_status", json!({"index": 0, "status": "finished"})),
-            call("run_cell", json!({"code": "1", "extra": true})),
-        ] {
-            assert!(matches!(plan_one(python, &tools, &policy), Plan::Python(_)));
-        }
+        assert_eq!(steps[2], Step::Run(Native::WriteTodos { todos: vec!["a".into()] }));
+        assert_eq!(plan_one(call("spawn_workers", json!({"tasks": []})), &tools, &policy), Step::Run(Native::SpawnWorkers { tasks: vec![] }));
+        assert_eq!(
+            plan_one(call("run_workflow", json!({"workflow_id": "w"})), &tools, &policy),
+            Step::Run(Native::RunWorkflow { workflow_id: "w".into(), inputs_json: None })
+        );
+        // Pydantic's lax reading: extra keys ignored, a numeric string an integer.
+        assert_eq!(plan_one(call("run_cell", json!({"code": "1", "extra": true})), &tools, &policy), Step::Run(Native::RunCell { code: "1".into() }));
+        assert_eq!(
+            plan_one(call("set_todo_status", json!({"index": "2", "status": "done"})), &tools, &policy),
+            Step::Run(Native::SetTodoStatus { index: 2, status: "done".into() })
+        );
     }
 
-    fn plan_one(c: ToolCall, tools: &Toolset, policy: &Policy) -> Plan {
-        plan(&[c], tools, policy)
+    #[test]
+    fn bad_arguments_are_answered_for_the_model_to_fix() {
+        let policy = Policy::default();
+        let tools = bound_for(&policy, false, &no_mcp());
+        let refused = |c: ToolCall| match plan_one(c, &tools, &policy) {
+            Step::Refused(error) => error,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            refused(call("set_todo_status", json!({"index": "first", "status": "finished"}))),
+            "Error invoking tool 'set_todo_status' with kwargs {'index': 'first', 'status': 'finished'} with error:\n \
+             index: Input should be a valid integer, unable to parse string as an integer\n\
+             status: Input should be 'pending', 'in_progress' or 'done'\n Please fix the error and try again."
+        );
+        assert_eq!(
+            refused(call("run_cell", json!({}))),
+            "Error invoking tool 'run_cell' with kwargs {} with error:\n code: Field required\n Please fix the error and try again."
+        );
+        assert!(refused(call("run_workflow", json!({"workflow_id": "w", "inputs_json": {"a": 1}}))).contains("inputs_json: Input should be a valid string"));
+        assert!(refused(call("spawn_workers", json!({"tasks": [{"task": 1}]}))).contains("tasks: Input should be a list of objects"));
+        assert!(refused(call("write_todos", json!({"todos": ["a", 2]}))).contains("todos.1: Input should be a valid string"));
+        assert!(refused(call("run_cell", json!("print(1)"))).contains("Input should be a valid dictionary"));
+    }
+
+    fn plan_one(c: ToolCall, tools: &Toolset, policy: &Policy) -> Step {
+        plan(&[c], tools, policy).pop().expect("one call, one step")
     }
 
     #[test]
@@ -389,7 +549,7 @@ mod tests {
         let tools = bound_for(&policy, false, &no_mcp());
         assert!(!tools.schemas.iter().any(|t| t.name == "remember"));
         let gated = plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy);
-        assert_eq!(gated, Plan::Edge(vec![Step::Gated(Native::RunCell { code: "1".into() })]));
+        assert_eq!(gated, Step::Gated(Native::RunCell { code: "1".into() }));
     }
 
     #[test]
@@ -415,9 +575,9 @@ mod tests {
         let args = json!({"title": "t"});
         assert_eq!(
             plan_one(call("issue", args.clone()), &tools, &policy),
-            Plan::Edge(vec![Step::Gated(Native::Mcp { server: "gh".into(), tool: "issue".into(), args })])
+            Step::Gated(Native::Mcp { server: "gh".into(), tool: "issue".into(), args })
         );
-        assert!(matches!(plan_one(call("issue", json!("x")), &tools, &policy), Plan::Python(_)));
+        assert!(matches!(plan_one(call("issue", json!("x")), &tools, &policy), Step::Refused(_)));
     }
 
     #[test]

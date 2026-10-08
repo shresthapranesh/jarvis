@@ -15,12 +15,11 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::engine::Env;
-use crate::agent::tools::{self, Native, Plan, Policy, Step, Toolset};
+use crate::agent::tools::{self, Native, Policy, Step, Toolset};
 use crate::agent::{artifacts, prompt, turn, workers};
 use crate::llm::shape::{self, Layout, Segment};
 use crate::llm::transcript::{Content, Message, Role, ToolCall};
 use crate::llm::{self, Delta, Endpoints, Request, compact};
-use crate::pyjson;
 
 /// `_run_agent_text`'s `recursion_limit`.
 const RECURSION_LIMIT: u32 = 100;
@@ -158,17 +157,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
     async fn tool_step(&mut self, calls: &[ToolCall]) -> Result<Vec<Message>, String> {
         let mut steps = Vec::with_capacity(calls.len());
         for call in calls {
-            let step = match tools::plan(std::slice::from_ref(call), &self.bound, &self.policy) {
-                Plan::Edge(mut one) => one.pop().expect("one call, one step"),
-                // In chat, Python words this; here the model gets a plainer
-                // version of `invoke_tool`'s error.
-                Plan::Python(_) => Step::Unknown(format!(
-                    "Error invoking tool '{}' with kwargs {} with error:\n arguments don't match the tool's schema\n \
-                     Please fix the error and try again.",
-                    call.name,
-                    pyjson::py_repr(&call.args)
-                )),
-            };
+            let step = tools::plan(std::slice::from_ref(call), &self.bound, &self.policy).pop().expect("one call, one step");
             steps.push(match step {
                 Step::Gated(native) => self.gate(call, native).await?,
                 other => other,
@@ -177,7 +166,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         let mut results = Vec::with_capacity(calls.len());
         for (call, step) in calls.iter().zip(steps) {
             let (content, status, artifact) = match step {
-                Step::Unknown(error) | Step::Denied(error) => (Content::Text(error), "error", None),
+                Step::Refused(error) | Step::Denied(error) => (Content::Text(error), "error", None),
                 Step::Gated(_) => unreachable!("gates are answered first"),
                 Step::Run(Native::Mcp { server, tool, args }) => {
                     self.count_tool();

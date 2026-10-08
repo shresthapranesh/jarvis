@@ -3,12 +3,11 @@
 //! provider publishes, diffs that against the catalog, and on request makes
 //! a one-token call per catalog model, because a listing is not entitlement.
 //!
-//! A provider that can't be listed is [`Fail::Skip`] with Python's
-//! `DiscoveryError` text, word for word — the UI shows it. Where Python's
-//! answer is an exception this side can't word the same (a reply that isn't
-//! JSON, an unusual transport error), it's [`Fail::Defer`]: the query goes
-//! to Python. A probe's reason follows each Python SDK's spelling as far as
-//! it can; it's advice for the operator, not a contract.
+//! A provider that can't be listed is [`Fail::Skip`], and the reason is
+//! shown in the UI: Python's `DiscoveryError` text where it had one, else a
+//! plain account of what was wrong with the reply. A probe's reason follows
+//! each Python SDK's spelling as far as it can; it's advice for the
+//! operator, not a contract.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -38,14 +37,13 @@ pub struct Found {
 pub enum Fail {
     /// `DiscoveryError`: the provider is skipped, and this is why.
     Skip(String),
-    /// Python's answer isn't one this side can give: ask Python.
-    Defer(String),
 }
 
 type Listing = Result<Vec<Found>, Fail>;
 
-fn defer<T>(why: impl Into<String>) -> Result<T, Fail> {
-    Err(Fail::Defer(why.into()))
+/// A reply that isn't the shape a listing has.
+fn malformed<T>(why: impl Into<String>) -> Result<T, Fail> {
+    Err(Fail::Skip(format!("unexpected reply: {}", why.into())))
 }
 
 /// `os.environ.get(k)`: set-but-empty is a value here, as it is there.
@@ -126,7 +124,7 @@ pub(crate) fn httpx_status_error(resp: &reqwest::Response) -> String {
 /// `httpx.get(url, ...)` + `raise_for_status()`, the failure as `str(exc)`.
 async fn httpx_get(url: &str, headers: &[(&str, String)]) -> Result<reqwest::Response, Result<String, Fail>> {
     let Ok(parsed) = Url::parse(url) else {
-        return Err(Err(Fail::Defer(format!("a URL httpx parses its own way: {url}"))));
+        return Err(Err(Fail::Skip(format!("not a valid URL: {url}"))));
     };
     let mut req = http().get(parsed);
     for (k, v) in headers {
@@ -135,13 +133,13 @@ async fn httpx_get(url: &str, headers: &[(&str, String)]) -> Result<reqwest::Res
     match req.send().await {
         Ok(r) if r.status().is_success() => Ok(r),
         Ok(r) => Err(Ok(httpx_status_error(&r))),
-        Err(e) => Err(httpx_error(&e).ok_or_else(|| Fail::Defer(format!("{url}: {e}")))),
+        Err(e) => Err(httpx_error(&e).ok_or_else(|| Fail::Skip(format!("{url}: {e}")))),
     }
 }
 
 async fn json_body(resp: reqwest::Response) -> Result<Value, Fail> {
-    let bytes = resp.bytes().await.map_err(|e| Fail::Defer(format!("reading a listing: {e}")))?;
-    serde_json::from_slice(&bytes).map_err(|e| Fail::Defer(format!("a listing that isn't JSON: {e}")))
+    let bytes = resp.bytes().await.map_err(|e| Fail::Skip(format!("reading a listing: {e}")))?;
+    serde_json::from_slice(&bytes).map_err(|e| Fail::Skip(format!("a listing that isn't JSON: {e}")))
 }
 
 /// A field that must be a string (or absent) for Python's answer to be one
@@ -150,7 +148,7 @@ fn opt_str(m: &serde_json::Map<String, Value>, key: &str) -> Result<Option<Strin
     match m.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) => Ok(Some(s.clone())),
-        Some(other) => defer(format!("{key} {other}")),
+        Some(other) => malformed(format!("{key} {other}")),
     }
 }
 
@@ -161,7 +159,7 @@ fn or(a: Option<String>, b: impl FnOnce() -> String) -> String {
 
 /// A window GraphQL's Int carries, or Python's own failure to.
 fn window(n: i64) -> Result<i32, Fail> {
-    i32::try_from(n).or_else(|_| defer(format!("a window GraphQL can't carry: {n}")))
+    i32::try_from(n).or_else(|_| malformed(format!("a window GraphQL can't carry: {n}")))
 }
 
 // ── Per-provider adapters ────────────────────────────────────────────────────
@@ -181,7 +179,7 @@ async fn discover_google() -> Listing {
     let mut out = vec![];
     let mut page: Option<String> = None;
     loop {
-        let mut url = Url::parse(&format!("{}/v1beta/models", google_base())).map_err(|e| Fail::Defer(e.to_string()))?;
+        let mut url = Url::parse(&format!("{}/v1beta/models", google_base())).map_err(|e| Fail::Skip(e.to_string()))?;
         url.query_pairs_mut().append_pair("pageSize", "1000");
         if let Some(p) = &page {
             url.query_pairs_mut().append_pair("pageToken", p);
@@ -189,7 +187,7 @@ async fn discover_google() -> Listing {
         let resp = match http().get(url).header("x-goog-api-key", &key).send().await {
             Ok(r) => r,
             // Python lets the transport error out of the query.
-            Err(e) => return defer(format!("ListModels: {e}")),
+            Err(e) => return malformed(format!("ListModels: {e}")),
         };
         let status = resp.status().as_u16();
         if status != 200 {
@@ -197,29 +195,29 @@ async fn discover_google() -> Listing {
             return Err(Fail::Skip(format!("ListModels failed ({status}): {}", pystr::prefix(&text, 200))));
         }
         let Value::Object(body) = json_body(resp).await? else {
-            return defer("ListModels: not an object");
+            return malformed("ListModels: not an object");
         };
         let models = match body.get("models") {
             None => vec![],
             Some(Value::Array(a)) => a.clone(),
-            Some(_) => return defer("ListModels: models isn't a list"),
+            Some(_) => return malformed("ListModels: models isn't a list"),
         };
         for m in models {
-            let Value::Object(m) = m else { return defer("ListModels: a model that isn't an object") };
+            let Value::Object(m) = m else { return malformed("ListModels: a model that isn't an object") };
             let generates = match m.get("supportedGenerationMethods") {
                 None => false,
                 Some(Value::Array(ms)) => ms.iter().any(|v| v == "generateContent"),
-                Some(_) => return defer("supportedGenerationMethods isn't a list"),
+                Some(_) => return malformed("supportedGenerationMethods isn't a list"),
             };
             if !generates {
                 continue;
             }
-            let Some(Value::String(full)) = m.get("name") else { return defer("a model without a name") };
+            let Some(Value::String(full)) = m.get("name") else { return malformed("a model without a name") };
             let name = full.split_once('/').map_or(full.as_str(), |(_, n)| n).to_string();
             let context_window = match m.get("inputTokenLimit") {
                 None | Some(Value::Null) => None,
                 Some(Value::Number(n)) if n.is_i64() => Some(window(n.as_i64().unwrap_or_default())?),
-                Some(other) => return defer(format!("inputTokenLimit {other}")),
+                Some(other) => return malformed(format!("inputTokenLimit {other}")),
             };
             out.push(Found {
                 id: format!("google_genai:{name}"),
@@ -233,7 +231,7 @@ async fn discover_google() -> Listing {
         match body.get("nextPageToken") {
             Some(Value::String(p)) if !p.is_empty() => page = Some(p.clone()),
             None | Some(Value::Null) | Some(Value::String(_)) => return Ok(out),
-            Some(_) => return defer("nextPageToken isn't a string"),
+            Some(_) => return malformed("nextPageToken isn't a string"),
         }
     }
 }
@@ -297,7 +295,7 @@ async fn discover_anthropic() -> Listing {
     let mut out = vec![];
     let mut after: Option<String> = None;
     loop {
-        let mut url = Url::parse(&format!("{}/v1/models", anthropic_base())).map_err(|e| Fail::Defer(e.to_string()))?;
+        let mut url = Url::parse(&format!("{}/v1/models", anthropic_base())).map_err(|e| Fail::Skip(e.to_string()))?;
         url.query_pairs_mut().append_pair("limit", "1000");
         if let Some(a) = &after {
             url.query_pairs_mut().append_pair("after_id", a);
@@ -305,15 +303,15 @@ async fn discover_anthropic() -> Listing {
         let resp = sdk_send(|| sdk_http().get(url.clone()).header("x-api-key", &key).header("anthropic-version", "2023-06-01"))
             .await
             .map_err(failed)?;
-        let Value::Object(page) = json_body(resp).await? else { return defer("models.list: not an object") };
+        let Value::Object(page) = json_body(resp).await? else { return malformed("models.list: not an object") };
         let data = match page.get("data") {
             Some(Value::Array(d)) => d.clone(),
             None | Some(Value::Null) => vec![],
-            Some(_) => return defer("models.list: data isn't a list"),
+            Some(_) => return malformed("models.list: data isn't a list"),
         };
         for m in &data {
-            let Value::Object(m) = m else { return defer("models.list: a model that isn't an object") };
-            let Some(Value::String(id)) = m.get("id") else { return defer("models.list: a model without an id") };
+            let Value::Object(m) = m else { return malformed("models.list: a model that isn't an object") };
+            let Some(Value::String(id)) = m.get("id") else { return malformed("models.list: a model without an id") };
             out.push(Found {
                 id: format!("anthropic:{id}"),
                 label: or(opt_str(m, "display_name")?, || id.clone()),
@@ -338,24 +336,24 @@ async fn discover_bedrock() -> Listing {
     let creds = match aws::credentials().await {
         Ok(c) => c,
         Err(aws::CredError::Failed(why)) => return Err(failed(why)),
-        Err(aws::CredError::Unsupported(why)) => return defer(format!("AWS credentials: {why}")),
+        Err(aws::CredError::Unsupported(why)) => return malformed(format!("AWS credentials: {why}")),
     };
     let mut url = Url::parse(&format!("{}/foundation-models", aws::endpoint("bedrock", &region)))
-        .map_err(|e| Fail::Defer(format!("the bedrock endpoint: {e}")))?;
+        .map_err(|e| Fail::Skip(format!("the bedrock endpoint: {e}")))?;
     url.query_pairs_mut().append_pair("byOutputModality", "TEXT");
     let body = match aws::call(sdk_http(), &creds, &region, "bedrock", "ListFoundationModels", &url, None).await {
         Ok(b) => b,
         Err(aws::CallError::Failed(why)) => return Err(failed(why)),
-        Err(aws::CallError::Unsupported(why)) => return defer(why),
+        Err(aws::CallError::Unsupported(why)) => return malformed(why),
     };
     let summaries = match body.get("modelSummaries") {
         Some(Value::Array(s)) => s.clone(),
         None | Some(Value::Null) => vec![],
-        Some(_) => return defer("modelSummaries isn't a list"),
+        Some(_) => return malformed("modelSummaries isn't a list"),
     };
     let mut out = vec![];
     for m in summaries {
-        let Value::Object(m) = m else { return defer("a model summary that isn't an object") };
+        let Value::Object(m) = m else { return malformed("a model summary that isn't an object") };
         let Some(mid) = opt_str(&m, "modelId")?.filter(|s| !s.is_empty()) else { continue };
         let on_demand = match m.get("inferenceTypesSupported") {
             Some(Value::Array(t)) => t.iter().any(|v| v == "ON_DEMAND"),
@@ -385,18 +383,18 @@ async fn discover_ollama() -> Listing {
     let resp = httpx_get(&format!("{host}/api/tags"), &[])
         .await
         .map_err(|e| e.map_or_else(|f| f, |why| Fail::Skip(format!("could not reach ollama at {host}: {why}"))))?;
-    let Value::Object(body) = json_body(resp).await? else { return defer("/api/tags: not an object") };
+    let Value::Object(body) = json_body(resp).await? else { return malformed("/api/tags: not an object") };
     let models = match body.get("models") {
         None => vec![],
         Some(Value::Array(m)) => m.clone(),
-        Some(_) => return defer("/api/tags: models isn't a list"),
+        Some(_) => return malformed("/api/tags: models isn't a list"),
     };
     let mut out = vec![];
     for m in models {
-        let Value::Object(m) = m else { return defer("/api/tags: a model that isn't an object") };
+        let Value::Object(m) = m else { return malformed("/api/tags: a model that isn't an object") };
         let name = match m.get("name") {
             Some(Value::String(n)) if !n.is_empty() => n.clone(),
-            Some(v) if pyjson::truthy(v) => return defer(format!("a model name {v}")),
+            Some(v) if pyjson::truthy(v) => return malformed(format!("a model name {v}")),
             _ => continue,
         };
         out.push(Found {
@@ -423,23 +421,23 @@ async fn discover_openrouter() -> Listing {
     let resp = httpx_get(&format!("{}/models", openrouter_base()), &[])
         .await
         .map_err(|e| e.map_or_else(|f| f, |why| Fail::Skip(format!("could not reach OpenRouter: {why}"))))?;
-    let Value::Object(body) = json_body(resp).await? else { return defer("OpenRouter: not an object") };
+    let Value::Object(body) = json_body(resp).await? else { return malformed("OpenRouter: not an object") };
     let data = match body.get("data") {
         None => vec![],
         Some(Value::Array(d)) => d.clone(),
-        Some(_) => return defer("OpenRouter: data isn't a list"),
+        Some(_) => return malformed("OpenRouter: data isn't a list"),
     };
     let mut out = vec![];
     for m in data {
-        let Value::Object(m) = m else { return defer("OpenRouter: a model that isn't an object") };
+        let Value::Object(m) = m else { return malformed("OpenRouter: a model that isn't an object") };
         let mid = match m.get("id") {
             Some(Value::String(id)) if !id.is_empty() => id.clone(),
-            Some(v) if pyjson::truthy(v) => return defer(format!("an OpenRouter id {v}")),
+            Some(v) if pyjson::truthy(v) => return malformed(format!("an OpenRouter id {v}")),
             _ => continue,
         };
         let arch = match m.get("architecture") {
             Some(Value::Object(a)) => a.clone(),
-            Some(v) if pyjson::truthy(v) => return defer("architecture isn't an object"),
+            Some(v) if pyjson::truthy(v) => return malformed("architecture isn't an object"),
             _ => Default::default(),
         };
         let likely_chat = match arch.get("output_modalities") {
@@ -448,7 +446,7 @@ async fn discover_openrouter() -> Listing {
         };
         let top = || match m.get("top_provider") {
             Some(Value::Object(t)) => Ok(t.get("context_length").cloned()),
-            Some(v) if pyjson::truthy(v) => defer("top_provider isn't an object"),
+            Some(v) if pyjson::truthy(v) => malformed("top_provider isn't an object"),
             _ => Ok(None),
         };
         let stated = match m.get("context_length") {
@@ -466,7 +464,7 @@ async fn discover_openrouter() -> Listing {
         };
         let description = match m.get("description") {
             Some(Value::String(d)) => Some(pystr::strip(d).to_string()).filter(|d| !d.is_empty()),
-            Some(v) if pyjson::truthy(v) => return defer("description isn't a string"),
+            Some(v) if pyjson::truthy(v) => return malformed("description isn't a string"),
             _ => None,
         };
         out.push(Found {
@@ -487,7 +485,7 @@ async fn discover_endpoint(ep: &Endpoint) -> Listing {
     let resp = httpx_get(&format!("{}/models", ep.base_url), &headers).await.map_err(|e| e.map_or_else(|f| f, failed))?;
     // Inside Python's `try`: a body it can't read is a skip, worded by an
     // exception this side doesn't reproduce.
-    let Value::Object(body) = json_body(resp).await? else { return defer("/models: not an object") };
+    let Value::Object(body) = json_body(resp).await? else { return malformed("/models: not an object") };
     let data = match body.get("data") {
         Some(Value::Array(d)) => d.clone(),
         _ => vec![],
@@ -539,11 +537,10 @@ fn first_line(text: &str) -> String {
 }
 
 /// `probe(model_id)`: can this credential call this model? A real
-/// one-token call; `Err` is the reason it can't. `Fail::Defer` when the
-/// credentials are of a kind only Python reads.
-pub async fn probe(spec: &Spec, ends: &Endpoints) -> Result<Result<(), String>, Fail> {
+/// one-token call; `Err` is the reason it can't.
+pub async fn probe(spec: &Spec, ends: &Endpoints) -> Result<(), String> {
     let name = spec.id.split_once(':').map_or("", |(_, n)| n);
-    let said = |r: Result<(), String>| Ok(r.map_err(|e| first_line(&e)));
+    let said = |r: Result<(), String>| r.map_err(|e| first_line(&e));
     let hi_chat = |model: &str| json!({"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1});
     match spec.provider.as_str() {
         "google_genai" => said(probe_google(name, ends).await),
@@ -563,15 +560,14 @@ pub async fn probe(spec: &Spec, ends: &Endpoints) -> Result<Result<(), String>, 
             let creds = match aws::credentials().await {
                 Ok(c) => c,
                 Err(aws::CredError::Failed(why)) => return said(Err(why)),
-                Err(aws::CredError::Unsupported(why)) => return Err(Fail::Defer(format!("AWS credentials: {why}"))),
+                Err(aws::CredError::Unsupported(why)) => return said(Err(format!("AWS credentials: {why}"))),
             };
             let url = format!("{}/model/{}/converse", aws::endpoint("bedrock-runtime", &region), aws::encode_label(name));
-            let Ok(url) = Url::parse(&url) else { return Err(Fail::Defer(format!("the bedrock-runtime endpoint: {url}"))) };
+            let Ok(url) = Url::parse(&url) else { return said(Err(format!("not a valid bedrock-runtime endpoint: {url}"))) };
             let body = json!({"messages": [{"role": "user", "content": [{"text": "hi"}]}], "inferenceConfig": {"maxTokens": 1}});
             match aws::call(sdk_http(), &creds, &region, "bedrock", "Converse", &url, Some(&body)).await {
                 Ok(_) => said(Ok(())),
-                Err(aws::CallError::Failed(why)) => said(Err(why)),
-                Err(aws::CallError::Unsupported(why)) => Err(Fail::Defer(why)),
+                Err(aws::CallError::Failed(why) | aws::CallError::Unsupported(why)) => said(Err(why)),
             }
         }
         provider => {

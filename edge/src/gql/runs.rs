@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use async_graphql::{Context, Json, Object, Result, SimpleObject, Subscription};
 use futures_util::Stream;
-use serde_json::json;
 use sqlx::SqlitePool;
 
 use super::codec::{DateTime, now_stored};
@@ -297,43 +296,26 @@ impl RunQuery {
     }
 }
 
-/// The checks every stop shares, then the in-process half: tell the worker,
-/// and mirror the flag at once so `runningTasks` doesn't show it un-cancelled
-/// until the worker's state report comes back.
-///
-/// A run no worker has claimed yet has no in-process half. Its stop is made
-/// durable instead, on the pending job: the worker that claims it starts the
-/// run already cancelled, so it finishes as stopped — its rows written, its
-/// subscribers told — rather than never running and never finishing.
-async fn stop(
-    registry: &Registry,
-    pool: &SqlitePool,
-    id: &str,
-    missing: &'static str,
-    finished: &'static str,
-    resume: bool,
-) -> Result<(Arc<Run>, bool)> {
+/// The checks every stop shares, then the stop: the run's flag, which its
+/// turn checks between steps, and the job's, which the agent loop also
+/// watches — so a run whose job hasn't been claimed yet starts cancelled
+/// and finishes as stopped, its rows written and its subscribers told.
+async fn stop(registry: &Registry, pool: &SqlitePool, id: &str, missing: &'static str, finished: &'static str) -> Result<Arc<Run>> {
     let run = registry.get(id).ok_or(missing)?;
     if run.fields().done {
         return Err(finished.into());
     }
-    let claimed = run.claimed();
-    if claimed {
-        registry.control(&json!({"type": "cancel", "task_id": id, "resume": resume}));
-    } else {
-        sqlx::query("UPDATE jobs SET cancel_requested = 1, updated_at = ? WHERE id = ? AND status IN ('pending', 'running')")
-            .bind(now_stored())
-            .bind(id)
-            .execute(pool)
-            .await?;
-    }
+    sqlx::query("UPDATE jobs SET cancel_requested = 1, updated_at = ? WHERE id = ? AND status IN ('pending', 'running')")
+        .bind(now_stored())
+        .bind(id)
+        .execute(pool)
+        .await?;
     run.update(|st| st.fields.cancelled = true);
-    Ok((run, claimed))
+    Ok(run)
 }
 
 /// `SqliteJobQueue.cancel`: a pending job won't be claimed; a running one is
-/// asked to stop, which its handler polls for. Durable, so it reaches the
-/// worker even if the link message didn't.
+/// asked to stop, which the agent loop polls for.
 pub(super) async fn cancel_job(pool: &SqlitePool, job_id: &str) -> Result<()> {
     let now = now_stored();
     sqlx::query("UPDATE jobs SET status = 'cancelled', completed_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'")
@@ -356,40 +338,23 @@ pub struct RunMutation;
 #[Object]
 impl RunMutation {
     async fn stop_running_task(&self, ctx: &Context<'_>, task_id: String) -> Result<StopRunningTaskPayload> {
-        let pool = ctx.data()?;
-        let (run, claimed) =
-            stop(ctx.data::<Arc<Registry>>()?, pool, &task_id, "task not found or already finished", "task already finished", true).await?;
-        if claimed {
-            cancel_job(pool, &task_id).await?;
-        }
+        let run =
+            stop(ctx.data::<Arc<Registry>>()?, ctx.data()?, &task_id, "task not found or already finished", "task already finished").await?;
         Ok(StopRunningTaskPayload { ok: true, kind: run.meta.kind.clone(), task_id })
     }
 
-    // The chat stop is in-process only in Python — no queue cancel — and so
-    // is this one, once a worker has the run.
     async fn stop_task(&self, ctx: &Context<'_>, task_id: String) -> Result<bool> {
-        stop(ctx.data::<Arc<Registry>>()?, ctx.data()?, &task_id, "task not found or already finished", "task already finished", true)
-            .await?;
+        stop(ctx.data::<Arc<Registry>>()?, ctx.data()?, &task_id, "task not found or already finished", "task already finished").await?;
         Ok(true)
     }
 
     async fn stop_automation_run(&self, ctx: &Context<'_>, run_id: String) -> Result<bool> {
-        let pool = ctx.data()?;
-        let (_, claimed) =
-            stop(ctx.data::<Arc<Registry>>()?, pool, &run_id, "run not found or already finished", "run already finished", false).await?;
-        if claimed {
-            cancel_job(pool, &run_id).await?;
-        }
+        stop(ctx.data::<Arc<Registry>>()?, ctx.data()?, &run_id, "run not found or already finished", "run already finished").await?;
         Ok(true)
     }
 
     async fn stop_workflow_run(&self, ctx: &Context<'_>, run_id: String) -> Result<bool> {
-        let pool = ctx.data()?;
-        let (_, claimed) =
-            stop(ctx.data::<Arc<Registry>>()?, pool, &run_id, "run not found or already finished", "run already finished", false).await?;
-        if claimed {
-            cancel_job(pool, &run_id).await?;
-        }
+        stop(ctx.data::<Arc<Registry>>()?, ctx.data()?, &run_id, "run not found or already finished", "run already finished").await?;
         Ok(true)
     }
 }

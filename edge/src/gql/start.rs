@@ -4,15 +4,8 @@
 //! a workflow's interrupt.
 //!
 //! A trigger is only rows: the domain row the run reports into, a `jobs` row
-//! for a worker to claim, and the run mirrored as *pending* (`runs.rs`) so a
-//! subscriber that gets the id back finds it — what the Python triggers did by
-//! registering a `TaskState` before their commit. The edge then wakes the
-//! worker, which claims the job and creates the run's state from it.
-//!
-//! What acts on a claimed run's in-memory state (`TaskState.pending_input`, a
-//! `resume_future`) goes to the worker as a `call`, which runs the function
-//! the Python resolver would have and returns its result or its error
-//! message. Before a worker claims the run, the edge answers for it.
+//! for the agent loop to claim, and the run registered (`runs.rs`) so a
+//! subscriber that gets the id back finds it. Then the loop is woken.
 
 use std::sync::Arc;
 
@@ -117,11 +110,9 @@ pub(crate) async fn insert_message(
     Ok(id)
 }
 
-/// Mirror the run, then commit its rows and wake the worker. Mirrored first,
-/// as the Python triggers registered before committing: once the job is
-/// visible a worker may claim it, and its report must find the run. `edge`:
-/// the job is for the edge's agent loop, and so is the run.
-#[allow(clippy::too_many_arguments)]
+/// Register the run, then commit its rows and wake the agent loop.
+/// Registered first: once the job is visible the loop may claim it, and must
+/// find the run its subscribers watch.
 async fn commit_run(
     registry: &Registry,
     tx: Transaction<'_, Sqlite>,
@@ -130,16 +121,15 @@ async fn commit_run(
     label: String,
     parent_id: &str,
     enqueued_at: &str,
-    edge: bool,
 ) -> Result<()> {
     let meta = Meta {
         kind: kind.into(),
         label,
         parent_id: Some(parent_id.into()),
-        // The worker starts the run's clock from the job's `created_at` too.
+        // The run's clock starts at the job's `created_at`.
         started_at: iso_from_db(enqueued_at).utc().0,
     };
-    registry.pre_register(id, meta, edge);
+    registry.pre_register(id, meta);
     if let Err(e) = tx.commit().await {
         registry.discard_pending(id);
         return Err(e.into());
@@ -149,22 +139,9 @@ async fn commit_run(
     Ok(())
 }
 
-fn worker_error(e: String) -> async_graphql::Error {
-    e.into()
-}
-
-/// Queue `query` onto a live chat run — `queue_chat_message`. A claimed run
-/// is the worker's; a pending one the edge queues onto itself, and the
-/// worker adopts the row when it claims the job.
-async fn queue_onto(registry: &Registry, pool: &SqlitePool, run: &Arc<Run>, query: &str) -> Result<(String, i64)> {
-    if run.claimed() {
-        let value = registry
-            .call("queue_message", json!({"task_id": run.id, "query": query}))
-            .await
-            .map_err(worker_error)?;
-        let message_id = value["message_id"].as_str().unwrap_or_default().to_string();
-        return Ok((message_id, value["position"].as_i64().unwrap_or_default()));
-    }
+/// Queue `query` onto a live chat run — `queue_chat_message`: a `queued`
+/// row the turn takes in before its next model call.
+async fn queue_onto(pool: &SqlitePool, run: &Arc<Run>, query: &str) -> Result<(String, i64)> {
     let text = query.trim();
     if text.is_empty() {
         return Err("empty message".into());
@@ -176,17 +153,13 @@ async fn queue_onto(registry: &Registry, pool: &SqlitePool, run: &Arc<Run>, quer
         return Err("task is not attached to a conversation".into());
     };
     let message_id = insert_message(pool, conversation_id, "user", text, None, "queued").await?;
-    // What the run will hold once the worker adopts the conversation's queue.
     let position: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND role = 'user' AND status = 'queued'",
     )
     .bind(conversation_id)
     .fetch_one(pool)
     .await?;
-    if !run.queue_local(&message_id, text, position) {
-        // Claimed since the check above: the worker announces it instead.
-        registry.adopt_queued(&run.id, &[&message_id]);
-    }
+    run.emit_local("queued_message", &json!({"message_id": message_id, "text": text, "position": position}));
     Ok((message_id, position))
 }
 
@@ -242,7 +215,7 @@ pub async fn start_chat(
     // thread lease (`jobs.thread_id`) runs its turns one at a time.
     if let Some(run) = registry.in_flight_chat(&conversation_id) {
         tx.commit().await?;
-        return Ok(match queue_onto(registry, pool, &run, &query).await {
+        return Ok(match queue_onto(pool, &run, &query).await {
             Ok((message_id, _)) => Dispatched::Queued { task_id: run.id.clone(), conversation_id, message_id },
             Err(e) => Dispatched::Refused(e.message),
         });
@@ -250,12 +223,12 @@ pub async fn start_chat(
 
     let display = display.unwrap_or_else(|| query.clone());
     insert_message(&mut *tx, &conversation_id, "user", &display, None, "done").await?;
-        let task_id = enqueue_turn(registry, tx, &conversation_id, &query, &model).await?;
+    let task_id = enqueue_turn(registry, tx, &conversation_id, &query, &model).await?;
     Ok(Dispatched::Started { task_id, conversation_id })
 }
 
 /// `enqueue_chat_task`: the assistant row the run writes into (its id is the
-/// task id) and the job, committed with `tx` and mirrored. The user's message
+/// task id) and the job, committed with `tx` and registered. The user's message
 /// is the caller's.
 async fn enqueue_turn(
     registry: &Registry,
@@ -276,11 +249,9 @@ async fn enqueue_turn(
     .execute(&mut *tx)
     .await?;
     let payload = json!({"query": query, "model": model, "conv_id": conversation_id});
-    // The conversation is the thread: its turns run one at a time. The edge
-    // runs the turn itself when it can (`agent/route.rs`).
-    let edge = crate::agent::route::enabled();
-    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(conversation_id), edge).await?;
-    commit_run(registry, tx, &task_id, "chat", first_chars(query, 60), conversation_id, &enqueued_at, edge).await?;
+    // The conversation is the thread: its turns run one at a time.
+    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(conversation_id)).await?;
+    commit_run(registry, tx, &task_id, "chat", first_chars(query, 60), conversation_id, &enqueued_at).await?;
     Ok(task_id)
 }
 
@@ -358,7 +329,7 @@ impl StartMutation {
         }
         let registry: &Arc<Registry> = ctx.data()?;
         let run = registry.get(&task_id).ok_or("task not found or already finished")?;
-        let (message_id, position) = queue_onto(registry, ctx.data()?, &run, &query).await?;
+        let (message_id, position) = queue_onto(ctx.data()?, &run, &query).await?;
         Ok(QueueMessagePayload { message_id, position })
     }
 
@@ -366,11 +337,6 @@ impl StartMutation {
     async fn unqueue_message(&self, ctx: &Context<'_>, task_id: String, message_id: String) -> Result<bool> {
         let registry: &Arc<Registry> = ctx.data()?;
         let run = registry.get(&task_id).ok_or("task not found")?;
-        let params = json!({"task_id": task_id, "message_id": message_id});
-        if run.claimed() {
-            let value = registry.call("unqueue_message", params).await.map_err(worker_error)?;
-            return Ok(value.as_bool().unwrap_or(false));
-        }
         let deleted = sqlx::query("DELETE FROM messages WHERE id = ? AND conversation_id = ? AND status = 'queued'")
             .bind(&message_id)
             .bind(run.meta.parent_id.as_deref())
@@ -379,13 +345,7 @@ impl StartMutation {
         if deleted.rows_affected() == 0 {
             return Ok(false);
         }
-        if !run.emit_local("queued_withdrawn", &json!({"message_id": message_id})) {
-            // Claimed meanwhile, and the worker may have adopted it already.
-            let registry = registry.clone();
-            tokio::spawn(async move {
-                let _ = registry.call("unqueue_message", params).await;
-            });
-        }
+        run.emit_local("queued_withdrawn", &json!({"message_id": message_id}));
         Ok(true)
     }
 
@@ -404,7 +364,6 @@ impl StartMutation {
             _ => json!({}),
         };
         let run_id = new_id();
-        let edge = crate::agent::route::enabled();
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO workflow_runs (id, workflow_id, status, inputs, outputs, node_results, error, started_at, \
@@ -417,8 +376,8 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"workflow_id": workflow_id, "inputs": inputs});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload, None, edge).await?;
-        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at, edge).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "workflow", &payload, None).await?;
+        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "workflow", name, &workflow_id, &enqueued_at).await?;
         Ok(run_id)
     }
 
@@ -426,17 +385,10 @@ impl StartMutation {
     async fn resume_workflow_run(&self, ctx: &Context<'_>, run_id: String, answer: String) -> Result<bool> {
         let registry: &Arc<Registry> = ctx.data()?;
         let run = registry.get(&run_id).ok_or("run not found or not running")?;
-        if run.edge_owned() {
-            // The paused node reads the answer off its request (`agent::workflow`).
-            if run.fields().done || !crate::agent::workflow::answer(ctx.data()?, &run, "answered", &answer).await? {
-                return Err("no pending human input for this run".into());
-            }
-            return Ok(true);
-        }
-        if !run.claimed() {
+        // The paused node reads the answer off its request (`agent::workflow`).
+        if run.fields().done || !crate::agent::workflow::answer(ctx.data()?, &run, "answered", &answer).await? {
             return Err("no pending human input for this run".into());
         }
-        registry.call("resume_workflow_run", json!({"run_id": run_id, "answer": answer})).await.map_err(worker_error)?;
         Ok(true)
     }
 
@@ -450,19 +402,11 @@ impl StartMutation {
     ) -> Result<bool> {
         let registry: &Arc<Registry> = ctx.data()?;
         let run = registry.get(&run_id).ok_or("run not found or not running")?;
-        if run.edge_owned() {
-            let (status, default) = if approved { ("approved", "approved") } else { ("denied", "denied") };
-            let answer = answer.filter(|a| !a.is_empty()).unwrap_or_else(|| default.into());
-            if run.fields().done || !crate::agent::workflow::answer(ctx.data()?, &run, status, &answer).await? {
-                return Err("no pending approval for this run".into());
-            }
-            return Ok(true);
-        }
-        if !run.claimed() {
+        let (status, default) = if approved { ("approved", "approved") } else { ("denied", "denied") };
+        let answer = answer.filter(|a| !a.is_empty()).unwrap_or_else(|| default.into());
+        if run.fields().done || !crate::agent::workflow::answer(ctx.data()?, &run, status, &answer).await? {
             return Err("no pending approval for this run".into());
         }
-        let params = json!({"run_id": run_id, "approved": approved, "answer": answer});
-        registry.call("resolve_workflow_approval", params).await.map_err(worker_error)?;
         Ok(true)
     }
 
@@ -476,7 +420,6 @@ impl StartMutation {
             .await?;
         let name = name.ok_or("automation not found")?;
         let run_id = new_id();
-        let edge = crate::agent::route::enabled();
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query(
             "INSERT INTO automation_runs (id, automation_id, status, triggered_by, output, error, started_at, \
@@ -488,8 +431,8 @@ impl StartMutation {
         .execute(&mut *tx)
         .await?;
         let payload = json!({"automation_id": automation_id, "triggered_by": "manual"});
-        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload, None, edge).await?;
-        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at, edge).await?;
+        let enqueued_at = crate::jobs::insert(&mut *tx, &run_id, "automation", &payload, None).await?;
+        commit_run(ctx.data::<Arc<Registry>>()?, tx, &run_id, "automation", name, &automation_id, &enqueued_at).await?;
         Ok(run_id)
     }
 }

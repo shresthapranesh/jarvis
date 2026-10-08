@@ -14,7 +14,6 @@
 //! `core/mcp.py:EdgeMcp`), and is told to re-read after every change.
 
 pub mod config;
-pub mod internal;
 mod http;
 mod session;
 mod stdio;
@@ -30,7 +29,6 @@ use serde_json::{Map, Value, json};
 use sqlx::SqlitePool;
 
 use crate::pyjson;
-use crate::runs::Registry;
 use config::{Connection, Servers};
 use session::Session;
 
@@ -247,16 +245,14 @@ fn format_g(x: f64) -> String {
 pub struct Mcp {
     pool: SqlitePool,
     app_dir: PathBuf,
-    /// A linked Python is told to re-read after a change.
-    runs: Arc<Registry>,
     current: RwLock<Option<Arc<Snapshot>>>,
     /// One load at a time.
     loading: tokio::sync::Mutex<()>,
 }
 
 impl Mcp {
-    pub fn new(pool: SqlitePool, app_dir: PathBuf, runs: Arc<Registry>) -> Arc<Self> {
-        Arc::new(Mcp { pool, app_dir, runs, current: RwLock::new(None), loading: tokio::sync::Mutex::new(()) })
+    pub fn new(pool: SqlitePool, app_dir: PathBuf) -> Arc<Self> {
+        Arc::new(Mcp { pool, app_dir, current: RwLock::new(None), loading: tokio::sync::Mutex::new(()) })
     }
 
     pub fn pool(&self) -> &SqlitePool {
@@ -334,7 +330,6 @@ impl Mcp {
             *self.current.write().expect("mcp state") = Some(s.clone());
             s
         };
-        self.changed().await;
         s
     }
 
@@ -354,14 +349,7 @@ impl Mcp {
             *self.current.write().expect("mcp state") = Some(s.clone());
             s
         };
-        self.changed().await;
         Ok(s)
-    }
-
-    /// A linked Python re-reads this manager (`apply_setting` on an `mcp.*`
-    /// key reloads its `EdgeMcp`).
-    async fn changed(&self) {
-        crate::gql::settings::tell_worker(&self.runs, config::SERVERS_KEY).await;
     }
 
     /// `call_mcp_tool`: one tool by (server, tool), within `timeout` seconds

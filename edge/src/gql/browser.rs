@@ -53,9 +53,6 @@ impl BrowserMutation {
         else {
             return Ok(false);
         };
-        if run.claimed() {
-            return Err(super::defer("the browsing run is a worker's".into()));
-        }
         let url = crate::pystr::prefix(&url, 500);
         run.emit_local("browser_step", &serde_json::json!({"url": url, "phase": phase, "source": "main"}));
         Ok(true)

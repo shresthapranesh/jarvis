@@ -11,7 +11,6 @@ use async_graphql::{ComplexObject, Context, Object, Result, SimpleObject};
 use futures_util::future::join_all;
 use sqlx::SqlitePool;
 
-use super::defer;
 use crate::catalog;
 use crate::discovery::{self, Fail, Found};
 use crate::llm::Endpoints;
@@ -113,7 +112,7 @@ impl ModelSyncQuery {
     ) -> Result<Vec<ModelSyncReport>> {
         let pool = ctx.data::<SqlitePool>()?;
         let endpoints = catalog::endpoints(pool).await?;
-        let (_, specs) = catalog::catalog(pool).await?.map_err(|e| defer(format!("models.custom: {}", e.0)))?;
+        let (_, specs) = catalog::catalog(pool).await?.map_err(|e| super::models::unreadable(&e.0))?;
         let names = |base: &[&str]| -> Vec<String> {
             let mut out: Vec<String> = base.iter().map(|p| p.to_string()).chain(endpoints.iter().map(|e| e.name.clone())).collect();
             out.sort();
@@ -145,16 +144,13 @@ impl ModelSyncQuery {
                     out.push(skipped(prov, why));
                     continue;
                 }
-                Err(Fail::Defer(why)) => return Err(defer(format!("modelSync {prov}: {why}"))),
             };
             let report = discovery::build_report(prov, &specs, &found);
             let mut unreachable = vec![];
             if probe {
                 for spec in specs.iter().filter(|s| &s.provider == prov) {
-                    match discovery::probe(spec, &ends).await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(reason)) => unreachable.push(UnreachableModel { id: spec.id.clone(), reason }),
-                        Err(Fail::Skip(why) | Fail::Defer(why)) => return Err(defer(format!("probing {}: {why}", spec.id))),
+                    if let Err(reason) = discovery::probe(spec, &ends).await {
+                        unreachable.push(UnreachableModel { id: spec.id.clone(), reason });
                     }
                 }
             }

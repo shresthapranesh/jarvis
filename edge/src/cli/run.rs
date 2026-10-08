@@ -1,13 +1,12 @@
 //! `run "<query>"` — the chat agent on one query, nothing kept: its own
-//! history and kernel, no conversation, the last reply printed. With the
-//! agent loop switched off (`JARVIS_AGENT_RUNTIME=python`) it is Python's.
+//! history and kernel, no conversation, the last reply printed.
 
 use std::io::{IsTerminal, Write};
 
 use sqlx::SqlitePool;
 
 use super::{Done, Fail, red, yellow};
-use crate::agent::{Agent, route, workflow};
+use crate::agent::{Agent, workflow};
 use crate::catalog;
 use crate::config::Config;
 use crate::llm::transcript::{Content, Part, Typed};
@@ -28,9 +27,6 @@ pub async fn run(config: &Config, pool: &SqlitePool, query: String, model: Optio
     } else {
         seed.to_string()
     };
-    if !route::enabled() {
-        return Err(Fail::Python("JARVIS_AGENT_RUNTIME=python".into()));
-    }
     if model != asked {
         // On a CLI a typo'd --model would otherwise answer from a model the
         // operator never asked for, with nothing on screen to say so.
@@ -47,7 +43,7 @@ pub async fn run(config: &Config, pool: &SqlitePool, query: String, model: Optio
         &config.app_dir,
         pool.clone(),
     );
-    let mcp = crate::mcp::Mcp::new(pool.clone(), config.app_dir.clone(), Default::default());
+    let mcp = crate::mcp::Mcp::new(pool.clone(), config.app_dir.clone());
     let agent = Agent::new(pool.clone(), Default::default(), kernels.clone(), mcp, None, config.artifacts_dir.clone());
 
     let spinner = std::io::stderr().is_terminal();

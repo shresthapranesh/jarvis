@@ -4,15 +4,13 @@
 //! The prompt goes into the thread and the plan is reset; then model step,
 //! tool batch, repeat, until the model answers without calling a tool. Every
 //! message is written as it arrives — the reply before any of its tools run,
-//! each result once it and the calls before it are done — so a turn handed to
-//! Python, or re-claimed after a crash, goes on from the rows.
+//! each result once it and the calls before it are done — so a turn
+//! re-claimed after a crash goes on from the rows.
 //!
 //! A history that outgrows the model's threshold is summarized before the
 //! call (`summarize.rs`). `spawn_workers` runs its workers here too
 //! (`workers.rs`), their events written and announced as they come, and
-//! `run_workflow` its workflow (`workflow/`). A step that needs Python
-//! (`tools::Plan::Python`) hands the turn over with what it carried
-//! (`Outcome::HandOver`); Python runs the recorded calls and goes on.
+//! `run_workflow` its workflow (`workflow/`).
 
 use std::sync::Arc;
 
@@ -26,7 +24,7 @@ use super::events::Emitter;
 use super::queue::Job;
 use super::summarize::{self, Summarizer};
 use super::thread::Thread;
-use super::tools::{self, Native, Plan, Policy, Step};
+use super::tools::{self, Native, Policy, Step};
 use super::{Agent, Outcome, prompt, workers};
 use crate::budget::{Budget, Limits};
 use crate::gql::codec::now_stored;
@@ -52,8 +50,6 @@ enum Stop {
     Cancelled,
     /// `RecursionLimitReached`.
     Limit,
-    /// Something only Python can do next; the turn goes over.
-    Python(String),
     /// The model call or a tool failed.
     Failed(String),
 }
@@ -179,10 +175,6 @@ impl<'a> Turn<'a> {
             Ok(mut thread) => self.start(&mut thread).await,
             Err(e) => Err(Stop::Failed(format!("reading the thread: {e}"))),
         };
-        if let Err(Stop::Python(why)) = &result {
-            tracing::info!("agent: run {} goes to Python: {why}", self.task_id);
-            return self.hand_over();
-        }
         match self.kind {
             Kind::Automation(_) => return self.finish_automation(result).await,
             Kind::Board(_) => return self.finish_board(result).await,
@@ -192,7 +184,6 @@ impl<'a> Turn<'a> {
             Ok(()) => self.finish_done(false).await,
             Err(Stop::Limit) => self.finish_done(true).await,
             Err(Stop::Cancelled) => self.finish_stopped().await,
-            Err(Stop::Python(_)) => unreachable!("handed over above"),
             Err(Stop::Failed(e)) => self.finish_failed(e).await,
         }
     }
@@ -236,22 +227,6 @@ impl<'a> Turn<'a> {
         }
     }
 
-    /// The job goes to Python, carrying what the run did here.
-    fn hand_over(&mut self) -> Outcome {
-        self.events.flush();
-        Outcome::HandOver(Some(json!({
-            "text": self.text,
-            "step_seq": self.events.step_seq,
-            "steps": self.steps,
-            "usage": {
-                "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens,
-                "llm_calls": self.budget.llm_calls,
-                "tool_calls": self.budget.tool_calls,
-            },
-        })))
-    }
-
     // ── the loop ────────────────────────────────────────────────────────────
 
     async fn turn(&mut self, thread: &mut Thread) -> Result<(), Stop> {
@@ -265,11 +240,7 @@ impl<'a> Turn<'a> {
             if reply.tool_calls.is_empty() {
                 return Ok(());
             }
-            // Nothing runs before its batch is known to be the edge's.
-            let steps = match tools::plan(&reply.tool_calls, &bound, &policy) {
-                Plan::Edge(steps) => steps,
-                Plan::Python(why) => return Err(Stop::Python(why)),
-            };
+            let steps = tools::plan(&reply.tool_calls, &bound, &policy);
             self.take_step()?;
             self.tool_step(thread, &reply.tool_calls, steps, &policy, &mcp).await?;
         }
@@ -444,7 +415,7 @@ impl<'a> Turn<'a> {
                 return Err(Stop::Cancelled);
             }
             let (content, status, artifact) = match step {
-                Step::Unknown(error) | Step::Denied(error) => (Content::Text(error), "error", None),
+                Step::Refused(error) | Step::Denied(error) => (Content::Text(error), "error", None),
                 Step::Gated(_) => unreachable!("gates are answered first"),
                 Step::Run(Native::SpawnWorkers { tasks }) => {
                     self.count_tool();
