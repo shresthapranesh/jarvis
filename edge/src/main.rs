@@ -1,8 +1,5 @@
-//! jarvis-edge — the Rust front of the jarvis server.
-//!
-//! Phase 1 of moving off Python: the edge owns the public port, answers the
-//! GraphQL operations it has been taught, and proxies everything else to the
-//! Python server behind it. See `edge/README.md`.
+//! jarvis-edge — the jarvis server and command line. Only the agent's
+//! notebook kernels run Python. See `edge/README.md`.
 
 mod agent;
 mod approvals;
@@ -21,20 +18,18 @@ mod gql;
 mod graphql;
 mod jobs;
 mod kernels;
-mod link;
 mod llm;
 mod logs;
 mod mcp;
 mod mimetypes;
 mod notify;
-mod proxy;
 mod pyjson;
 mod pystr;
 mod rest;
 mod runs;
 mod schedule;
 mod schema;
-mod supervisor;
+mod web;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -51,30 +46,17 @@ pub struct AppState {
     /// For the REST routes the edge serves (`rest.rs`).
     pub pool: sqlx::SqlitePool,
     pub schema: gql::EdgeSchema,
-    pub owned: Arc<gql::router::Owned>,
     pub http: reqwest::Client,
-    /// The live-run mirror the worker link feeds (`runs.rs`).
+    /// The live runs (`runs.rs`).
     pub runs: Arc<runs::Registry>,
     /// Every timer, and the board dispatcher (`schedule.rs`).
     pub scheduler: Arc<schedule::Scheduler>,
-    /// The Python worker's process, when the edge owns it (`supervisor.rs`).
-    pub supervisor: Arc<supervisor::Supervisor>,
     /// The agent's notebooks (`kernels/`).
     pub kernels: Arc<kernels::Kernels>,
-    /// MCP servers (`mcp/`), which Python behind the edge calls through.
+    /// MCP servers (`mcp/`).
     pub mcp: Arc<mcp::Mcp>,
     /// The live view of the agent's browser (`browser/`).
     pub screencast: Arc<browser::screencast::Screencast>,
-}
-
-impl AppState {
-    /// Whether the run mirror is the truth, so the edge answers what reads,
-    /// steers or starts a run: a worker is linked, or the edge owns the worker
-    /// (and none being up means none is running anything), or the edge runs
-    /// chat turns itself (`agent/`).
-    pub fn runs_here(&self) -> bool {
-        self.supervisor.supervised() || self.runs.link_up() || agent::route::enabled()
-    }
 }
 
 /// The test hooks below keep their raw flags; anything else is the command
@@ -114,7 +96,7 @@ async fn serve() {
                 ".".as_ref(),
                 pool.clone(),
             ),
-            mcp: mcp::Mcp::new(pool.clone(), Default::default(), Default::default()),
+            mcp: mcp::Mcp::new(pool.clone(), Default::default()),
         };
         print!("{}", gql::build(pool, data, Default::default()).sdl());
         return;
@@ -166,7 +148,7 @@ async fn serve() {
         )
         .init();
 
-    let mut config = match Config::from_env() {
+    let config = match Config::from_env() {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("{e}");
@@ -220,11 +202,7 @@ async fn serve() {
         println!("{out}");
         return;
     }
-    let http = reqwest::Client::builder()
-        // A proxy hands redirects to the client; it never follows them.
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("http client");
+    let http = reqwest::Client::new();
     let runs: Arc<runs::Registry> = Default::default();
     let scheduler = schedule::Scheduler::new(pool.clone(), runs.clone(), tz);
     let kernels = kernels::Kernels::new(
@@ -240,7 +218,7 @@ async fn serve() {
         &config.app_dir,
         pool.clone(),
     );
-    let mcp = mcp::Mcp::new(pool.clone(), config.app_dir.clone(), runs.clone());
+    let mcp = mcp::Mcp::new(pool.clone(), config.app_dir.clone());
     // Each server listed once, in the background, before anything asks.
     tokio::spawn({
         let mcp = mcp.clone();
@@ -260,31 +238,13 @@ async fn serve() {
     tokio::spawn(scheduler.clone().run());
     tokio::spawn(sweep_pending_runs(runs.clone(), pool.clone()));
 
-    let supervisor = supervisor::Supervisor::new(
-        config.worker.take(),
-        config.backend.clone(),
-        config.backend_port().to_string(),
-        pool.clone(),
-        runs.clone(),
-        http.clone(),
-    );
-    tokio::spawn(supervisor.clone().run());
     bots::spawn(pool.clone(), runs.clone());
-    let owned = gql::owned_root_fields(&schema);
     tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
     // The chat turns the edge runs itself (`agent/`), and the recovery of any
     // a previous edge left running.
     tokio::spawn(agent::Agent::new(pool.clone(), runs.clone(), kernels.clone(), mcp.clone(), Some(scheduler.clone()), config.artifacts_dir.clone()).run());
 
-    let mut fields: Vec<_> = owned.query.iter().chain(&owned.mutation).cloned().collect();
-    fields.sort();
-    tracing::info!(
-        "edge on {} → backend {} · db {} · serving {}",
-        config.bind,
-        config.backend,
-        config.db_path.display(),
-        fields.join(", ")
-    );
+    tracing::info!("jarvis on {} · db {}", config.bind, config.db_path.display());
 
     let bind = config.bind;
     if let Some(dir) = &config.static_dir {
@@ -295,26 +255,18 @@ async fn serve() {
         config: Arc::new(config),
         pool: pool.clone(),
         schema,
-        owned: Arc::new(owned),
         http,
         runs,
         scheduler,
-        supervisor: supervisor.clone(),
         kernels: kernels.clone(),
         mcp,
         screencast,
     };
     let app = Router::new()
-        // GET /graphql (the subscription WebSocket) falls through to the proxy.
-        .route("/graphql", post(graphql::post).get(graphql::websocket).fallback(proxy::any))
-        .route("/internal/worker", get(link::upgrade))
-        .route("/internal/kernels/run", post(kernels::http_run))
-        .route("/internal/kernels/shutdown", post(kernels::http_shutdown))
-        .route("/internal/mcp/state", post(mcp::internal::state))
-        .route("/internal/mcp/call", post(mcp::internal::call))
+        .route("/graphql", post(graphql::post).get(graphql::websocket))
         .route("/ws/browser", get(browser::ws::upgrade))
-        .fallback(proxy::any)
-        // Python sets no request-size limit on /graphql; neither does the edge.
+        .fallback(web::any)
+        // No request-size limit on /graphql.
         .layer(DefaultBodyLimit::disable())
         .with_state(state);
 
@@ -329,12 +281,11 @@ async fn serve() {
         .with_graceful_shutdown(shutdown())
         .await
         .expect("server");
-    // Python doesn't outlive the edge that started it, nor do the kernels.
-    supervisor.shutdown().await;
+    // The kernels don't outlive the server.
     kernels.shutdown_all().await;
 }
 
-/// Runs this edge started whose job ended before any worker claimed it.
+/// Runs whose job ended before the agent loop took it.
 async fn sweep_pending_runs(runs: Arc<runs::Registry>, pool: sqlx::SqlitePool) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {

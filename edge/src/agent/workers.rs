@@ -9,16 +9,15 @@
 //! model and tool calls, which count against the run's budget and usage as
 //! the parent's callbacks counted them in Python.
 //!
-//! A worker can't be handed to Python halfway, so it answers everything
-//! itself: unknown tools, arguments Pydantic would reject (worded as
-//! `invoke_tool` words them), gated calls.
+//! A worker answers unknown tools, arguments its tool's signature won't take
+//! (`tools::Args`) and gated calls itself.
 
 use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::tools::{Policy, Toolset};
+use super::tools::{Args, Policy, Toolset};
 use super::{Agent, artifacts, files};
 use crate::llm::perf::CallPerf;
 use crate::llm::shape::{self, Layout};
@@ -506,21 +505,12 @@ fn answer(reply: &Message) -> String {
 
 // ── arguments ───────────────────────────────────────────────────────────────
 
-/// `_BAD_ARGS`.
-fn bad_args(tool: &str, args: &Value, errors: &[String]) -> String {
-    format!(
-        "Error invoking tool '{tool}' with kwargs {} with error:\n {}\n Please fix the error and try again.",
-        pyjson::py_repr(args),
-        errors.join("\n")
-    )
-}
-
 /// The call as its tool's signature takes it, or `invoke_tool`'s answer.
 /// Pydantic's lax mode: extra keys ignored, an integer from a whole float
 /// or a numeric string, a boolean from 0/1 or a word.
 fn check(name: &str, args: &Value) -> Result<Call, String> {
     let empty = Map::new();
-    let mut a = Args { args: args.as_object().unwrap_or(&empty), errors: vec![] };
+    let mut a = Args::new(args.as_object().unwrap_or(&empty));
     let call = match name {
         "run_cell" => Call::RunCell { code: a.str("code") },
         "read_file" => Call::ReadFile { filepath: a.str("filepath") },
@@ -536,107 +526,9 @@ fn check(name: &str, args: &Value) -> Result<Call, String> {
         "list_artifacts" => Call::ListArtifacts { all_conversations: a.bool("all_conversations", false) },
         other => unreachable!("{other} is no worker tool"),
     };
-    if a.errors.is_empty() { Ok(call) } else { Err(bad_args(name, args, &a.errors)) }
+    a.finish(name, args, call)
 }
 
-struct Args<'v> {
-    args: &'v Map<String, Value>,
-    errors: Vec<String>,
-}
-
-impl Args<'_> {
-    fn fail(&mut self, key: &str, msg: &str) {
-        self.errors.push(format!("{key}: {msg}"));
-    }
-
-    fn str(&mut self, key: &str) -> String {
-        match self.args.get(key) {
-            Some(Value::String(s)) => s.clone(),
-            None => {
-                self.fail(key, "Field required");
-                String::new()
-            }
-            Some(_) => {
-                self.fail(key, "Input should be a valid string");
-                String::new()
-            }
-        }
-    }
-
-    fn opt_str(&mut self, key: &str) -> Option<String> {
-        match self.args.get(key) {
-            None | Some(Value::Null) => None,
-            Some(Value::String(s)) => Some(s.clone()),
-            Some(_) => {
-                self.fail(key, "Input should be a valid string");
-                None
-            }
-        }
-    }
-
-    fn opt_int(&mut self, key: &str) -> Option<i64> {
-        match self.args.get(key) {
-            None | Some(Value::Null) => None,
-            Some(v) => self.as_int(key, v),
-        }
-    }
-
-    fn as_int(&mut self, key: &str, v: &Value) -> Option<i64> {
-        let n = match v {
-            Value::Bool(b) => Some(i64::from(*b)),
-            Value::Number(n) => match (n.as_i64(), n.as_f64()) {
-                (Some(i), _) => Some(i),
-                (None, Some(f)) if f.fract() == 0.0 && f.abs() < 9.2e18 => Some(f as i64),
-                (None, Some(_)) => {
-                    self.fail(key, "Input should be a valid integer, got a number with a fractional part");
-                    return None;
-                }
-                _ => None,
-            },
-            Value::String(s) => match s.trim().parse::<i64>() {
-                Ok(i) => Some(i),
-                Err(_) => {
-                    self.fail(key, "Input should be a valid integer, unable to parse string as an integer");
-                    return None;
-                }
-            },
-            _ => None,
-        };
-        if n.is_none() {
-            self.fail(key, "Input should be a valid integer");
-        }
-        n
-    }
-
-    fn bool(&mut self, key: &str, default: bool) -> bool {
-        const UNREADABLE: &str = "Input should be a valid boolean, unable to interpret input";
-        let b = match self.args.get(key) {
-            None => return default,
-            Some(Value::Bool(b)) => Some(*b),
-            Some(Value::Number(n)) => match n.as_f64() {
-                Some(0.0) => Some(false),
-                Some(1.0) => Some(true),
-                _ => {
-                    self.fail(key, UNREADABLE);
-                    return default;
-                }
-            },
-            Some(Value::String(s)) => match s.to_lowercase().as_str() {
-                "0" | "off" | "f" | "false" | "n" | "no" => Some(false),
-                "1" | "on" | "t" | "true" | "y" | "yes" => Some(true),
-                _ => {
-                    self.fail(key, UNREADABLE);
-                    return default;
-                }
-            },
-            Some(_) => None,
-        };
-        b.unwrap_or_else(|| {
-            self.fail(key, "Input should be a valid boolean");
-            default
-        })
-    }
-}
 
 #[cfg(test)]
 mod tests {

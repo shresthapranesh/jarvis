@@ -10,11 +10,7 @@
 //!   SDK waits for one inside the cell), up to 30 minutes.
 //! - At most `MAX_KERNELS` live kernels (least recently used goes), and one
 //!   untouched for 30 minutes is shut down.
-//!
-//! Python behind the edge runs `run_cell` here (`http.rs`), so a live kernel
-//! no longer keeps the Python worker up.
 
-pub(crate) mod http;
 mod kernel;
 mod wire;
 
@@ -26,13 +22,11 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use sqlx::SqlitePool;
 
-pub use http::{run as http_run, shutdown as http_shutdown};
 pub use kernel::Launch;
 use kernel::Kernel;
 
 pub const MAX_KERNELS: usize = 12;
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-pub const DEFAULT_CELL_TIMEOUT: f64 = 60.0;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const INTERRUPT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const HOLD_POLL: Duration = Duration::from_secs(5);

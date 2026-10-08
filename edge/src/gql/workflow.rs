@@ -167,9 +167,17 @@ impl WorkflowMutation {
         Workflow::by_id(pool, &raw).await?.ok_or_else(|| "workflow not found".into())
     }
 
-    // The human path only — see `delete_skill`.
+    // An agent's delete may need a human's approval first (`gate_action`).
     async fn delete_workflow(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
+        if ctx.data::<super::RequestFrom>()?.caller == super::router::Caller::Agent {
+            let pool: &SqlitePool = ctx.data()?;
+            let name: Option<String> =
+                sqlx::query_scalar("SELECT name FROM workflows WHERE id = ?").bind(&raw).fetch_optional(pool).await?;
+            let name = name.ok_or("workflow not found")?;
+            let payload = serde_json::json!({"workflow_id": raw, "name": name});
+            super::approval::gate_action(ctx, "delete_workflow", payload).await?;
+        }
         if !delete_workflow(ctx.data()?, &raw).await? {
             return Err("workflow not found".into());
         }

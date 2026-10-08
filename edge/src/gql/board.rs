@@ -10,7 +10,7 @@ use async_graphql::{ComplexObject, Context, ID, InputObject, Object, Result, Sim
 use serde_json::{Value, json};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use super::{EdgeData, defer};
+use super::EdgeData;
 use super::codec::{DateTime, decode_global_id, global_id, new_id, now_stored};
 use super::conversation::{delete_conversation, unknown_model};
 use crate::runs::Registry;
@@ -439,9 +439,6 @@ impl BoardTaskMutation {
         if has_parents.is_some() {
             return Err("task already has dependencies — decompose only standalone tasks".into());
         }
-        if !crate::agent::route::enabled() {
-            return Err(defer("JARVIS_AGENT_RUNTIME=python".into()));
-        }
         let model = crate::catalog::resolve_model(pool, task.model.as_deref()).await?;
         let specs = parse_decomposition(&plan(pool, &data.http, &model, &task).await?)?;
 
@@ -598,9 +595,6 @@ impl BoardTaskMutation {
             .ok_or("task is not running")?;
         let run = registry.get(&run_id);
         if let Some(run) = &run {
-            if run.claimed() {
-                registry.control(&json!({"type": "cancel", "task_id": run_id, "resume": false}));
-            }
             run.update(|st| st.fields.cancelled = true);
         }
         super::runs::cancel_job(pool, &run_id).await?;

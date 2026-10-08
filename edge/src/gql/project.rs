@@ -97,15 +97,12 @@ pub struct ProjectMutation;
 #[Object]
 impl ProjectMutation {
     // The pass for one project now, without the quiet-period wait the
-    // timer observes. With the agent loop off, Python's.
+    // timer observes.
     async fn consolidate_project_memory(&self, ctx: &Context<'_>, id: ID, model: Option<String>) -> Result<String> {
         let (_, raw) = decode_global_id(&id)?;
         let pool: &SqlitePool = ctx.data()?;
         if Project::by_id(pool, &raw).await?.is_none() {
             return Err("project not found".into());
-        }
-        if !crate::agent::route::enabled() {
-            return Err(super::defer("JARVIS_AGENT_RUNTIME=python".into()));
         }
         let http = &ctx.data::<super::EdgeData>()?.http;
         Ok(crate::consolidate::project::consolidate(pool, http, &raw, model.as_deref(), true).await?)

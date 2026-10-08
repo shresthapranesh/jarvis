@@ -7,16 +7,13 @@
 //! servers (`crate::mcp`), and a linked Python is told about the keys it
 //! caches (the embedding model, the catalog, the tool policy).
 
-use std::sync::Arc;
 
 use async_graphql::{Context, ID, Object, Result, SimpleObject};
 use serde_json::Value;
 use sqlx::SqlitePool;
 
 use super::codec::{DateTime, now_stored};
-use super::defer;
 use crate::pystr;
-use crate::runs::Registry;
 
 /// What a key is for and who owns it — `SettingSpec`.
 struct Spec {
@@ -304,8 +301,7 @@ fn redact(key: &str, value: &str) -> String {
     crate::pyjson::dumps(&Value::Array(rows))
 }
 
-/// `validate`'s refusals that have one right answer. Invalid JSON for a
-/// json-kind key defers: Python words the decoder's error.
+/// `validate`.
 fn validate(key: &str, value: &str) -> Result<()> {
     if key.is_empty() {
         return Err("key is empty".into());
@@ -315,8 +311,10 @@ fn validate(key: &str, value: &str) -> Result<()> {
     }
     let Some(spec) = spec_for(key) else { return Ok(()) };
     let value = pystr::strip(value);
-    if spec.kind == "json" && !value.is_empty() && serde_json::from_str::<serde::de::IgnoredAny>(value).is_err() {
-        return Err(defer(format!("{key}: invalid JSON is Python's to word")));
+    if spec.kind == "json" && !value.is_empty() {
+        if let Err(e) = serde_json::from_str::<serde::de::IgnoredAny>(value) {
+            return Err(format!("{key} must be valid JSON: {e}").into());
+        }
     }
     if spec.kind == "select" && !value.is_empty() && !spec.choices.contains(&value) {
         return Err(format!("{key} must be one of: {}", spec.choices.join(", ")).into());
@@ -335,43 +333,20 @@ fn owner_check(key: &str, allow_managed: bool) -> Result<()> {
     Ok(())
 }
 
-/// `apply_setting`. Everything the edge reads it reads from the table at the
-/// point of use, except the MCP servers, which are reconnected; a linked
-/// Python caches the embedding model, the catalog and the tool policy, so it
-/// is told to re-read them.
+/// `apply_setting`. Everything is read from the table at the point of use,
+/// except the MCP servers, which are reconnected.
 async fn apply(ctx: &Context<'_>, key: &str) -> Result<String> {
     if key.starts_with("mcp.") {
-        // The reload tells a linked Python itself.
         let mcp = &ctx.data::<super::EdgeData>()?.mcp;
         let merged = mcp.reload().await;
         return Ok(format!("Applied. Reconnected {} MCP server(s).", merged.connections.len()));
     }
     match key {
-        "embedding.model" => {
-            tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
-            Ok("Applied. New embeddings use this model; existing vectors are unchanged.".into())
-        }
-        "models.custom" | "models.endpoints" | "default.model" => {
-            tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
-            Ok("Applied.".into())
-        }
-        "tools.policy" => {
-            tell_worker(ctx.data::<Arc<Registry>>()?, key).await;
-            Ok("Applied. New runs use the updated policy.".into())
-        }
-        // The scheduler's zone is read once at startup, here as in Python.
+        "embedding.model" => Ok("Applied. New embeddings use this model; existing vectors are unchanged.".into()),
+        "tools.policy" => Ok("Applied. New runs use the updated policy.".into()),
+        // The scheduler's zone is read once at startup.
         "scheduler.timezone" => Ok("Saved. Takes effect when the server restarts.".into()),
         _ => Ok("Applied.".into()),
-    }
-}
-
-/// Have a linked Python re-read `key` into the caches it holds
-/// (`apply_setting`). No worker linked: one started later reads it at startup.
-pub async fn tell_worker(registry: &Registry, key: &str) {
-    if let Err(e) = registry.call("apply_setting", serde_json::json!({"key": key})).await {
-        if e != "no worker is linked" {
-            tracing::warn!("applying {key} in the worker failed: {e}");
-        }
     }
 }
 
@@ -486,7 +461,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_matches_python() {
+    fn validate_refuses_what_it_should() {
         assert_eq!(validate("", "v").unwrap_err().message, "key is empty");
         assert_eq!(validate("a b", "v").unwrap_err().message, "key 'a b' contains whitespace");
         assert_eq!(
@@ -495,7 +470,7 @@ mod tests {
         );
         assert!(validate("mcp.default_load_mode", " lazy ").is_ok());
         assert!(validate("tools.policy", "{}").is_ok());
-        assert!(validate("tools.policy", "{").unwrap_err().extensions.is_some());
+        assert!(validate("tools.policy", "{").unwrap_err().message.starts_with("tools.policy must be valid JSON: "));
         assert!(validate("free.form", "{").is_ok());
     }
 }

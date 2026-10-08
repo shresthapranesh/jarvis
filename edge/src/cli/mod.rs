@@ -2,11 +2,8 @@
 //! `config *`, `model *`, `memory *`. No subcommand serves, as the edge
 //! always has.
 //!
-//! The commands read and write the database as `main.py`'s do, through the
-//! edge's own ports of the same code (`catalog.rs`, `gql/models.rs`,
-//! `discovery.rs`, the agent loop). Only `run` with the agent loop switched
-//! off (`JARVIS_AGENT_RUNTIME=python`) runs the command through `main.py`
-//! instead.
+//! The commands read and write the database through the server's own code
+//! (`catalog.rs`, `gql/models.rs`, `discovery.rs`, the agent loop).
 //!
 //! The output says what `main.py`'s says, as plain text: tables are aligned
 //! columns, a report is printed as its Markdown.
@@ -108,10 +105,8 @@ pub fn parse() -> Mode {
     }
 }
 
-/// Why a command didn't finish here.
+/// Why a command didn't finish.
 pub enum Fail {
-    /// The agent loop is Python's: `main.py` runs the command instead.
-    Python(String),
     /// A failure to report.
     Error(String),
 }
@@ -131,7 +126,6 @@ pub async fn main(command: Command) -> ! {
     logging(debug);
     let code = match dispatch(command).await {
         Ok(code) => code,
-        Err(Fail::Python(why)) => to_python(&why),
         Err(Fail::Error(e)) => {
             eprintln!("{} {e}", red("Error:"));
             1
@@ -174,25 +168,6 @@ async fn open() -> Result<(crate::config::Config, SqlitePool), Fail> {
     let pool = crate::db::pool(&config.db_path).map_err(|e| database(e.to_string()))?;
     crate::schema::init(&pool, &config.db_path).await.map_err(database)?;
     Ok((config, pool))
-}
-
-/// `main.py` with this process's arguments, in its place.
-fn to_python(why: &str) -> i32 {
-    use std::os::unix::process::CommandExt;
-    let app = crate::config::app_dir();
-    let script = app.join("main.py");
-    if !script.is_file() {
-        eprintln!("{} this needs Python ({why}), and there is no {}", red("Error:"), script.display());
-        return 1;
-    }
-    tracing::debug!("handing the command to Python: {why}");
-    let err = std::process::Command::new(crate::config::python())
-        .arg(&script)
-        .args(std::env::args_os().skip(1))
-        .current_dir(&app)
-        .exec();
-    eprintln!("{} this needs Python ({why}), which didn't start: {err}", red("Error:"));
-    1
 }
 
 // ── Output ──────────────────────────────────────────────────────────────────

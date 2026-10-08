@@ -109,9 +109,7 @@ impl Emitter {
     }
 
     fn raw(&self, event: &str, data: &Value) {
-        if !self.run.emit_local(event, data) {
-            tracing::warn!("agent: run {} is no longer the edge's; dropped its {event} event", self.task_id);
-        }
+        self.run.emit_local(event, data);
     }
 
     /// A finished step: its row, then its event.

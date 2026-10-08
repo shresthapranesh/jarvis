@@ -1,5 +1,4 @@
-//! Every timer the Python server ran (`core/scheduler.py`), so that between
-//! jobs there is nothing for Python to do.
+//! Every timer the server runs (a port of `core/scheduler.py`).
 //!
 //! | timer | when | does |
 //! |---|---|---|
@@ -9,16 +8,10 @@
 //! | project memory | every 30 min | the sweep, here (`consolidate/`) |
 //! | memory-activity prune | `0 4 * * *` | deletes old access-log rows, here |
 //!
-//! A memory sweep is Python's — a queued `maintenance` job — when the agent
-//! loop is off (`JARVIS_AGENT_RUNTIME=python`).
-//! Python behind the edge registers none of these (`core/edge_link.py:
-//! behind_edge`), and asks the edge instead — `dispatch` after a board
-//! change, `schedules` after an automation's schedule changed.
-//!
 //! Firing follows APScheduler's rules for the jobs it replaces: times are
 //! `cron.rs`'s, a run that is late by more than the job's grace period is
 //! skipped, several missed runs coalesce into one, and nothing missed while
-//! the edge was down is caught up on.
+//! the server was down is caught up on.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,16 +30,15 @@ use crate::runs::{Meta, Registry};
 /// How many board tasks may run at once — `task_board_runtime.MAX_IN_PROGRESS`.
 const MAX_IN_PROGRESS: i64 = 3;
 /// Re-read the automations this often even unprompted, for writes that
-/// didn't come through Python (the CLI, another process).
+/// didn't come through this server (the CLI, another process).
 const RELOAD_EVERY: Duration = Duration::from_secs(60);
-/// Python reports a schedule change as it makes it, often just before the
-/// commit; wait out the commit before re-reading.
+/// A schedule change may be reported just before its commit; wait out the
+/// commit before re-reading.
 const RELOAD_SETTLE: Duration = Duration::from_millis(300);
 
 /// The zone cron expressions are read in — `get_scheduler_timezone`: the
 /// `scheduler.timezone` setting, else `JARVIS_TIMEZONE`, else the machine's
-/// zone (`TZ` first, as tzlocal does), else UTC. Read once at startup; Python
-/// can't change it on a running scheduler either.
+/// zone (`TZ` first, as tzlocal does), else UTC. Read once at startup.
 pub async fn resolve_tz(pool: &SqlitePool) -> Tz {
     let setting: Option<String> = sqlx::query_scalar("SELECT value FROM config_settings WHERE key = 'scheduler.timezone'")
         .fetch_optional(pool)
@@ -146,7 +138,7 @@ pub struct Scheduler {
     tz: Tz,
     /// The memory sweeps' model calls.
     http: reqwest::Client,
-    /// Python changed an automation's schedule.
+    /// An automation's schedule changed.
     changed: Notify,
     /// One dispatch pass at a time: a tick and a requested pass must not
     /// both claim the same card.
@@ -291,8 +283,7 @@ impl Scheduler {
             return Ok(());
         }
         let job_id = new_id();
-        let edge = crate::agent::route::enabled();
-        crate::jobs::insert(&self.pool, &job_id, "automation", &json!({"automation_id": id, "triggered_by": "schedule"}), None, edge)
+        crate::jobs::insert(&self.pool, &job_id, "automation", &json!({"automation_id": id, "triggered_by": "schedule"}), None)
             .await?;
         tracing::info!("automation {id} scheduled run enqueued (job {job_id})");
         self.runs.wake();
@@ -300,10 +291,7 @@ impl Scheduler {
     }
 
     /// A maintenance tick: the sweep, only with something for it to do
-    /// (`maintenance_due`) — a model call costs, and a job for Python would
-    /// start it just to find nothing new. Run here when the edge calls the
-    /// default model and Python has no pass of its own queued; else queued
-    /// for Python.
+    /// (`maintenance_due`) — a model call costs.
     async fn fire_maintenance(&self, task: &'static str) -> sqlx::Result<()> {
         match self.maintenance_due(task).await {
             Ok(false) => {
@@ -313,13 +301,6 @@ impl Scheduler {
             Ok(true) => {}
             // The sweep's own checks decide, as they did before this one.
             Err(e) => tracing::warn!("maintenance {task}: could not tell whether it is due ({e}); going ahead"),
-        }
-        if !crate::agent::route::enabled() {
-            return self.enqueue_maintenance(task).await;
-        }
-        if self.queued_maintenance(task).await?.is_some() {
-            tracing::debug!("maintenance {task}: Python has one queued");
-            return Ok(());
         }
         let (pool, http) = (self.pool.clone(), self.http.clone());
         // Off the timer loop: a pass takes as long as its model calls.
@@ -332,32 +313,10 @@ impl Scheduler {
         Ok(())
     }
 
-    /// A `maintenance` job for this task that is pending or running.
-    async fn queued_maintenance(&self, task: &str) -> sqlx::Result<Option<String>> {
-        sqlx::query_scalar(
-            "SELECT id FROM jobs WHERE kind = 'maintenance' AND status IN ('pending', 'running') AND payload = ? LIMIT 1",
-        )
-        .bind(crate::pyjson::dumps(&json!({"task": task})))
-        .fetch_optional(&self.pool)
-        .await
-    }
-
-    /// One at a time per task: a box that was off for a day shouldn't come
-    /// back to four queued consolidation passes.
-    async fn enqueue_maintenance(&self, task: &str) -> sqlx::Result<()> {
-        if self.queued_maintenance(task).await?.is_some() {
-            tracing::debug!("maintenance {task}: one is already queued");
-            return Ok(());
-        }
-        crate::jobs::insert(&self.pool, &new_id(), "maintenance", &json!({"task": task}), None, false).await?;
-        self.runs.wake();
-        Ok(())
-    }
-
     /// Whether a maintenance sweep would find work — the checks each one
-    /// makes before doing any, read from the same rows. A wrong "yes" costs a
-    /// pointless start of Python; a wrong "no" would stall the sweep, so where
-    /// in doubt this says yes and lets Python decide.
+    /// makes before doing any, read from the same rows. A wrong "no" would
+    /// stall the sweep, so where in doubt this says yes and lets the sweep
+    /// decide.
     pub async fn maintenance_due(&self, task: &str) -> sqlx::Result<bool> {
         match task {
             "memory_consolidation" => self.memory_due().await,
@@ -388,7 +347,7 @@ impl Scheduler {
             None => None,
             Some(serde_json::Value::String(iso)) => match stored_from_iso(&iso) {
                 Some(s) => Some(s),
-                None => return Ok(true), // unreadable: Python's to judge
+                None => return Ok(true), // unreadable: the sweep's to judge
             },
             Some(_) => return Ok(true),
         };
@@ -512,7 +471,6 @@ impl Scheduler {
         .await?;
 
         let mut started = vec![];
-        let edge = crate::agent::route::enabled();
         for (task_id, title) in &ready {
             let run_id = new_id();
             sqlx::query("UPDATE board_tasks SET status = 'running', job_id = ?, updated_at = ? WHERE id = ?")
@@ -523,14 +481,14 @@ impl Scheduler {
                 .await?;
             let thread = format!("boardtask_{task_id}");
             let enqueued_at =
-                crate::jobs::insert(&mut *tx, &run_id, "board_task", &json!({"task_id": task_id}), Some(&thread), edge).await?;
+                crate::jobs::insert(&mut *tx, &run_id, "board_task", &json!({"task_id": task_id}), Some(&thread)).await?;
             let meta = Meta {
                 kind: "board_task".into(),
                 label: title.clone(),
                 parent_id: Some(task_id.clone()),
                 started_at: iso_from_db(&enqueued_at).utc().0,
             };
-            self.runs.pre_register(&run_id, meta, edge);
+            self.runs.pre_register(&run_id, meta);
             started.push(run_id);
         }
         if let Err(e) = tx.commit().await {
@@ -637,18 +595,6 @@ mod tests {
         entries.get_mut("on").unwrap().next = Some(Wall::from_utc(next + chrono::Duration::hours(1), Tz::UTC));
         s.reload(&mut entries, &mut broken).await;
         assert_eq!(entries["on"].next.unwrap().to_utc(), next + chrono::Duration::hours(1));
-    }
-
-    #[tokio::test]
-    async fn maintenance_waits_for_the_one_already_queued() {
-        let s = scheduler().await;
-        s.enqueue_maintenance("memory_consolidation").await.unwrap();
-        s.enqueue_maintenance("memory_consolidation").await.unwrap();
-        s.enqueue_maintenance("project_memory").await.unwrap();
-        assert_eq!(jobs(&s).await.len(), 2);
-        sqlx::query("UPDATE jobs SET status = 'done'").execute(&s.pool).await.unwrap();
-        s.enqueue_maintenance("memory_consolidation").await.unwrap();
-        assert_eq!(jobs(&s).await[2], ("maintenance".into(), r#"{"task": "memory_consolidation"}"#.into()));
     }
 
     #[test]

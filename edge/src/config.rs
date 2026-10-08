@@ -1,27 +1,21 @@
-//! Process configuration, resolved the way `core/config.py` resolves it so the
-//! edge and the Python backend always agree on which database they share.
+//! Process configuration, resolved the way `core/config.py` resolves it, so
+//! the kernels' `jarvis` SDK and the server agree on which database they share.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 pub struct Config {
-    /// Where the edge listens. It takes over the port the Python server used
-    /// to own, so the frontend, the vite proxy and the `jarvis` SDK
-    /// (`JARVIS_API_URL`) keep working without changes.
+    /// Where the server listens: the port the frontend, the vite proxy and
+    /// the `jarvis` SDK (`JARVIS_API_URL`) use.
     pub bind: SocketAddr,
-    /// The Python server, which now listens behind the edge.
-    pub backend: String,
     pub db_path: PathBuf,
     /// Where artifact files live (`AppConfig.artifacts_dir`).
     pub artifacts_dir: PathBuf,
     /// LangGraph's database (`AppConfig.checkpoints_db`): its store is
     /// copied into `kv_store` once (`schema::import_store_once`).
     pub checkpoints_db: PathBuf,
-    /// The built SPA (`static/dist` under the app), served here rather than
-    /// by Python when it exists — loading the UI must not start Python.
+    /// The built SPA (`static/dist` under the app), when it exists.
     pub static_dir: Option<PathBuf>,
-    /// How to start Python, when the edge is to own it (`supervisor.rs`).
-    pub worker: Option<WorkerConfig>,
     /// The jarvis checkout: kernels run there, with it on `sys.path`.
     pub app_dir: PathBuf,
     /// The interpreter kernels run on: `JARVIS_KERNEL_PYTHON`, else the
@@ -31,79 +25,34 @@ pub struct Config {
     pub work_dir: PathBuf,
 }
 
-pub struct WorkerConfig {
-    /// A shell command; it must serve `backend` and link to this edge.
-    pub command: String,
-    /// The directory it runs in: the jarvis checkout.
-    pub dir: PathBuf,
-    /// Stop Python after this long with nothing to do. `None`: never.
-    pub idle: Option<std::time::Duration>,
-    /// What the worker links back to (`JARVIS_EDGE_URL`).
-    pub edge_url: String,
-}
-
 impl Config {
     pub fn from_env() -> Result<Self, String> {
-        // Same `.env` the Python side loads, so WORK_DIR / DATABASE_URL set
-        // there apply to both processes.
+        // Same `.env` the kernels' Python loads, so WORK_DIR / DATABASE_URL
+        // set there apply to both.
         let _ = dotenvy::dotenv();
 
         let bind: SocketAddr = env_or("JARVIS_EDGE_BIND", "127.0.0.1:8000")
             .parse()
             .map_err(|e| format!("JARVIS_EDGE_BIND: {e}"))?;
-        let backend = env_or("JARVIS_BACKEND_URL", "http://127.0.0.1:8001")
-            .trim_end_matches('/')
-            .to_string();
-        if !backend.starts_with("http://") {
-            return Err(format!("JARVIS_BACKEND_URL must be an http:// URL, got {backend}"));
-        }
         // Resolved, as Python's is: an artifact's stored path is under it.
         let artifacts_dir = resolve(match std::env::var("ARTIFACTS_DIR") {
             Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
             _ => resolve(work_dir()?).join("artifacts"),
         });
         let checkpoints_db = env_path("CHECKPOINTS_DB").unwrap_or(work_dir()?.join("checkpoints.db"));
-        // The jarvis checkout: where Python runs, and where the SPA was built.
+        // The jarvis checkout: where kernels run, and where the SPA was built.
         let app_dir = app_dir();
         let static_dir = Some(app_dir.join("static").join("dist")).filter(|d| d.join("index.html").is_file());
-        let worker = match std::env::var("JARVIS_WORKER_CMD") {
-            Ok(command) if !command.trim().is_empty() => {
-                let idle = match std::env::var("JARVIS_WORKER_IDLE") {
-                    Ok(v) if !v.trim().is_empty() => {
-                        v.trim().parse::<u64>().map_err(|e| format!("JARVIS_WORKER_IDLE (seconds): {e}"))?
-                    }
-                    _ => 300,
-                };
-                let idle = (idle > 0).then(|| std::time::Duration::from_secs(idle));
-                // Loopback, whatever address the edge binds for the public.
-                let edge_url = format!("http://127.0.0.1:{}", bind.port());
-                Some(WorkerConfig { command, dir: app_dir.clone(), idle, edge_url })
-            }
-            _ => None,
-        };
         Ok(Self {
             bind,
-            backend,
             db_path: db_path()?,
             artifacts_dir,
             checkpoints_db,
             static_dir,
-            worker,
             kernel_python: python_in(&app_dir),
             work_dir: work_dir()?,
             app_dir: resolve(app_dir),
         })
-    }
-
-    /// The port Python listens on, from `backend`.
-    pub fn backend_port(&self) -> &str {
-        let host = self.backend["http://".len()..].split('/').next().unwrap_or("");
-        host.rsplit_once(':').map_or("80", |(_, port)| port)
-    }
-
-    /// `ws://` twin of `backend`, for proxying WebSocket upgrades.
-    pub fn backend_ws(&self) -> String {
-        format!("ws://{}", &self.backend["http://".len()..])
     }
 }
 

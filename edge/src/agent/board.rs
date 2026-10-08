@@ -157,11 +157,14 @@ async fn close_questions(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, task_id: 
     crate::gql::board::close_open_approvals(tx, task_id, "cancelled", &format!("The task moved to {status}."), None).await
 }
 
-/// `complete_task(summary, metadata)`; the metadata is already known to be
-/// JSON (`tools.rs` leaves anything else to Python, which words the error).
+/// `complete_task(summary, metadata)`.
 pub async fn complete(pool: &SqlitePool, spec: &Spec, summary: &str, metadata: Option<&str>) -> Result<String, String> {
-    if metadata.is_some_and(|m| !serde_json::from_str::<Value>(m).is_ok_and(|v| v.is_object())) {
-        return Ok("Error: metadata must be a JSON object.".into());
+    if let Some(m) = metadata {
+        match serde_json::from_str::<Value>(m) {
+            Ok(v) if v.is_object() => {}
+            Ok(_) => return Ok("Error: metadata must be a JSON object.".into()),
+            Err(e) => return Ok(format!("Error: metadata is not valid JSON: {e}")),
+        }
     }
     let mut tx = crate::db::write_tx(pool).await.map_err(|e| e.to_string())?;
     let done = sqlx::query(

@@ -6,7 +6,7 @@
 //! Python's own catalogue (`sdk_tools.json`, exported and diffed by the
 //! tests); MCP tools are what the edge's MCP manager has loaded.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 use async_graphql::{Context, ID, Object, Result, SimpleObject};
 use serde::Deserialize;
@@ -14,9 +14,8 @@ use serde_json::{Map, Value, json};
 use sqlx::SqlitePool;
 
 use super::EdgeData;
-use super::settings::{tell_worker, upsert};
+use super::settings::upsert;
 use crate::pyjson;
-use crate::runs::Registry;
 
 const CONFIG_KEY: &str = "tools.policy";
 
@@ -171,7 +170,6 @@ impl ToolPolicyMutation {
         }
         upsert(&mut tx, CONFIG_KEY, &pyjson::dumps(&Value::Object(stored))).await?;
         tx.commit().await?;
-        tell_worker(ctx.data::<Arc<Registry>>()?, CONFIG_KEY).await;
         inventory(pool, &ctx.data::<EdgeData>()?.mcp).await
     }
 }

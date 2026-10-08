@@ -1,11 +1,9 @@
 //! The MCP API — `server/graphql/types/mcp.py`, `queries/mcp.py` and
 //! `mutations/mcp.py`, over the edge's manager (`crate::mcp`). Change both.
 //!
-//! A config or arguments that aren't JSON defer: Python words its parser's
-//! error, and refuses before writing anything. So does an agent's call
-//! while `call_mcp_tool` is an approval-required action
-//! (`core/approvals.py:gate_action` records it), or one a worker's run would
-//! have to be asked about.
+//! An agent's call passes the per-tool policy (Settings → Tools), then the
+//! blanket `call_mcp_tool` action when an operator gates it
+//! (`approval::gate_action`).
 
 use std::sync::Arc;
 
@@ -15,7 +13,7 @@ use sqlx::SqlitePool;
 
 use super::router::Caller;
 use super::settings::upsert;
-use super::{EdgeData, RequestFrom, defer};
+use super::{EdgeData, RequestFrom};
 use crate::mcp::config::{self, Connection};
 use crate::mcp::{Mcp, Snapshot};
 use crate::pyjson;
@@ -92,9 +90,9 @@ fn tool_type(server: &str, t: &crate::mcp::Tool) -> McpTool {
     }
 }
 
-/// A JSON argument, or a deferral so Python words the parse error.
+/// A JSON argument, refused before anything is written when it doesn't parse.
 fn parse_json(raw: &str, what: &str) -> Result<Value> {
-    serde_json::from_str(raw).map_err(|_| defer(format!("{what} is not JSON")))
+    serde_json::from_str(raw).map_err(|e| format!("{what} is not valid JSON: {e}").into())
 }
 
 async fn write_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()> {
@@ -137,16 +135,6 @@ async fn upsert_server(ctx: &Context<'_>, name: &str, config_json: &str, not_obj
     let s = mcp.reload().await;
     let cfg = s.connections.get(name).cloned().unwrap_or(fallback);
     Ok(McpServer::from_snapshot(name, &cfg, &s))
-}
-
-/// `required_actions` holds `call_mcp_tool`.
-async fn calls_are_gated(pool: &SqlitePool) -> Result<bool> {
-    let Some(raw) = crate::catalog::setting(pool, "approval.required_actions").await? else { return Ok(false) };
-    let names: Vec<&str> = raw.split(',').map(crate::pystr::strip).filter(|p| !p.is_empty()).collect();
-    if names.is_empty() || names.iter().all(|n| *n == "none") {
-        return Ok(false);
-    }
-    Ok(names.iter().all(|n| *n == "all") || names.contains(&"call_mcp_tool"))
 }
 
 /// The policy a human set for one tool key (`tools.policy`).
@@ -268,9 +256,6 @@ impl McpMutation {
         let pool = data.mcp.pool();
         let from = ctx.data::<RequestFrom>()?;
         if from.caller == Caller::Agent {
-            if calls_are_gated(pool).await? {
-                return Err(defer("call_mcp_tool is an approval-required action".into()));
-            }
             let key = format!("mcp:{server}/{tool}");
             let (enabled, needs_approval) = policy(pool, &key).await?;
             if !enabled {
@@ -282,6 +267,8 @@ impl McpMutation {
                     return Ok(McpToolResult { content: denial, is_error: true });
                 }
             }
+            let payload = json!({"server": server, "tool": tool, "args": args});
+            super::approval::gate_action(ctx, "call_mcp_tool", payload).await?;
         }
         let result = data.mcp.call(&server, &tool, &args, Some(timeout_seconds)).await?;
         Ok(McpToolResult { content: result.text(), is_error: result.is_error })
@@ -295,9 +282,6 @@ async fn approve(ctx: &Context<'_>, key: &str, label: &str, args: &Value, conver
     let pool = ctx.data::<EdgeData>()?.mcp.pool();
     let registry = ctx.data::<Arc<Registry>>()?;
     let run = super::approval::live_run(registry, conversation);
-    if run.as_ref().is_some_and(|r| r.claimed()) {
-        return Err(defer("the asking run is a worker's".into()));
-    }
     let request = crate::approvals::create(pool, key, label, args, conversation, run.as_ref().map(|r| r.id.as_str())).await?;
     let live = run.as_ref().filter(|r| !r.fields().done);
     if let Some(r) = live {
@@ -319,7 +303,7 @@ async fn approve(ctx: &Context<'_>, key: &str, label: &str, args: &Value, conver
 
 /// `_exec_call_mcp_tool`: an approved deferred call, run.
 pub async fn execute_approved(mcp: &Mcp, payload: &Value) -> Result<String> {
-    let field = |key: &str| payload.get(key).map(pyjson::py_str).ok_or_else(|| defer(format!("payload without {key}")));
+    let field = |key: &str| payload.get(key).map(pyjson::py_str).ok_or_else(|| format!("approval payload has no {key}"));
     let (server, tool) = (field("server")?, field("tool")?);
     let args = payload.get("args").filter(|a| pyjson::truthy(a)).cloned().unwrap_or_else(|| json!({}));
     let r = mcp.call(&server, &tool, &args, Some(crate::mcp::CALL_TIMEOUT)).await?;
