@@ -1,16 +1,15 @@
 """The REST routes the edge serves itself (`edge/src/rest.rs`, `logs.rs`):
 raw artifact downloads and the log viewer.
 
-Python's routers run on a bare FastAPI app over the same database; the edge
-runs with a dead backend, so a request it hands to Python comes back 502 —
-"served by the edge" is asserted, not assumed.
+Each answer is diffed against what Python's router answered on a bare
+FastAPI app over the same database, recorded while it existed
+(`python_golden.py`).
 
 Skipped when `cargo` isn't installed.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from pathlib import Path
@@ -19,10 +18,10 @@ import httpx
 import pytest
 
 from edge_support import _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from python_golden import recorded
 
 
-@pytest.fixture
-async def python(database):
+async def _python(method: str, url: str, headers: dict | None) -> tuple:
     from fastapi import FastAPI
 
     from server import routes_artifacts
@@ -30,7 +29,7 @@ async def python(database):
     app = FastAPI()
     app.include_router(routes_artifacts.router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://python") as client:
-        yield client
+        return _shape(await client.request(method, url, headers=headers))
 
 
 @pytest.fixture
@@ -44,7 +43,9 @@ async def files(database, work_dir: Path) -> Path:
     (d / "report.md").write_text("# Title\n" + "x" * 300)
     (d / "clip.mp3").write_bytes(bytes(range(256)) * 40)
     (d / "data.bin").write_bytes(b"\0\1\2" * 10)
-    os.utime(d / "clip.mp3", (1_700_000_000.123456, 1_700_000_000.123456))
+    # Fixed times: a file's ETag and Last-Modified are made from its mtime.
+    for name in ("report.md", "clip.mp3", "data.bin"):
+        os.utime(d / name, (1_700_000_000.123456, 1_700_000_000.123456))
     async with async_session() as s:
         s.add_all([
             Artifact(id="a-md", title="Weekly report", filename=str(d / "report.md"), kind="markdown"),
@@ -72,47 +73,42 @@ def _shape(resp: httpx.Response) -> tuple:
     return resp.status_code, {h: resp.headers.get(h) for h in _HEADERS}, resp.content
 
 
-async def _same(python: httpx.AsyncClient, edge: httpx.AsyncClient, method: str, url: str, headers: dict | None = None):
-    expected = await python.request(method, url, headers=headers)
-    got = await edge.request(method, url, headers=headers)
-    assert got.status_code != 502, f"edge proxied {method} {url} {headers}"
-    assert _shape(got) == _shape(expected), (method, url, headers)
-    return expected
+async def _same(edge: httpx.AsyncClient, method: str, url: str, headers: dict | None = None) -> tuple:
+    expected = await recorded(lambda: _python(method, url, headers))
+    got = _shape(await edge.request(method, url, headers=headers))
+    assert got == expected, (method, url, headers)
+    return got
 
 
-async def test_downloads_answer_as_starlettes_file_response(python, edge, files):
+async def test_downloads_answer_as_starlettes_file_response(edge, files):
     for url in ("/artifacts/a-md/raw", "/artifacts/a-audio/raw", "/artifacts/a-untitled/raw", "/artifacts/a-gone/raw",
                 "/artifacts/nope/raw"):
-        await _same(python, edge, "GET", url)
-    whole = await python.get("/artifacts/a-audio/raw")
-    etag, modified = whole.headers["etag"], whole.headers["last-modified"]
+        await _same(edge, "GET", url)
+    _, whole, _ = await _same(edge, "GET", "/artifacts/a-audio/raw")
+    etag, modified = whole["etag"], whole["last-modified"]
     for rng in ("bytes=0-99", "bytes=100-", "bytes=-50", "bytes=10000-", "bytes=9000-99999", "bytes=5-4", "items=0-1",
                 "bytes", "bytes=,", "bytes=abc", "BYTES = 3 - 7", "bytes=0-0"):
-        await _same(python, edge, "GET", "/artifacts/a-audio/raw", {"range": rng})
+        await _same(edge, "GET", "/artifacts/a-audio/raw", {"range": rng})
     for if_range in (etag, modified, '"stale"'):
-        await _same(python, edge, "GET", "/artifacts/a-audio/raw", {"range": "bytes=1-2", "if-range": if_range})
+        await _same(edge, "GET", "/artifacts/a-audio/raw", {"range": "bytes=1-2", "if-range": if_range})
+    await _same(edge, "HEAD", "/artifacts/a-md/raw")  # FastAPI's 405
 
 
-async def test_what_the_edge_leaves_to_python(edge, files):
-    """Several ranges, a range number only `int()` reads, a path that isn't a
-    file, a HEAD (FastAPI's 405): Python's to answer (here, the dead
-    backend's 502)."""
-    assert (await edge.head("/artifacts/a-md/raw")).status_code == 502
-    for url, headers in (("/artifacts/a-audio/raw", {"range": "bytes=0-1,5-9"}),
-                         ("/artifacts/a-audio/raw", {"range": "bytes=+1-2"}),
-                         ("/artifacts/a-dir/raw", None)):
-        assert (await edge.get(url, headers=headers)).status_code == 502, (url, headers)
+async def test_what_starlette_answered_differently(edge, files):
+    """Several ranges, or a range number only `int()` reads: the whole file
+    (Starlette sent multipart ranges). A path that isn't a file is missing
+    (Starlette raised)."""
+    whole = await edge.get("/artifacts/a-audio/raw")
+    for rng in ("bytes=0-1,5-9", "bytes=+1-2"):
+        got = await edge.get("/artifacts/a-audio/raw", headers={"range": rng})
+        assert (got.status_code, got.content) == (200, whole.content), rng
+    missing = await edge.get("/artifacts/a-dir/raw")
+    assert (missing.status_code, missing.json()) == (404, {"error": "file missing"})
 
 
-async def test_the_log_viewer_shows_the_edge_and_a_linked_worker(edge, monkeypatch):
-    """The edge's own records, and what a linked Python logs, in one stream;
-    a cross-origin page is refused."""
-    import logging
-
-    from core import edge_link, log_setup
-    from core.edge_link import EdgeLink
-    from test_edge_runs import _edge_owns_runs, _until
-
+async def test_the_log_viewer(edge):
+    """The server's own records, as Python's handler shaped them, listed and
+    streamed; a cross-origin page is refused."""
     listed = (await edge.get("/server-logs")).json()["logs"]
     assert listed and all(set(r) == {"ts", "level", "logger", "message"} for r in listed)
     assert any(r["logger"].startswith("edge") and r["level"] == "INFO" for r in listed)
@@ -120,41 +116,15 @@ async def test_the_log_viewer_shows_the_edge_and_a_linked_worker(edge, monkeypat
         refused = await edge.get(path, headers={"origin": "https://evil.example"})
         assert (refused.status_code, refused.json()) == (403, {"error": "cross-origin not allowed"})
     assert (await edge.get("/server-logs", headers={"origin": "http://localhost:5173"})).status_code == 200
-
-    handler = log_setup.BroadcastHandler()
-    handler.attach_loop(asyncio.get_running_loop())
-    monkeypatch.setattr(log_setup, "_broadcast_handler", handler)
-    probe = logging.getLogger("jarvis.test.probe")
-    probe.addHandler(handler)
-    probe.setLevel(logging.INFO)
-    probe.info("before the link — é")
-    link = EdgeLink(f"ws://127.0.0.1:{edge.base_url.port}/internal/worker")
-    link.start()
-    monkeypatch.setattr(edge_link, "_link", link)
-    try:
-        await _until(lambda: _edge_owns_runs(edge))
-        probe.warning("after the link")
-
-        async def arrived() -> bool:
-            logs = (await edge.get("/server-logs")).json()["logs"]
-            return {"before the link — é", "after the link"} <= {r["message"] for r in logs}
-
-        await _until(arrived)
-        mine = [r for r in (await edge.get("/server-logs")).json()["logs"] if r["logger"] == "jarvis.test.probe"]
-        assert [(r["level"], r["message"]) for r in mine] == [("INFO", "before the link — é"), ("WARNING", "after the link")]
-        # The stream opens with the backfill, Python's `json.dumps` of it.
-        async with edge.stream("GET", "/server-logs/stream") as resp:
-            assert resp.headers["content-type"].startswith("text/event-stream")
-            head = ""
-            async for chunk in resp.aiter_text():
-                head += chunk
-                if "\n\n" in head:
-                    break
-        event, data = head.split("\n")[:2]
-        assert event == "event: backfill"
-        backfill = json.loads(data.removeprefix("data: "))
-        assert "before the link \\u2014 \\u00e9" in data  # ensure_ascii, as json.dumps
-        assert {"before the link — é", "after the link"} <= {r["message"] for r in backfill}
-    finally:
-        probe.removeHandler(handler)
-        await link.stop()
+    # The stream opens with the backfill, Python's `json.dumps` of it.
+    async with edge.stream("GET", "/server-logs/stream") as resp:
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        head = ""
+        async for chunk in resp.aiter_text():
+            head += chunk
+            if "\n\n" in head:
+                break
+    event, data = head.split("\n")[:2]
+    assert event == "event: backfill"
+    backfill = json.loads(data.removeprefix("data: "))
+    assert backfill[: len(listed)] == listed

@@ -1,33 +1,51 @@
 """The edge's kernels (`edge/src/kernels/`) diffed against `core/kernels.py`.
 
 Each case runs the same cells through Python's `KernelRegistry` and through
-the edge's `/internal/kernels/run`, and compares what the agent would read.
-Both start real `ipykernel` processes from this venv. Skipped when `cargo`
-isn't installed.
+the edge's kernels (`jarvis-edge --kernel-cells`, one JSON command per line),
+and compares what the agent would read. Both start real `ipykernel`
+processes from this venv. Skipped when `cargo` isn't installed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
 from core.kernels import KernelRegistry
-from edge_support import _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from edge_support import edge_binary  # noqa: F401 — edge_binary is a fixture
 
 KERNEL_ENV = {"JARVIS_KERNEL_PYTHON": sys.executable, "JARVIS_APP_DIR": str(Path(__file__).resolve().parent.parent)}
-JSON = {"content-type": "application/json"}
+
+
+class EdgeKernels:
+    """`jarvis-edge --kernel-cells` over the test database."""
+
+    def __init__(self, proc: asyncio.subprocess.Process) -> None:
+        self.proc = proc
+
+    async def ask(self, command: dict[str, Any]) -> dict[str, Any]:
+        assert self.proc.stdin and self.proc.stdout
+        self.proc.stdin.write((json.dumps(command) + "\n").encode())
+        await self.proc.stdin.drain()
+        return json.loads(await asyncio.wait_for(self.proc.stdout.readline(), 120))
 
 
 @pytest.fixture
 async def edge(database, work_dir: Path, edge_binary: Path):
-    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", KERNEL_ENV) as client:
-        client.timeout = httpx.Timeout(120)
-        yield client
+    env = {**os.environ, "DATABASE_URL": f"sqlite+aiosqlite:///{work_dir / 'database.db'}", "WORK_DIR": str(work_dir),
+           "JARVIS_EDGE_LOG": "warn", **KERNEL_ENV}
+    proc = await asyncio.create_subprocess_exec(str(edge_binary), "--kernel-cells", env=env, cwd=work_dir,
+                                                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+    yield EdgeKernels(proc)
+    assert proc.stdin
+    proc.stdin.close()
+    await asyncio.wait_for(proc.wait(), 30)
 
 
 @pytest.fixture
@@ -37,10 +55,10 @@ async def py_kernels():
     await registry.shutdown_all()
 
 
-async def _edge_run(client: httpx.AsyncClient, key: str, code: str, **kw: Any) -> str:
-    r = await client.post("/internal/kernels/run", json={"key": key, "code": code, **kw})
-    assert r.status_code == 200, r.text
-    return r.json()["output"]
+async def _edge_run(edge: EdgeKernels, key: str, code: str, **kw: Any) -> str:
+    out = await edge.ask({"key": key, "code": code, **kw})
+    assert "output" in out, out
+    return out["output"]
 
 
 async def _py_run(registry: KernelRegistry, key: str, code: str, timeout: float = 60, **kw: Any) -> str:
@@ -53,7 +71,7 @@ async def _py_run(registry: KernelRegistry, key: str, code: str, timeout: float 
     return await registry.run_cell(key, code, timeout=timeout, hold_check=held, **kw)
 
 
-async def _both(edge: httpx.AsyncClient, registry: KernelRegistry, key: str, cells: list) -> tuple[list, list]:
+async def _both(edge: EdgeKernels, registry: KernelRegistry, key: str, cells: list) -> tuple[list, list]:
     """Each `(code, kwargs)` through Python's registry, then the edge."""
     python = [await _py_run(registry, key, code, **kw) for code, kw in cells]
     got = [await _edge_run(edge, key, code, **kw) for code, kw in cells]
@@ -116,8 +134,7 @@ async def test_shutdown_forgets_the_session(edge, py_kernels):
     await _py_run(py_kernels, "k", "x = 1")
     await _edge_run(edge, "k", "x = 1")
     await py_kernels.shutdown("k")
-    r = await edge.post("/internal/kernels/shutdown", json={"key": "k"})
-    assert r.json() == {"ok": True}
+    assert await edge.ask({"shutdown": "k"}) == {"ok": True}
     python, got = await _both(edge, py_kernels, "k", [("x", {})])
     assert got == python and "NameError" in got[0]
 
@@ -139,55 +156,3 @@ async def test_input_fails_at_once(edge, py_kernels):
     started = loop.time()
     got = await _edge_run(edge, "k", "input('name? ')", timeout=30)
     assert "StdinNotImplementedError" in got and loop.time() - started < 10
-
-
-async def test_a_caller_that_goes_away_interrupts_the_cell(edge):
-    """…and the next cell waits for that interrupt to land. Python's cancel
-    path doesn't, and a cell sent before the kernel has raised is aborted:
-    no output at all."""
-    await _edge_run(edge, "k", "x = 1")
-    with pytest.raises(httpx.ReadTimeout):
-        await edge.post("/internal/kernels/run", json={"key": "k", "code": "import time\ntime.sleep(60)"}, timeout=2)
-    loop = asyncio.get_running_loop()
-    started = loop.time()
-    assert await _edge_run(edge, "k", "x") == "1"
-    assert loop.time() - started < 15
-
-
-@pytest.mark.parametrize("headers", [
-    {"origin": "https://example.com", **JSON},
-    {"content-type": "text/plain"},
-])
-async def test_a_browser_cannot_run_code(edge, headers):
-    body = '{"key": "k", "code": "1"}'
-    for path in ("run", "shutdown"):
-        r = await edge.post(f"/internal/kernels/{path}", content=body, headers=headers)
-        assert r.status_code == 403
-
-
-async def test_python_behind_the_edge_runs_cells_there(edge, monkeypatch):
-    """`get_kernel_registry()` behind the edge: cells run in the edge's
-    kernels, a cancelled one is interrupted there, and no kernel holds this
-    process up."""
-    import core.kernels as kernels
-    from core.edge_link import current_holds
-
-    monkeypatch.setenv("JARVIS_EDGE_URL", f"http://127.0.0.1:{edge.base_url.port}")
-    monkeypatch.setattr(kernels, "_registry", None)
-    registry = kernels.get_kernel_registry()
-    assert isinstance(registry, kernels.EdgeKernels)
-
-    assert await registry.run_cell("conv", "y = 6 * 7") == "(no output)"
-    assert await _edge_run(edge, "conv", "y") == "42"
-    run = asyncio.create_task(registry.run_cell("conv", "import time\ntime.sleep(60)"))
-    await asyncio.sleep(2)
-    run.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await run
-    assert await asyncio.wait_for(registry.run_cell("conv", "y"), 15) == "42"
-    assert current_holds() == []
-    await registry.shutdown_all()
-    assert await registry.run_cell("conv", "y") == "42"
-    await registry.shutdown("conv")
-    assert "NameError" in await registry.run_cell("conv", "y")
-    await registry.shutdown("conv")

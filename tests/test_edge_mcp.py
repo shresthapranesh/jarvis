@@ -4,9 +4,10 @@ diffed against `core/mcp.py` and its resolvers.
 Both sides talk to real MCP servers — the stdio fixtures, and the same tools
 over Streamable HTTP, HTTP+SSE and websocket — because the contract is the
 wire protocol and what the adapter makes of it, and a stand-in would agree
-with a wrong assumption about either. Python runs on the test database, the
-edge on a copy, and each mutation is diffed on its answer and on the
-settings it wrote. Skipped when `cargo` isn't installed.
+with a wrong assumption about either. The edge runs on a copy of the test
+database, and each operation is diffed on its answer and on the settings it
+wrote against Python's, recorded while it existed (`python_golden.py`).
+Skipped when `cargo` isn't installed.
 
 Where the edge differs on purpose: a deleted `mcp.default_load_mode` falls
 back at once (Python keeps the last one it synced until it restarts); a
@@ -20,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import re
 import sqlite3
 import subprocess
 import sys
@@ -32,6 +32,7 @@ import httpx
 import pytest
 
 from edge_support import _free_port, _relay_text, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from python_golden import RECORD, portable, recorded
 
 pytest.importorskip("mcp.server.fastmcp")
 
@@ -88,7 +89,7 @@ async def _python(query: str, variables: dict[str, Any] | None = None) -> dict[s
 
 
 class McpTwin:
-    """Python and its own `McpManager` on the test database; the edge on a copy."""
+    """The edge on a copy of the test database; Python's answers recorded."""
 
     def __init__(self, edge: httpx.AsyncClient, a_dir: Path, b_dir: Path):
         self.edge, self.a_dir, self.b_dir = edge, a_dir, b_dir
@@ -98,15 +99,19 @@ class McpTwin:
             _put(d / "database.db", key, value)
 
     async def run(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-        python = await _python(query, variables)
+        async def python_side() -> Any:
+            answer = await _python(query, variables)
+            return portable(answer), portable(_settings(self.a_dir / "database.db"))
+
+        python, settings = await recorded(python_side)
         resp = await self.edge.post("/graphql", json={"query": query, "variables": variables or {}})
-        assert resp.status_code == 200, f"edge proxied instead of answering ({resp.status_code})"
+        assert resp.status_code == 200
         body = resp.json()
         edge: dict[str, Any] = {"data": body.get("data")}
         if body.get("errors"):
             edge["errors"] = [{"message": e["message"], "path": e.get("path")} for e in body["errors"]]
-        assert edge == python, query
-        assert _settings(self.b_dir / "database.db") == _settings(self.a_dir / "database.db"), query
+        assert portable(edge) == python, query
+        assert portable(_settings(self.b_dir / "database.db")) == settings, query
         return python
 
 
@@ -136,12 +141,14 @@ async def _twin(work_dir: Path, b_dir: Path, edge_binary: Path, monkeypatch, ser
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
             contextlib.closing(sqlite3.connect(b_dir / "database.db")) as dst:
         src.backup(dst)
-    mgr = await _python_manager(monkeypatch)
+    # Python's side is only run when recording it.
+    mgr = await _python_manager(monkeypatch) if RECORD else None
     # HOME and the edge's working directory hold no mcp.json.
     async with _run_edge(edge_binary, b_dir, b_dir / "database.db", {"HOME": str(b_dir), **env}) as client:
         client.timeout = httpx.Timeout(120)
         yield McpTwin(client, work_dir, b_dir)
-    await mgr.close()
+    if mgr is not None:
+        await mgr.close()
 
 
 @pytest.fixture
@@ -233,9 +240,9 @@ async def test_mcp_settings_are_applied(twin):
     await twin.run(q, {"k": "mcp.load_modes", "v": json.dumps({"other": "lazy"})})
     await twin.run(_relay_text("McpServersQuery"))
     await twin.run('mutation { deleteSetting(key: "mcp.load_modes", allowManaged: true) { note } }')
-    # Not JSON: Python words the decoder's error.
-    resp = await twin.edge.post("/graphql", json={"query": q, "variables": {"k": "mcp.servers", "v": "{"}})
-    assert resp.status_code == 502
+    # Not JSON: refused with the parser's reason.
+    body = (await twin.edge.post("/graphql", json={"query": q, "variables": {"k": "mcp.servers", "v": "{"}})).json()
+    assert body["errors"][0]["message"].startswith("mcp.servers must be valid JSON: ")
 
 
 async def test_an_approved_deferred_call_runs_on_the_edge(database, work_dir, tmp_path_factory, edge_binary, isolated,
@@ -254,7 +261,7 @@ async def test_an_approved_deferred_call_runs_on_the_edge(database, work_dir, tm
         c.commit()
     # The edge answers approvals while it runs turns itself.
     async with _twin(work_dir, tmp_path_factory.mktemp("twin"), edge_binary, monkeypatch, SERVERS,
-                     JARVIS_AGENT_RUNTIME="edge") as twin:
+                     JARVIS_RUN_JOBS="1") as twin:
         q = "mutation($id: String!) { resolveApproval(id: $id, answer: \"yes\") { status result } }"
         ok = await twin.run(q, {"id": "ap-ok"})
         assert ok["data"]["resolveApproval"] == {"status": "approved", "result": "echo: approved"}
@@ -273,10 +280,11 @@ async def test_an_agents_call_follows_its_tool_policy(twin):
     # A human's call isn't the agent's to be refused.
     body = (await twin.edge.post("/graphql", json={"query": q})).json()
     assert body["data"]["callMcpTool"] == {"content": "echo: x", "isError": False}
-    # With every MCP call approval-gated, Python records the request.
+    # With every MCP call approval-gated, the request is recorded for a human.
     twin.put("tools.policy", "{}")
     twin.put("approval.required_actions", "call_mcp_tool")
-    assert (await twin.edge.post("/graphql", json={"query": q}, headers=AGENT)).status_code == 502
+    body = (await twin.edge.post("/graphql", json={"query": q}, headers=AGENT)).json()
+    assert body["errors"][0]["message"].startswith('Approval required: Call MCP tool echo.echo with {"text": "x"}? ')
 
 
 @pytest.mark.parametrize("answer, expected", [
@@ -288,7 +296,7 @@ async def test_an_agents_call_follows_its_tool_policy(twin):
 async def test_an_agents_gated_call_waits_for_a_human(database, work_dir, tmp_path_factory, edge_binary, isolated,
                                                      monkeypatch, answer, expected):
     async with _twin(work_dir, tmp_path_factory.mktemp("twin"), edge_binary, monkeypatch, SERVERS,
-                     JARVIS_AGENT_RUNTIME="edge") as twin:
+                     JARVIS_RUN_JOBS="1") as twin:
         twin.put("tools.policy", json.dumps({"mcp:echo/echo": {"approval": True}}))
         q = 'mutation { callMcpTool(server: "echo", tool: "echo", argsJson: "{\\"text\\": \\"gated\\"}") { content isError } }'
         call = asyncio.create_task(twin.edge.post("/graphql", json={"query": q}, headers=AGENT))
@@ -350,56 +358,7 @@ async def test_network_transports(database, work_dir, tmp_path_factory, edge_bin
             await twin.run(q, {"t": "explode", "a": "{}"})
 
 
-# ── Python behind the edge ───────────────────────────────────────────────────
-
-
-def _unid(content: Any) -> Any:
-    """Content blocks without their random `lc_` ids."""
-    if isinstance(content, list):
-        return [{k: v for k, v in b.items() if k != "id"} if isinstance(b, dict) else b for b in content]
-    return content
-
-
-async def test_python_behind_the_edge_binds_and_calls_through_it(twin, monkeypatch):
-    from core.agent_loop import invoke_tool
-    from core.mcp import EdgeMcp, get_mcp_manager
-
-    python = get_mcp_manager()
-    edge = EdgeMcp(str(twin.edge.base_url))
-    await edge.initialize()
-    assert edge.server_summaries() == python.server_summaries()
-    assert [t.name for t in edge.get_bound_tools_sync()] == [t.name for t in python.get_bound_tools_sync()] == ["ping"]
-
-    from langchain_core.utils.function_calling import convert_to_openai_tool
-
-    for name in ("echo", "other"):
-        assert [convert_to_openai_tool(t) for t in edge.tools_for_server(name)] == [
-            convert_to_openai_tool(t) for t in python.tools_for_server(name)
-        ]
-    # A bound call, as the agent loop makes it: content blocks, status, artifact.
-    for server, tool, args in (("echo", "echo", {"text": "hi"}), ("echo", "add", {"a": 1, "b": 2}),
-                               ("echo", "explode", {}), ("other", "ping", {})):
-        call = {"name": tool, "args": args, "id": "c1"}
-        got = await invoke_tool(edge.find_tool(server, tool), call, {})
-        want = await invoke_tool(python.find_tool(server, tool), call, {})
-        assert (_unid(got.content), got.status, got.artifact) == (_unid(want.content), want.status, want.artifact)
-    # The lazy path's call, and the misses, worded the same.
-    assert await edge.call_tool("echo", "echo", {"text": "lazy"}) == await python.call_tool("echo", "echo", {"text": "lazy"})
-    for server, tool in (("nope", "echo"), ("echo", "nope")):
-        with pytest.raises(ValueError) as want:
-            python.find_tool(server, tool)
-        with pytest.raises(ValueError) as got:
-            edge.find_tool(server, tool)
-        assert str(got.value) == str(want.value)
-        with pytest.raises(RuntimeError, match=re.escape(str(want.value))):
-            await edge.call_tool(server, tool)
-
-
-async def test_the_internal_endpoints_refuse_a_browser(twin):
-    r = await twin.edge.post("/internal/mcp/state", json={}, headers={"Origin": "http://evil.example"})
-    assert r.status_code == 403
-    r = await twin.edge.post("/internal/mcp/call", content=b"{}", headers={"content-type": "text/plain"})
-    assert r.status_code == 403
+# ── conversions ──────────────────────────────────────────────────────────────
 
 
 def test_schemas_convert_as_langchain_converts_them():
@@ -423,37 +382,3 @@ def test_schemas_convert_as_langchain_converts_them():
             "node": {"type": "object", "properties": {"next": {}}, "description": "n"},
             "list": {"anyOf": [{"title": "kept in lists", "type": "null"}]}}},
     }
-
-
-
-async def test_a_linked_python_rereads_after_an_edge_reload(jarvis, work_dir: Path, edge_binary: Path, isolated,
-                                                           monkeypatch):
-    """The edge tells a linked Python after each change; its `EdgeMcp` copy
-    — what Python's own turns bind — follows."""
-    from core import agents, edge_link
-    from core.edge_link import EdgeLink
-    from core.mcp import EdgeMcp
-    from test_edge_runs import _edge_owns_runs, _until
-
-    _put(work_dir / "database.db", "mcp.servers", json.dumps({"other": SERVERS["other"]}))
-    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", {"HOME": str(work_dir)}) as client:
-        client.timeout = httpx.Timeout(60)
-        python = EdgeMcp(str(client.base_url))
-        monkeypatch.setattr("core.mcp._mcp_manager", python)
-        await python.initialize()
-        assert [t.name for t in python.get_bound_tools_sync()] == ["ping"]
-        link = EdgeLink(f"ws://127.0.0.1:{client.base_url.port}/internal/worker")
-        link.start()
-        monkeypatch.setattr(edge_link, "_link", link)
-        try:
-            await _until(lambda: _edge_owns_runs(client))
-            agents.invalidate_agent_cache()
-            add = "mutation($c: String!) { addMcpServer(name: \"echo\", configJson: $c) { toolCount } }"
-            r = await client.post("/graphql", json={"query": add, "variables": {"c": json.dumps(SERVERS["echo"])}})
-            assert r.json()["data"]["addMcpServer"]["toolCount"] == 3
-            assert {s["name"]: s["load_mode"] for s in python.server_summaries()} == {"other": "always", "echo": "lazy"}
-            mode = 'mutation { setMcpServerLoadMode(name: "echo", mode: "always") { loadMode } }'
-            assert (await client.post("/graphql", json={"query": mode})).status_code == 200
-            assert sorted(t.name for t in python.get_bound_tools_sync()) == ["add", "echo", "explode", "ping"]
-        finally:
-            await link.stop()

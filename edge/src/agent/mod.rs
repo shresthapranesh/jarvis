@@ -25,7 +25,6 @@ mod turn;
 mod workers;
 pub mod workflow;
 
-pub use queue::EDGE as EDGE_RUNTIME;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,6 +58,18 @@ pub struct Agent {
     scheduler: Option<Arc<crate::schedule::Scheduler>>,
     /// Where `write_artifact` puts files (`AppConfig.artifacts_dir`).
     artifacts_dir: std::path::PathBuf,
+}
+
+/// What a start does before claiming anything: the jobs a previous process
+/// was running are pending again, and what a crash left behind is swept up
+/// (`sweep.rs`) — before the first claim, so a run claimed now is no zombie.
+pub async fn recover(pool: &SqlitePool, kernels: &Kernels, artifacts_dir: &std::path::Path) {
+    match queue::recover(pool).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("agent: {n} job(s) a previous process was running are pending again"),
+        Err(e) => tracing::warn!("agent: recovering jobs: {e}"),
+    }
+    sweep::run(pool, kernels, artifacts_dir).await;
 }
 
 /// What a turn came to, for the job.
@@ -96,13 +107,13 @@ impl Agent {
     /// crash left behind (`sweep.rs`), then claim and run jobs until the
     /// process ends.
     pub async fn run(self: Arc<Self>) {
-        match queue::recover(&self.pool).await {
-            Ok(0) => {}
-            Ok(n) => tracing::info!("agent: {n} job(s) a previous process was running are pending again"),
-            Err(e) => tracing::warn!("agent: recovering jobs: {e}"),
+        recover(&self.pool, &self.kernels, &self.artifacts_dir).await;
+        // `JARVIS_RUN_JOBS=0` queues runs without running them — for tests
+        // that look at what a write queued.
+        if std::env::var("JARVIS_RUN_JOBS").is_ok_and(|v| v.trim() == "0") {
+            tracing::info!("agent: JARVIS_RUN_JOBS=0 — jobs are queued, not run");
+            return;
         }
-        // Before the first claim: a run claimed now is no zombie.
-        sweep::run(&self.pool, &self.kernels, &self.artifacts_dir).await;
         loop {
             // A slot before the claim: a claimed job's lock is ticking.
             let Ok(slot) = self.slots.clone().acquire_owned().await else { return };

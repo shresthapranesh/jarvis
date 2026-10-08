@@ -1,0 +1,72 @@
+{
+ "test_telegram_writes_what_python_writes": [
+  {
+   "conversations": [
+    {
+     "created_at": "<now>",
+     "ephemeral": 0,
+     "id": "telegram_100",
+     "model": "ollama:fake",
+     "pinned": 0,
+     "project_id": null,
+     "surface": "telegram",
+     "title": "hello"
+    }
+   ],
+   "jobs": [
+    {
+     "attempts": 0,
+     "cancel_requested": 0,
+     "completed_at": null,
+     "created_at": "<now>",
+     "id": "<uuid>",
+     "kind": "chat",
+     "last_error": null,
+     "locked_by": null,
+     "locked_until": null,
+     "max_attempts": 3,
+     "payload": "{\"query\": \"hello\", \"model\": \"ollama:fake\", \"conv_id\": \"telegram_100\"}",
+     "run_at": "<now>",
+     "runtime": null,
+     "status": "pending",
+     "thread_id": "telegram_100",
+     "updated_at": "<now>"
+    }
+   ],
+   "messages": [
+    {
+     "content": "hello",
+     "conversation_id": "telegram_100",
+     "created_at": "<now>",
+     "duration_ms": null,
+     "eval_tps": null,
+     "id": "<uuid>",
+     "input_tokens": null,
+     "llm_ms": null,
+     "model": null,
+     "output_tokens": null,
+     "prefill_tps": null,
+     "role": "user",
+     "status": "done",
+     "ttft_ms": null
+    },
+    {
+     "content": "",
+     "conversation_id": "telegram_100",
+     "created_at": "<now>",
+     "duration_ms": null,
+     "eval_tps": null,
+     "id": "<uuid>",
+     "input_tokens": null,
+     "llm_ms": null,
+     "model": "ollama:fake",
+     "output_tokens": null,
+     "prefill_tps": null,
+     "role": "assistant",
+     "status": "running",
+     "ttft_ms": null
+    }
+   ]
+  }
+ ]
+}

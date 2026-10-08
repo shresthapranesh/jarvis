@@ -142,8 +142,7 @@ async fn json_body(resp: reqwest::Response) -> Result<Value, Fail> {
     serde_json::from_slice(&bytes).map_err(|e| Fail::Skip(format!("a listing that isn't JSON: {e}")))
 }
 
-/// A field that must be a string (or absent) for Python's answer to be one
-/// this side gives.
+/// A field that must be a string, or absent.
 fn opt_str(m: &serde_json::Map<String, Value>, key: &str) -> Result<Option<String>, Fail> {
     match m.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -157,9 +156,9 @@ fn or(a: Option<String>, b: impl FnOnce() -> String) -> String {
     a.filter(|s| !s.is_empty()).unwrap_or_else(b)
 }
 
-/// A window GraphQL's Int carries, or Python's own failure to.
+/// A window GraphQL's Int carries.
 fn window(n: i64) -> Result<i32, Fail> {
-    i32::try_from(n).or_else(|_| malformed(format!("a window GraphQL can't carry: {n}")))
+    i32::try_from(n).map_err(|_| Fail::Skip(format!("a context window too large to report: {n}")))
 }
 
 // ── Per-provider adapters ────────────────────────────────────────────────────
@@ -336,7 +335,7 @@ async fn discover_bedrock() -> Listing {
     let creds = match aws::credentials().await {
         Ok(c) => c,
         Err(aws::CredError::Failed(why)) => return Err(failed(why)),
-        Err(aws::CredError::Unsupported(why)) => return malformed(format!("AWS credentials: {why}")),
+        Err(aws::CredError::Unsupported(why)) => return Err(Fail::Skip(format!("AWS credentials: {why}"))),
     };
     let mut url = Url::parse(&format!("{}/foundation-models", aws::endpoint("bedrock", &region)))
         .map_err(|e| Fail::Skip(format!("the bedrock endpoint: {e}")))?;
@@ -344,7 +343,7 @@ async fn discover_bedrock() -> Listing {
     let body = match aws::call(sdk_http(), &creds, &region, "bedrock", "ListFoundationModels", &url, None).await {
         Ok(b) => b,
         Err(aws::CallError::Failed(why)) => return Err(failed(why)),
-        Err(aws::CallError::Unsupported(why)) => return malformed(why),
+        Err(aws::CallError::Unsupported(why)) => return Err(Fail::Skip(why)),
     };
     let summaries = match body.get("modelSummaries") {
         Some(Value::Array(s)) => s.clone(),

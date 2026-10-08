@@ -1,30 +1,25 @@
-"""The edge owning the Python worker (`edge/src/supervisor.rs`), and what
-it serves so that an idle UI doesn't need Python: the SPA, `/health`, and the
-three queries a page load makes that Python used to answer (`models`, `todos`,
-`browserAvailable`). Plus the maintenance gates that keep the timers from
-starting Python for nothing.
+"""What a page load gets: the SPA, `/health`, and the queries it makes
+(`models`, `todos`, `browserAvailable`) — diffed against Python's answers,
+recorded (`python_golden.py`). Plus the maintenance gates that keep the
+timers from calling a model for nothing.
 
 Skipped when `cargo` isn't installed.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import os
-import socket
 import subprocess
-import sys
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
-import httpx
 import pytest
 
 from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — a fixture
+from python_golden import recorded
 from test_edge_parity import _assert_same, _edge, _relay_text
 
 REPO = Path(__file__).resolve().parent.parent
@@ -101,10 +96,10 @@ async def test_models(edge):
         await _assert_same(edge, _relay_text("ModelCatalogQuery"))
 
 
-async def test_a_custom_model_python_would_reject_is_left_to_python(edge):
+async def test_a_custom_model_list_that_cant_be_read_is_an_error(edge):
     await _set("models.custom", json.dumps([{"id": 7}]))
-    resp = await _edge(edge, _relay_text("ModelCatalogQuery"))
-    assert resp.status_code == 502  # deferred: proxied to the dead backend
+    body = (await _edge(edge, _relay_text("ModelCatalogQuery"))).json()
+    assert body["errors"][0]["message"].startswith("the custom models setting (models.custom) can't be read: ")
 
 
 async def test_todos(edge):
@@ -299,15 +294,15 @@ def _python_get_routes() -> list[str]:
     return paths
 
 
-async def test_spa_is_served_here_and_python_routes_are_not_shadowed(database, work_dir: Path, edge_binary: Path,
-                                                                      monkeypatch):
+async def test_spa_is_served_and_the_server_routes_are_not_shadowed(database, work_dir: Path, edge_binary: Path,
+                                                                     monkeypatch):
     app = work_dir / "app"
     (app / "static" / "dist" / "assets").mkdir(parents=True)
     (app / "static" / "dist" / "index.html").write_text("<!doctype html>spa")
     (app / "static" / "dist" / "assets" / "app-1.js").write_text("console.log(1)")
     (work_dir / "secret.txt").write_text("nope")
     monkeypatch.setenv("JARVIS_APP_DIR", str(app))
-    routes = _python_get_routes()
+    routes = await recorded(_python_get_routes)
     assert {"/health", "/artifacts/a1/raw", "/server-logs/stream", "/graphql", "/docs"} <= set(routes)
 
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
@@ -323,174 +318,15 @@ async def test_spa_is_served_here_and_python_routes_are_not_shadowed(database, w
                      "/../secret.txt", "/%2e%2e/secret.txt"):
             resp = await client.get(path)
             assert resp.text == "<!doctype html>spa", path
-        # Python's own GET routes are proxied (to the dead backend: 502) —
-        # or answered by the edge's REST routes (`rest.rs`), never the SPA.
-        served_here = {"/artifacts/a1/raw": 404, "/server-logs": 200}
+        # The routes Python served are never the SPA — except FastAPI's own
+        # API docs, which went with it.
+        answered = {"/health": 200, "/artifacts/a1/raw": 404, "/server-logs": 200}
         for path in routes:
             if path == "/server-logs/stream":
                 continue  # never ends; tests/test_edge_rest.py reads it
-            assert (await client.get(path)).status_code == served_here.get(path, 502), path
-
-
-# ── the supervisor, end to end ───────────────────────────────────────────────
-
-
-def _listening(port: int) -> bool:
-    with contextlib.suppress(OSError):
-        socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
-        return True
-    return False
-
-
-async def _until(predicate, timeout: float = 60.0, what: str = "condition") -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if await predicate() if asyncio.iscoroutinefunction(predicate) else predicate():
-            return
-        await asyncio.sleep(0.1)
-    pytest.fail(f"timed out waiting for {what}")
-
-
-async def test_the_worker_comes_and_goes_with_the_work(database, work_dir: Path, edge_binary: Path):
-    from db import async_session
-    from db.models import Automation, AutomationRun, Conversation
-
-    async with async_session() as s:
-        s.add(Automation(id="a1", name="tick", input_type="code", code_text="print('tick')", enabled=True))
-        await s.commit()
-
-    port, backend = _free_port(), _free_port()
-    env = {
-        **os.environ,
-        "WORK_DIR": str(work_dir),
-        "DATABASE_URL": f"sqlite+aiosqlite:///{work_dir}/database.db",
-        "CHECKPOINTS_DB": str(work_dir / "checkpoints.db"),
-        "HOME": str(work_dir),  # no ~/.jarvis/mcp.json servers
-        # Set, so the repo's .env can't fill them in.
-        "TELEGRAM_BOT_TOKEN": "",
-        "DISCORD_BOT_TOKEN": "",
-        "JARVIS_EDGE_BIND": f"127.0.0.1:{port}",
-        "JARVIS_BACKEND_URL": f"http://127.0.0.1:{backend}",
-        "JARVIS_APP_DIR": str(REPO),
-        "JARVIS_WORKER_CMD": f"{sys.executable} -m uvicorn server.entrypoint:app --host 127.0.0.1 "
-                             "--port $JARVIS_BACKEND_PORT",
-        "JARVIS_WORKER_IDLE": "2",
-        "JARVIS_EDGE_LOG": "info",
-    }
-    log = (work_dir / "edge.log").open("w")
-    proc = subprocess.Popen([str(edge_binary)], env=env, cwd=work_dir, stdout=log, stderr=subprocess.STDOUT)
-    try:
-        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=60) as client:
-            # Started at boot (the startup sweeps run), then stopped when idle.
-            await _until(lambda: _listening(backend), what="the boot start")
-            await _until(lambda: not _listening(backend), what="the idle stop")
-
-            # The edge answers a page's queries and /health without it.
-            assert (await client.get("/health")).json() == {"status": "ok"}
-            for op, variables in (("ConversationListQuery", {}), ("ModelCatalogQuery", {}),
-                                  ("TodoListQuery", {"conversationId": "c1"}), ("RunningTasksQuery", {})):
-                assert (await _edge(client, _relay_text(op), variables)).status_code == 200, op
-            await asyncio.sleep(1)
-            assert not _listening(backend)
-
-            # A request only Python can answer starts it, and waits for it.
-            assert (await client.get("/openapi.json")).status_code == 200
-            assert _listening(backend)
-            await _until(lambda: not _listening(backend), what="the second idle stop")
-
-            # An incognito chat open between turns survives the restart.
-            async with async_session() as s:
-                s.add(Conversation(id="incognito", title="t", model="m", ephemeral=True))
-                await s.commit()
-
-            # A run started here, with no worker up: the job brings one up,
-            # and the run's row isn't taken for a crashed one's.
-            resp = await _edge(client, 'mutation T($id: ID!) { triggerAutomation(id: $id) }',
-                               {"id": _gid("Automation", "a1")})
-            run_id = resp.json()["data"]["triggerAutomation"]
-
-            async def finished() -> bool:
-                async with async_session() as s:
-                    run = await s.get(AutomationRun, run_id)
-                    return run is not None and run.status not in ("running", "pending")
-
-            await _until(finished, what="the automation run")
-            async with async_session() as s:
-                run = await s.get(AutomationRun, run_id)
-                assert run is not None
-                assert (run.status, (run.output or "").strip()) == ("done", "tick"), run.error
-                assert await s.get(Conversation, "incognito") is not None
-            await _until(lambda: not _listening(backend), what="the idle stop after the run")
-    finally:
-        proc.terminate()
-        proc.wait(timeout=40)
-        log.close()
-    assert not _listening(backend), "the worker outlived the edge"
-    output = (work_dir / "edge.log").read_text()
-    assert "worker exited unexpectedly" not in output, output
-
-
-def _gid(type_name: str, raw: str) -> str:
-    from strawberry.relay.utils import to_base64
-
-    return to_base64(type_name, raw)
-
-
-# ── Python's side ────────────────────────────────────────────────────────────
-
-
-async def test_a_run_waiting_for_its_first_claim_is_not_a_zombie(database):
-    """The edge writes a run's row and its job, then starts Python to claim
-    it; that start's sweep must not take the row for a crashed run's."""
-    from db import async_session
-    from db.models import Automation, AutomationRun, Conversation, Job, Message, Workflow, WorkflowRun
-    from db.ops import cleanup_zombie_running_rows
-
-    async with async_session() as s:
-        s.add_all([
-            Conversation(id="c", title="t", model="m"),
-            Automation(id="a", name="a", input_type="code"),
-            Workflow(id="w", name="w", definition="{}"),
-        ])
-        for state, job_status in (("waiting", "pending"), ("crashed", "running")):
-            s.add_all([
-                Message(id=f"m-{state}", conversation_id="c", role="assistant", content="", status="running"),
-                AutomationRun(id=f"a-{state}", automation_id="a", status="running", triggered_by="manual"),
-                WorkflowRun(id=f"w-{state}", workflow_id="w", status="running"),
-            ])
-            s.add_all(Job(id=f"{k}-{state}", kind="chat", payload="{}", status=job_status) for k in "maw")
-        await s.commit()
-        await cleanup_zombie_running_rows(s)
-    async with async_session() as s:
-        for model, k in ((Message, "m"), (AutomationRun, "a"), (WorkflowRun, "w")):
-            waiting, crashed = await s.get(model, f"{k}-waiting"), await s.get(model, f"{k}-crashed")
-            job = await s.get(Job, f"{k}-crashed")
-            assert waiting is not None and crashed is not None and job is not None
-            assert (waiting.status, crashed.status, job.status) == ("running", "error", "pending"), model.__name__
-
-
-async def test_drain_waits_out_a_claim_in_flight(database):
-    from core.queue import SqliteJobQueue
-
-    queue = SqliteJobQueue()
-    await queue.enqueue("chat", {})
-    gate = asyncio.Event()
-    claim_body = queue._claim
-
-    async def slow_claim(*args, **kwargs):
-        await gate.wait()
-        return await claim_body(*args, **kwargs)
-
-    queue._claim = slow_claim  # type: ignore[method-assign]
-    claiming = asyncio.create_task(queue.claim(["chat"], worker_id="w"))
-    await asyncio.sleep(0)
-    draining = asyncio.create_task(queue.drain())
-    await asyncio.sleep(0.05)
-    assert not draining.done()  # the claim that started first finishes first
-    gate.set()
-    assert (await claiming) is not None
-    await draining
-    await queue.enqueue("chat", {})
-    assert await queue.claim(["chat"], worker_id="w") is None
-    queue.undrain()
-    assert await queue.claim(["chat"], worker_id="w") is not None
+            if path in ("/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"):
+                continue
+            resp = await client.get(path)
+            assert resp.text != "<!doctype html>spa", path
+            if path in answered:
+                assert resp.status_code == answered[path], path

@@ -3,8 +3,8 @@
 Each command runs twice, as a subprocess: `main.py` over one database and
 `jarvis-edge` over a copy. What they print, their exit codes and what they
 leave in the database are diffed. The edge runs with a `JARVIS_APP_DIR`
-that has no `main.py`, so a command it hands to Python fails loudly instead
-of matching trivially; only the hand-off tests give it the checkout.
+that has no checkout in it, so nothing it does can lean on the Python code;
+only `run`, which reads the system prompt from the checkout, is given it.
 
 Tables are compared by their contents, not their borders: `main.py` draws
 Rich tables, the edge aligned columns.
@@ -48,7 +48,7 @@ def _env(work: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
         "AWS_SHARED_CREDENTIALS_FILE": str(work / "aws-credentials"),
         "AWS_EC2_METADATA_DISABLED": "true",
     })
-    for var in ("JARVIS_AGENT_RUNTIME", "FORCE_COLOR", "TTY_COMPATIBLE", "TTY_INTERACTIVE", "CLICOLOR_FORCE"):
+    for var in ("FORCE_COLOR", "TTY_COMPATIBLE", "TTY_INTERACTIVE", "CLICOLOR_FORCE"):
         env.pop(var, None)
     env.update(extra or {})
     return env
@@ -66,7 +66,7 @@ def _out(proc: subprocess.CompletedProcess) -> Out:
 class Twins:
     def __init__(self, root: Path, binary: Path) -> None:
         self.py, self.rs, self.binary = root / "py", root / "rs", binary
-        # An app dir with no main.py: a hand-off fails instead of matching.
+        # An app dir with no checkout in it.
         self.no_python = root / "no-python"
         for d in (self.py, self.rs, self.no_python):
             d.mkdir(parents=True)
@@ -77,11 +77,10 @@ class Twins:
         return _out(proc)
 
     def edge(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None,
-             handoff: bool = False) -> Out:
-        extra = {"JARVIS_APP_DIR": str(REPO if handoff else self.no_python), **(env or {})}
+             checkout: bool = False) -> Out:
+        extra = {"JARVIS_APP_DIR": str(REPO if checkout else self.no_python), **(env or {})}
         proc = subprocess.run([str(self.binary), *args], cwd=self.rs, input=stdin,
                               capture_output=True, text=True, env=_env(self.rs, extra), timeout=120)
-        assert "this needs Python" not in proc.stderr, proc.stderr
         return _out(proc)
 
     def same(self, *args: str, **kw) -> Out:
@@ -272,7 +271,7 @@ def test_run(twins, model):
     model.reset(script)
     # The agent reads its prompt from the checkout. That it's the edge, not
     # Python, shows in the reply: raw Markdown, no Rich panel.
-    edge = twins.edge("run", "--model", MODEL, "What is it?", env=env, handoff=True)
+    edge = twins.edge("run", "--model", MODEL, "What is it?", env=env, checkout=True)
     assert python.code == edge.code == 0
     assert "The answer is 42." in python.out  # Rich renders the Markdown
     assert edge.out == "The answer is **42**."
@@ -287,7 +286,3 @@ def test_run(twins, model):
     assert (edge.returncode, edge.stdout.strip()) == (0, "ok")
     assert "Unknown model 'ollama:typo' — running on ollama:fake instead." in edge.stderr
 
-    # The agent loop switched off: Python runs it.
-    model.reset([Reply("from python")])
-    edge = twins.edge("run", "--model", MODEL, "hi", env={**env, "JARVIS_AGENT_RUNTIME": "python"}, handoff=True)
-    assert edge.code == 0 and "from python" in edge.out

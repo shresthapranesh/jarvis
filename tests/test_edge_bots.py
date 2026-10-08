@@ -1,10 +1,10 @@
 """The chat bots, run by the Rust edge (`edge/src/bots/`).
 
 A fake chat service stands in for Telegram's Bot API, Discord's REST API and
-gateway; the edge runs its bots against it, with a
-real worker linked that claims the runs they start. What a message *writes* is
-also diffed against Python's own bot handler on a twin database, as every
-ported operation is (`test_edge_parity.py`).
+gateway; the edge runs its bots against it, and runs the turns they start
+against a fake model that echoes the message (`test_edge_loop.py`). What a
+message *writes* is also diffed against Python's own bot handler, recorded
+(`python_golden.py`), as every ported operation is (`test_edge_parity.py`).
 
 Skipped when `cargo` isn't installed.
 """
@@ -15,15 +15,19 @@ import asyncio
 import contextlib
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from edge_support import _free_port, _run_edge, edge_binary, fake_worker  # noqa: F401 — edge_binary is a fixture
-from test_edge_parity import _dump, _mask
-from test_edge_runs import _edge_owns_runs, _until
-from test_edge_start import Scripted, Worked
+from edge_support import _free_port, _run_edge, edge_binary, until  # noqa: F401 — edge_binary is a fixture
+from python_golden import recorded
+from test_edge_loop import MODEL, FakeOllama, Reply, fake  # noqa: F401 — fake is a fixture
+from test_edge_parity import SESSION_START, _dump, _mask
+
+REPO = Path(__file__).resolve().parent.parent
+_until = until
 
 TG_TOKEN = "123:tg"
 DC_TOKEN = "dc-token"
@@ -59,7 +63,6 @@ class FakeChat:
             "DISCORD_BOT_TOKEN": DC_TOKEN,
             "DISCORD_API_URL": f"{self.base}/dc",
             "DISCORD_GATEWAY_URL": f"ws://127.0.0.1:{self.port}/gateway",
-            "JARVIS_BACKEND_URL": self.base,
         }
 
     def new_id(self) -> str:
@@ -210,6 +213,9 @@ async def _allow() -> None:
         s.add_all([
             ConfigSetting(key="telegram.allowed_users", value="42, 43"),
             ConfigSetting(key="discord.allowed_users", value="7"),
+            # Turns run on the fake model.
+            ConfigSetting(key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}])),
+            ConfigSetting(key="default.model", value=MODEL),
         ])
         await s.commit()
 
@@ -224,26 +230,41 @@ async def chat():
         await fake.stop()
 
 
-@pytest.fixture
-async def bots(jarvis, work_dir: Path, edge_binary: Path, chat: FakeChat, monkeypatch):
-    """The edge running both bots against `chat`, with a scripted worker linked."""
-    from core.edge_link import EdgeLink
+def echoed(text: str) -> str:
+    """The fake model's reply to `text`. Long enough that the run's token
+    batch (64 characters) goes out before the reply holds."""
+    return f"echo: {text} " + "·" * 64
 
+
+class Bots:
+    """The edge running both bots, its turns on a model that echoes each
+    message and then holds until `release()`."""
+
+    def __init__(self, fake: FakeOllama) -> None:
+        self.fake = fake
+        fake.pause = threading.Event()
+
+        def echo(n: int, body: dict) -> Reply:
+            return Reply(echoed(body["messages"][-1]["content"]))
+
+        fake.script = echo
+
+    def release(self) -> None:
+        assert self.fake.pause is not None
+        self.fake.pause.set()
+
+
+@pytest.fixture
+async def bots(database, work_dir: Path, edge_binary: Path, chat: FakeChat, fake: FakeOllama):
     await _allow()
-    script = Scripted()
-    monkeypatch.setattr("server.chat_runtime._run_agent_task", script.chat)
-    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", chat.env()) as client:
-        link = EdgeLink(f"ws://127.0.0.1:{client.base_url.port}/internal/worker")
-        link.start()
-        await _until(lambda: _edge_owns_runs(client))
-        w = Worked(client, link, script)
-        await w.start_worker()
+    env = {**chat.env(), "JARVIS_RUN_JOBS": "1", "OLLAMA_HOST": fake.url, "JARVIS_APP_DIR": str(REPO),
+           "HOME": str(work_dir), "JARVIS_BROWSER_CDP_URL": f"http://127.0.0.1:{_free_port()}"}
+    harness = Bots(fake)
+    async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env):
         try:
-            yield w
+            yield harness
         finally:
-            script.release.set()
-            await w.stop_worker()
-            await link.stop()
+            harness.release()
 
 
 def _rows(db: Path, sql: str, *args: Any) -> list[dict[str, Any]]:
@@ -272,12 +293,12 @@ async def test_telegram_message_round_trip(bots, chat, work_dir):
     chat.telegram(_tg_message("hello there"))
     # The reply's message appears with the first text — never a placeholder.
     first = await chat.until_sent("sendMessage")
-    assert first == {"chat_id": 100, "text": "echo: hello there"}
+    assert first == {"chat_id": 100, "text": echoed("hello there")}
     assert chat.sent("sendChatAction")[0] == {"chat_id": 100, "action": "typing"}
 
-    bots.script.release.set()
+    bots.release()
     # Done: the final text lands on the same message.
-    await chat.until_sent("editMessageText", lambda b: b["text"] == "echo: hello there")
+    await chat.until_sent("editMessageText", lambda b: b["text"] == echoed("hello there"))
     assert len(chat.sent("sendMessage")) == 1
 
     conv = _rows(db, "SELECT id, title, surface, model FROM conversations WHERE id = 'telegram_100'")
@@ -325,41 +346,47 @@ async def test_telegram_voice_notes_and_photos_are_text_only(bots, chat, work_di
 
 
 async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_factory, edge_binary, chat, monkeypatch):
-    """Python's handlers on the test database, the edge's bot on a copy."""
-    from datetime import datetime, timezone
+    """The edge's bot on a copy of the test database writes what Python's
+    handlers wrote. Nothing runs the turn."""
     from types import SimpleNamespace
-
-    from server import telegram_bot
 
     await _allow()
     b_dir = tmp_path_factory.mktemp("twin")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
             contextlib.closing(sqlite3.connect(b_dir / "database.db")) as dst:
         src.backup(dst)
-    since = datetime.now(timezone.utc).replace(microsecond=0)
+    dirs = (str(work_dir), str(b_dir))
+    tables = ("conversations", "messages", "jobs")
 
-    class Bot:
-        async def send_message(self, **_: Any) -> Any:
-            return SimpleNamespace(message_id=1)
+    async def python() -> dict[str, list]:
+        from server import telegram_bot
 
-        async def edit_message_text(self, **_: Any) -> None: ...
+        class Bot:
+            async def send_message(self, **_: Any) -> Any:
+                return SimpleNamespace(message_id=1)
 
-        async def send_chat_action(self, **_: Any) -> None: ...
+            async def edit_message_text(self, **_: Any) -> None: ...
 
-    def update(chat_id: int, **message: Any) -> Any:
-        fields = {"text": None, "photo": [], "caption": None, "voice": None, "audio": None, **message}
-        return SimpleNamespace(message=SimpleNamespace(chat_id=chat_id, **fields),
-                               effective_user=SimpleNamespace(id=42))
+            async def send_chat_action(self, **_: Any) -> None: ...
 
-    context = SimpleNamespace(bot=Bot())
-    before = asyncio.all_tasks()
-    await telegram_bot.handle_message(update(100, text="hello"), context)
-    await telegram_bot.handle_unsupported(update(101, photo=[object()], caption="what is this"), context)
-    await telegram_bot.handle_unsupported(update(102, voice=object()), context)
-    for task in asyncio.all_tasks() - before:  # the reply streams, waiting on runs nobody claims
-        task.cancel()
+        def update(chat_id: int, **message: Any) -> Any:
+            fields = {"text": None, "photo": [], "caption": None, "voice": None, "audio": None, **message}
+            return SimpleNamespace(message=SimpleNamespace(chat_id=chat_id, **fields),
+                                   effective_user=SimpleNamespace(id=42))
 
-    async with _run_edge(edge_binary, b_dir, b_dir / "database.db", chat.env()) as client, fake_worker(client):
+        context = SimpleNamespace(bot=Bot())
+        before = asyncio.all_tasks()
+        await telegram_bot.handle_message(update(100, text="hello"), context)
+        await telegram_bot.handle_unsupported(update(101, photo=[object()], caption="what is this"), context)
+        await telegram_bot.handle_unsupported(update(102, voice=object()), context)
+        for task in asyncio.all_tasks() - before:  # the reply streams, waiting on runs nobody claims
+            task.cancel()
+        a = _dump(work_dir / "database.db")
+        return {t: _mask(a[t], SESSION_START, dirs) for t in tables}
+
+    want = await recorded(python)
+
+    async with _run_edge(edge_binary, b_dir, b_dir / "database.db", chat.env()):
         chat.telegram(_tg_message("hello", chat_id=100))
         await chat.until_sent("sendChatAction", lambda b: b["chat_id"] == 100)
         chat.telegram(_tg_message(None, chat_id=101, photo=[{"file_id": "img"}], caption="what is this"))
@@ -372,10 +399,9 @@ async def test_telegram_writes_what_python_writes(jarvis, work_dir, tmp_path_fac
 
         await _until(written)
 
-    dirs = (str(work_dir), str(b_dir))
-    a, b = _dump(work_dir / "database.db"), _dump(b_dir / "database.db")
-    for table in ("conversations", "messages", "jobs"):
-        assert _mask(b[table], since, dirs) == _mask(a[table], since, dirs), table
+    b = _dump(b_dir / "database.db")
+    for table in tables:
+        assert _mask(b[table], SESSION_START, dirs) == want[table], table
 
 
 # ── Discord ──────────────────────────────────────────────────────────────────
@@ -406,7 +432,7 @@ async def test_discord_identifies_and_answers_dms(bots, chat, work_dir):
     await chat.discord("MESSAGE_CREATE", _dc_message("hi bot"))
     reply = await chat.until_sent("POST /channels/dm1/messages")
     assert reply == {
-        "content": "echo: hi bot",
+        "content": echoed("hi bot"),
         "allowed_mentions": {"parse": [], "replied_user": False},
         "message_reference": {"message_id": "m1", "channel_id": "dm1", "fail_if_not_exists": False},
     }
@@ -438,7 +464,7 @@ async def test_discord_in_a_server_needs_a_mention_and_opens_a_thread(bots, chat
     thread_id = next(cid for cid, c in chat.channels.items() if c.get("owner_id") == ME)
     reply = await chat.until_sent(f"POST /channels/{thread_id}/messages")
     # In the new thread, so not a reply to a message in another channel.
-    assert reply == {"content": "echo: plan my\nweek", "allowed_mentions": {"parse": [], "replied_user": False}}
+    assert reply == {"content": echoed("plan my\nweek"), "allowed_mentions": {"parse": [], "replied_user": False}}
     convs = _rows(work_dir / "database.db", "SELECT id FROM conversations WHERE id LIKE 'discord_%'")
     assert convs == [{"id": f"discord_{thread_id}"}]
     assert not any(path.startswith("POST /channels/general/messages") and not path.endswith("/threads")
