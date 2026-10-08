@@ -279,21 +279,6 @@ async def test_maintenance_gates_match_the_sweeps(jarvis, work_dir: Path, edge_b
 # ── the SPA and the routes it must not shadow ────────────────────────────────
 
 
-def _python_get_routes() -> list[str]:
-    """Every GET route the Python app serves, as a concrete path."""
-    from server.entrypoint import app
-
-    paths = []
-    for route in app.router.routes:
-        inner = getattr(route, "original_router", None)
-        prefix = getattr(getattr(route, "include_context", None), "prefix", "") or ""
-        for r in inner.routes if inner else [route]:
-            path = prefix + getattr(r, "path", "")
-            if "GET" in (getattr(r, "methods", None) or ()) and "{full_path" not in path:
-                paths.append(path.replace("{artifact_id}", "a1").replace("{doc_id}", "d1"))
-    return paths
-
-
 async def test_spa_is_served_and_the_server_routes_are_not_shadowed(database, work_dir: Path, edge_binary: Path,
                                                                      monkeypatch):
     app = work_dir / "app"
@@ -302,7 +287,7 @@ async def test_spa_is_served_and_the_server_routes_are_not_shadowed(database, wo
     (app / "static" / "dist" / "assets" / "app-1.js").write_text("console.log(1)")
     (work_dir / "secret.txt").write_text("nope")
     monkeypatch.setenv("JARVIS_APP_DIR", str(app))
-    routes = await recorded(_python_get_routes)
+    routes = await recorded()  # every GET route the Python app served
     assert {"/health", "/artifacts/a1/raw", "/server-logs/stream", "/graphql", "/docs"} <= set(routes)
 
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:

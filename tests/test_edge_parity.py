@@ -12,7 +12,6 @@ Skipped when `cargo` isn't installed.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import re
@@ -58,7 +57,7 @@ PARITY_OPERATIONS = {
     "McpServersQuery",
     # Diffed against live runs in test_edge_runs.py.
     "RunningTasksQuery",
-    # tests/test_edge_supervisor.py
+    # tests/test_edge_serving.py
     "ModelCatalogQuery",
     "useModelsQuery",
     "TodoListQuery",
@@ -77,9 +76,8 @@ SESSION_START = datetime.now(timezone.utc).replace(microsecond=0)
 
 @pytest.fixture
 def one_zone(monkeypatch):
-    """One scheduler zone for both sides (`Automation.nextRunAt`), with DST."""
+    """The scheduler zone the recordings were made in (`Automation.nextRunAt`), with DST."""
     monkeypatch.setenv("JARVIS_TIMEZONE", "America/New_York")
-    monkeypatch.setattr("core.scheduler._timezone", None)
 
 
 @pytest.fixture
@@ -143,19 +141,6 @@ async def seeded(database) -> dict[str, str]:
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-async def _python(query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-    from db import async_session
-    from server.graphql.extensions import SESSION_LOCK_KEY
-    from server.graphql.schema import schema
-
-    async with async_session() as s:
-        res = await schema.execute(
-            query, variable_values=variables, context_value={"session": s, SESSION_LOCK_KEY: asyncio.Lock()},
-        )
-    assert not res.errors, res.errors
-    return {"data": res.data}
-
-
 async def _edge(client: httpx.AsyncClient, query: str, variables: dict[str, Any] | None = None) -> httpx.Response:
     return await client.post("/graphql", json={"query": query, "variables": variables or {}})
 
@@ -165,10 +150,7 @@ _dirs: tuple[str, ...] = ()
 
 
 async def _assert_same(client: httpx.AsyncClient, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-    async def python() -> dict[str, Any]:
-        return _mask(await _python(query, variables), SESSION_START, _dirs)
-
-    expected = await recorded(python)
+    expected = await recorded()
     resp = await _edge(client, query, variables)
     assert resp.status_code == 200
     assert _mask(resp.json(), SESSION_START, _dirs) == expected
@@ -409,11 +391,10 @@ async def test_node_resolves_every_type(edge, domains, type_name, raw):
 
 # ── mutations ────────────────────────────────────────────────────────────────
 #
-# A mutation's result can't be compared against a server that already ran it,
-# so each one runs twice: through Python on the test database, and through the
-# edge on a byte-identical copy (`twin`). Then the responses, every table and
-# every artifact file are compared. Only what is generated fresh — uuid ids and
-# "now" timestamps — is masked.
+# A mutation runs on the edge over a byte-identical copy of the test database
+# (`twin`), and its response, every table and every artifact file are compared
+# with what Python's left on the original. Only what is generated fresh — uuid
+# ids and "now" timestamps — is masked.
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 _STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?([+-]\d{2}:\d{2})?$")
@@ -470,14 +451,12 @@ def _files(directory: Path) -> dict[str, bytes]:
 
 
 class Twin:
-    """The edge on a copy of the test database; Python's answers recorded."""
+    """The edge on a copy of the test database — the one Python's recorded
+    answers were taken on."""
 
     def __init__(self, edge: httpx.AsyncClient, a_dir: Path, b_dir: Path):
         self.edge, self.a_dir, self.b_dir = edge, a_dir, b_dir
         self.dirs = (str(a_dir), str(b_dir))
-        # Python's last answer unmasked, while recording: the ids it minted,
-        # for a test to hand back to it. None on replay.
-        self.raw: dict[str, Any] | None = None
         # Anything stamped during this session was written by the test — a
         # seed's default, or a mutation — at a time no recording can share.
         self.since = SESSION_START
@@ -489,25 +468,8 @@ class Twin:
         files against Python's. `edge_variables` is for ids each side minted
         for itself (a run's, a queued message's)."""
         since = self.since
-
-        async def python_side() -> tuple[Any, Any, Any]:
-            from db import async_session
-            from server.graphql.extensions import SESSION_LOCK_KEY
-            from server.graphql.schema import schema
-
-            async with async_session() as s:
-                res = await schema.execute(
-                    query, variable_values=variables,
-                    context_value={"session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": "human"},
-                )
-            python = {"data": res.data}
-            if res.errors:
-                python["errors"] = [{"message": e.message, "path": e.path} for e in res.errors]
-            self.raw = python
-            dump = _dump(self.a_dir / "database.db")
-            return _mask(python, since, self.dirs), _mask(dump, since, self.dirs), _files(self.a_dir / "artifacts")
-
-        python, tables, files = await recorded(python_side)
+        # Python's answer, every table after it and the artifact files, masked.
+        python, tables, files = await recorded()
 
         edge_vars = variables if edge_variables is None else edge_variables
         resp = await self.edge.post("/graphql", json={"query": query, "variables": edge_vars or {}})
@@ -664,14 +626,14 @@ async def test_artifact_mutations(twin):
     await twin.run("mutation($id: ID!) { deleteArtifact(id: $id) }", {"id": _gid("Artifact", "a-crlf")})
 
 
-def _sql_both(twin: Twin, sql: str, *args: Any) -> None:
-    """The same write to both databases — set-up the mutations then diff."""
+def _sql_edge(twin: Twin, sql: str, *args: Any) -> None:
+    """A write to the edge's copy that Python's database had too when its
+    answers were recorded — set-up the mutations then diff."""
     import sqlite3
 
-    for d in (twin.a_dir, twin.b_dir):
-        with contextlib.closing(sqlite3.connect(d / "database.db")) as conn:
-            conn.execute(sql, args)
-            conn.commit()
+    with contextlib.closing(sqlite3.connect(twin.b_dir / "database.db")) as conn:
+        conn.execute(sql, args)
+        conn.commit()
 
 
 BUILTIN = "google_genai:gemma-4-31b-it"
@@ -681,28 +643,20 @@ BOARD_FIELDS = (
 )
 
 
-@pytest.fixture
-def board_queue(monkeypatch):
-    """Python's dispatcher enqueues through the process queue, as the server's does."""
-    from core.queue import SqliteJobQueue
-
-    monkeypatch.setattr("core.state._queue", SqliteJobQueue())
-
-
-async def test_board_task_mutations(twin, board_queue):
+async def test_board_task_mutations(twin):
     """Every board write the UI makes, including the dispatch pass a ready
     card starts and the inbox question a status change closes."""
     gid = lambda raw: _gid("BoardTask", raw)  # noqa: E731
     # b-b's question in the inbox, and a conversation from b-a's run.
-    _sql_both(twin, "INSERT INTO approvals (id, source, kind, status, question, label, board_task_id, parent_id, "
+    _sql_edge(twin, "INSERT INTO approvals (id, source, kind, status, question, label, board_task_id, parent_id, "
                     "requested_at, updated_at) VALUES ('ap-b', 'board_task', 'input', 'pending', '?', 'Answer', "
                     "'b-b', 'boardtask_b-b', '2026-03-02 00:00:00.000000', '2026-03-02 00:00:00.000000')")
-    _sql_both(twin, "INSERT INTO approvals (id, source, kind, status, question, label, board_task_id, "
+    _sql_edge(twin, "INSERT INTO approvals (id, source, kind, status, question, label, board_task_id, "
                     "requested_at, updated_at) VALUES ('ap-arch', 'board_task', 'input', 'pending', '?', 'Answer', "
                     "'b-arch', '2026-03-02 00:00:00.000000', '2026-03-02 00:00:00.000000')")
-    _sql_both(twin, "INSERT INTO conversations (id, title, model, surface, pinned, ephemeral, created_at) "
+    _sql_edge(twin, "INSERT INTO conversations (id, title, model, surface, pinned, ephemeral, created_at) "
                     "VALUES ('boardtask_b-a', 'part a', 'm', 'task', 0, 0, '2026-03-01 01:00:00.000000')")
-    _sql_both(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
+    _sql_edge(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
                     "VALUES ('bm1', 'boardtask_b-a', 'user', 'do a', 'done', '2026-03-01 01:00:00.000000')")
 
     create = f"mutation($input: BoardTaskInput!) {{ createBoardTask(input: $input) {{ {BOARD_FIELDS} }} }}"
@@ -727,7 +681,7 @@ async def test_board_task_mutations(twin, board_queue):
     await twin.run(move, {"id": gid("nope"), "s": "done"})
     await twin.run(move, {"id": gid("b-arch"), "s": "todo"})   # its question closes
     await twin.run(move, {"id": gid("b-root"), "s": "ready"})  # dispatched
-    _sql_both(twin, "UPDATE board_tasks SET status = 'running' WHERE id = 'b-arch'")
+    _sql_edge(twin, "UPDATE board_tasks SET status = 'running' WHERE id = 'b-arch'")
     await twin.run(move, {"id": gid("b-arch"), "s": "done"})
 
     answer = f"mutation($id: ID!, $a: String!) {{ answerBoardTask(id: $id, answer: $a) {{ {BOARD_FIELDS} }} }}"
@@ -746,21 +700,21 @@ async def test_conversation_deletes_and_model_change(twin):
     """A conversation goes with everything it owns: messages and steps,
     artifacts with their versions and files, episodes, and its transcript — a blob another thread still names stays."""
     shared, own = "sha256:" + "a" * 64, "sha256:" + "b" * 64
-    _sql_both(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
+    _sql_edge(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
                     "VALUES ('cm1', 'c1', 'assistant', 'x', 'done', '2026-02-01 00:00:00.000000')")
-    _sql_both(twin, "INSERT INTO steps (id, message_id, conversation_id, node, source, seq, created_at) "
+    _sql_edge(twin, "INSERT INTO steps (id, message_id, conversation_id, node, source, seq, created_at) "
                     "VALUES ('cs1', 'cm1', 'c1', 'model', 'main', 0, '2026-02-01 00:00:00.000000')")
-    _sql_both(twin, "INSERT INTO conversation_episodes (id, conversation_id, text, created_at) "
+    _sql_edge(twin, "INSERT INTO conversation_episodes (id, conversation_id, text, created_at) "
                     "VALUES ('ep1', 'c1', 'earlier', '2026-02-01 00:00:00.000000')")
     for tid, seq, blob in (("c1", 0, shared), ("c1", 1, own), ("c-old", 0, shared)):
         data = json.dumps({"v": 1, "role": "user", "content": [{"type": "image", "blob": blob}]})
-        _sql_both(twin, "INSERT INTO thread_messages (id, thread_id, seq, message_id, role, data, created_at) "
+        _sql_edge(twin, "INSERT INTO thread_messages (id, thread_id, seq, message_id, role, data, created_at) "
                         "VALUES (?, ?, ?, ?, 'user', ?, '2026-02-01 00:00:00.000000')",
                   f"t-{tid}-{seq}", tid, seq, f"m-{seq}", data)
     for blob in (shared, own):
-        _sql_both(twin, "INSERT INTO transcript_blobs (hash, mime_type, size, data, created_at) "
+        _sql_edge(twin, "INSERT INTO transcript_blobs (hash, mime_type, size, data, created_at) "
                         "VALUES (?, 'image/png', 1, x'00', '2026-02-01 00:00:00.000000')", blob)
-    _sql_both(twin, "INSERT INTO thread_state (thread_id, todos, updated_at) VALUES ('c1', '[]', '2026-02-01 00:00:00.000000')")
+    _sql_edge(twin, "INSERT INTO thread_state (thread_id, todos, updated_at) VALUES ('c1', '[]', '2026-02-01 00:00:00.000000')")
     # A version file no row names: swept by its name.
     for d in (twin.a_dir, twin.b_dir):
         (d / "artifacts" / "a-crlf_v9.md").write_text("stray")
@@ -793,11 +747,11 @@ async def test_automation_mutations(twin):
     conversation with it. Validation refuses an unknown model and a schedule
     the scheduler can't build — the edge's cron engine, not APScheduler, now."""
     gid = lambda raw: _gid("Automation", raw)  # noqa: E731
-    _sql_both(twin, "INSERT INTO conversations (id, title, model, surface, pinned, ephemeral, created_at) "
+    _sql_edge(twin, "INSERT INTO conversations (id, title, model, surface, pinned, ephemeral, created_at) "
                     "VALUES ('automation_au-off', 'disabled', 'm', 'automation', 0, 0, '2026-01-03 00:00:00.000000')")
-    _sql_both(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
+    _sql_edge(twin, "INSERT INTO messages (id, conversation_id, role, content, status, created_at) "
                     "VALUES ('am1', 'automation_au-off', 'user', 'run', 'done', '2026-01-03 00:00:00.000000')")
-    _sql_both(twin, "INSERT INTO automation_runs (id, automation_id, status, triggered_by, started_at) "
+    _sql_edge(twin, "INSERT INTO automation_runs (id, automation_id, status, triggered_by, started_at) "
                     "VALUES ('r-off', 'au-off', 'done', 'manual', '2026-01-03 00:00:00.000000')")
 
     create = f"mutation($input: AutomationInput!) {{ createAutomation(input: $input) {{ {AUTOMATION_FIELDS} }} }}"
@@ -877,7 +831,7 @@ async def test_agent_memory_blob(twin):
     await twin.run(delete)
     legacy = json.dumps({"content": ["- likes tea", "- café"], "created_at": "2025-01-01T00:00:00+00:00",
                          "modified_at": "2025-02-01T00:00:00+00:00"})
-    _sql_both(twin, "INSERT INTO kv_store (namespace, key, value, created_at, updated_at) "
+    _sql_edge(twin, "INSERT INTO kv_store (namespace, key, value, created_at, updated_at) "
                     "VALUES ('memory', '/AGENTS.md', ?, '2025-01-01 00:00:00', '2025-01-01 00:00:00')", legacy)
     await twin.run(read)
     await twin.run(update, {"c": "- likes tea\n- naïve ✓"})
@@ -892,12 +846,11 @@ async def test_setting_reads_and_writes(twin, monkeypatch):
     """The generic settings editor: the inventory (known keys unset, a
     free-form key, endpoint keys redacted), one key, and writes — the row a
     write returns carries Python's in-memory, UTC-aware stamp."""
-    monkeypatch.setattr("core.embeddings._embedding_model_override", None)
     endpoints = json.dumps([{"name": "lab", "base_url": "http://x/v1", "api_key": "sk-secret"},
                             {"name": "local", "base_url": "http://y/v1", "api_key": ""}])
     for key, value in (("zeta.custom", "1"), ("alpha.custom", "ü"), ("models.endpoints", endpoints),
                        ("telegram.allowed_users", "42")):
-        _sql_both(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, '2026-01-02 03:04:05.000000')",
+        _sql_edge(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, '2026-01-02 03:04:05.000000')",
                   key, value)
     await twin.run(_relay_text("SettingsQuery"))
     one = "query($k: String!) { setting(key: $k) { id key value updatedAt isSet label kind choices known } }"
@@ -962,11 +915,6 @@ async def test_model_catalog_writes(twin, monkeypatch):
     """Custom models and endpoints: the `models.custom` / `models.endpoints`
     rows rewritten as Python's `json.dumps` writes them (junk rows dropped, an
     upsert moved last, a window kept or converted), and every refusal."""
-    from core import model_catalog
-
-    # Python's caches are hydrated per write; leave them as found.
-    monkeypatch.setattr(model_catalog, "_custom_models", ())
-    monkeypatch.setattr(model_catalog, "_endpoints", ())
     custom = json.dumps([
         {"id": "ollama:kept", "label": "Kept", "provider": "ollama", "context_window": "8000"},
         "junk",
@@ -975,7 +923,7 @@ async def test_model_catalog_writes(twin, monkeypatch):
     ])
     endpoints = json.dumps([{"name": "lab", "base_url": "http://lab/v1/", "api_key": "sk-1"}, {"name": "Bad"}])
     for key, value in (("models.custom", custom), ("models.endpoints", endpoints)):
-        _sql_both(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, '2026-01-02 03:04:05.000000')",
+        _sql_edge(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES (?, ?, '2026-01-02 03:04:05.000000')",
                   key, value)
 
     add = f"mutation($id: String!, $label: String!, $provider: String) {{ addModel(id: $id, label: $label, provider: $provider) {CATALOG} }}"
@@ -1059,7 +1007,7 @@ async def test_tool_inventory_and_policy(twin):
     """The Tools page: the inventory with its policy, and `setToolPolicy`
     keeping only non-default entries, in the stored order."""
     stored = json.dumps({"sdk:zzz": {"enabled": False, "extra": 1.0}, "bound:remember": {"approval": "yes"}, "weird": 3})
-    _sql_both(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES ('tools.policy', ?, '2026-01-02 03:04:05.000000')",
+    _sql_edge(twin, "INSERT INTO config_settings (key, value, updated_at) VALUES ('tools.policy', ?, '2026-01-02 03:04:05.000000')",
               stored)
     await twin.run(_relay_text("ToolsQuery"))
     policy = _relay_text("SetToolPolicyMutation")
@@ -1169,18 +1117,7 @@ async def test_unknown_fields_are_validation_errors(edge, seeded, query):
 async def test_requests_strawberry_refuses_are_refused(edge, seeded, request_):
     """What Strawberry refused before executing gets its 400 and its words."""
 
-    async def python() -> tuple[int, str]:
-        from fastapi import FastAPI
-
-        from server.graphql.router import router
-
-        app = FastAPI()
-        app.include_router(router, prefix="/graphql")
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://python") as client:
-            expected = await client.post("/graphql", **request_)
-        return expected.status_code, expected.text
-
-    expected = await recorded(python)
+    expected = await recorded()  # (status, body)
     resp = await edge.post("/graphql", **request_)
     assert expected[0] == 400
     assert (resp.status_code, resp.text) == expected
@@ -1233,13 +1170,8 @@ async def test_the_schema_keeps_every_field_python_had(edge_binary):
     against it."""
     from graphql import GraphQLInputObjectType, GraphQLInterfaceType, GraphQLObjectType, build_schema
 
-    def python_sdl() -> str:
-        from server.graphql.schema import schema
-
-        return schema.as_str()
-
     rust = build_schema(subprocess.run([str(edge_binary), "--print-schema"], capture_output=True, text=True, check=True).stdout)
-    python = build_schema(await recorded(python_sdl))
+    python = build_schema(await recorded())  # Python's SDL
 
     for name, ptype in python.type_map.items():
         if name.startswith("__"):

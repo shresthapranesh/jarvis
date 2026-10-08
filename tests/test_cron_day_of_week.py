@@ -105,18 +105,3 @@ def test_named_weekdays_keep_working(expr, expected):
 )
 def test_expressions_without_a_numeric_weekday_are_untouched(expr):
     assert normalize_crontab(expr) == expr
-
-
-def test_displayed_next_run_lands_on_the_weekday_the_user_wrote():
-    """The user-visible half: the automation card's next-run must name the same
-    weekday as the expression, since it is built from the same helper."""
-    from server.automation_runtime import _compute_next_run_at
-
-    auto = type("Auto", (), {"schedule": "0 9 * * 1", "enabled": True})()
-    next_run = _compute_next_run_at(auto)
-    # Asserting first turns a None return into a readable failure instead of a
-    # TypeError inside fromisoformat, and narrows the str | None for the checker.
-    assert next_run is not None, "an enabled automation with a valid cron must have a next run"
-    shown = datetime.fromisoformat(next_run)
-    assert shown.weekday() == 0  # Python Monday
-    assert shown.hour == 9

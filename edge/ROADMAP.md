@@ -56,9 +56,10 @@ it's on `main`.
 ## D. Switch Python off
 
 - [x] Schema and migrations owned by the edge (from `db/engine.py:_migrate`) — M
-- [ ] Parity tests that diff against Python become Rust-only tests — M
+- [x] Parity tests diff against Python's answers, recorded (`tests/python_golden.py`)
 - [x] 2a step 11: drop `langgraph-checkpoint-sqlite`, `checkpoints.db` conversion, edge `checkpoints.rs`
-- [ ] Delete `server/`, the worker link and supervisor, and the Python dependencies (langchain and the rest) — after everything below
+- [x] Delete `server/`, the worker link, the supervisor and the proxy; the server-only Python dependencies
+- [ ] Delete Python's former runtime (`core/agents.py`, the loop, `workflow/`, `main.py`) and langchain — with the kernel decision below
 
 ### What still reaches Python (audit, 2026-10-06)
 
@@ -68,7 +69,7 @@ gone, before `server/` can be deleted.
 
 **Turns handed over mid-run** (`src/agent/`)
 
-- [ ] Tool arguments that aren't exactly what the schema asks (`tools::native`
+- [x] Tool arguments that aren't exactly what the schema asks (`tools::native`
   → `Plan::Python`): Python words Pydantic's error to the model. The workers
   already word these themselves (`workers.rs`); do the same for the main
   agent's tools — M
@@ -81,7 +82,7 @@ gone, before `server/` can be deleted.
 
 **GraphQL the edge defers** (`gql::defer`, 58 sites; `graphql.rs`)
 
-- [ ] Errors Python words: invalid JSON in settings, MCP and approval payloads,
+- [x] Errors Python words: invalid JSON in settings, MCP and approval payloads,
   a malformed `models.custom` row, values `agentMemory` would coerce, a provider
   listing `modelSync` can't read, a context window GraphQL can't carry — word
   them in Rust — M
@@ -133,4 +134,4 @@ gone, before `server/` can be deleted.
 ## Not yet tried for real
 
 - [ ] Bots with real Telegram and Discord tokens
-- [ ] The Docker image (`edge/serve.sh`) built and run
+- [ ] The Docker image built and run (`CMD ["jarvis-edge"]`)

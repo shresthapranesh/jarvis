@@ -4,8 +4,9 @@ A multi-agent AI research assistant with a web UI. Submit queries and specialize
 
 ## Prerequisites
 
-- [Python 3.13+](https://python.org) with [uv](https://docs.astral.sh/uv/getting-started/installation/)
-- [Node.js](https://nodejs.org) with [pnpm](https://pnpm.io/installation) (for frontend development only)
+- [Rust](https://rustup.rs) (the server)
+- [Python 3.13+](https://python.org) with [uv](https://docs.astral.sh/uv/getting-started/installation/) (the agent's notebooks)
+- [Node.js](https://nodejs.org) with [pnpm](https://pnpm.io/installation) (to build the web UI)
 - At least one AI provider API key (see below)
 
 ## Quick Start
@@ -16,6 +17,8 @@ A multi-agent AI research assistant with a web UI. Submit queries and specialize
 git clone <repo-url>
 cd jarvis
 uv sync
+(cd frontend && pnpm install && pnpm build)
+(cd edge && cargo build --release)
 ```
 
 ### 2. Set up environment variables
@@ -37,7 +40,7 @@ AWS_DEFAULT_REGION=us-east-1
 ### 3. Start the server
 
 ```bash
-uv run main.py start
+JARVIS_APP_DIR=. edge/target/release/jarvis-edge
 ```
 
 Open [http://localhost:8000](http://localhost:8000) in your browser.
@@ -72,33 +75,13 @@ Build visual multi-step pipelines in the Workflows tab. Supports agent nodes, co
 
 ## CLI Usage
 
-```bash
-# Start the web server
-uv run main.py start
-
-# Run a one-shot query in the terminal
-uv run main.py run "What is the current state of AI chip manufacturing?"
-
-# List saved reports
-uv run main.py reports
-
-# View a saved report
-uv run main.py view report-name
-```
-
-The Rust edge binary carries the same commands without starting Python —
-`run`, `config`, `model`, `memory` and `start` (no command serves):
+The server binary is the command line too (no command serves):
 
 ```bash
-cd edge && cargo build --release
-./target/release/jarvis-edge run "What is the current state of AI chip manufacturing?"
-./target/release/jarvis-edge model list
-```
-
-### Server options
-
-```bash
-uv run main.py start --host 0.0.0.0 --port 8080 --reload
+edge/target/release/jarvis-edge run "What is the current state of AI chip manufacturing?"
+edge/target/release/jarvis-edge model list
+edge/target/release/jarvis-edge config set <key> <value>
+edge/target/release/jarvis-edge start --host 0.0.0.0 --port 8080
 ```
 
 ---
@@ -119,7 +102,7 @@ All settings can be set via environment variables or a `.env` file:
 ### Backend
 
 ```bash
-uv run main.py start --reload   # auto-reload on changes
+cd edge && JARVIS_APP_DIR=.. cargo run   # the server on :8000 — see edge/README.md
 ```
 
 ### Frontend
@@ -133,11 +116,11 @@ pnpm build      # build to ../static/dist/ for production
 
 ### Add a new AI model
 
-Edit `core/model_catalog.py` — add a `ModelSpec` entry. The frontend picks it up automatically via `GET /models`.
+Settings → Models in the UI, or `jarvis-edge model add`. A built-in one goes in `core/builtin_models.json` (compiled into the server — rebuild it).
 
 ### Add a new tool
 
-Add a function to `tools/` then import it into the relevant subagent's tool list in `core/agents.py`.
+Add a function to the `jarvis` SDK (`tools/sdk.py`), which the agent calls from its notebook. See `tools/CLAUDE.md`.
 
 ---
 

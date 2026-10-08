@@ -11,7 +11,6 @@ Skipped when `cargo` isn't installed.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import socket
@@ -345,22 +344,6 @@ def _providers(fake: Fake) -> dict[str, str]:
     }
 
 
-async def _python(query: str, variables: dict[str, Any]) -> dict[str, Any]:
-    from db import async_session
-    from server.graphql.extensions import SESSION_LOCK_KEY
-    from server.graphql.schema import schema
-
-    async with async_session() as s:
-        res = await schema.execute(
-            query, variable_values=variables,
-            context_value={"session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": "human"},
-        )
-    out: dict[str, Any] = {"data": res.data}
-    if res.errors:
-        out["errors"] = [{"message": e.message, "path": e.path} for e in res.errors]
-    return out
-
-
 async def _edge(client, query: str, variables: dict[str, Any]) -> dict[str, Any]:
     resp = await client.post("/graphql", json={"query": query, "variables": variables}, timeout=60)
     assert resp.status_code == 200
@@ -381,17 +364,13 @@ def _unport(value: Any) -> Any:
 
 async def _both(client, variables: dict[str, Any], query: str = SYNC) -> dict[str, Any]:
     """The edge's answer, diffed against Python's recorded one."""
-    python = await recorded(lambda: _unport_async(_python(query, variables)))
+    python = await recorded()
     edge = _unport(await _edge(client, query, variables))
     if edge != python and (edge["data"] and python["data"]):
         for e, p in zip(edge["data"]["modelSync"], python["data"]["modelSync"], strict=True):
             assert e == p, variables
     assert edge == python, variables
     return python
-
-
-async def _unport_async(answer: Any) -> Any:
-    return _unport(await answer)
 
 
 def _reports(answer: dict[str, Any]) -> dict[str, dict[str, Any]]:

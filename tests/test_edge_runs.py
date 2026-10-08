@@ -154,42 +154,6 @@ async def subscribe(client: httpx.AsyncClient, query: str, variables: dict[str, 
                 return out
 
 
-def _context(session) -> dict[str, Any]:
-    from server.graphql.extensions import SESSION_LOCK_KEY
-
-    return {"session": session, SESSION_LOCK_KEY: asyncio.Lock(), "caller": "human"}
-
-
-async def _python_subscribe(query: str, variables: dict[str, Any]) -> list[dict[str, Any]]:
-    from db import async_session
-    from server.graphql.schema import schema
-
-    out = []
-    async with async_session() as s:
-        stream = await schema.subscribe(query, variable_values=variables, context_value=_context(s))
-        async for result in stream:
-            item: dict[str, Any] = {"data": result.data}
-            if result.errors:
-                item["errors"] = [{"message": e.message} for e in result.errors]
-            out.append(item)
-    return out
-
-
-def _register(task_id: str, kind: str = "chat", label: str = "run", parent_id: str | None = "c1"):
-    from core.state import TaskState, _tasks
-
-    state = TaskState(kind=kind, label=label, parent_id=parent_id)  # type: ignore[arg-type]
-    _tasks[task_id] = state
-    return state
-
-
-def _finish(state) -> None:
-    from core.state import _notify
-
-    state.done = True
-    _notify(state)
-
-
 # ── streams ──────────────────────────────────────────────────────────────────
 
 
@@ -198,19 +162,9 @@ async def test_a_finished_run_replays_identically(database, edge_binary, query):
     """Every event type through every coercer — including the events each
     union doesn't render, which both sides must skip."""
 
-    async def python() -> tuple[list, list]:
-        from core.state import _tasks, emit_event
-
-        state = _register("run-1")
-        for name, data in CHAT_EVENTS + WORKFLOW_EVENTS:
-            emit_event(state, name, **data)
-        _finish(state)
-        try:
-            return list(state.events), await _python_subscribe(query, {"id": "run-1"})
-        finally:
-            _tasks.clear()
-
-    events, expected = await recorded(python)
+    # The raw records Python's `emit_event` made of CHAT_EVENTS + WORKFLOW_EVENTS,
+    # and what its subscription answered over them.
+    events, expected = await recorded()
     assert len(expected) > 3
     case = {"id": "run-1", "kind": "chat", "events": events, "query": query, "variables": {"id": "run-1"}}
     out = subprocess.run([str(edge_binary), "--replay-events"], input=json.dumps(case) + "\n",
@@ -256,7 +210,7 @@ async def finished_rows(database):
     (WORKFLOW, "wr-done"), (WORKFLOW, "wr-err"), (WORKFLOW, "missing"),
 ])
 async def test_fallbacks_for_runs_not_live(edge, finished_rows, query, run_id):
-    expected = await recorded(lambda: _python_subscribe(query, {"id": run_id}))
+    expected = await recorded()
     for protocol in ("graphql-transport-ws", "graphql-ws"):
         assert await subscribe(edge, query, {"id": run_id}, protocol=protocol) == expected, protocol
 
@@ -264,7 +218,7 @@ async def test_fallbacks_for_runs_not_live(edge, finished_rows, query, run_id):
 async def test_an_in_progress_row_that_never_registers_falls_back(edge, finished_rows):
     """A row still marked in progress may belong to a run being registered;
     the edge waits briefly for it, then answers from the row."""
-    expected = await recorded(lambda: _python_subscribe(CHAT, {"id": "m-running"}))
+    expected = await recorded()
     loop = asyncio.get_running_loop()
     started = loop.time()
     assert await subscribe(edge, CHAT, {"id": "m-running"}) == expected

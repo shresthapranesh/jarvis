@@ -1,4 +1,10 @@
-# core/ — agent runtime notes
+# core/ — Python's agent runtime notes
+
+The server and its agent loop are Rust now (`edge/`); what's here is what the
+kernels' `jarvis` SDK imports (config, embeddings, retrieval, the tool gate and
+policy) and Python's former runtime, which serves nothing and stays while the
+tests diff the server against it (`edge/ROADMAP.md`). Its notes say what each
+Rust port follows.
 
 ## Agent loop (`agent_loop.py`, `agents.py`, `messages.py`, `compaction.py`)
 - `agent_loop.Agent` is the loop (no LangGraph): model step → tool batch → repeat. `build_agent(model, board=False)` builds the main agent (and its worker roles) once per model id + flags; anything that changes what's bound (tool policy, MCP load mode, catalog edits) must call `invalidate_agent_cache()`.
@@ -10,8 +16,7 @@
 - A nested run (a worker inside `spawn_workers`) merges the enclosing config, so the parent's budget/perf callbacks count its model calls. The token handler is attached to the model call only — never to tools — so nothing leaks between runs.
 - The main model step (`model_request_node`) is the only chokepoint every main-agent LLM call goes through. Mid-run queued user messages are drained there (`_drain_queued_input`), never in the tool batch — a HumanMessage between a tool call and its result is an orphan pairing Anthropic/Bedrock reject.
 - Project context is re-read every iteration and must never be captured inside `_build_agent` (agents are shared across conversations).
-- **The edge runs chat turns too** (`edge/src/agent/`, by default; `JARVIS_AGENT_RUNTIME=python` turns it off): `prompt.rs` ports this module's context assembly (system prompt, segments, todos/planning tail), `retrieve.rs`/`embed.rs` the retrieval and memory write below, `tools.rs` the todo tools and `remember`, `turn.rs` `_run_agent_task` and this loop. A change to any of them is made in both; `tests/test_edge_loop.py` diffs the two. A bound tool's schema change needs `edge/src/agent/tools.json` re-exported (see that test).
-- `tests/test_agent_golden.py` replays scripted runs (`tests/agent_harness.py`) and compares events, steps, model requests and the thread with `tests/golden/agent/`. Re-record (`JARVIS_UPDATE_GOLDEN=1`) only for an intended change, and read the diff.
+- **The Rust loop is a port of this** (`edge/src/agent/`): `prompt.rs` ports this module's context assembly (system prompt, segments, todos/planning tail), `retrieve.rs`/`embed.rs` the retrieval and memory write below, `tools.rs` the todo tools and `remember`, `turn.rs` `_run_agent_task` and this loop. `tests/test_edge_loop.py` diffs it against this one's recorded runs. A bound tool's schema change needs `edge/src/agent/tools.json` re-exported (see that test).
 
 ### Prompt layout and caching (`context_cache.py`, `build_llm_messages`)
 A prefix cache is invalidated from the first changed byte, so **each call's payload must start with the previous call's payload**. With `cache=True`, requests are laid out most-stable-first:
@@ -52,7 +57,7 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 ## Memory (`memory_store.py`, `memory_consolidation.py`, `episodes.py`, `retrieval.py`)
 - **With an embedder**: discrete `Memory` rows (`core` always injected; `fact` retrieved per turn into the tail). Agent writes via the bound `remember`; searches via `jarvis.search_memory`.
 - **Without**: one `AGENTS.md` blob in `kv_store`.
-- Consolidation (every 6h / `consolidateMemory`): watermark = last message consumed; batches of ≤16KB, ≤6 per pass, oldest first; stops before any `status="running"` row; 30% delete cap per pass. Behind the edge it runs in `edge/src/consolidate/` (a port — change both).
+- Consolidation (every 6h / `consolidateMemory`): watermark = last message consumed; batches of ≤16KB, ≤6 per pass, oldest first; stops before any `status="running"` row; 30% delete cap per pass. The server runs `edge/src/consolidate/`, a port.
 - **Episodes**: each compaction chunk's summary is stored as a `ConversationEpisode` and retrieved into the tail on later turns. A `prefetch_retrieval` call that omits `conversation_id` disables episodes for that turn.
 - **Hybrid retrieval**: dense cosine + BM25 via FTS5, fused with RRF (never a weighted sum of raw scores). Never pass user text to `MATCH` — use `fts_match_expr()`. Zero results is valid; callers must handle an empty list. Thresholds are per-install env vars (`JARVIS_MEMORY_MIN_COSINE`, etc.).
 
@@ -61,18 +66,14 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 - Load modes per server: `always` (bound) or `lazy` (reached via `jarvis.mcp_call`, advertised by name in the `mcp_servers` segment). Stored as `"x-jarvis-load"` in the connection dict plus a separate `mcp.load_modes` override map. `strip_jarvis_keys()` must remove it before the client sees it (otherwise `TypeError` on connect).
 - `call_tool` invokes with a ToolCall payload so `ToolMessage.status` distinguishes MCP errors from success.
 - Tests: `tests/test_mcp_integration.py` spawns real stdio servers — keep it that way.
-- **Behind the edge the MCP client is the edge's** (`edge/src/mcp/`, a port of this module and of the adapter's result/schema handling — change both): `get_mcp_manager()` returns `EdgeMcp`, which keeps a copy of the edge's loaded state (re-read on `initialize`/`reload`; the edge asks for a reload after each change) and runs every call there. Bound tools are `StructuredTool`s shaped as the adapter's. `tests/test_edge_mcp.py` diffs the two against real servers.
+- **The server's MCP client is `edge/src/mcp/`**, a port of this module and of the adapter's result/schema handling. `tests/test_edge_mcp.py` diffs it against real servers.
 
 ## Approvals and tool gating (`approval.py` = answer parsing, `approvals.py`, `tool_gate.py`, `tool_gate_node.py`, `tool_policy.py`)
-- Every approval is a durable `Approval` row. **Blocking** (`action IS NULL`): a run is suspended now. **Deferred** (`action` set): the operation was recorded instead of performed; approving executes it (`ACTIONS`).
-- `resolveApproval` → `approvals.resolve` is the single entry point. `is_affirmative_answer` denies on anything ambiguous. Deferred actions execute before the row closes.
-- Only workflow approval/human_input nodes pause a run on `TaskState` (`set_interrupt()` / `clear_interrupt()` + `resume_future`; never set `pending_interrupt_id` alone). A chat run never pauses that way — it blocks inside the gated call.
-- Rows are closed at chokepoints: `db.ops.update_board_task`, `streaming._finalize_message`, the resume mutations, `answer_board_task` (closes as `answered` *before* updating the task).
-- `reconcile_startup()` runs after the zombie sweep: deferred and board rows stay; everything else (workflow, tool gate) expires.
-- Deferred gating of agent writes (`gate_action`) is off unless `approval.required_actions` is set. Only `caller == "agent"` (the `X-Jarvis-Caller` header) is gated. Gate before any side effect.
-- **Tool policy** (`tools.policy` setting, non-default entries only): disabled tools are unbound (filtered in `_build_agent` and hidden from `jarvis.help()`). Approval-required tools gate in the loop (`tool_gate_node.make_tool_gate`, run before each tool batch) — never by wrapping tools. All tool calls stay in history; a denied one gets its denial as its result.
-- The tool gate uses the Approval row as the rendezvous (event + DB poll in-process, polling from the kernel). `run_cell`'s 60s timeout is suspended while a gate is open (`kernels.py:_hold_for_approval`).
-- The edge gates its own runs the same way and serves `resolveApproval` (gates, board questions) and `requestToolApproval`: `edge/src/approvals.rs` ports `tool_gate.py` + `approval.py`, `edge/src/gql/approval.rs` the two mutations — change both. It defers to Python a deferred action, a paused workflow, and a gate a worker's run waits on.
+- Every approval is a durable `Approval` row. **Blocking** (`action IS NULL`): a run is suspended now. **Deferred** (`action` set): the operation was recorded instead of performed; approving executes it.
+- Answering, the deferred actions (`gate_action`, off unless `approval.required_actions` is set; only `X-Jarvis-Caller: agent` is gated) and the startup reconcile are the server's: `edge/src/gql/approval.rs` and `edge/src/agent/sweep.rs`. Python keeps `approvals.record_blocking_request` for its former workflow nodes.
+- **Tool policy** (`tools.policy` setting, non-default entries only): disabled tools are unbound and hidden from `jarvis.help()`. Approval-required tools gate before each tool batch — never by wrapping tools. All tool calls stay in history; a denied one gets its denial as its result.
+- The tool gate uses the Approval row as the rendezvous: the SDK in a kernel asks with `requestToolApproval` and polls the row. `run_cell`'s 60s timeout is suspended while a gate is open.
+- `edge/src/approvals.rs` ports `tool_gate.py` + `approval.py` — change both.
 
 ## Budget and throughput (`budget.py`, `perf.py`)
 - Each runtime creates a `BudgetTracker` + `BudgetCallbackHandler` per run; limits from `JARVIS_BUDGET_MAX_*` / `RunnerConfig`.
@@ -81,6 +82,6 @@ tail:    one user message, <turn_context>…</turn_context> — everything volat
 ## Other modules
 - `runner.py` — `JarvisRunner` owns store/queue/config; `should_use_cache()` true only for anthropic/bedrock.
 - `planning.py` — `JARVIS_PLANNING_MODE` (auto/always/off); injects a `## Planning Required` tail segment for complex queries.
-- `kernels.py` — per-conversation IPython kernels (cap 12, reaped at 30 min idle); injects SDK scope (`conversation_id`, `project_id`). Behind the edge `get_kernel_registry()` is `EdgeKernels`: the kernels are the edge's (`edge/src/kernels/`, a port — change both).
+- `kernels.py` — per-conversation IPython kernels (cap 12, reaped at 30 min idle); injects SDK scope (`conversation_id`, `project_id`). The server's kernels are `edge/src/kernels/`, a port.
 - `scheduler.py` — cron is local time (`scheduler.timezone` → `JARVIS_TIMEZONE` → machine zone), Unix day-of-week numbering via `normalize_crontab()`. Timezone is set before `_scheduler.start()`.
 - `settings_admin.py` — `KNOWN_SETTINGS` registry + `apply_setting()` for in-process side effects of config writes. Keys with `managedBy` are owned by another settings tab.

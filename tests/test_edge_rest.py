@@ -21,17 +21,6 @@ from edge_support import _run_edge, edge_binary  # noqa: F401 — edge_binary is
 from python_golden import recorded
 
 
-async def _python(method: str, url: str, headers: dict | None) -> tuple:
-    from fastapi import FastAPI
-
-    from server import routes_artifacts
-
-    app = FastAPI()
-    app.include_router(routes_artifacts.router)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://python") as client:
-        return _shape(await client.request(method, url, headers=headers))
-
-
 @pytest.fixture
 async def files(database, work_dir: Path) -> Path:
     """Artifacts with their files, in shapes the headers vary by."""
@@ -74,7 +63,7 @@ def _shape(resp: httpx.Response) -> tuple:
 
 
 async def _same(edge: httpx.AsyncClient, method: str, url: str, headers: dict | None = None) -> tuple:
-    expected = await recorded(lambda: _python(method, url, headers))
+    expected = await recorded()
     got = _shape(await edge.request(method, url, headers=headers))
     assert got == expected, (method, url, headers)
     return got

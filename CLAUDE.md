@@ -3,92 +3,74 @@
 Multi-agent research assistant. Users submit queries via the web UI, CLI, or Telegram/Discord bots; agents run them and stream results live. Also: automations (scheduled/manual), a kanban task board, visual workflow graphs, projects, skills, persistent memory, notification channels.
 
 Deeper notes live next to the code and load when you work there:
-`core/CLAUDE.md` (agent loop, prompt caching, model catalog, memory, MCP, approvals) ·
-`server/CLAUDE.md` (GraphQL, job queue + live streaming, automations, board, projects, bots) ·
-`tools/CLAUDE.md` (the `jarvis` SDK, web/browser) · `db/CLAUDE.md` · `workflow/CLAUDE.md` ·
-`frontend/CLAUDE.md` · `edge/CLAUDE.md` (+ `edge/README.md`).
+`edge/CLAUDE.md` (+ `edge/README.md` — the server) · `core/CLAUDE.md` · `tools/CLAUDE.md` (the `jarvis` SDK, web/browser) ·
+`db/CLAUDE.md` · `workflow/CLAUDE.md` · `frontend/CLAUDE.md`.
 
 ## Architecture
 
-- **API is GraphQL-first** — Strawberry + FastAPI. Queries/mutations over HTTP POST `/graphql`; live streams over `graphql-ws` subscriptions on the same path. REST only for what GraphQL can't carry: binary download, `/ws/browser`, log tailing, health. Frontend is React 19 + Relay.
-- **A Rust edge (`edge/`) sits in front of Python** — phase 1 of moving to Rust so jarvis runs on old, low-RAM hardware. The edge owns :8000, answers the GraphQL operations ported so far from SQLite, fires all schedules, and proxies everything else to Python on :8001. With `JARVIS_WORKER_CMD` set it **starts Python on demand and stops it after `JARVIS_WORKER_IDLE` seconds idle**. Consequence for Python code: process start is no longer crash recovery — anything that runs at startup must be safe to run every few minutes.
-- **Long-running work goes through a durable SQLite job queue** (`core/queue/`), never bare `asyncio.create_task`. `job.id == task_id` is the single cancellation key. A job with `runtime = 'edge'` is the edge's agent loop's (`edge/src/agent/`): anything in Python that claims, reaps or sweeps jobs or their run rows must skip it.
+- **The server is Rust** (`edge/`, axum) — moved off Python so jarvis runs on old, low-RAM hardware. One process on :8000: GraphQL (queries/mutations over HTTP POST `/graphql`, live streams over `graphql-ws` subscriptions on the same path), REST only for what GraphQL can't carry (binary download, `/ws/browser`, log tailing, health), the agent loop, the scheduler, the bots, MCP, and the SPA. Frontend is React 19 + Relay.
+- **Python is the agent's notebook kernels**: the agent writes Python in `run_cell`, in an `ipykernel` the server starts, with the `jarvis` SDK (`tools/sdk.py`) preloaded. SDK writes go through the server's GraphQL. Python's former runtime (`core/agents.py`, its loop, `workflow/`, `main.py`) serves nothing now; it remains while tests diff the server against it — see `edge/ROADMAP.md`.
+- **Long-running work goes through a durable SQLite job queue**, never a bare spawned task: a trigger writes the `jobs` row, the agent loop (`edge/src/agent/queue.rs`) claims it. `job.id == task_id` is the single cancellation key.
 
 ```
-main.py          CLI (typer): run, start, config *, model *, memory *, maintenance *
-core/            agent factory + loop, messages/compaction/caching, model catalog, memory,
-                 MCP, approvals + tool gate, budget/perf, queue, scheduler, kernels, config
-db/              models.py (ORM), ops.py (async CRUD), engine.py (init + _migrate)
-server/          entrypoint.py (lifespan, routers), graphql/ (types, queries, mutations,
-                 subscriptions), *_runtime.py (job handlers), routes_*.py (REST), bots
-tools/           bound agent tools + sdk.py (the kernel-preloaded `jarvis` SDK), research/browser
-workflow/        engine.py (BFS executor) + nodes.py (node types)
+edge/            the server and CLI (Rust) — see edge/README.md
+tools/           sdk.py (the kernel-preloaded `jarvis` SDK), research.py / browser.py (web + browser)
+core/            what the SDK imports (config, embeddings, retrieval, tool gate/policy), plus
+                 Python's former agent runtime, kept for the tests that diff against it
+db/              models.py (ORM the SDK reads through), ops.py, engine.py (init + _migrate)
+workflow/        Python's former workflow engine (the server's is edge/src/agent/workflow/)
+main.py          Python's former CLI (the server's is `jarvis-edge`)
 frontend/        React + TanStack Router + Relay + StyleX + Vite
-edge/            Rust edge (axum) — see edge/README.md
-tests/           pytest; parity tests diff the edge against Python
+tests/           pytest; tests/test_edge_*.py drive the binary against Python's recorded answers
 ```
 
 ## Commands
 
 ```bash
-# Backend — edge on :8000, starting/stopping Python on :8001 on demand
-cd edge && JARVIS_APP_DIR=.. \
-  JARVIS_WORKER_CMD='exec .venv/bin/uvicorn server.entrypoint:app --port $JARVIS_BACKEND_PORT' \
-  cargo run
-# …or Python always on (with --reload), linked to the edge
-JARVIS_EDGE_URL=http://127.0.0.1:8000 uv run uvicorn server.entrypoint:app --reload --port 8001
-cd edge && cargo run
-# …or Python alone on :8000 — still fully works
-uv run uvicorn server.entrypoint:app --reload
+cd edge && JARVIS_APP_DIR=.. cargo run       # the server on :8000
+edge/target/debug/jarvis-edge run|config|model|memory …   # the CLI
+cd edge && cargo test                        # unit tests
 
-uv run python main.py run "<query>"          # one-shot CLI query
-uv run python main.py config set|get|list|delete <key> [value]
-uv run python main.py model list|add|remove|set-default|sync
-edge/target/debug/jarvis-edge run|config|model|memory …   # the same CLI in Rust (edge/src/cli/)
-uv add <package>                             # dependency (pyproject.toml + uv.lock)
-
+uv add <package>                             # Python dependency (pyproject.toml + uv.lock) — for the kernels
 uv run pytest                                # tests; `-m llm` for real-model tests (need GOOGLE_API_KEY)
 uvx pyrefly check --summarize-errors         # Python type check (no linter configured)
 
 cd frontend && pnpm dev                      # vite + relay-compiler --watch on :5173 (always pnpm, never npm)
-pnpm schema && pnpm relay                    # after changing the Python GraphQL schema
+pnpm schema && pnpm relay                    # after changing the server's GraphQL schema
 pnpm typecheck / pnpm build
 ```
 
-Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. The `jarvis` fixture (`tests/conftest.py`) boots a full `JarvisRunner` in-process without uvicorn, the scheduler, or queue workers.
+Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. `tests/test_edge_*.py` build the binary once per session and compare it against Python's answers, recorded before the Python server was deleted (`tests/python_golden.py`); a deliberate change to an answer is an edit to the recording.
 
 ## Rules that are easy to break
 
-**Agent / LLM calls**
-- Any node that calls an LLM must run `strip_historical_thinking` + `repair_orphan_tool_calls` + `build_llm_messages` (`core/messages.py`) on history before `.ainvoke`, or Bedrock/Anthropic reject the call. Loop nodes also run `apply_per_call_compaction()`. Pass `cache_segments` and `cache_provider=spec.provider` when caching. See `core/CLAUDE.md`.
-- `_THINKING_TYPES` must list `thinking`, `redacted_thinking` **and** `reasoning` — threads are shared across models, and a reasoning block one provider leaves behind crashes another.
-- `maybe_compact()` returns a `CompactionResult` whose `.messages` is already compacted — don't also call `apply_per_call_compaction` on it.
-- A new prompt `CacheSegment` needs a `_SEGMENT_STABILITY` entry in `core/agents.py`. Per-turn or live-edited content must be `cacheable=False`.
-- Pick models via `db.ops.resolve_model()` (async) / `resolve_model_spec()` (sync) — stored model ids can outlive the catalog. `is_valid_model` is only for write boundaries.
+**Agent / LLM calls** (`edge/src/agent/`, `edge/src/llm/`)
+- Every model call shapes its history through `llm/shape.rs` (`strip_historical_thinking`, `repair_orphan_tool_calls`, the cache layout) or Bedrock/Anthropic reject it. Thinking types include `thinking`, `redacted_thinking` **and** `reasoning` — threads are shared across models.
+- A new prompt segment needs its place in the stability order (`agent/prompt.rs`); per-turn or live-edited content stays out of the cached region.
+- Pick a run's model with `catalog::resolve_model` — stored model ids can outlive the catalog.
 
 **Runs and streaming**
-- `register_*` pre-registers `_tasks[task_id] = TaskState(...)` **before** committing the job, so a subscriber can't race the worker. Handlers read `state = _tasks[task_id]`; never `setdefault`. Behind the edge, pass `job=job` to `get_or_create_task_state`.
-- Every event goes through `emit_event` — it is the one append the edge link ships. Workflow nodes use `_emit()`.
-- Custom events from tools: `adispatch_custom_event(name, {"type": name, ...})` — the `"type"` key is required.
+- A trigger registers the run **before** committing its job (`gql/start.rs:commit_run`), so a subscriber can't race the agent loop.
+- Every run event is appended through the run (`Run::emit_local` / `agent/events.rs`), in the raw `{"event", "data"}` shape the subscriptions coerce.
 
 **GraphQL**
-- `get_context` also runs for the subscription WebSocket: its params must be `HTTPConnection`, never `Request`, or every subscription silently fails while queries keep working.
-- A new `*Query`/`*Mutation`/`*Subscription` mixin must be added to `merge_types(...)` in `server/graphql/schema.py`.
+- A new query/mutation object goes into `Query` / `Mutation` in `edge/src/gql/mod.rs`; then `pnpm schema && pnpm relay`.
+- An agent's (`X-Jarvis-Caller: agent`) destructive write passes `approval::gate_action` when it is one of the deferred actions.
 
 **Database**
-- `async_session` has `expire_on_commit=False` — don't `session.refresh()` after commit.
-- Updates use ORM `setattr`, not raw `UPDATE`, so `onupdate` fires. FK columns get `index=True`. Schema changes to existing tables go in `_migrate()`. The edge owns the schema (`edge/src/schema.rs`): a model change is re-captured into `edge/src/schema.sql`, and a `_migrate` step is ported there too (`tests/test_edge_schema.py`).
+- The server owns the schema (`edge/src/schema.rs`): a change goes in `db/models.py` + `db/engine.py:_migrate` (the SDK reads through them) and is re-captured into `edge/src/schema.sql`, with the `_migrate` step ported (`tests/test_edge_schema.py`).
+- A write leaves a row exactly as SQLAlchemy did: `uuid4()` ids, its timestamp text, `updated_at` bumped where `onupdate` fired, cascades as explicit DELETEs.
 
 **Scheduling**
-- Build every cron trigger with `core/scheduler.py:_cron(expr)`, never `CronTrigger.from_crontab` — it applies the timezone and the Unix day-of-week fix. `edge/src/cron.rs` is a port: change both.
-- Every path that creates/updates/deletes a scheduled automation calls `_register_scheduler_job` / `_remove_scheduler_job`.
+- Cron is `edge/src/cron.rs`, a port of `core/scheduler.py:_cron` (timezone + Unix day-of-week) diffed against APScheduler — change both while that test stands.
+- Every automation write tells the scheduler (`Scheduler::schedules_changed`).
 
 **Agent tools**
-- The main agent is code-first: only graph-coupled tools are bound (`run_cell`, `write_artifact`, `write_todos`/`set_todo_status`, `spawn_workers`, `run_workflow`, `remember` with an embedder, `complete_task`/`block_task` on board runs). Everything else goes in the `jarvis` SDK (`tools/sdk.py`). See `tools/CLAUDE.md`.
+- The main agent is code-first: only loop-coupled tools are bound (`run_cell`, `write_artifact`, `write_todos`/`set_todo_status`, `spawn_workers`, `run_workflow`, `remember`, `complete_task`/`block_task` on board runs; schemas in `edge/src/agent/tools.json`). Everything else goes in the `jarvis` SDK (`tools/sdk.py`). See `tools/CLAUDE.md`.
 - SDK writes go through GraphQL mutations, not direct DB writes, so server-side side effects fire.
 
 **Frontend**
-- After changing a `graphql` literal run `pnpm relay`; after changing the Python schema, `pnpm schema` first. Never edit `src/__generated__/` or `routeTree.gen.ts`.
+- After changing a `graphql` literal run `pnpm relay`; after changing the server's schema, `pnpm schema` first. Never edit `src/__generated__/` or `routeTree.gen.ts`.
 - `pnpm fmt` rewrites files you didn't touch — format only what you changed.
 
 ## Security posture

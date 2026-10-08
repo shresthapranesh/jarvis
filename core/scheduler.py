@@ -161,13 +161,7 @@ _scheduler = BackgroundScheduler(timezone=get_scheduler_timezone())
 
 
 def _register_scheduler_job(auto) -> None:
-    """Register (or replace) a cron job for the given automation. Behind the
-    Rust edge the edge fires schedules, so it is told to re-read them instead."""
-    from core.edge_link import behind_edge, notify_edge  # noqa: PLC0415
-
-    if behind_edge():
-        notify_edge("schedules")
-        return
+    """Register (or replace) a cron job for the given automation."""
     try:
         _scheduler.add_job(
             func=_run_scheduled_automation,
@@ -185,11 +179,6 @@ def _register_scheduler_job(auto) -> None:
 
 
 def _remove_scheduler_job(automation_id: str) -> None:
-    from core.edge_link import behind_edge, notify_edge  # noqa: PLC0415
-
-    if behind_edge():
-        notify_edge("schedules")
-        return
     job_id = f"auto_{automation_id}"
     if _scheduler.get_job(job_id):
         _scheduler.remove_job(job_id)
@@ -214,36 +203,6 @@ def _run_scheduled_automation(automation_id: str) -> None:
         future.result(timeout=10.0)
     except Exception:
         logger.exception("failed to enqueue scheduled automation %s", automation_id)
-
-
-def _run_board_dispatch() -> None:
-    """Called from BackgroundScheduler thread — runs one board-dispatch pass
-    (promote todo→ready, enqueue ready board tasks) on the main loop."""
-    from server.task_board_runtime import dispatch_board_tasks  # noqa: PLC0415
-
-    if state._main_loop is None or state._queue is None:
-        return
-    future = asyncio.run_coroutine_threadsafe(dispatch_board_tasks(), state._main_loop)
-    try:
-        future.result(timeout=30)
-    except Exception:
-        logger.exception("board dispatch tick failed")
-
-
-def register_board_dispatch_job(interval_seconds: int = 15) -> None:
-    """Register the task-board dispatcher interval job. Called once from the
-    server lifespan. Mutations/tools also kick dispatch directly on create;
-    this tick catches promotions and anything those kicks missed."""
-    from apscheduler.triggers.interval import IntervalTrigger
-
-    _scheduler.add_job(
-        func=_run_board_dispatch,
-        trigger=IntervalTrigger(seconds=interval_seconds),
-        id="board_dispatch",
-        replace_existing=True,
-        misfire_grace_time=30,
-    )
-    logger.info("board dispatch scheduled: every %ss", interval_seconds)
 
 
 def _run_memory_consolidation() -> None:

@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from edge_support import _gid, _run_edge, edge_binary, startup_sweep, until  # noqa: F401 — edge_binary is a fixture
-from python_golden import RECORD
 from test_edge_parity import Twin
 
 START = """mutation($input: StartTaskInput!) {
@@ -98,7 +97,7 @@ async def _edge_run(t: Twin, kind: str) -> str:
 
 async def test_a_busy_conversation_queues_instead(twin):
     first = await twin.run(START, {"input": {"query": "first", "conversationId": "c2"}})
-    task = (twin.raw or first)["data"]["startTask"]["taskId"]
+    task = first["data"]["startTask"]["taskId"]  # Python's id, masked
     edge_task = await _edge_run(twin, "chat")
     # A second message joins the run that's up (still pending, on both sides:
     # nothing claims jobs here).
@@ -109,10 +108,9 @@ async def test_a_busy_conversation_queues_instead(twin):
     await twin.run(QUEUE, {"taskId": "missing", "query": "x"})
     # Withdrawing one: once, then it's gone.
     b = _queued(twin.b_dir / "database.db", "c2")
-    a = _queued(twin.a_dir / "database.db", "c2") if RECORD else b
-    assert len(a) == len(b) == 2
+    assert len(b) == 2
     for _ in range(2):
-        await twin.run(UNQUEUE, {"taskId": task, "messageId": a[0]},
+        await twin.run(UNQUEUE, {"taskId": task, "messageId": "<python's>"},
                        edge_variables={"taskId": edge_task, "messageId": b[0]})
     await twin.run(UNQUEUE, {"taskId": "missing", "messageId": "m"})
 
@@ -120,7 +118,7 @@ async def test_a_busy_conversation_queues_instead(twin):
 async def test_runs_that_arent_claimed_yet_have_nothing_to_answer(twin):
     """A pending run has no interrupt to answer; an unknown one isn't there."""
     started = await twin.run(RUN_WORKFLOW, {"id": _gid("Workflow", "w1")})
-    flow = (twin.raw or started)["data"]["runWorkflow"]
+    flow = started["data"]["runWorkflow"]  # Python's id, masked
     edge_flow = await _edge_run(twin, "workflow")
     for query, variables, ids in [
         (RESUME_WORKFLOW, {"answer": "a"}, {"runId": (flow, edge_flow)}),

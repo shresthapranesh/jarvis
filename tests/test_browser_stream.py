@@ -9,7 +9,6 @@ the run it names and no one else.
 
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 
@@ -112,125 +111,6 @@ def test_ensure_page_survives_an_unreachable_endpoint(monkeypatch):
 
     monkeypatch.setattr(httpx, "get", _boom)
     browser._ensure_page("http://127.0.0.1:9222")  # must not raise
-
-
-# ── The announce that drives the chip ────────────────────────────────────────
-
-def _context(session, caller: str = "agent", conversation_id: str | None = None):
-    from server.graphql.extensions import SESSION_LOCK_KEY
-
-    return {
-        "session": session,
-        SESSION_LOCK_KEY: asyncio.Lock(),
-        "caller": caller,
-        "caller_conversation_id": conversation_id,
-    }
-
-
-MUTATION = """
-mutation($u: String!, $p: String!) { browserActivity(url: $u, phase: $p) }
-"""
-
-
-async def _announce(caller="agent", phase="start", conversation_id=None):
-    from db import async_session
-    from server.graphql.schema import schema
-
-    async with async_session() as s:
-        return await schema.execute(
-            MUTATION,
-            context_value=_context(s, caller, conversation_id),
-            variable_values={"u": "https://example.com/a", "p": phase},
-        )
-
-
-async def test_announce_is_refused_for_a_human_caller(database):
-    """A person opening the panel is not an agent announcing a navigation."""
-    result = await _announce(caller="human")
-    assert result.errors and "agent-initiated" in str(result.errors[0])
-
-
-async def test_announce_rejects_an_unknown_phase(database):
-    result = await _announce(phase="sideways")
-    assert result.errors and "phase must be one of" in str(result.errors[0])
-
-
-async def test_announce_without_a_live_run_is_false_not_an_error(database):
-    """CLI, bots and tests browse with no TaskState. That is normal."""
-    result = await _announce()
-    assert not result.errors, result.errors
-    assert result.data == {"browserActivity": False}
-
-
-async def test_announce_lands_on_the_conversations_live_run(database):
-    from core.state import TaskState, _tasks
-
-    conv = "conv-browsing"
-    state = TaskState()
-    state.parent_id = conv
-    _tasks["task-browsing"] = state
-    try:
-        result = await _announce(conversation_id=conv)
-        assert not result.errors, result.errors
-        assert result.data == {"browserActivity": True}
-        emitted = [e for e in state.events if e.get("event") == "browser_step"]
-        assert len(emitted) == 1
-        import json
-
-        payload = json.loads(emitted[0]["data"])
-        assert payload["url"] == "https://example.com/a"
-        assert payload["phase"] == "start"
-    finally:
-        _tasks.pop("task-browsing", None)
-
-
-# ── Availability ─────────────────────────────────────────────────────────────
-#
-# The UI asks this instead of deriving "can I open the panel" from browser_step
-# events, which vanish when a run ends and again when the next message resets
-# the stream state.
-
-AVAILABLE = "{ browserAvailable }"
-
-
-async def _available():
-    from db import async_session
-    from server.graphql.schema import schema
-
-    async with async_session() as s:
-        return await schema.execute(AVAILABLE, context_value=_context(s, "human"))
-
-
-async def test_available_is_true_when_a_browser_answers(database, monkeypatch):
-    monkeypatch.setattr(browser, "_endpoint_live", lambda url: True)
-    result = await _available()
-    assert not result.errors, result.errors
-    assert result.data == {"browserAvailable": True}
-
-
-async def test_available_is_false_when_nothing_is_listening(database, monkeypatch):
-    monkeypatch.setattr(browser, "_endpoint_live", lambda url: False)
-    result = await _available()
-    assert result.data == {"browserAvailable": False}
-
-
-async def test_available_fails_soft_rather_than_erroring(database, monkeypatch):
-    """It decides whether to render a button; a raise would blank the page."""
-
-    def _boom(url):
-        raise RuntimeError("no config")
-
-    monkeypatch.setattr(browser, "_endpoint_live", _boom)
-    result = await _available()
-    assert not result.errors
-    assert result.data == {"browserAvailable": False}
-
-
-async def test_available_never_launches_a_browser(database, monkeypatch):
-    """A page load must not be what opens a window on someone's screen."""
-    monkeypatch.setattr(browser, "_endpoint_live", lambda url: False)
-    monkeypatch.setattr(browser, "launch", lambda: pytest.fail("probe launched a browser"))
-    await _available()
 
 
 # ── Telling the agent the browser exists ─────────────────────────────────────

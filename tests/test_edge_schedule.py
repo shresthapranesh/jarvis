@@ -113,7 +113,6 @@ def test_next_fire_times_match_apscheduler(edge_binary: Path):
 
 # ── the board dispatcher ─────────────────────────────────────────────────────
 
-import asyncio  # noqa: E402
 import contextlib  # noqa: E402
 
 from edge_support import _gid, _run_edge, startup_sweep, until  # noqa: E402
@@ -194,57 +193,38 @@ async def _settles_as(db: Path, dirs: tuple[str, ...], want: dict[str, list]) ->
         assert _board(db, dirs) == want
 
 
-async def test_dispatch_matches_python(jarvis, work_dir: Path, tmp_path_factory, edge_binary: Path):
+async def test_dispatch_matches_python(database, work_dir: Path, tmp_path_factory, edge_binary: Path):
     """Promotion, the cap, priority order, and the live-previous-run guard —
-    the edge's ticks leave the rows a pass through Python's dispatcher left."""
+    the edge's ticks leave the rows each pass of Python's dispatcher left."""
     import sqlite3
 
     async with _board_copy(work_dir, tmp_path_factory, edge_binary) as (client, b_dir):
         dirs = (str(work_dir), str(b_dir))
 
-        async def python_pass() -> dict[str, list]:
-            from server.task_board_runtime import dispatch_board_tasks
-
-            await dispatch_board_tasks()
-            return _board(work_dir / "database.db", dirs)
-
         # Promotes "joins", starts the two highest priority; then at the cap.
-        await _settles_as(b_dir / "database.db", dirs, await recorded(python_pass))
-        await _settles_as(b_dir / "database.db", dirs, await recorded(python_pass))
-        for db in (work_dir / "database.db", b_dir / "database.db"):
+        await _settles_as(b_dir / "database.db", dirs, await recorded())
+        await _settles_as(b_dir / "database.db", dirs, await recorded())
+        for db in (b_dir / "database.db",):
             with contextlib.closing(sqlite3.connect(db)) as conn:
                 conn.execute("UPDATE jobs SET status = 'done' WHERE kind = 'board_task'")
                 conn.commit()
         # Room again: the rest, by priority then age.
-        await _settles_as(b_dir / "database.db", dirs, await recorded(python_pass))
+        await _settles_as(b_dir / "database.db", dirs, await recorded())
 
         # Each run the edge started is registered, queued, for its subscribers.
         running = (await client.post("/graphql", json={"query": RUNNING})).json()["data"]["runningTasks"]
         assert {"Task joins", "Task low", "Task p3"} <= {r["label"] for r in running}
 
 
-async def test_a_queued_board_run_stopped_matches_python(jarvis, work_dir: Path, tmp_path_factory, edge_binary: Path):
+async def test_a_queued_board_run_stopped_matches_python(database, work_dir: Path, tmp_path_factory, edge_binary: Path):
     """stopBoardTask on a run nothing has claimed: the job is cancelled and
     the card blocked as stopped — the end no handler is left to write. The
     run ends for whoever watches it."""
     async with _board_copy(work_dir, tmp_path_factory, edge_binary) as (client, b_dir):
         dirs = (str(work_dir), str(b_dir))
 
-        async def python_pass() -> dict[str, list]:
-            from server.task_board_runtime import dispatch_board_tasks
-
-            await dispatch_board_tasks()
-            return _board(work_dir / "database.db", dirs)
-
-        await _settles_as(b_dir / "database.db", dirs, await recorded(python_pass))
-
-        async def python_stop() -> dict[str, list]:
-            from server.task_board_runtime import stop_board_task
-
-            assert await stop_board_task("high-old") is True
-            return _board(work_dir / "database.db", dirs)
-
-        want = await recorded(python_stop)
+        await _settles_as(b_dir / "database.db", dirs, await recorded())
+        want = await recorded()  # after Python's stop_board_task("high-old")
         q = "mutation($id: ID!) { stopBoardTask(id: $id) }"
         resp = await client.post("/graphql", json={"query": q, "variables": {"id": _gid("BoardTask", "high-old")}})
         assert resp.json() == {"data": {"stopBoardTask": True}}

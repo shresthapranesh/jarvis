@@ -8,9 +8,9 @@ diffed: the events a `taskEvents` subscriber gets, the Step rows, the final
 message, the thread, and every request the model received.
 
 Python's runs were recorded (`python_golden.py`): each one's events, its
-whole database afterwards and what the fake model saw. On replay that
-database is put back as the run left it (`_python_step`), so everything read
-from it afterwards reads what Python wrote.
+whole database afterwards, its artifact files and what the fake model saw.
+Each is put back as the run left it (`_python_step`), so everything read from
+Python's database afterwards reads what Python wrote.
 
 Where the edge differs on purpose it says so here, by name.
 
@@ -36,9 +36,9 @@ import pytest
 
 from agent_harness import Normalizer
 from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
-from python_golden import RECORD, portable, recorded
+from python_golden import portable, recorded
 from test_edge_llm import _intended_ollama, _semantics
-from test_edge_runs import AUTOMATION, BOARD, CHAT, _python_subscribe
+from test_edge_runs import AUTOMATION, BOARD, CHAT
 
 REPO = Path(__file__).resolve().parent.parent
 MODEL = "ollama:fake"
@@ -247,12 +247,13 @@ class Turn:
 
 @pytest.fixture
 async def twins(request, jarvis, work_dir: Path, tmp_path_factory, fake: FakeOllama, monkeypatch, edge_binary: Path):
-    """Python in this process over `work_dir`, and an edge over a copy, both
-    pointed at `fake` and at a CDP port nothing listens on. Parametrized
-    indirectly, it sets those environment variables in both."""
+    """Python's database at `work_dir` — its recorded runs are put back into
+    it — and an edge over a copy, pointed at `fake` and at a CDP port nothing
+    listens on. Parametrized indirectly, it sets those environment variables
+    in both. Python's memory sweeps (`core/`) still run here, live."""
     from core import agents, embeddings, memory_store
     from db import async_session
-    from db.models import ConfigSetting, Conversation, ConversationEpisode, Memory, Project, Skill
+    from db.models import ConfigSetting, Conversation, ConversationEpisode, Memory, Project
     from db.ops import hydrate_catalog
 
     dead = f"http://127.0.0.1:{_free_port()}"
@@ -328,53 +329,23 @@ def _restore(db: Path, dump: dict[str, list[dict]]) -> None:
         conn.commit()
 
 
-_in_python_step = False
 # The running test's twins, for `_python_gql`.
 _twins: Twins | None = None
 
 
-async def _python_step(twins: Twins, run: Any) -> Any:
-    """Python's side of a scenario: `run()` while recording, and its result,
-    the database it left and what the fake saw, recorded; on replay, the same
-    put back. A step inside another (a callback during a run) is part of it."""
-    global _in_python_step
-    if _in_python_step:
-        return await run()
-
+async def _python_step(twins: Twins) -> Any:
+    """Python's side of the next step of a scenario, as recorded: its
+    database, artifact files and what the fake saw put back as the step left
+    them, and its result returned."""
     home = twins.python_db.parent
-
-    async def step() -> dict[str, Any]:
-        global _in_python_step
-        _in_python_step = True
-        try:
-            result = await run()
-        finally:
-            _in_python_step = False
-        fake = twins.fake
-        files = {str(p.relative_to(home)): p.read_bytes() for p in sorted((home / "artifacts").rglob("*")) if p.is_file()}
-        snap = {"result": result, "db": _dump_all(twins.python_db),
-                "fake": [fake.requests, fake.telegram, fake.hooks, fake.embeds]}
-        # Relocatable: this run's directory, and this machine's paths, named.
-        text = json.dumps(portable(json.loads(json.dumps(snap, default=_bytes_out))))
-        return {"snap": text.replace(json.dumps(str(home))[1:-1], "<python_dir>"), "files": files}
-
-    taken = await recorded(step)
+    taken = await recorded()
     snap = json.loads(taken["snap"].replace("<python_dir>", json.dumps(str(home))[1:-1]), object_hook=_bytes_in)
-    if not RECORD:
-        _restore(twins.python_db, snap["db"])
-        for rel, data in taken["files"].items():
-            (home / rel).parent.mkdir(parents=True, exist_ok=True)
-            (home / rel).write_bytes(data)
-        twins.fake.requests, twins.fake.telegram, twins.fake.hooks, twins.fake.embeds = snap["fake"]
+    _restore(twins.python_db, snap["db"])
+    for rel, data in taken["files"].items():
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_bytes(data)
+    twins.fake.requests, twins.fake.telegram, twins.fake.hooks, twins.fake.embeds = snap["fake"]
     return snap["result"]
-
-
-def _bytes_out(value: Any) -> Any:
-    if isinstance(value, bytes):
-        import base64
-
-        return {"$b64": base64.b64encode(value).decode()}
-    raise TypeError(type(value).__name__)
 
 
 def _bytes_in(value: dict) -> Any:
@@ -383,12 +354,6 @@ def _bytes_in(value: dict) -> Any:
 
         return base64.b64decode(value["$b64"])
     return value
-
-
-def _live(twins: Twins, run: Any) -> bool:
-    """Whether `run` really runs: the edge's always, Python's only while
-    recording — something done alongside it is then done too."""
-    return RECORD or run != twins.python
 
 
 def _turn(t: Turn) -> dict[str, Any]:
@@ -403,33 +368,11 @@ class Twins:
     def __init__(self, jarvis: Any, client: Any, python_db: Path, edge_db: Path, fake: FakeOllama):
         self.jarvis, self.client, self.python_db, self.edge_db, self.fake = jarvis, client, python_db, edge_db, fake
 
-    async def python(self, query: str, script: list[Reply], *, hold: int | None = None,
-                     during: Any = None, **start: Any) -> tuple[Turn, list[dict]]:
-        """`during(task_id)` runs once the held request has arrived, and then
-        the request goes on."""
-
-        async def run() -> dict[str, Any]:
-            from db import async_session
-            from server.chat_runtime import chat_job_handler, register_chat_task
-
-            async with async_session() as s:
-                dispatch = await register_chat_task(s, query=query, model=MODEL, **start)
-                await s.commit()
-            job = await self.jarvis.queue.claim(kinds=["chat"], worker_id="test", ttl_seconds=600)
-            assert job is not None and job.id == dispatch.task_id
-            handler = asyncio.create_task(chat_job_handler(job))
-            if during is not None:
-                await self.fake.held()
-                await during(dispatch.task_id)
-                self.fake.release()
-            async with asyncio.timeout(60):
-                await handler
-            await self.jarvis.queue.complete(job.id, worker_id="test")
-            events = await _python_subscribe(CHAT, {"id": dispatch.task_id})
-            return _turn(Turn(dispatch.task_id, dispatch.conversation_id, events, self.python_db))
-
-        self.fake.reset(script, hold)
-        turn = await _python_step(self, run)
+    async def python(self, query: str, script: list[Reply], **_: Any) -> tuple[Turn, list[dict]]:
+        """Python's turn on `query` — `register_chat_task`, then its job — as
+        recorded."""
+        self.fake.reset(script)
+        turn = await _python_step(self)
         return _unturn(turn, self.python_db), list(self.fake.requests)
 
     async def edge(self, query: str, script: list[Reply], *, hold: int | None = None,
@@ -473,30 +416,12 @@ class Twins:
             await s.commit()
         _copy(self.python_db, self.edge_db, "notification_channels", channel_id)
 
-    async def python_automation(self, auto_id: str, script: list[Reply], *, hold: int | None = None,
-                                during: Any = None) -> tuple[Turn, list[dict], list[dict]]:
-        """Python runs the automation once: `register_automation_run`, then
-        its job. Returns the run, the model's requests and the notifications."""
-
-        async def run() -> dict[str, Any]:
-            from db import async_session
-            from server.automation_runtime import automation_job_handler, register_automation_run
-
-            async with async_session() as s:
-                run_id = await register_automation_run(s, auto_id)
-            job = await self.jarvis.queue.claim(kinds=["automation"], worker_id="test", ttl_seconds=600)
-            assert job is not None and job.id == run_id
-            handler = asyncio.create_task(automation_job_handler(job))
-            if during is not None:
-                await self._during(run_id, hold, during)
-            async with asyncio.timeout(60):
-                await handler
-            await self.jarvis.queue.complete(job.id, worker_id="test")
-            events = await _python_subscribe(AUTOMATION, {"id": run_id})
-            return _turn(Turn(run_id, _automation_thread(self.python_db, auto_id, run_id), events, self.python_db))
-
-        self.fake.reset(script, hold)
-        turn = await _python_step(self, run)
+    async def python_automation(self, auto_id: str, script: list[Reply], **_: Any) -> tuple[Turn, list[dict], list[dict]]:
+        """Python's run of the automation — `register_automation_run`, then
+        its job — as recorded: the run, the model's requests and the
+        notifications."""
+        self.fake.reset(script)
+        turn = await _python_step(self)
         return _unturn(turn, self.python_db), list(self.fake.requests), list(self.fake.telegram)
 
     async def edge_automation(self, auto_id: str, script: list[Reply], *, hold: int | None = None,
@@ -536,27 +461,11 @@ class Twins:
             _copy(self.python_db, self.edge_db, "board_tasks", task.id)
         return task.id
 
-    async def python_board(self, task_id: str, script: list[Reply], *, hold: int | None = None,
-                           during: Any = None) -> tuple[Turn, list[dict]]:
-        """Python's dispatcher starts the task, and its handler runs it."""
-
-        async def run() -> dict[str, Any]:
-            from server.task_board_runtime import board_task_job_handler, dispatch_board_tasks
-
-            assert await dispatch_board_tasks() == 1
-            job = await self.jarvis.queue.claim(kinds=["board_task"], worker_id="test", ttl_seconds=600)
-            assert job is not None
-            handler = asyncio.create_task(board_task_job_handler(job))
-            if during is not None:
-                await self._during(task_id, hold, during)
-            async with asyncio.timeout(60):
-                await handler
-            await self.jarvis.queue.complete(job.id, worker_id="test")
-            events = await _python_subscribe(BOARD, {"id": job.id})
-            return _turn(Turn(job.id, f"boardtask_{task_id}", events, self.python_db))
-
-        self.fake.reset(script, hold)
-        turn = await _python_step(self, run)
+    async def python_board(self, task_id: str, script: list[Reply], **_: Any) -> tuple[Turn, list[dict]]:
+        """Python's dispatcher starting the task and its handler running it,
+        as recorded."""
+        self.fake.reset(script)
+        turn = await _python_step(self)
         return _unturn(turn, self.python_db), list(self.fake.requests)
 
     async def edge_board(self, task_id: str, before: tuple, script: list[Reply], *, hold: int | None = None,
@@ -728,8 +637,8 @@ def _requests(python: list[dict], edge: list[dict]) -> None:
 
 
 async def _both(twins: Twins, query: str, script: list[Reply], *, hold: int | None = None,
-                python_during: Any = None, edge_during: Any = None, **start: Any) -> tuple[dict, dict]:
-    python, python_requests = await twins.python(query, script, hold=hold, during=python_during, **start)
+                edge_during: Any = None, **start: Any) -> tuple[dict, dict]:
+    python, python_requests = await twins.python(query, script, **start)
     edge, edge_requests = await twins.edge(query, script, hold=hold, during=edge_during, **start)
     _requests(python_requests, edge_requests)
     return _record(python), _record(edge)
@@ -784,21 +693,13 @@ async def test_a_project_conversation(twins):
 
 async def test_a_message_queued_mid_run(twins):
     """Sent while the first model call is out: delivered before the second."""
-    async def python_queue(task_id: str) -> None:
-        from db import async_session
-        from server.chat_runtime import queue_chat_message
-
-        async with async_session() as s:
-            await queue_chat_message(s, task_id, "also mention Y")
-
     async def edge_queue(task_id: str) -> None:
         resp = await twins.client.post("/graphql", json={"query": QUEUE, "variables": {
             "taskId": task_id, "query": "also mention Y"}})
         assert "errors" not in resp.json(), resp.json()
 
     script = [Reply("", [("write_todos", {"todos": ["X"]})]), Reply("X and Y.")]
-    python, edge = await _both(twins, "tell me about X", script, hold=0,
-                               python_during=python_queue, edge_during=edge_queue)
+    python, edge = await _both(twins, "tell me about X", script, hold=0, edge_during=edge_queue)
     assert edge == python
     kinds = [e["kind"] for e in python["events"]]
     assert kinds.index("QueuedMessageEvent") < kinds.index("QueuedConsumedEvent")
@@ -807,15 +708,12 @@ async def test_a_message_queued_mid_run(twins):
 
 async def test_a_stop_while_the_model_is_answering(twins):
 
-    async def python_stop(task_id: str) -> None:
-        assert (await _python_gql(STOP, {"id": task_id}))["data"] == {"stopTask": True}
-
     async def edge_stop(task_id: str) -> None:
         resp = await twins.client.post("/graphql", json={"query": STOP, "variables": {"id": task_id}})
         assert resp.json()["data"] == {"stopTask": True}
 
     script = [Reply("Never sent.")]
-    python, edge = await _both(twins, "a long job", script, hold=0, python_during=python_stop, edge_during=edge_stop)
+    python, edge = await _both(twins, "a long job", script, hold=0, edge_during=edge_stop)
     assert edge == python
     assert python["message"][:2] == ["", "stopped"]
     assert python["events"][-1]["kind"] == "StoppedEvent"
@@ -946,8 +844,8 @@ def _automation_record_of(turn: Turn, auto_id: str) -> dict[str, Any]:
 
 
 async def _both_automation(twins: Twins, auto_id: str, script: list[Reply], *, hold: int | None = None,
-                           python_during: Any = None, edge_during: Any = None) -> tuple[dict, dict, list, list]:
-    python, python_requests, python_sent = await twins.python_automation(auto_id, script, hold=hold, during=python_during)
+                           edge_during: Any = None) -> tuple[dict, dict, list, list]:
+    python, python_requests, python_sent = await twins.python_automation(auto_id, script)
     edge, edge_requests, edge_sent = await twins.edge_automation(auto_id, script, hold=hold, during=edge_during)
     _requests(python_requests, edge_requests)
     return _automation_record(python, auto_id), _automation_record(edge, auto_id), python_sent, edge_sent
@@ -993,16 +891,12 @@ async def test_an_automation_stopped_while_the_model_answers(twins):
 
     stop = "mutation($id: String!) { stopAutomationRun(runId: $id) }"
 
-    async def python_stop(run_id: str) -> None:
-        assert (await _python_gql(stop, {"id": run_id}))["data"] == {"stopAutomationRun": True}
-
     async def edge_stop(run_id: str) -> None:
         resp = await twins.client.post("/graphql", json={"query": stop, "variables": {"id": run_id}})
         assert resp.json()["data"] == {"stopAutomationRun": True}
 
     auto = await twins.automation(input_type="prompt", prompt_text="a long job", stateful=True)
-    python, edge, _, _ = await _both_automation(twins, auto, [Reply("Never sent.")], hold=0,
-                                                python_during=python_stop, edge_during=edge_stop)
+    python, edge, _, _ = await _both_automation(twins, auto, [Reply("Never sent.")], hold=0, edge_during=edge_stop)
     assert edge == python
     assert python["run"][0] == "stopped" and python["events"][-1]["kind"] == "AutomationStoppedEvent"
 
@@ -1024,15 +918,12 @@ async def test_a_code_automation_stopped_mid_run(twins):
 
     stop = "mutation($id: String!) { stopAutomationRun(runId: $id) }"
 
-    async def python_stop(run_id: str) -> None:
-        assert (await _python_gql(stop, {"id": run_id}))["data"] == {"stopAutomationRun": True}
-
     async def edge_stop(run_id: str) -> None:
         resp = await twins.client.post("/graphql", json={"query": stop, "variables": {"id": run_id}})
         assert resp.json()["data"] == {"stopAutomationRun": True}
 
     auto = await twins.automation(input_type="code", code_text="import time\nprint('started', flush=True)\ntime.sleep(30)\n")
-    python, edge, _, _ = await _both_automation(twins, auto, [], python_during=python_stop, edge_during=edge_stop)
+    python, edge, _, _ = await _both_automation(twins, auto, [], edge_during=edge_stop)
     assert edge == python
     assert python["run"][:2] == ["stopped", None]
     assert [e["kind"] for e in python["events"]] == ["TokenEvent", "AutomationStoppedEvent"]
@@ -1077,9 +968,9 @@ def _board_record_of(turn: Turn, task_id: str) -> dict[str, Any]:
 
 async def _both_board(twins: Twins, task_id: str, script: list[Reply], *, before_edge: Any = None,
                       **kw: Any) -> tuple[dict, dict]:
-    python_during, edge_during = kw.pop("python_during", None), kw.pop("edge_during", None)
+    edge_during = kw.pop("edge_during", None)
     before = _board_row(twins.python_db, task_id)
-    python, python_requests = await twins.python_board(task_id, script, during=python_during, **kw)
+    python, python_requests = await twins.python_board(task_id, script)
     if before_edge is not None:
         before_edge()
     edge, edge_requests = await twins.edge_board(task_id, before, script, during=edge_during, **kw)
@@ -1139,11 +1030,6 @@ async def test_a_board_task_without_its_tools_finishes_with_its_reply(twins):
 async def test_a_board_task_stopped_through_its_job(twins):
     """Python's stopBoardTask only flags the job for a run it doesn't hold;
     the edge sees the flag within its poll and stops the run."""
-    async def python_stop(task_id: str) -> None:
-        from server.task_board_runtime import stop_board_task
-
-        assert await stop_board_task(task_id) is True
-
     async def edge_stop(task_id: str) -> None:
         with contextlib.closing(sqlite3.connect(twins.edge_db)) as c:
             c.execute("UPDATE jobs SET cancel_requested = 1 WHERE kind = 'board_task' AND status = 'running'")
@@ -1151,8 +1037,7 @@ async def test_a_board_task_stopped_through_its_job(twins):
         await asyncio.sleep(6)  # past the edge's poll
 
     task = await twins.board_task(id="t4", title="Long", status="ready")
-    python, edge = await _both_board(twins, task, [Reply("Never sent.")], hold=0,
-                                     python_during=python_stop, edge_during=edge_stop)
+    python, edge = await _both_board(twins, task, [Reply("Never sent.")], hold=0, edge_during=edge_stop)
     assert edge == python
     assert python["task"][:5] == ["blocked", None, None, "stopped by user", "stopped"]
 
@@ -1162,19 +1047,13 @@ async def test_a_board_task_stopped_from_the_board(twins):
     at the next poll of the job, and ends as Python's does."""
     from edge_support import _gid
 
-    async def python_stop(task_id: str) -> None:
-        from server.task_board_runtime import stop_board_task
-
-        assert await stop_board_task(task_id) is True
-
     async def edge_stop(task_id: str) -> None:
         q = "mutation($id: ID!) { stopBoardTask(id: $id) }"
         resp = await twins.client.post("/graphql", json={"query": q, "variables": {"id": _gid("BoardTask", task_id)}})
         assert resp.json() == {"data": {"stopBoardTask": True}}
 
     task = await twins.board_task(id="t5", title="Long", status="ready")
-    python, edge = await _both_board(twins, task, [Reply("Never sent.")], hold=0,
-                                     python_during=python_stop, edge_during=edge_stop)
+    python, edge = await _both_board(twins, task, [Reply("Never sent.")], hold=0, edge_during=edge_stop)
     assert edge == python
     assert python["task"][:5] == ["blocked", None, None, "stopped by user", "stopped"]
     resp = await twins.client.post("/graphql", json={"query": "mutation($id: ID!) { stopBoardTask(id: $id) }",
@@ -1310,23 +1189,10 @@ _APPROVAL_COLS = ("source, kind, status, question, label, tool, args_json, task_
 
 
 async def _python_gql(query: str, variables: dict, *, caller: str = "human", conversation: str | None = None) -> dict:
-    """Python's schema on its database, a step of its own (`_python_step`)."""
-
-    async def run() -> dict:
-        from db import async_session
-        from server.graphql.extensions import SESSION_LOCK_KEY
-        from server.graphql.schema import schema
-
-        async with async_session() as s:
-            res = await schema.execute(query, variable_values=variables, context_value={
-                "session": s, SESSION_LOCK_KEY: asyncio.Lock(), "caller": caller, "caller_conversation_id": conversation})
-        out: dict = {"data": res.data}
-        if res.errors:
-            out["errors"] = [e.message for e in res.errors]
-        return out
-
+    """What Python's schema answered to this operation, as recorded — the
+    arguments say what it was asked."""
     assert _twins is not None, "_python_gql outside a twins test"
-    return await _python_step(_twins, run)
+    return await _python_step(_twins)
 
 
 async def _edge_gql(twins: Twins, query: str, variables: dict, headers: dict | None = None) -> dict:
@@ -1371,26 +1237,24 @@ async def _answer_when_asked(db: Path, answer: Any) -> None:
 
 
 async def _both_gated(twins: Twins, query: str, script: list[Reply], answer: str) -> tuple[dict, dict]:
-    async def python_answer(approval_id: str) -> None:
-        out = await _python_gql(RESOLVE, {"id": approval_id, "a": answer})
-        assert "errors" not in out, out
+    """The turn asks before its gated call and `answer` comes back — on the
+    edge here; in Python's recorded run, the same answer through its own
+    `resolveApproval`."""
 
     async def edge_answer(approval_id: str) -> None:
         out = await _edge_gql(twins, RESOLVE, {"id": approval_id, "a": answer})
         assert "errors" not in out, out
 
-    records = []
-    for run, db, answerer in ((twins.python, twins.python_db, python_answer), (twins.edge, twins.edge_db, edge_answer)):
-        # Python's gate was answered during its run, which replays whole.
-        answering = asyncio.create_task(_answer_when_asked(db, answerer)) if _live(twins, run) else None
-        turn, requests = await run(query, script)
-        if answering is not None:
-            await answering
-        norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
-        records.append(({**_record(turn), "approvals": _approvals(db, norm)}, requests))
-    (python, python_requests), (edge, edge_requests) = records
+    python, python_requests = await twins.python(query, script)
+    answering = asyncio.create_task(_answer_when_asked(twins.edge_db, edge_answer))
+    edge, edge_requests = await twins.edge(query, script)
+    await answering
     _requests(python_requests, edge_requests)
-    return python, edge
+    records = []
+    for turn in (python, edge):
+        norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
+        records.append({**_record(turn), "approvals": _approvals(turn.db, norm)})
+    return records[0], records[1]
 
 
 async def test_a_gated_call_runs_once_approved(twins):
@@ -1422,22 +1286,14 @@ MCP_SERVERS = {
 }
 
 
-async def _mcp(twins: Twins, monkeypatch) -> None:
+async def _mcp(twins: Twins) -> None:
     """`echo` bound (`always`), `other` advertised (`lazy`), on both sides."""
-    from core import agents
-    from core.mcp import McpManager
-
     value = json.dumps(MCP_SERVERS)
     for db in (twins.python_db, twins.edge_db):
         with contextlib.closing(sqlite3.connect(db)) as c:
             c.execute("INSERT INTO config_settings (key, value, updated_at) VALUES ('mcp.servers', ?, "
                       "'2026-01-01 00:00:00')", (value,))
             c.commit()
-    mgr = McpManager(connections=MCP_SERVERS)
-    await mgr.initialize(MCP_SERVERS)
-    monkeypatch.setattr("core.mcp._mcp_manager", mgr)
-    agents.invalidate_agent_cache()
-    agents._retrieval_cache.clear()
     loaded = await _edge_gql(twins, "mutation { reloadMcpServers { name toolCount } }", {})
     assert loaded["data"]["reloadMcpServers"] == [{"name": "echo", "toolCount": 3}, {"name": "other", "toolCount": 1}]
 
@@ -1449,11 +1305,11 @@ def _unid(record: Any) -> Any:
     return json.loads(re.sub(r"lc_[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", "lc_<id>", json.dumps(record)))
 
 
-async def test_mcp_tools_bound_and_advertised(twins, monkeypatch):
+async def test_mcp_tools_bound_and_advertised(twins):
     """An `always` server's tools are bound — called, failing on the server,
     answered with the adapter's blocks and structured content — and a `lazy`
     one's are named in the prompt, not callable as tools."""
-    await _mcp(twins, monkeypatch)
+    await _mcp(twins)
     script = [
         Reply("Trying. ", [("echo", {"text": "hi"}), ("add", {"a": 2, "b": 3}), ("explode", {})]),
         Reply("", [("ping", {})]),
@@ -1468,11 +1324,11 @@ async def test_mcp_tools_bound_and_advertised(twins, monkeypatch):
     assert "## MCP Servers (on demand)" in prompt and "- **other** (1 tools): ping" in prompt
 
 
-async def test_a_gated_mcp_tool_runs_once_approved(twins, monkeypatch):
+async def test_a_gated_mcp_tool_runs_once_approved(twins):
     from core import tool_policy
     from db import async_session
 
-    await _mcp(twins, monkeypatch)
+    await _mcp(twins)
     async with async_session() as s:
         await tool_policy.set_tool_policy(s, "mcp:echo/echo", approval=True)
     [(policy,)] = _rows(twins.python_db, "SELECT value FROM config_settings WHERE key = 'tools.policy'")
@@ -1924,12 +1780,13 @@ async def test_a_browse_is_announced_on_the_live_run(twins):
         headers = {"X-Jarvis-Caller": "agent", "X-Jarvis-Conversation": conversation} if conversation else {}
         return await _edge_gql(twins, query, variables, headers)
 
+    # Python's run announced the same while it waited (its recording).
+    python_turn, _ = await twins.python("read it", script)
+    announcing = asyncio.create_task(announce(twins.edge_db, edge_ask))
+    edge_turn, _ = await twins.edge("read it", script)
+    await announcing
     records = []
-    for run, db, ask in ((twins.python, twins.python_db, python_ask), (twins.edge, twins.edge_db, edge_ask)):
-        announcing = asyncio.create_task(announce(db, ask)) if _live(twins, run) else None
-        turn, _ = await run("read it", script)
-        if announcing is not None:
-            await announcing
+    for turn, ask in ((python_turn, python_ask), (edge_turn, edge_ask)):
         norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
         records.append(norm.value(_record(turn)["events"]))
         # The run is over: nothing to announce onto.
@@ -1965,10 +1822,10 @@ def _by_worker(record: dict) -> dict:
 
 
 async def _both_workers(twins: Twins, query: str, script: ByRole, *, hold: int | None = None,
-                        python_during: Any = None, edge_during: Any = None) -> tuple[dict, dict]:
+                        edge_during: Any = None) -> tuple[dict, dict]:
     """Both runtimes, the requests matched up in any order and ids minted
-    on each side normalized; the edge must not have handed the turn over."""
-    python, python_requests = await twins.python(query, script, hold=hold, during=python_during)
+    on each side normalized."""
+    python, python_requests = await twins.python(query, script)
     edge, edge_requests = await twins.edge(query, script, hold=hold, during=edge_during)
 
     def key(r: dict) -> str:
@@ -2105,15 +1962,12 @@ async def test_a_worker_asks_before_its_gated_tool(twins):
 
 async def test_a_stop_while_a_worker_is_answering(twins):
 
-    async def python_stop(task_id: str) -> None:
-        assert (await _python_gql(STOP, {"id": task_id}))["data"] == {"stopTask": True}
-
     async def edge_stop(task_id: str) -> None:
         resp = await twins.client.post("/graphql", json={"query": STOP, "variables": {"id": task_id}})
         assert resp.json()["data"] == {"stopTask": True}
 
     script = ByRole([_spawn({"task": "Take ages", "role": "writer"})], writer=[Reply("Never sent.")])
-    python, edge = await _both_workers(twins, "a long job", script, hold=1, python_during=python_stop,
+    python, edge = await _both_workers(twins, "a long job", script, hold=1,
                                        edge_during=edge_stop)
     # Departure: the edge drops the workers at the stop. Python's stop lands
     # at the next chunk its stream sees, so the held worker call finishes
