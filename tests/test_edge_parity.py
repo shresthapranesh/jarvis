@@ -987,16 +987,22 @@ async def test_model_catalog_writes(twin, monkeypatch):
     await twin.run(remove_ep, {"n": "lab"})
 
 
-def test_the_edge_lists_pythons_sdk_catalogue():
+def test_the_edge_lists_the_sdk_catalogue():
     """`edge/src/gql/sdk_tools.json` is the `jarvis` SDK as the tool inventory
-    lists it. Re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
+    lists it: each discoverable function, its docstring's first line, its
+    category. Re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
     tests/test_edge_parity.py -k catalogue` after changing an SDK function's
     name, category or docstring, then rebuild the edge."""
+    import inspect
     import os
 
-    from core.tool_policy import _sdk_inventory
+    from tools import sdk
 
-    python = [{"name": t.key.partition(":")[2], "description": t.description, "group": t.group} for t in _sdk_inventory({})]
+    python = [
+        {"name": fn.__name__, "description": ((inspect.getdoc(fn) or "").strip().splitlines() or [""])[0], "group": category}
+        for category, (_blurb, funcs) in sdk._CATEGORIES.items()
+        for fn in funcs
+    ]
     path = ROOT / "edge" / "src" / "gql" / "sdk_tools.json"
     if os.environ.get("JARVIS_UPDATE_GOLDEN") == "1":
         path.write_text(json.dumps(python, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")

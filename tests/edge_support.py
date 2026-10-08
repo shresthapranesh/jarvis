@@ -108,6 +108,12 @@ def startup_sweep(edge_binary: Path, work_dir: Path, db: Path) -> None:
     subprocess.run([str(edge_binary), "--startup-sweep"], env=env, cwd=work_dir, check=True)
 
 
+def fresh_db(edge_binary: Path, db: Path) -> None:
+    """A new database as the server leaves one at its first start: the
+    schema, and its migrations marked done."""
+    startup_sweep(edge_binary, db.parent, db)
+
+
 def _gid(type_name: str, raw: str) -> str:
     """A Relay global id, as the server mints them."""
     import base64

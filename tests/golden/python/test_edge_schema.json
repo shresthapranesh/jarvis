@@ -1,0 +1,4112 @@
+{
+ "test_a_fresh_database": [
+  {
+   "fts": {
+    "conversation_episodes_fts": [],
+    "memories_fts": [],
+    "messages_fts": []
+   },
+   "master": [
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_id ON approvals (board_task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_status ON approvals (board_task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_source",
+      "approvals",
+      "CREATE INDEX ix_approvals_source ON approvals (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_status ON approvals (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status_requested",
+      "approvals",
+      "CREATE INDEX ix_approvals_status_requested ON approvals (status, requested_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_id ON approvals (task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_status ON approvals (task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_id",
+      "artifact_versions",
+      "CREATE INDEX ix_artifact_versions_artifact_id ON artifact_versions (artifact_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_version",
+      "artifact_versions",
+      "CREATE UNIQUE INDEX ix_artifact_versions_artifact_version ON artifact_versions (artifact_id, version)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_conversation_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_conversation_id ON artifacts (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_message_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_message_id ON artifacts (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_automation_runs_automation_id",
+      "automation_runs",
+      "CREATE INDEX ix_automation_runs_automation_id ON automation_runs (automation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_child_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_child_id ON board_task_links (child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_edge",
+      "board_task_links",
+      "CREATE UNIQUE INDEX ix_board_task_links_edge ON board_task_links (parent_id, child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_parent_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_parent_id ON board_task_links (parent_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_tasks_status",
+      "board_tasks",
+      "CREATE INDEX ix_board_tasks_status ON board_tasks (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversation_episodes_conversation_id",
+      "conversation_episodes",
+      "CREATE INDEX ix_conversation_episodes_conversation_id ON conversation_episodes (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_ephemeral",
+      "conversations",
+      "CREATE INDEX ix_conversations_ephemeral ON conversations (ephemeral)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_project_id",
+      "conversations",
+      "CREATE INDEX ix_conversations_project_id ON conversations (project_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_surface",
+      "conversations",
+      "CREATE INDEX ix_conversations_surface ON conversations (surface)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_kind_status_run_at",
+      "jobs",
+      "CREATE INDEX ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_locked_until",
+      "jobs",
+      "CREATE INDEX ix_jobs_locked_until ON jobs (locked_until)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_conv_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_conv_time ON memory_activities (conversation_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_mem_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_mem_time ON memory_activities (memory_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memories_kind",
+      "memories",
+      "CREATE INDEX ix_memories_kind ON memories (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_accessed_at",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_accessed_at ON memory_activities (accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_conversation_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_conversation_id ON memory_activities (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_kind",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_kind ON memory_activities (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_memory_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_memory_id ON memory_activities (memory_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_source",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_source ON memory_activities (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conv_created",
+      "messages",
+      "CREATE INDEX ix_messages_conv_created ON messages (conversation_id, created_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conversation_id",
+      "messages",
+      "CREATE INDEX ix_messages_conversation_id ON messages (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_skills_name",
+      "skills",
+      "CREATE UNIQUE INDEX ix_skills_name ON skills (name)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_conversation_id",
+      "steps",
+      "CREATE INDEX ix_steps_conversation_id ON steps (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_message_id",
+      "steps",
+      "CREATE INDEX ix_steps_message_id ON steps (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_thread_messages_thread_message",
+      "thread_messages",
+      "CREATE INDEX ix_thread_messages_thread_message ON thread_messages (thread_id, message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_workflow_runs_workflow_id",
+      "workflow_runs",
+      "CREATE INDEX ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_approvals_1",
+      "approvals",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifact_versions_1",
+      "artifact_versions",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifacts_1",
+      "artifacts",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automation_runs_1",
+      "automation_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automations_1",
+      "automations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_task_links_1",
+      "board_task_links",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_tasks_1",
+      "board_tasks",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_config_settings_1",
+      "config_settings",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversation_episodes_1",
+      "conversation_episodes",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversations_1",
+      "conversations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_jobs_1",
+      "jobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_kv_store_1",
+      "kv_store",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memories_1",
+      "memories",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memory_activities_1",
+      "memory_activities",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_messages_1",
+      "messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_notification_channels_1",
+      "notification_channels",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_projects_1",
+      "projects",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_skills_1",
+      "skills",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_steps_1",
+      "steps",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_messages_1",
+      "thread_messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_state_1",
+      "thread_state",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_transcript_blobs_1",
+      "transcript_blobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflow_runs_1",
+      "workflow_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflows_1",
+      "workflows",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_jobs_thread_lease",
+      "jobs",
+      "CREATE UNIQUE INDEX ux_jobs_thread_lease ON jobs (thread_id) WHERE status = 'running' AND thread_id IS NOT NULL"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_thread_messages_thread_seq",
+      "thread_messages",
+      "CREATE UNIQUE INDEX ux_thread_messages_thread_seq ON thread_messages (thread_id, seq)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "approvals",
+      "approvals",
+      "CREATE TABLE approvals (\n\tid VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tquestion TEXT NOT NULL, \n\tlabel VARCHAR NOT NULL, \n\ttool VARCHAR, \n\targs_json TEXT, \n\ttask_id VARCHAR, \n\tinterrupt_id VARCHAR, \n\tparent_id VARCHAR, \n\tboard_task_id VARCHAR, \n\taction VARCHAR, \n\taction_payload TEXT, \n\tresult TEXT, \n\tanswer TEXT, \n\trequested_at DATETIME NOT NULL, \n\tresolved_at DATETIME, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifact_versions",
+      "artifact_versions",
+      "CREATE TABLE artifact_versions (\n\tid VARCHAR NOT NULL, \n\tartifact_id VARCHAR NOT NULL, \n\tversion INTEGER NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(artifact_id) REFERENCES artifacts (id) ON DELETE CASCADE\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifacts",
+      "artifacts",
+      "CREATE TABLE artifacts (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tmime_type VARCHAR, \n\tconversation_id VARCHAR, \n\tmessage_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automation_runs",
+      "automation_runs",
+      "CREATE TABLE automation_runs (\n\tid VARCHAR NOT NULL, \n\tautomation_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\ttriggered_by VARCHAR NOT NULL, \n\toutput TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(automation_id) REFERENCES automations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automations",
+      "automations",
+      "CREATE TABLE automations (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinput_type VARCHAR NOT NULL, \n\tprompt_text TEXT, \n\tmodel VARCHAR, \n\tcode_text TEXT, \n\twebhook_url VARCHAR, \n\twebhook_method VARCHAR, \n\twebhook_headers TEXT, \n\twebhook_body TEXT, \n\tschedule VARCHAR, \n\tenabled BOOLEAN NOT NULL, \n\tstateful BOOLEAN NOT NULL, \n\tnotifications TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_task_links",
+      "board_task_links",
+      "CREATE TABLE board_task_links (\n\tid VARCHAR NOT NULL, \n\tparent_id VARCHAR NOT NULL, \n\tchild_id VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(parent_id) REFERENCES board_tasks (id), \n\tFOREIGN KEY(child_id) REFERENCES board_tasks (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_tasks",
+      "board_tasks",
+      "CREATE TABLE board_tasks (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tbody TEXT, \n\tstatus VARCHAR NOT NULL, \n\tpriority INTEGER NOT NULL, \n\tcreated_by VARCHAR NOT NULL, \n\tmodel VARCHAR, \n\tskill VARCHAR, \n\tblocked_reason TEXT, \n\tblocked_kind VARCHAR, \n\tpending_answer TEXT, \n\tfailure_count INTEGER NOT NULL, \n\tsummary TEXT, \n\tresult_metadata TEXT, \n\tjob_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tstarted_at DATETIME, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "config_settings",
+      "config_settings",
+      "CREATE TABLE config_settings (\n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (\"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes",
+      "conversation_episodes",
+      "CREATE TABLE conversation_episodes (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts",
+      "conversation_episodes_fts",
+      "CREATE VIRTUAL TABLE conversation_episodes_fts USING fts5(text, content='conversation_episodes', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_config",
+      "conversation_episodes_fts_config",
+      "CREATE TABLE 'conversation_episodes_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_data",
+      "conversation_episodes_fts_data",
+      "CREATE TABLE 'conversation_episodes_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_docsize",
+      "conversation_episodes_fts_docsize",
+      "CREATE TABLE 'conversation_episodes_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_idx",
+      "conversation_episodes_fts_idx",
+      "CREATE TABLE 'conversation_episodes_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversations",
+      "conversations",
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tsurface VARCHAR NOT NULL, \n\tpinned BOOLEAN NOT NULL, \n\tephemeral BOOLEAN NOT NULL, \n\tproject_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(project_id) REFERENCES projects (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "jobs",
+      "jobs",
+      "CREATE TABLE jobs (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tpayload TEXT NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\trun_at DATETIME NOT NULL, \n\tattempts INTEGER NOT NULL, \n\tmax_attempts INTEGER NOT NULL, \n\tlast_error TEXT, \n\tlocked_by VARCHAR, \n\tlocked_until DATETIME, \n\tcancel_requested BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tcompleted_at DATETIME, \n\tthread_id VARCHAR, \n\truntime VARCHAR, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "kv_store",
+      "kv_store",
+      "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories",
+      "memories",
+      "CREATE TABLE memories (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts",
+      "memories_fts",
+      "CREATE VIRTUAL TABLE memories_fts USING fts5(text, content='memories', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_config",
+      "memories_fts_config",
+      "CREATE TABLE 'memories_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_data",
+      "memories_fts_data",
+      "CREATE TABLE 'memories_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_docsize",
+      "memories_fts_docsize",
+      "CREATE TABLE 'memories_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_idx",
+      "memories_fts_idx",
+      "CREATE TABLE 'memories_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memory_activities",
+      "memory_activities",
+      "CREATE TABLE memory_activities (\n\tid VARCHAR NOT NULL, \n\tmemory_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR, \n\tkind VARCHAR NOT NULL, \n\tscore FLOAT, \n\t\"query\" TEXT, \n\tsource VARCHAR NOT NULL, \n\taccessed_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(memory_id) REFERENCES memories (id) ON DELETE CASCADE, \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE SET NULL\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages",
+      "messages",
+      "CREATE TABLE messages (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\trole VARCHAR NOT NULL, \n\tcontent TEXT NOT NULL, \n\tmodel VARCHAR, \n\tstatus VARCHAR NOT NULL, \n\tinput_tokens INTEGER, \n\toutput_tokens INTEGER, \n\tttft_ms FLOAT, \n\tllm_ms FLOAT, \n\tprefill_tps FLOAT, \n\teval_tps FLOAT, \n\tduration_ms FLOAT, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts",
+      "messages_fts",
+      "CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_config",
+      "messages_fts_config",
+      "CREATE TABLE 'messages_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_data",
+      "messages_fts_data",
+      "CREATE TABLE 'messages_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_docsize",
+      "messages_fts_docsize",
+      "CREATE TABLE 'messages_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_idx",
+      "messages_fts_idx",
+      "CREATE TABLE 'messages_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "notification_channels",
+      "notification_channels",
+      "CREATE TABLE notification_channels (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\ttype VARCHAR NOT NULL, \n\ttarget VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "projects",
+      "projects",
+      "CREATE TABLE projects (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinstructions TEXT NOT NULL, \n\tmemory TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "skills",
+      "skills",
+      "CREATE TABLE skills (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT NOT NULL, \n\tbody TEXT NOT NULL, \n\tenabled BOOLEAN NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "steps",
+      "steps",
+      "CREATE TABLE steps (\n\tid VARCHAR NOT NULL, \n\tmessage_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\tnode VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tsubagent VARCHAR, \n\tdata TEXT, \n\tseq INTEGER NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_messages",
+      "thread_messages",
+      "CREATE TABLE thread_messages (\n\tid VARCHAR NOT NULL, \n\tthread_id VARCHAR NOT NULL, \n\tseq INTEGER NOT NULL, \n\tmessage_id VARCHAR, \n\trole VARCHAR NOT NULL, \n\tdata TEXT NOT NULL, \n\tevicted_at DATETIME, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_state",
+      "thread_state",
+      "CREATE TABLE thread_state (\n\tthread_id VARCHAR NOT NULL, \n\ttodos TEXT, \n\tsource VARCHAR, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (thread_id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "transcript_blobs",
+      "transcript_blobs",
+      "CREATE TABLE transcript_blobs (\n\thash VARCHAR NOT NULL, \n\tmime_type VARCHAR NOT NULL, \n\tsize INTEGER NOT NULL, \n\tdata BLOB NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (hash)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflow_runs",
+      "workflow_runs",
+      "CREATE TABLE workflow_runs (\n\tid VARCHAR NOT NULL, \n\tworkflow_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tinputs TEXT, \n\toutputs TEXT, \n\tnode_results TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(workflow_id) REFERENCES workflows (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflows",
+      "workflows",
+      "CREATE TABLE workflows (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tdefinition TEXT NOT NULL, \n\tnotifications TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ad",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ad AFTER DELETE ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ai",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ai AFTER INSERT ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_au",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_au AFTER UPDATE OF text ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ad",
+      "memories",
+      "CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ai",
+      "memories",
+      "CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_au",
+      "memories",
+      "CREATE TRIGGER memories_fts_au AFTER UPDATE OF text ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ad",
+      "messages",
+      "CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ai",
+      "messages",
+      "CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_au",
+      "messages",
+      "CREATE TRIGGER messages_fts_au AFTER UPDATE OF content ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    }
+   ],
+   "rows": {
+    "approvals": [],
+    "artifact_versions": [],
+    "artifacts": [],
+    "automation_runs": [],
+    "automations": [],
+    "board_task_links": [],
+    "board_tasks": [],
+    "config_settings": [
+     {
+      "$tuple": [
+       "migration.artifact_message_ids",
+       "1",
+       "<now>"
+      ]
+     }
+    ],
+    "conversation_episodes": [],
+    "conversations": [],
+    "jobs": [],
+    "kv_store": [
+     {
+      "$tuple": [
+       "jarvis.migrations",
+       "langgraph_store",
+       "{\"copied\": 0, \"at\": \"<now>\"}",
+       "<now>",
+       "<now>"
+      ]
+     }
+    ],
+    "memories": [],
+    "memory_activities": [],
+    "messages": [],
+    "notification_channels": [],
+    "projects": [],
+    "skills": [],
+    "steps": [],
+    "thread_messages": [],
+    "thread_state": [],
+    "transcript_blobs": [],
+    "workflow_runs": [],
+    "workflows": []
+   }
+  }
+ ],
+ "test_an_old_database_is_migrated_the_same": [
+  {
+   "fts": {
+    "conversation_episodes_fts": [],
+    "memories_fts": [],
+    "messages_fts": [
+     {
+      "$tuple": [
+       1,
+       "first"
+      ]
+     },
+     {
+      "$tuple": [
+       2,
+       "second"
+      ]
+     },
+     {
+      "$tuple": [
+       3,
+       "a user turn"
+      ]
+     }
+    ]
+   },
+   "master": [
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_id ON approvals (board_task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_status ON approvals (board_task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_source",
+      "approvals",
+      "CREATE INDEX ix_approvals_source ON approvals (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_status ON approvals (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status_requested",
+      "approvals",
+      "CREATE INDEX ix_approvals_status_requested ON approvals (status, requested_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_id ON approvals (task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_status ON approvals (task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_id",
+      "artifact_versions",
+      "CREATE INDEX ix_artifact_versions_artifact_id ON artifact_versions (artifact_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_version",
+      "artifact_versions",
+      "CREATE UNIQUE INDEX ix_artifact_versions_artifact_version ON artifact_versions (artifact_id, version)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_conversation_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_conversation_id ON artifacts (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_message_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_message_id ON artifacts (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_automation_runs_automation_id",
+      "automation_runs",
+      "CREATE INDEX ix_automation_runs_automation_id ON automation_runs (automation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_child_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_child_id ON board_task_links (child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_edge",
+      "board_task_links",
+      "CREATE UNIQUE INDEX ix_board_task_links_edge ON board_task_links (parent_id, child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_parent_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_parent_id ON board_task_links (parent_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_tasks_status",
+      "board_tasks",
+      "CREATE INDEX ix_board_tasks_status ON board_tasks (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversation_episodes_conversation_id",
+      "conversation_episodes",
+      "CREATE INDEX ix_conversation_episodes_conversation_id ON conversation_episodes (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_ephemeral",
+      "conversations",
+      "CREATE INDEX ix_conversations_ephemeral ON conversations (ephemeral)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_project_id",
+      "conversations",
+      "CREATE INDEX ix_conversations_project_id ON conversations (project_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_surface",
+      "conversations",
+      "CREATE INDEX ix_conversations_surface ON conversations (surface)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_kind_status_run_at",
+      "jobs",
+      "CREATE INDEX ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_locked_until",
+      "jobs",
+      "CREATE INDEX ix_jobs_locked_until ON jobs (locked_until)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_conv_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_conv_time ON memory_activities (conversation_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_mem_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_mem_time ON memory_activities (memory_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memories_kind",
+      "memories",
+      "CREATE INDEX ix_memories_kind ON memories (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_accessed_at",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_accessed_at ON memory_activities (accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_conversation_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_conversation_id ON memory_activities (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_kind",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_kind ON memory_activities (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_memory_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_memory_id ON memory_activities (memory_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_source",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_source ON memory_activities (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conv_created",
+      "messages",
+      "CREATE INDEX ix_messages_conv_created ON messages (conversation_id, created_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conversation_id",
+      "messages",
+      "CREATE INDEX ix_messages_conversation_id ON messages (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_skills_name",
+      "skills",
+      "CREATE UNIQUE INDEX ix_skills_name ON skills (name)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_conversation_id",
+      "steps",
+      "CREATE INDEX ix_steps_conversation_id ON steps (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_message_id",
+      "steps",
+      "CREATE INDEX ix_steps_message_id ON steps (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_thread_messages_thread_message",
+      "thread_messages",
+      "CREATE INDEX ix_thread_messages_thread_message ON thread_messages (thread_id, message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_workflow_runs_workflow_id",
+      "workflow_runs",
+      "CREATE INDEX ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_approvals_1",
+      "approvals",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifact_versions_1",
+      "artifact_versions",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifacts_1",
+      "artifacts",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automation_runs_1",
+      "automation_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automations_1",
+      "automations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_task_links_1",
+      "board_task_links",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_tasks_1",
+      "board_tasks",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_config_settings_1",
+      "config_settings",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversation_episodes_1",
+      "conversation_episodes",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversations_1",
+      "conversations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_jobs_1",
+      "jobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_kv_store_1",
+      "kv_store",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memories_1",
+      "memories",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memory_activities_1",
+      "memory_activities",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_messages_1",
+      "messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_notification_channels_1",
+      "notification_channels",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_projects_1",
+      "projects",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_skills_1",
+      "skills",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_steps_1",
+      "steps",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_messages_1",
+      "thread_messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_state_1",
+      "thread_state",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_transcript_blobs_1",
+      "transcript_blobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflow_runs_1",
+      "workflow_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflows_1",
+      "workflows",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_jobs_thread_lease",
+      "jobs",
+      "CREATE UNIQUE INDEX ux_jobs_thread_lease ON jobs (thread_id) WHERE status = 'running' AND thread_id IS NOT NULL"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_thread_messages_thread_seq",
+      "thread_messages",
+      "CREATE UNIQUE INDEX ux_thread_messages_thread_seq ON thread_messages (thread_id, seq)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "approvals",
+      "approvals",
+      "CREATE TABLE approvals (\n\tid VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tquestion TEXT NOT NULL, \n\tlabel VARCHAR NOT NULL, \n\ttool VARCHAR, \n\targs_json TEXT, \n\ttask_id VARCHAR, \n\tinterrupt_id VARCHAR, \n\tparent_id VARCHAR, \n\tboard_task_id VARCHAR, \n\taction VARCHAR, \n\taction_payload TEXT, \n\tresult TEXT, \n\tanswer TEXT, \n\trequested_at DATETIME NOT NULL, \n\tresolved_at DATETIME, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifact_versions",
+      "artifact_versions",
+      "CREATE TABLE artifact_versions (\n\tid VARCHAR NOT NULL, \n\tartifact_id VARCHAR NOT NULL, \n\tversion INTEGER NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(artifact_id) REFERENCES artifacts (id) ON DELETE CASCADE\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifacts",
+      "artifacts",
+      "CREATE TABLE artifacts (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tconversation_id VARCHAR, \n\tmessage_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, mime_type VARCHAR, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automation_runs",
+      "automation_runs",
+      "CREATE TABLE automation_runs (\n\tid VARCHAR NOT NULL, \n\tautomation_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\ttriggered_by VARCHAR NOT NULL, \n\toutput TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(automation_id) REFERENCES automations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automations",
+      "automations",
+      "CREATE TABLE automations (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinput_type VARCHAR NOT NULL, \n\tprompt_text TEXT, \n\tmodel VARCHAR, \n\tcode_text TEXT, \n\twebhook_url VARCHAR, \n\twebhook_method VARCHAR, \n\twebhook_headers TEXT, \n\twebhook_body TEXT, \n\tschedule VARCHAR, \n\tenabled BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, notifications TEXT, stateful BOOLEAN DEFAULT 0, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_task_links",
+      "board_task_links",
+      "CREATE TABLE board_task_links (\n\tid VARCHAR NOT NULL, \n\tparent_id VARCHAR NOT NULL, \n\tchild_id VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(parent_id) REFERENCES board_tasks (id), \n\tFOREIGN KEY(child_id) REFERENCES board_tasks (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_tasks",
+      "board_tasks",
+      "CREATE TABLE board_tasks (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tbody TEXT, \n\tstatus VARCHAR NOT NULL, \n\tpriority INTEGER NOT NULL, \n\tcreated_by VARCHAR NOT NULL, \n\tmodel VARCHAR, \n\tskill VARCHAR, \n\tblocked_reason TEXT, \n\tfailure_count INTEGER NOT NULL, \n\tsummary TEXT, \n\tresult_metadata TEXT, \n\tjob_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tstarted_at DATETIME, \n\tfinished_at DATETIME, blocked_kind VARCHAR, pending_answer TEXT, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "config_settings",
+      "config_settings",
+      "CREATE TABLE config_settings (\n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (\"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes",
+      "conversation_episodes",
+      "CREATE TABLE conversation_episodes (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts",
+      "conversation_episodes_fts",
+      "CREATE VIRTUAL TABLE conversation_episodes_fts USING fts5(text, content='conversation_episodes', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_config",
+      "conversation_episodes_fts_config",
+      "CREATE TABLE 'conversation_episodes_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_data",
+      "conversation_episodes_fts_data",
+      "CREATE TABLE 'conversation_episodes_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_docsize",
+      "conversation_episodes_fts_docsize",
+      "CREATE TABLE 'conversation_episodes_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_idx",
+      "conversation_episodes_fts_idx",
+      "CREATE TABLE 'conversation_episodes_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversations",
+      "conversations",
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, pinned BOOLEAN DEFAULT 0, surface VARCHAR DEFAULT 'web', project_id VARCHAR REFERENCES projects(id), ephemeral BOOLEAN DEFAULT 0, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "jobs",
+      "jobs",
+      "CREATE TABLE jobs (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tpayload TEXT NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\trun_at DATETIME NOT NULL, \n\tattempts INTEGER NOT NULL, \n\tmax_attempts INTEGER NOT NULL, \n\tlast_error TEXT, \n\tlocked_by VARCHAR, \n\tlocked_until DATETIME, \n\tcancel_requested BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tcompleted_at DATETIME, thread_id VARCHAR, runtime VARCHAR, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "kv_store",
+      "kv_store",
+      "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories",
+      "memories",
+      "CREATE TABLE memories (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts",
+      "memories_fts",
+      "CREATE VIRTUAL TABLE memories_fts USING fts5(text, content='memories', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_config",
+      "memories_fts_config",
+      "CREATE TABLE 'memories_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_data",
+      "memories_fts_data",
+      "CREATE TABLE 'memories_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_docsize",
+      "memories_fts_docsize",
+      "CREATE TABLE 'memories_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_idx",
+      "memories_fts_idx",
+      "CREATE TABLE 'memories_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memory_activities",
+      "memory_activities",
+      "CREATE TABLE memory_activities (\n\tid VARCHAR NOT NULL, \n\tmemory_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR, \n\tkind VARCHAR NOT NULL, \n\tscore FLOAT, \n\t\"query\" TEXT, \n\tsource VARCHAR NOT NULL, \n\taccessed_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(memory_id) REFERENCES memories (id) ON DELETE CASCADE, \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE SET NULL\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages",
+      "messages",
+      "CREATE TABLE messages (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\trole VARCHAR NOT NULL, \n\tcontent TEXT NOT NULL, \n\tmodel VARCHAR, \n\tcreated_at DATETIME NOT NULL, status VARCHAR DEFAULT 'done', input_tokens INTEGER, output_tokens INTEGER, ttft_ms FLOAT, llm_ms FLOAT, prefill_tps FLOAT, eval_tps FLOAT, duration_ms FLOAT, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts",
+      "messages_fts",
+      "CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_config",
+      "messages_fts_config",
+      "CREATE TABLE 'messages_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_data",
+      "messages_fts_data",
+      "CREATE TABLE 'messages_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_docsize",
+      "messages_fts_docsize",
+      "CREATE TABLE 'messages_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_idx",
+      "messages_fts_idx",
+      "CREATE TABLE 'messages_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "notification_channels",
+      "notification_channels",
+      "CREATE TABLE notification_channels (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\ttype VARCHAR NOT NULL, \n\ttarget VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "projects",
+      "projects",
+      "CREATE TABLE projects (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinstructions TEXT NOT NULL, \n\tmemory TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "skills",
+      "skills",
+      "CREATE TABLE skills (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT NOT NULL, \n\tbody TEXT NOT NULL, \n\tenabled BOOLEAN NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "steps",
+      "steps",
+      "CREATE TABLE steps (\n\tid VARCHAR NOT NULL, \n\tmessage_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\tnode VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tdata TEXT, \n\tseq INTEGER NOT NULL, \n\tcreated_at DATETIME NOT NULL, subagent VARCHAR, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_messages",
+      "thread_messages",
+      "CREATE TABLE thread_messages (\n\tid VARCHAR NOT NULL, \n\tthread_id VARCHAR NOT NULL, \n\tseq INTEGER NOT NULL, \n\tmessage_id VARCHAR, \n\trole VARCHAR NOT NULL, \n\tdata TEXT NOT NULL, \n\tevicted_at DATETIME, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_state",
+      "thread_state",
+      "CREATE TABLE thread_state (\n\tthread_id VARCHAR NOT NULL, \n\ttodos TEXT, \n\tsource VARCHAR, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (thread_id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "transcript_blobs",
+      "transcript_blobs",
+      "CREATE TABLE transcript_blobs (\n\thash VARCHAR NOT NULL, \n\tmime_type VARCHAR NOT NULL, \n\tsize INTEGER NOT NULL, \n\tdata BLOB NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (hash)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflow_runs",
+      "workflow_runs",
+      "CREATE TABLE workflow_runs (\n\tid VARCHAR NOT NULL, \n\tworkflow_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tinputs TEXT, \n\toutputs TEXT, \n\tnode_results TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(workflow_id) REFERENCES workflows (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflows",
+      "workflows",
+      "CREATE TABLE workflows (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tdefinition TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, notifications TEXT, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ad",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ad AFTER DELETE ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ai",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ai AFTER INSERT ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_au",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_au AFTER UPDATE OF text ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ad",
+      "memories",
+      "CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ai",
+      "memories",
+      "CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_au",
+      "memories",
+      "CREATE TRIGGER memories_fts_au AFTER UPDATE OF text ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ad",
+      "messages",
+      "CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ai",
+      "messages",
+      "CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_au",
+      "messages",
+      "CREATE TRIGGER messages_fts_au AFTER UPDATE OF content ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    }
+   ],
+   "rows": {
+    "approvals": [],
+    "artifact_versions": [],
+    "artifacts": [
+     {
+      "$tuple": [
+       "a1",
+       "x",
+       "a1.md",
+       "markdown",
+       "telegram_1",
+       "m1",
+       "2025-01-01 00:00:02.000000",
+       "2025-01-01 00:00:02.000000",
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "a2",
+       "y",
+       "a2.md",
+       "markdown",
+       "telegram_1",
+       "m2",
+       "2025-01-01 00:00:05.000000",
+       "2025-01-01 00:00:05.000000",
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "a3",
+       "z",
+       "a3.md",
+       "markdown",
+       "telegram_1",
+       null,
+       "2025-01-01 00:00:00.500000",
+       "2025-01-01 00:00:00.500000",
+       null
+      ]
+     }
+    ],
+    "automation_runs": [],
+    "automations": [],
+    "board_task_links": [],
+    "board_tasks": [],
+    "config_settings": [
+     {
+      "$tuple": [
+       "migration.artifact_message_ids",
+       "1",
+       "<now>"
+      ]
+     }
+    ],
+    "conversation_episodes": [],
+    "conversations": [
+     {
+      "$tuple": [
+       "telegram_1",
+       "t",
+       "m",
+       "2025-01-01 00:00:00.000000",
+       0,
+       "telegram",
+       null,
+       0
+      ]
+     },
+     {
+      "$tuple": [
+       "discord_2",
+       "d",
+       "m",
+       "2025-01-01 00:00:00.000000",
+       0,
+       "discord",
+       null,
+       0
+      ]
+     },
+     {
+      "$tuple": [
+       "telegramx",
+       "w",
+       "m",
+       "2025-01-01 00:00:00.000000",
+       0,
+       "web",
+       null,
+       0
+      ]
+     }
+    ],
+    "jobs": [],
+    "kv_store": [
+     {
+      "$tuple": [
+       "jarvis.migrations",
+       "langgraph_store",
+       "{\"copied\": 0, \"at\": \"<now>\"}",
+       "<now>",
+       "<now>"
+      ]
+     }
+    ],
+    "memories": [],
+    "memory_activities": [],
+    "messages": [
+     {
+      "$tuple": [
+       "m1",
+       "telegram_1",
+       "assistant",
+       "first",
+       null,
+       "2025-01-01 00:00:01.000000",
+       "done",
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "m2",
+       "telegram_1",
+       "assistant",
+       "second",
+       null,
+       "2025-01-01 00:00:03.000000",
+       "done",
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "m3",
+       "telegram_1",
+       "user",
+       "a user turn",
+       null,
+       "2025-01-01 00:00:04.000000",
+       "done",
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ]
+     }
+    ],
+    "notification_channels": [],
+    "projects": [],
+    "skills": [],
+    "steps": [],
+    "thread_messages": [],
+    "thread_state": [],
+    "transcript_blobs": [],
+    "workflow_runs": [],
+    "workflows": []
+   }
+  }
+ ],
+ "test_starting_again_changes_nothing": [
+  {
+   "fts": {
+    "conversation_episodes_fts": [],
+    "memories_fts": [],
+    "messages_fts": []
+   },
+   "master": [
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_id ON approvals (board_task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_status ON approvals (board_task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_source",
+      "approvals",
+      "CREATE INDEX ix_approvals_source ON approvals (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_status ON approvals (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status_requested",
+      "approvals",
+      "CREATE INDEX ix_approvals_status_requested ON approvals (status, requested_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_id ON approvals (task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_status ON approvals (task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_id",
+      "artifact_versions",
+      "CREATE INDEX ix_artifact_versions_artifact_id ON artifact_versions (artifact_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_version",
+      "artifact_versions",
+      "CREATE UNIQUE INDEX ix_artifact_versions_artifact_version ON artifact_versions (artifact_id, version)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_conversation_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_conversation_id ON artifacts (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_message_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_message_id ON artifacts (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_automation_runs_automation_id",
+      "automation_runs",
+      "CREATE INDEX ix_automation_runs_automation_id ON automation_runs (automation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_child_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_child_id ON board_task_links (child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_edge",
+      "board_task_links",
+      "CREATE UNIQUE INDEX ix_board_task_links_edge ON board_task_links (parent_id, child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_parent_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_parent_id ON board_task_links (parent_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_tasks_status",
+      "board_tasks",
+      "CREATE INDEX ix_board_tasks_status ON board_tasks (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversation_episodes_conversation_id",
+      "conversation_episodes",
+      "CREATE INDEX ix_conversation_episodes_conversation_id ON conversation_episodes (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_ephemeral",
+      "conversations",
+      "CREATE INDEX ix_conversations_ephemeral ON conversations (ephemeral)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_project_id",
+      "conversations",
+      "CREATE INDEX ix_conversations_project_id ON conversations (project_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_surface",
+      "conversations",
+      "CREATE INDEX ix_conversations_surface ON conversations (surface)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_kind_status_run_at",
+      "jobs",
+      "CREATE INDEX ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_locked_until",
+      "jobs",
+      "CREATE INDEX ix_jobs_locked_until ON jobs (locked_until)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_conv_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_conv_time ON memory_activities (conversation_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_mem_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_mem_time ON memory_activities (memory_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memories_kind",
+      "memories",
+      "CREATE INDEX ix_memories_kind ON memories (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_accessed_at",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_accessed_at ON memory_activities (accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_conversation_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_conversation_id ON memory_activities (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_kind",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_kind ON memory_activities (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_memory_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_memory_id ON memory_activities (memory_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_source",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_source ON memory_activities (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conv_created",
+      "messages",
+      "CREATE INDEX ix_messages_conv_created ON messages (conversation_id, created_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conversation_id",
+      "messages",
+      "CREATE INDEX ix_messages_conversation_id ON messages (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_skills_name",
+      "skills",
+      "CREATE UNIQUE INDEX ix_skills_name ON skills (name)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_conversation_id",
+      "steps",
+      "CREATE INDEX ix_steps_conversation_id ON steps (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_message_id",
+      "steps",
+      "CREATE INDEX ix_steps_message_id ON steps (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_thread_messages_thread_message",
+      "thread_messages",
+      "CREATE INDEX ix_thread_messages_thread_message ON thread_messages (thread_id, message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_workflow_runs_workflow_id",
+      "workflow_runs",
+      "CREATE INDEX ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_approvals_1",
+      "approvals",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifact_versions_1",
+      "artifact_versions",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifacts_1",
+      "artifacts",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automation_runs_1",
+      "automation_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automations_1",
+      "automations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_task_links_1",
+      "board_task_links",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_tasks_1",
+      "board_tasks",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_config_settings_1",
+      "config_settings",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversation_episodes_1",
+      "conversation_episodes",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversations_1",
+      "conversations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_jobs_1",
+      "jobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_kv_store_1",
+      "kv_store",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memories_1",
+      "memories",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memory_activities_1",
+      "memory_activities",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_messages_1",
+      "messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_notification_channels_1",
+      "notification_channels",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_projects_1",
+      "projects",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_skills_1",
+      "skills",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_steps_1",
+      "steps",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_messages_1",
+      "thread_messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_state_1",
+      "thread_state",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_transcript_blobs_1",
+      "transcript_blobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflow_runs_1",
+      "workflow_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflows_1",
+      "workflows",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_jobs_thread_lease",
+      "jobs",
+      "CREATE UNIQUE INDEX ux_jobs_thread_lease ON jobs (thread_id) WHERE status = 'running' AND thread_id IS NOT NULL"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_thread_messages_thread_seq",
+      "thread_messages",
+      "CREATE UNIQUE INDEX ux_thread_messages_thread_seq ON thread_messages (thread_id, seq)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "approvals",
+      "approvals",
+      "CREATE TABLE approvals (\n\tid VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tquestion TEXT NOT NULL, \n\tlabel VARCHAR NOT NULL, \n\ttool VARCHAR, \n\targs_json TEXT, \n\ttask_id VARCHAR, \n\tinterrupt_id VARCHAR, \n\tparent_id VARCHAR, \n\tboard_task_id VARCHAR, \n\taction VARCHAR, \n\taction_payload TEXT, \n\tresult TEXT, \n\tanswer TEXT, \n\trequested_at DATETIME NOT NULL, \n\tresolved_at DATETIME, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifact_versions",
+      "artifact_versions",
+      "CREATE TABLE artifact_versions (\n\tid VARCHAR NOT NULL, \n\tartifact_id VARCHAR NOT NULL, \n\tversion INTEGER NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(artifact_id) REFERENCES artifacts (id) ON DELETE CASCADE\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifacts",
+      "artifacts",
+      "CREATE TABLE artifacts (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tmime_type VARCHAR, \n\tconversation_id VARCHAR, \n\tmessage_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automation_runs",
+      "automation_runs",
+      "CREATE TABLE automation_runs (\n\tid VARCHAR NOT NULL, \n\tautomation_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\ttriggered_by VARCHAR NOT NULL, \n\toutput TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(automation_id) REFERENCES automations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automations",
+      "automations",
+      "CREATE TABLE automations (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinput_type VARCHAR NOT NULL, \n\tprompt_text TEXT, \n\tmodel VARCHAR, \n\tcode_text TEXT, \n\twebhook_url VARCHAR, \n\twebhook_method VARCHAR, \n\twebhook_headers TEXT, \n\twebhook_body TEXT, \n\tschedule VARCHAR, \n\tenabled BOOLEAN NOT NULL, \n\tstateful BOOLEAN NOT NULL, \n\tnotifications TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_task_links",
+      "board_task_links",
+      "CREATE TABLE board_task_links (\n\tid VARCHAR NOT NULL, \n\tparent_id VARCHAR NOT NULL, \n\tchild_id VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(parent_id) REFERENCES board_tasks (id), \n\tFOREIGN KEY(child_id) REFERENCES board_tasks (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_tasks",
+      "board_tasks",
+      "CREATE TABLE board_tasks (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tbody TEXT, \n\tstatus VARCHAR NOT NULL, \n\tpriority INTEGER NOT NULL, \n\tcreated_by VARCHAR NOT NULL, \n\tmodel VARCHAR, \n\tskill VARCHAR, \n\tblocked_reason TEXT, \n\tblocked_kind VARCHAR, \n\tpending_answer TEXT, \n\tfailure_count INTEGER NOT NULL, \n\tsummary TEXT, \n\tresult_metadata TEXT, \n\tjob_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tstarted_at DATETIME, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "config_settings",
+      "config_settings",
+      "CREATE TABLE config_settings (\n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (\"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes",
+      "conversation_episodes",
+      "CREATE TABLE conversation_episodes (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts",
+      "conversation_episodes_fts",
+      "CREATE VIRTUAL TABLE conversation_episodes_fts USING fts5(text, content='conversation_episodes', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_config",
+      "conversation_episodes_fts_config",
+      "CREATE TABLE 'conversation_episodes_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_data",
+      "conversation_episodes_fts_data",
+      "CREATE TABLE 'conversation_episodes_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_docsize",
+      "conversation_episodes_fts_docsize",
+      "CREATE TABLE 'conversation_episodes_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_idx",
+      "conversation_episodes_fts_idx",
+      "CREATE TABLE 'conversation_episodes_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversations",
+      "conversations",
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tsurface VARCHAR NOT NULL, \n\tpinned BOOLEAN NOT NULL, \n\tephemeral BOOLEAN NOT NULL, \n\tproject_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(project_id) REFERENCES projects (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "jobs",
+      "jobs",
+      "CREATE TABLE jobs (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tpayload TEXT NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\trun_at DATETIME NOT NULL, \n\tattempts INTEGER NOT NULL, \n\tmax_attempts INTEGER NOT NULL, \n\tlast_error TEXT, \n\tlocked_by VARCHAR, \n\tlocked_until DATETIME, \n\tcancel_requested BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tcompleted_at DATETIME, \n\tthread_id VARCHAR, \n\truntime VARCHAR, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "kv_store",
+      "kv_store",
+      "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories",
+      "memories",
+      "CREATE TABLE memories (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts",
+      "memories_fts",
+      "CREATE VIRTUAL TABLE memories_fts USING fts5(text, content='memories', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_config",
+      "memories_fts_config",
+      "CREATE TABLE 'memories_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_data",
+      "memories_fts_data",
+      "CREATE TABLE 'memories_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_docsize",
+      "memories_fts_docsize",
+      "CREATE TABLE 'memories_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_idx",
+      "memories_fts_idx",
+      "CREATE TABLE 'memories_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memory_activities",
+      "memory_activities",
+      "CREATE TABLE memory_activities (\n\tid VARCHAR NOT NULL, \n\tmemory_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR, \n\tkind VARCHAR NOT NULL, \n\tscore FLOAT, \n\t\"query\" TEXT, \n\tsource VARCHAR NOT NULL, \n\taccessed_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(memory_id) REFERENCES memories (id) ON DELETE CASCADE, \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE SET NULL\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages",
+      "messages",
+      "CREATE TABLE messages (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\trole VARCHAR NOT NULL, \n\tcontent TEXT NOT NULL, \n\tmodel VARCHAR, \n\tstatus VARCHAR NOT NULL, \n\tinput_tokens INTEGER, \n\toutput_tokens INTEGER, \n\tttft_ms FLOAT, \n\tllm_ms FLOAT, \n\tprefill_tps FLOAT, \n\teval_tps FLOAT, \n\tduration_ms FLOAT, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts",
+      "messages_fts",
+      "CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_config",
+      "messages_fts_config",
+      "CREATE TABLE 'messages_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_data",
+      "messages_fts_data",
+      "CREATE TABLE 'messages_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_docsize",
+      "messages_fts_docsize",
+      "CREATE TABLE 'messages_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_idx",
+      "messages_fts_idx",
+      "CREATE TABLE 'messages_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "notification_channels",
+      "notification_channels",
+      "CREATE TABLE notification_channels (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\ttype VARCHAR NOT NULL, \n\ttarget VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "projects",
+      "projects",
+      "CREATE TABLE projects (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinstructions TEXT NOT NULL, \n\tmemory TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "skills",
+      "skills",
+      "CREATE TABLE skills (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT NOT NULL, \n\tbody TEXT NOT NULL, \n\tenabled BOOLEAN NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "steps",
+      "steps",
+      "CREATE TABLE steps (\n\tid VARCHAR NOT NULL, \n\tmessage_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\tnode VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tsubagent VARCHAR, \n\tdata TEXT, \n\tseq INTEGER NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_messages",
+      "thread_messages",
+      "CREATE TABLE thread_messages (\n\tid VARCHAR NOT NULL, \n\tthread_id VARCHAR NOT NULL, \n\tseq INTEGER NOT NULL, \n\tmessage_id VARCHAR, \n\trole VARCHAR NOT NULL, \n\tdata TEXT NOT NULL, \n\tevicted_at DATETIME, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_state",
+      "thread_state",
+      "CREATE TABLE thread_state (\n\tthread_id VARCHAR NOT NULL, \n\ttodos TEXT, \n\tsource VARCHAR, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (thread_id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "transcript_blobs",
+      "transcript_blobs",
+      "CREATE TABLE transcript_blobs (\n\thash VARCHAR NOT NULL, \n\tmime_type VARCHAR NOT NULL, \n\tsize INTEGER NOT NULL, \n\tdata BLOB NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (hash)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflow_runs",
+      "workflow_runs",
+      "CREATE TABLE workflow_runs (\n\tid VARCHAR NOT NULL, \n\tworkflow_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tinputs TEXT, \n\toutputs TEXT, \n\tnode_results TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(workflow_id) REFERENCES workflows (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflows",
+      "workflows",
+      "CREATE TABLE workflows (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tdefinition TEXT NOT NULL, \n\tnotifications TEXT, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ad",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ad AFTER DELETE ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ai",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ai AFTER INSERT ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_au",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_au AFTER UPDATE OF text ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ad",
+      "memories",
+      "CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ai",
+      "memories",
+      "CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_au",
+      "memories",
+      "CREATE TRIGGER memories_fts_au AFTER UPDATE OF text ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ad",
+      "messages",
+      "CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ai",
+      "messages",
+      "CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_au",
+      "messages",
+      "CREATE TRIGGER messages_fts_au AFTER UPDATE OF content ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    }
+   ],
+   "rows": {
+    "approvals": [],
+    "artifact_versions": [],
+    "artifacts": [],
+    "automation_runs": [],
+    "automations": [],
+    "board_task_links": [],
+    "board_tasks": [],
+    "config_settings": [
+     {
+      "$tuple": [
+       "migration.artifact_message_ids",
+       "1",
+       "<now>"
+      ]
+     }
+    ],
+    "conversation_episodes": [],
+    "conversations": [],
+    "jobs": [],
+    "kv_store": [
+     {
+      "$tuple": [
+       "jarvis.migrations",
+       "langgraph_store",
+       "{\"copied\": 0, \"at\": \"<now>\"}",
+       "<now>",
+       "<now>"
+      ]
+     }
+    ],
+    "memories": [],
+    "memory_activities": [],
+    "messages": [],
+    "notification_channels": [],
+    "projects": [],
+    "skills": [],
+    "steps": [],
+    "thread_messages": [],
+    "thread_state": [],
+    "transcript_blobs": [],
+    "workflow_runs": [],
+    "workflows": []
+   }
+  }
+ ],
+ "test_the_langgraph_store_is_copied_once": [
+  {
+   "fts": {
+    "conversation_episodes_fts": [],
+    "memories_fts": [],
+    "messages_fts": [
+     {
+      "$tuple": [
+       1,
+       "first"
+      ]
+     },
+     {
+      "$tuple": [
+       2,
+       "second"
+      ]
+     },
+     {
+      "$tuple": [
+       3,
+       "a user turn"
+      ]
+     }
+    ]
+   },
+   "master": [
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_id ON approvals (board_task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_board_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_board_task_status ON approvals (board_task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_source",
+      "approvals",
+      "CREATE INDEX ix_approvals_source ON approvals (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_status ON approvals (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_status_requested",
+      "approvals",
+      "CREATE INDEX ix_approvals_status_requested ON approvals (status, requested_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_id",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_id ON approvals (task_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_approvals_task_status",
+      "approvals",
+      "CREATE INDEX ix_approvals_task_status ON approvals (task_id, status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_id",
+      "artifact_versions",
+      "CREATE INDEX ix_artifact_versions_artifact_id ON artifact_versions (artifact_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifact_versions_artifact_version",
+      "artifact_versions",
+      "CREATE UNIQUE INDEX ix_artifact_versions_artifact_version ON artifact_versions (artifact_id, version)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_conversation_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_conversation_id ON artifacts (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_artifacts_message_id",
+      "artifacts",
+      "CREATE INDEX ix_artifacts_message_id ON artifacts (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_automation_runs_automation_id",
+      "automation_runs",
+      "CREATE INDEX ix_automation_runs_automation_id ON automation_runs (automation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_child_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_child_id ON board_task_links (child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_edge",
+      "board_task_links",
+      "CREATE UNIQUE INDEX ix_board_task_links_edge ON board_task_links (parent_id, child_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_task_links_parent_id",
+      "board_task_links",
+      "CREATE INDEX ix_board_task_links_parent_id ON board_task_links (parent_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_board_tasks_status",
+      "board_tasks",
+      "CREATE INDEX ix_board_tasks_status ON board_tasks (status)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversation_episodes_conversation_id",
+      "conversation_episodes",
+      "CREATE INDEX ix_conversation_episodes_conversation_id ON conversation_episodes (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_ephemeral",
+      "conversations",
+      "CREATE INDEX ix_conversations_ephemeral ON conversations (ephemeral)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_project_id",
+      "conversations",
+      "CREATE INDEX ix_conversations_project_id ON conversations (project_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_conversations_surface",
+      "conversations",
+      "CREATE INDEX ix_conversations_surface ON conversations (surface)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_kind_status_run_at",
+      "jobs",
+      "CREATE INDEX ix_jobs_kind_status_run_at ON jobs (kind, status, run_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_jobs_locked_until",
+      "jobs",
+      "CREATE INDEX ix_jobs_locked_until ON jobs (locked_until)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_conv_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_conv_time ON memory_activities (conversation_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_mem_act_mem_time",
+      "memory_activities",
+      "CREATE INDEX ix_mem_act_mem_time ON memory_activities (memory_id, accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memories_kind",
+      "memories",
+      "CREATE INDEX ix_memories_kind ON memories (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_accessed_at",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_accessed_at ON memory_activities (accessed_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_conversation_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_conversation_id ON memory_activities (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_kind",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_kind ON memory_activities (kind)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_memory_id",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_memory_id ON memory_activities (memory_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_memory_activities_source",
+      "memory_activities",
+      "CREATE INDEX ix_memory_activities_source ON memory_activities (source)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conv_created",
+      "messages",
+      "CREATE INDEX ix_messages_conv_created ON messages (conversation_id, created_at)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_messages_conversation_id",
+      "messages",
+      "CREATE INDEX ix_messages_conversation_id ON messages (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_skills_name",
+      "skills",
+      "CREATE UNIQUE INDEX ix_skills_name ON skills (name)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_conversation_id",
+      "steps",
+      "CREATE INDEX ix_steps_conversation_id ON steps (conversation_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_steps_message_id",
+      "steps",
+      "CREATE INDEX ix_steps_message_id ON steps (message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_thread_messages_thread_message",
+      "thread_messages",
+      "CREATE INDEX ix_thread_messages_thread_message ON thread_messages (thread_id, message_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ix_workflow_runs_workflow_id",
+      "workflow_runs",
+      "CREATE INDEX ix_workflow_runs_workflow_id ON workflow_runs (workflow_id)"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_approvals_1",
+      "approvals",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifact_versions_1",
+      "artifact_versions",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_artifacts_1",
+      "artifacts",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automation_runs_1",
+      "automation_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_automations_1",
+      "automations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_task_links_1",
+      "board_task_links",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_board_tasks_1",
+      "board_tasks",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_config_settings_1",
+      "config_settings",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversation_episodes_1",
+      "conversation_episodes",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_conversations_1",
+      "conversations",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_jobs_1",
+      "jobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_kv_store_1",
+      "kv_store",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memories_1",
+      "memories",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_memory_activities_1",
+      "memory_activities",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_messages_1",
+      "messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_notification_channels_1",
+      "notification_channels",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_projects_1",
+      "projects",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_skills_1",
+      "skills",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_steps_1",
+      "steps",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_messages_1",
+      "thread_messages",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_thread_state_1",
+      "thread_state",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_transcript_blobs_1",
+      "transcript_blobs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflow_runs_1",
+      "workflow_runs",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "sqlite_autoindex_workflows_1",
+      "workflows",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_jobs_thread_lease",
+      "jobs",
+      "CREATE UNIQUE INDEX ux_jobs_thread_lease ON jobs (thread_id) WHERE status = 'running' AND thread_id IS NOT NULL"
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
+      "ux_thread_messages_thread_seq",
+      "thread_messages",
+      "CREATE UNIQUE INDEX ux_thread_messages_thread_seq ON thread_messages (thread_id, seq)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "approvals",
+      "approvals",
+      "CREATE TABLE approvals (\n\tid VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tquestion TEXT NOT NULL, \n\tlabel VARCHAR NOT NULL, \n\ttool VARCHAR, \n\targs_json TEXT, \n\ttask_id VARCHAR, \n\tinterrupt_id VARCHAR, \n\tparent_id VARCHAR, \n\tboard_task_id VARCHAR, \n\taction VARCHAR, \n\taction_payload TEXT, \n\tresult TEXT, \n\tanswer TEXT, \n\trequested_at DATETIME NOT NULL, \n\tresolved_at DATETIME, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifact_versions",
+      "artifact_versions",
+      "CREATE TABLE artifact_versions (\n\tid VARCHAR NOT NULL, \n\tartifact_id VARCHAR NOT NULL, \n\tversion INTEGER NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(artifact_id) REFERENCES artifacts (id) ON DELETE CASCADE\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "artifacts",
+      "artifacts",
+      "CREATE TABLE artifacts (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tfilename VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tconversation_id VARCHAR, \n\tmessage_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, mime_type VARCHAR, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automation_runs",
+      "automation_runs",
+      "CREATE TABLE automation_runs (\n\tid VARCHAR NOT NULL, \n\tautomation_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\ttriggered_by VARCHAR NOT NULL, \n\toutput TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(automation_id) REFERENCES automations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "automations",
+      "automations",
+      "CREATE TABLE automations (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinput_type VARCHAR NOT NULL, \n\tprompt_text TEXT, \n\tmodel VARCHAR, \n\tcode_text TEXT, \n\twebhook_url VARCHAR, \n\twebhook_method VARCHAR, \n\twebhook_headers TEXT, \n\twebhook_body TEXT, \n\tschedule VARCHAR, \n\tenabled BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, notifications TEXT, stateful BOOLEAN DEFAULT 0, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_task_links",
+      "board_task_links",
+      "CREATE TABLE board_task_links (\n\tid VARCHAR NOT NULL, \n\tparent_id VARCHAR NOT NULL, \n\tchild_id VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(parent_id) REFERENCES board_tasks (id), \n\tFOREIGN KEY(child_id) REFERENCES board_tasks (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "board_tasks",
+      "board_tasks",
+      "CREATE TABLE board_tasks (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR NOT NULL, \n\tbody TEXT, \n\tstatus VARCHAR NOT NULL, \n\tpriority INTEGER NOT NULL, \n\tcreated_by VARCHAR NOT NULL, \n\tmodel VARCHAR, \n\tskill VARCHAR, \n\tblocked_reason TEXT, \n\tfailure_count INTEGER NOT NULL, \n\tsummary TEXT, \n\tresult_metadata TEXT, \n\tjob_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tstarted_at DATETIME, \n\tfinished_at DATETIME, blocked_kind VARCHAR, pending_answer TEXT, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "config_settings",
+      "config_settings",
+      "CREATE TABLE config_settings (\n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (\"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes",
+      "conversation_episodes",
+      "CREATE TABLE conversation_episodes (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts",
+      "conversation_episodes_fts",
+      "CREATE VIRTUAL TABLE conversation_episodes_fts USING fts5(text, content='conversation_episodes', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_config",
+      "conversation_episodes_fts_config",
+      "CREATE TABLE 'conversation_episodes_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_data",
+      "conversation_episodes_fts_data",
+      "CREATE TABLE 'conversation_episodes_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_docsize",
+      "conversation_episodes_fts_docsize",
+      "CREATE TABLE 'conversation_episodes_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversation_episodes_fts_idx",
+      "conversation_episodes_fts_idx",
+      "CREATE TABLE 'conversation_episodes_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "conversations",
+      "conversations",
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, pinned BOOLEAN DEFAULT 0, surface VARCHAR DEFAULT 'web', project_id VARCHAR REFERENCES projects(id), ephemeral BOOLEAN DEFAULT 0, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "jobs",
+      "jobs",
+      "CREATE TABLE jobs (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tpayload TEXT NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\trun_at DATETIME NOT NULL, \n\tattempts INTEGER NOT NULL, \n\tmax_attempts INTEGER NOT NULL, \n\tlast_error TEXT, \n\tlocked_by VARCHAR, \n\tlocked_until DATETIME, \n\tcancel_requested BOOLEAN NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tcompleted_at DATETIME, thread_id VARCHAR, runtime VARCHAR, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "kv_store",
+      "kv_store",
+      "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories",
+      "memories",
+      "CREATE TABLE memories (\n\tid VARCHAR NOT NULL, \n\tkind VARCHAR NOT NULL, \n\ttext TEXT NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts",
+      "memories_fts",
+      "CREATE VIRTUAL TABLE memories_fts USING fts5(text, content='memories', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_config",
+      "memories_fts_config",
+      "CREATE TABLE 'memories_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_data",
+      "memories_fts_data",
+      "CREATE TABLE 'memories_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_docsize",
+      "memories_fts_docsize",
+      "CREATE TABLE 'memories_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memories_fts_idx",
+      "memories_fts_idx",
+      "CREATE TABLE 'memories_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "memory_activities",
+      "memory_activities",
+      "CREATE TABLE memory_activities (\n\tid VARCHAR NOT NULL, \n\tmemory_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR, \n\tkind VARCHAR NOT NULL, \n\tscore FLOAT, \n\t\"query\" TEXT, \n\tsource VARCHAR NOT NULL, \n\taccessed_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(memory_id) REFERENCES memories (id) ON DELETE CASCADE, \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE SET NULL\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages",
+      "messages",
+      "CREATE TABLE messages (\n\tid VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\trole VARCHAR NOT NULL, \n\tcontent TEXT NOT NULL, \n\tmodel VARCHAR, \n\tcreated_at DATETIME NOT NULL, status VARCHAR DEFAULT 'done', input_tokens INTEGER, output_tokens INTEGER, ttft_ms FLOAT, llm_ms FLOAT, prefill_tps FLOAT, eval_tps FLOAT, duration_ms FLOAT, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts",
+      "messages_fts",
+      "CREATE VIRTUAL TABLE messages_fts USING fts5(content, content='messages', content_rowid='rowid', tokenize='porter unicode61 remove_diacritics 2')"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_config",
+      "messages_fts_config",
+      "CREATE TABLE 'messages_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_data",
+      "messages_fts_data",
+      "CREATE TABLE 'messages_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_docsize",
+      "messages_fts_docsize",
+      "CREATE TABLE 'messages_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "messages_fts_idx",
+      "messages_fts_idx",
+      "CREATE TABLE 'messages_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "notification_channels",
+      "notification_channels",
+      "CREATE TABLE notification_channels (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\ttype VARCHAR NOT NULL, \n\ttarget VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "projects",
+      "projects",
+      "CREATE TABLE projects (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tinstructions TEXT NOT NULL, \n\tmemory TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "skills",
+      "skills",
+      "CREATE TABLE skills (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT NOT NULL, \n\tbody TEXT NOT NULL, \n\tenabled BOOLEAN NOT NULL, \n\tembedding BLOB, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "steps",
+      "steps",
+      "CREATE TABLE steps (\n\tid VARCHAR NOT NULL, \n\tmessage_id VARCHAR NOT NULL, \n\tconversation_id VARCHAR NOT NULL, \n\tnode VARCHAR NOT NULL, \n\tsource VARCHAR NOT NULL, \n\tdata TEXT, \n\tseq INTEGER NOT NULL, \n\tcreated_at DATETIME NOT NULL, subagent VARCHAR, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(message_id) REFERENCES messages (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_messages",
+      "thread_messages",
+      "CREATE TABLE thread_messages (\n\tid VARCHAR NOT NULL, \n\tthread_id VARCHAR NOT NULL, \n\tseq INTEGER NOT NULL, \n\tmessage_id VARCHAR, \n\trole VARCHAR NOT NULL, \n\tdata TEXT NOT NULL, \n\tevicted_at DATETIME, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "thread_state",
+      "thread_state",
+      "CREATE TABLE thread_state (\n\tthread_id VARCHAR NOT NULL, \n\ttodos TEXT, \n\tsource VARCHAR, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (thread_id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "transcript_blobs",
+      "transcript_blobs",
+      "CREATE TABLE transcript_blobs (\n\thash VARCHAR NOT NULL, \n\tmime_type VARCHAR NOT NULL, \n\tsize INTEGER NOT NULL, \n\tdata BLOB NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (hash)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflow_runs",
+      "workflow_runs",
+      "CREATE TABLE workflow_runs (\n\tid VARCHAR NOT NULL, \n\tworkflow_id VARCHAR NOT NULL, \n\tstatus VARCHAR NOT NULL, \n\tinputs TEXT, \n\toutputs TEXT, \n\tnode_results TEXT, \n\terror TEXT, \n\tstarted_at DATETIME NOT NULL, \n\tfinished_at DATETIME, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(workflow_id) REFERENCES workflows (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "workflows",
+      "workflows",
+      "CREATE TABLE workflows (\n\tid VARCHAR NOT NULL, \n\tname VARCHAR NOT NULL, \n\tdescription TEXT, \n\tdefinition TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, notifications TEXT, \n\tPRIMARY KEY (id)\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ad",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ad AFTER DELETE ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_ai",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_ai AFTER INSERT ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "conversation_episodes_fts_au",
+      "conversation_episodes",
+      "CREATE TRIGGER conversation_episodes_fts_au AFTER UPDATE OF text ON conversation_episodes BEGIN INSERT INTO conversation_episodes_fts(conversation_episodes_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO conversation_episodes_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ad",
+      "memories",
+      "CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_ai",
+      "memories",
+      "CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "memories_fts_au",
+      "memories",
+      "CREATE TRIGGER memories_fts_au AFTER UPDATE OF text ON memories BEGIN INSERT INTO memories_fts(memories_fts, rowid, text) VALUES('delete', old.rowid, old.text); INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ad",
+      "messages",
+      "CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_ai",
+      "messages",
+      "CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    },
+    {
+     "$tuple": [
+      "trigger",
+      "messages_fts_au",
+      "messages",
+      "CREATE TRIGGER messages_fts_au AFTER UPDATE OF content ON messages BEGIN INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content); INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END"
+     ]
+    }
+   ],
+   "rows": {
+    "approvals": [],
+    "artifact_versions": [],
+    "artifacts": [
+     {
+      "$tuple": [
+       "a1",
+       "x",
+       "a1.md",
+       "markdown",
+       "telegram_1",
+       "m1",
+       "2025-01-01 00:00:02.000000",
+       "2025-01-01 00:00:02.000000",
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "a2",
+       "y",
+       "a2.md",
+       "markdown",
+       "telegram_1",
+       "m2",
+       "2025-01-01 00:00:05.000000",
+       "2025-01-01 00:00:05.000000",
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "a3",
+       "z",
+       "a3.md",
+       "markdown",
+       "telegram_1",
+       null,
+       "2025-01-01 00:00:00.500000",
+       "2025-01-01 00:00:00.500000",
+       null
+      ]
+     }
+    ],
+    "automation_runs": [],
+    "automations": [],
+    "board_task_links": [],
+    "board_tasks": [],
+    "config_settings": [
+     {
+      "$tuple": [
+       "migration.artifact_message_ids",
+       "1",
+       "<now>"
+      ]
+     }
+    ],
+    "conversation_episodes": [],
+    "conversations": [
+     {
+      "$tuple": [
+       "telegram_1",
+       "t",
+       "m",
+       "2025-01-01 00:00:00.000000",
+       0,
+       "telegram",
+       null,
+       0
+      ]
+     },
+     {
+      "$tuple": [
+       "discord_2",
+       "d",
+       "m",
+       "2025-01-01 00:00:00.000000",
+       0,
+       "discord",
+       null,
+       0
+      ]
+     },
+     {
+      "$tuple": [
+       "telegramx",
+       "w",
+       "m",
+       "2025-01-01 00:00:00.000000",
+       0,
+       "web",
+       null,
+       0
+      ]
+     }
+    ],
+    "jobs": [],
+    "kv_store": [
+     {
+      "$tuple": [
+       "app",
+       "kept",
+       "{\"from\": \"kv\"}",
+       "2026-01-01 00:00:00.000000",
+       "2026-01-01 00:00:00.000000"
+      ]
+     },
+     {
+      "$tuple": [
+       "memory",
+       "AGENTS.md",
+       "{\"content\": \"café\"}",
+       "2026-05-03 07:00:24.000000",
+       "2026-05-03 07:00:25.000000"
+      ]
+     },
+     {
+      "$tuple": [
+       "memory_consolidation",
+       "state",
+       "{\"last_run_at\": \"x\"}",
+       "2026-05-03 07:00:24.500000",
+       "2026-05-03 00:00:00.000000"
+      ]
+     },
+     {
+      "$tuple": [
+       "app",
+       "odd",
+       "{\"n\": 1}",
+       "2026-10-08 17:16:20.038270",
+       "2026-10-08 17:16:20.038279"
+      ]
+     },
+     {
+      "$tuple": [
+       "jarvis.migrations",
+       "langgraph_store",
+       "{\"copied\": 3, \"at\": \"<now>\"}",
+       "<now>",
+       "<now>"
+      ]
+     }
+    ],
+    "memories": [],
+    "memory_activities": [],
+    "messages": [
+     {
+      "$tuple": [
+       "m1",
+       "telegram_1",
+       "assistant",
+       "first",
+       null,
+       "2025-01-01 00:00:01.000000",
+       "done",
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "m2",
+       "telegram_1",
+       "assistant",
+       "second",
+       null,
+       "2025-01-01 00:00:03.000000",
+       "done",
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ]
+     },
+     {
+      "$tuple": [
+       "m3",
+       "telegram_1",
+       "user",
+       "a user turn",
+       null,
+       "2025-01-01 00:00:04.000000",
+       "done",
+       null,
+       null,
+       null,
+       null,
+       null,
+       null,
+       null
+      ]
+     }
+    ],
+    "notification_channels": [],
+    "projects": [],
+    "skills": [],
+    "steps": [],
+    "thread_messages": [],
+    "thread_state": [],
+    "transcript_blobs": [],
+    "workflow_runs": [],
+    "workflows": []
+   }
+  }
+ ]
+}

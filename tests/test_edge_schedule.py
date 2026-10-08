@@ -15,11 +15,13 @@ from __future__ import annotations
 import json
 import random
 import subprocess
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from edge_support import edge_binary  # noqa: F401 — a fixture
+from python_golden import recorded_sync
 
 EXPRESSIONS = [
     "* * * * *", "*/15 * * * *", "*/30 * * * *", "0 */6 * * *", "20 * * * *", "0 4 * * *",
@@ -102,9 +104,16 @@ def test_next_fire_times_match_apscheduler(edge_binary: Path):
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
     assert len(out) == len(cases)
+
+    def python() -> bytes:
+        # Compressed: one answer per case is a few megabytes of JSON.
+        fires = [_apscheduler(c["expr"], c["tz"], datetime.fromisoformat(c["now"])) for c in cases]
+        return zlib.compress(json.dumps(fires, separators=(",", ":")).encode(), 9)
+
+    apscheduler = json.loads(zlib.decompress(recorded_sync(python)))
+    assert len(apscheduler) == len(cases)
     mismatches = []
-    for case, line in zip(cases, out):
-        expected = _apscheduler(case["expr"], case["tz"], datetime.fromisoformat(case["now"]))
+    for case, line, expected in zip(cases, out, apscheduler):
         if json.loads(line) != expected:
             mismatches.append((case, expected, json.loads(line)))
     assert not mismatches, f"{len(mismatches)} of {len(cases)} differ; first: {mismatches[:3]}"

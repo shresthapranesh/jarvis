@@ -36,7 +36,7 @@ import pytest
 
 from agent_harness import Normalizer
 from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
-from python_golden import portable, recorded
+from python_golden import RECORD, portable, recorded
 from test_edge_llm import _intended_ollama, _semantics
 from test_edge_runs import AUTOMATION, BOARD, CHAT
 
@@ -333,19 +333,40 @@ def _restore(db: Path, dump: dict[str, list[dict]]) -> None:
 _twins: Twins | None = None
 
 
-async def _python_step(twins: Twins) -> Any:
+async def _python_step(twins: Twins, run: Any = None) -> Any:
     """Python's side of the next step of a scenario, as recorded: its
     database, artifact files and what the fake saw put back as the step left
-    them, and its result returned."""
+    them, and its result returned. With `run` and `JARVIS_RECORD_PYTHON=1`,
+    `run()` is the step, recorded as it goes."""
     home = twins.python_db.parent
-    taken = await recorded()
+
+    async def step() -> dict[str, Any]:
+        result = await run()
+        fake = twins.fake
+        files = {str(p.relative_to(home)): p.read_bytes() for p in sorted((home / "artifacts").rglob("*")) if p.is_file()}
+        snap = {"result": result, "db": _dump_all(twins.python_db),
+                "fake": [fake.requests, fake.telegram, fake.hooks, fake.embeds]}
+        # Relocatable: this run's directory, and this machine's paths, named.
+        text = json.dumps(portable(json.loads(json.dumps(snap, default=_bytes_out))))
+        return {"snap": text.replace(json.dumps(str(home))[1:-1], "<python_dir>"), "files": files}
+
+    taken = await recorded(step if run is not None else None)
     snap = json.loads(taken["snap"].replace("<python_dir>", json.dumps(str(home))[1:-1]), object_hook=_bytes_in)
-    _restore(twins.python_db, snap["db"])
-    for rel, data in taken["files"].items():
-        (home / rel).parent.mkdir(parents=True, exist_ok=True)
-        (home / rel).write_bytes(data)
-    twins.fake.requests, twins.fake.telegram, twins.fake.hooks, twins.fake.embeds = snap["fake"]
+    if run is None or not RECORD:
+        _restore(twins.python_db, snap["db"])
+        for rel, data in taken["files"].items():
+            (home / rel).parent.mkdir(parents=True, exist_ok=True)
+            (home / rel).write_bytes(data)
+        twins.fake.requests, twins.fake.telegram, twins.fake.hooks, twins.fake.embeds = snap["fake"]
     return snap["result"]
+
+
+def _bytes_out(value: Any) -> Any:
+    if isinstance(value, bytes):
+        import base64
+
+        return {"$b64": base64.b64encode(value).decode()}
+    raise TypeError(type(value).__name__)
 
 
 def _bytes_in(value: dict) -> Any:
@@ -1651,7 +1672,7 @@ async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
     _sql(twins, "UPDATE messages SET status = 'done' WHERE conversation_id = 'c-mem'")
     _talk(twins, "c-mem2", [("user", "Forget the lunch thing", "2026-01-02 09:00:00")])
     twins.fake.script = [Reply(json.dumps([{"op": "delete", "id": "m2", "reason": "user_requested"}]))] * 2
-    python = await consolidate_memory(get_store())
+    python = await _python_step(twins, lambda: consolidate_memory(get_store()))
     assert _edge_sweep(twins, edge_binary, "memory_consolidation") == {"result": python}
     assert python == "consolidated 2 messages in 1 batch(es) → +0 ~0 -1 (+0 seeded)"
     assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
@@ -1721,7 +1742,7 @@ async def test_project_memory_is_consolidated_through_the_edge(twins, edge_binar
     _talk(twins, "c-b", [("user", "Beacon status? " * 50, "2026-01-01 11:00:00")], project="p2", title="Beacon")
     _talk(twins, "c-t", [("user", "hi", "2026-01-01 11:00:00")], project="p3")
     twins.fake.reset([Reply(r) for r in ["- The beacon ships in March\n- Telemetry goes over LoRa radio", "- Condensed beacon"] * 2])
-    python = await consolidate_project_memories(get_store())
+    python = await _python_step(twins, lambda: consolidate_project_memories(get_store()))
     assert _edge_sweep(twins, edge_binary, "project_memory") == {"result": python}
     assert python == f"Beacon: rewrite: {len(full)} → 18 chars"
     for pid in ("p1", "p2", "p3"):

@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from python_golden import recorded
 from tests.edge_support import EDGE_DIR, edge_binary  # noqa: F401 — fixture
 
 SCHEMA_SQL = EDGE_DIR / "src" / "schema.sql"
@@ -122,11 +123,15 @@ async def _twins(edge_binary: Path, tmp: Path, start: Path | None, checkpoints: 
             shutil.copy(start, db)
         cp = checkpoints or d / "checkpoints.db"
         if side == "python":
-            db.parent.mkdir(exist_ok=True)  # Database() makes it; the edge must too
-            await _python_init(db, cp)
+            async def python(db: Path = db, cp: Path = cp) -> dict:
+                db.parent.mkdir(exist_ok=True)  # Database() makes it; the edge must too
+                await _python_init(db, cp)
+                return _snapshot(db)
+
+            snaps.append(await recorded(python))
         else:
             _edge_init(edge_binary, db, cp)
-        snaps.append(_snapshot(db))
+            snaps.append(_snapshot(db))
     return snaps
 
 
@@ -143,8 +148,12 @@ async def test_starting_again_changes_nothing(edge_binary, tmp_path):
     first = _snapshot(db)
     _edge_init(edge_binary, db, cp)
     assert _snapshot(db) == first
-    await _python_init(db, cp)  # and Python finds nothing to do either
-    assert _snapshot(db) == first
+
+    async def python() -> dict:
+        await _python_init(db, cp)
+        return _snapshot(db)
+
+    assert await recorded(python) == first  # and Python found nothing to do either
 
 
 # ── an older database ────────────────────────────────────────────────────────
@@ -166,14 +175,8 @@ _ADDED = {
 def _old_database(path: Path) -> None:
     """The current schema with `_migrate`'s columns, indexes, FTS mirrors and
     backfill marker taken away, and rows each backfill acts on."""
-    from sqlalchemy import create_engine
-
-    from db.models import Base
-
-    engine = create_engine(f"sqlite:///{path}")
-    Base.metadata.create_all(engine)
-    engine.dispose()
     with contextlib.closing(sqlite3.connect(path)) as conn:
+        conn.executescript(SCHEMA_SQL.read_text())
         for table, cols in _ADDED.items():
             (sql,) = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone()
             indexes = conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? "

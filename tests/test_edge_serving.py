@@ -220,7 +220,7 @@ async def test_maintenance_gates_match_the_sweeps(jarvis, work_dir: Path, edge_b
     store = get_store()
 
     async def check(label: str) -> None:
-        edge, python = _edge_due(edge_binary, work_dir), await _python_due(monkeypatch)
+        edge, python = _edge_due(edge_binary, work_dir), await recorded(lambda: _python_due(monkeypatch))
         assert edge == python, label
 
     await check("empty")
