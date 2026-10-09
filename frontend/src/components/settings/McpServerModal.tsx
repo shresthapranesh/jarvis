@@ -5,7 +5,15 @@ import {FormModal} from '../FormModal';
 import {PlusIcon, TrashIcon} from '../icons';
 import {btn, field, iconBtn, Switch} from '../ui';
 import type {McpFormState, McpPreset, McpTransport} from './mcpConfig';
-import {MCP_PRESETS, configToForm, emptyForm, formToConfigJson, prettyJson} from './mcpConfig';
+import {
+  MCP_PRESETS,
+  SECRET_MASK,
+  configToForm,
+  emptyForm,
+  formToConfigJson,
+  maskSecrets,
+  prettyJson,
+} from './mcpConfig';
 import {settings} from './settings.styles';
 
 export function McpServerModal({
@@ -205,12 +213,10 @@ export function McpServerModal({
                   placeholder="KEY"
                   spellCheck={false}
                 />
-                <input
-                  {...stylex.props(field.input, settings.mono)}
+                <SecretInput
                   value={pair.v}
-                  onChange={(e) => updateList('env', i, 'v', e.target.value)}
+                  onChange={(v) => updateList('env', i, 'v', v)}
                   placeholder="value"
-                  spellCheck={false}
                 />
                 <button
                   type="button"
@@ -249,6 +255,29 @@ export function McpServerModal({
             />
           </div>
           <div {...stylex.props(field.group)}>
+            <span {...stylex.props(field.label)}>Auth token</span>
+            <div {...stylex.props(settings.kvRow)}>
+              <SecretInput
+                value={form.token}
+                onChange={(v) => update('token', v)}
+                placeholder="Paste a token — sent as Authorization: Bearer …"
+              />
+              {form.token === SECRET_MASK && (
+                <button
+                  type="button"
+                  {...stylex.props(iconBtn.base)}
+                  title="Remove token"
+                  onClick={() => update('token', '')}
+                >
+                  <TrashIcon size={13} />
+                </button>
+              )}
+            </div>
+            <span {...stylex.props(field.hint)}>
+              Stored on the server and never shown again once saved.
+            </span>
+          </div>
+          <div {...stylex.props(field.group)}>
             <span {...stylex.props(field.label)}>Headers</span>
             {form.headers.map((pair, i) => (
               <div key={i} {...stylex.props(settings.kvRow)}>
@@ -256,15 +285,13 @@ export function McpServerModal({
                   {...stylex.props(field.input, settings.mono, settings.kvKey)}
                   value={pair.k}
                   onChange={(e) => updateList('headers', i, 'k', e.target.value)}
-                  placeholder="Authorization"
+                  placeholder="X-Api-Key"
                   spellCheck={false}
                 />
-                <input
-                  {...stylex.props(field.input, settings.mono)}
+                <SecretInput
                   value={pair.v}
-                  onChange={(e) => updateList('headers', i, 'v', e.target.value)}
-                  placeholder="Bearer …"
-                  spellCheck={false}
+                  onChange={(v) => updateList('headers', i, 'v', v)}
+                  placeholder="value"
                 />
                 <button
                   type="button"
@@ -277,7 +304,7 @@ export function McpServerModal({
               </div>
             ))}
             {form.headers.length === 0 && (
-              <span {...stylex.props(field.hint)}>Optional — auth tokens etc.</span>
+              <span {...stylex.props(field.hint)}>Optional — other headers the server needs.</span>
             )}
             <button
               type="button"
@@ -304,9 +331,54 @@ export function McpServerModal({
       ) : (
         <div {...stylex.props(field.group)}>
           <span {...stylex.props(field.label)}>Preview JSON</span>
-          <pre {...stylex.props(settings.configPre)}>{prettyJson(formToConfigJson(form))}</pre>
+          <pre {...stylex.props(settings.configPre)}>
+            {prettyJson(maskSecrets(formToConfigJson(form)))}
+          </pre>
         </div>
       )}
     </FormModal>
+  );
+}
+
+/** A secret's input. A saved one is never on the client — it shows as saved
+ * until replaced, and the mask it holds keeps the server's value on save. */
+function SecretInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  const [replacing, setReplacing] = useState(false);
+  if (value === SECRET_MASK) {
+    return (
+      <div {...stylex.props(settings.secretSaved)}>
+        <span>Saved · hidden</span>
+        <button
+          type="button"
+          {...stylex.props(btn.base, btn.small)}
+          onClick={() => {
+            setReplacing(true);
+            onChange('');
+          }}
+        >
+          Replace
+        </button>
+      </div>
+    );
+  }
+  return (
+    <input
+      {...stylex.props(field.input, settings.mono, settings.kvValue)}
+      type="password"
+      autoComplete="new-password"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      spellCheck={false}
+      autoFocus={replacing}
+    />
   );
 }

@@ -124,6 +124,15 @@ export const settings = stylex.create({
   kvRow: {display: 'flex', gap: 6, alignItems: 'center'},
   kvKey: {flexGrow: 0, flexShrink: 0, flexBasis: 160},
   kvValue: {flex: 1, minWidth: 0},
+  secretSaved: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+    color: colors.textDim,
+    fontSize: type.tUi,
+  },
   addRowBtn: {alignSelf: 'flex-start'},
 
   configPre: {

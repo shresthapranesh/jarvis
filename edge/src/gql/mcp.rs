@@ -63,7 +63,7 @@ impl McpServer {
         };
         McpServer {
             name: name.into(),
-            config: pyjson::dumps(&Value::Object(cfg.clone())),
+            config: pyjson::dumps(&Value::Object(config::redact(cfg))),
             transport,
             command,
             url: cfg.get("url").filter(|u| pyjson::truthy(u)).map(pyjson::py_str),
@@ -122,15 +122,16 @@ async fn add_to_db(pool: &SqlitePool, name: &str, cfg: &Value) -> Result<()> {
 
 /// `addMcpServer` and `updateMcpServer`, which are the same upsert.
 async fn upsert_server(ctx: &Context<'_>, name: &str, config_json: &str, not_object: &str) -> Result<McpServer> {
-    let raw = parse_json(config_json, "config_json")?;
+    let mut raw = parse_json(config_json, "config_json")?;
     if !raw.is_object() {
         return Err(not_object.to_string().into());
     }
+    let mcp = ctx.data::<EdgeData>()?.mcp.clone();
+    config::unmask(&mut raw, mcp.configured().await.get(name))?;
     let normalized = config::normalize(&single(name, &raw));
     let Some(fallback) = normalized.get(name).cloned() else {
         return Err(format!("invalid config for server {}", pyjson::repr_str(name)).into());
     };
-    let mcp = ctx.data::<EdgeData>()?.mcp.clone();
     add_to_db(mcp.pool(), name, &raw).await?;
     let s = mcp.reload().await;
     let cfg = s.connections.get(name).cloned().unwrap_or(fallback);

@@ -7,6 +7,10 @@
  * `formToConfigJson` emits has to stay a valid connection dict.
  */
 
+/** What the server sends instead of a saved header or env value. Sent back
+ * unchanged, it keeps the saved value. */
+export const SECRET_MASK = '••••';
+
 export type McpTransport = 'stdio' | 'http' | 'sse' | 'streamable-http';
 
 export interface McpFormState {
@@ -16,6 +20,8 @@ export interface McpFormState {
   args: string[];
   env: {k: string; v: string}[];
   url: string;
+  /** The `Authorization` header: '' none, `SECRET_MASK` saved, else typed. */
+  token: string;
   headers: {k: string; v: string}[];
   advancedJson: string;
   useAdvanced: boolean;
@@ -124,6 +130,7 @@ export function emptyForm(): McpFormState {
     args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
     env: [],
     url: '',
+    token: '',
     headers: [],
     advancedJson: DEFAULT_ADVANCED_JSON,
     useAdvanced: false,
@@ -142,7 +149,9 @@ export function configToForm(name: string, rawJson: string): McpFormState {
   if (Array.isArray(cfg.args)) args = cfg.args;
   else if (typeof cfg.args === 'string') args = [cfg.args];
   const envObj = cfg.env && typeof cfg.env === 'object' ? cfg.env : {};
-  const headersObj = cfg.headers && typeof cfg.headers === 'object' ? cfg.headers : {};
+  const headersObj: Record<string, unknown> =
+    cfg.headers && typeof cfg.headers === 'object' ? cfg.headers : {};
+  const authKey = Object.keys(headersObj).find((k) => k.toLowerCase() === 'authorization');
   return {
     name: name || '',
     transport,
@@ -154,7 +163,10 @@ export function configToForm(name: string, rawJson: string): McpFormState {
     args,
     env: Object.entries(envObj).map(([k, v]) => ({k, v: String(v)})),
     url: cfg.url || '',
-    headers: Object.entries(headersObj).map(([k, v]) => ({k, v: String(v)})),
+    token: authKey ? String(headersObj[authKey]) : '',
+    headers: Object.entries(headersObj)
+      .filter(([k]) => k !== authKey)
+      .map(([k, v]) => ({k, v: String(v)})),
     advancedJson: (() => {
       try {
         return JSON.stringify(cfg, null, 2);
@@ -184,12 +196,31 @@ export function formToConfigJson(form: McpFormState): string {
   } else {
     out.url = form.url.trim();
     const headers: Record<string, string> = {};
+    const token = form.token.trim();
+    // A bare token is a bearer token; one with a scheme ("Basic …") goes as written.
+    if (token)
+      headers.Authorization = token === SECRET_MASK || /\s/.test(token) ? token : `Bearer ${token}`;
     form.headers.forEach(({k, v}) => {
       if (k.trim()) headers[k.trim()] = v;
     });
     if (Object.keys(headers).length) out.headers = headers;
   }
   return JSON.stringify(out);
+}
+
+/** `raw` with every header and env value masked, as the server shows it. */
+export function maskSecrets(raw: string): string {
+  try {
+    const cfg = JSON.parse(raw);
+    for (const key of ['headers', 'env']) {
+      const map = cfg?.[key];
+      if (!map || typeof map !== 'object') continue;
+      for (const k of Object.keys(map)) if (map[k]) map[k] = SECRET_MASK;
+    }
+    return JSON.stringify(cfg);
+  } catch {
+    return raw;
+  }
 }
 
 export function prettyJson(raw: string): string {
