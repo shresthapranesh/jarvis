@@ -14,29 +14,26 @@ import os
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
 from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — a fixture
 from python_golden import recorded
+from seed import execute, insert, put_kv, row, set_setting, set_todos, stamp
 from test_edge_parity import _assert_same, _edge, _relay_text
 
 REPO = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
-async def edge(jarvis, work_dir: Path, edge_binary: Path):
+async def edge(database: Path, work_dir: Path, edge_binary: Path):
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
         yield client
 
 
 async def _set(key: str, value: str) -> None:
-    from db import async_session
-    from db.ops import set_setting
-
-    async with async_session() as s:
-        await set_setting(s, key, value)
+    set_setting(Path(os.environ["WORK_DIR"]) / "database.db", key, value)
 
 
 # ── the page-load queries ────────────────────────────────────────────────────
@@ -102,10 +99,7 @@ async def test_a_custom_model_list_that_cant_be_read_is_an_error(edge):
     assert body["errors"][0]["message"].startswith("the custom models setting (models.custom) can't be read: ")
 
 
-async def test_todos(edge):
-    from core.transcript_store import set_todos
-    from db import async_session
-
+async def test_todos(edge, database):
     query = _relay_text("TodoListQuery")
     # No `thread_state` row yet.
     await _assert_same(edge, query, {"conversationId": "c1"})
@@ -117,11 +111,10 @@ async def test_todos(edge):
         {"text": 42, "status": "bogus"},
         {"status": "done"},
     ]
-    async with async_session() as s:
-        await set_todos(s, "c1", cast(list, todos))
-        await set_todos(s, "c2", cast(list, "not a list"))
-        await set_todos(s, "c3", None)
-        await set_todos(s, "c4", [])
+    set_todos(database, "c1", todos)
+    set_todos(database, "c2", "not a list")
+    set_todos(database, "c3", None)
+    set_todos(database, "c4", [])
     for thread in ("c1", "c2", "c3", "c4", "nobody"):
         await _assert_same(edge, query, {"conversationId": thread})
     data = await _assert_same(edge, query, {"conversationId": "c1"})
@@ -211,13 +204,8 @@ async def _python_due(monkeypatch) -> dict[str, bool]:
     }
 
 
-async def test_maintenance_gates_match_the_sweeps(jarvis, work_dir: Path, edge_binary: Path, monkeypatch):
-    from core.state import get_store
-    from db import async_session
-    from db.models import Conversation, Message, Project
-
+async def test_maintenance_gates_match_the_sweeps(database: Path, work_dir: Path, edge_binary: Path, monkeypatch):
     now = datetime.now(timezone.utc)
-    store = get_store()
 
     async def check(label: str) -> None:
         edge, python = _edge_due(edge_binary, work_dir), await recorded(lambda: _python_due(monkeypatch))
@@ -225,18 +213,12 @@ async def test_maintenance_gates_match_the_sweeps(jarvis, work_dir: Path, edge_b
 
     await check("empty")
 
-    async with async_session() as s:
-        s.add_all([
-            Project(id="p1", name="P"),
-            Conversation(id="c1", title="t", model="m", project_id="p1", created_at=now - timedelta(days=2)),
-            Conversation(id="ghost", title="t", model="m", ephemeral=True, project_id="p1"),
-        ])
-        await s.commit()
+    insert(database, "projects", id="p1", name="P")
+    insert(database, "conversations", id="c1", title="t", model="m", project_id="p1", created_at=now - timedelta(days=2))
+    insert(database, "conversations", id="ghost", title="t", model="m", ephemeral=True, project_id="p1")
 
     async def say(mid: str, at: datetime, conv: str = "c1", text: str = "x" * 400, status: str = "done") -> None:
-        async with async_session() as s:
-            s.add(Message(id=mid, conversation_id=conv, role="user", content=text, created_at=at, status=status))
-            await s.commit()
+        insert(database, "messages", id=mid, conversation_id=conv, role="user", content=text, created_at=at, status=status)
 
     await say("ghost-1", now - timedelta(hours=3), conv="ghost")
     await check("only incognito material")
@@ -246,33 +228,32 @@ async def test_maintenance_gates_match_the_sweeps(jarvis, work_dir: Path, edge_b
     await check("enough, but still active")
 
     async def age(minutes: int) -> None:
-        async with async_session() as s:
-            for mid in ("m1", "m2"):
-                m = await s.get(Message, mid)
-                assert m is not None
-                m.created_at -= timedelta(minutes=minutes)
-            await s.commit()
+        for mid in ("m1", "m2"):
+            m = row(database, "messages", mid)
+            assert m is not None
+            at = datetime.fromisoformat(m["created_at"]) - timedelta(minutes=minutes)
+            execute(database, "UPDATE messages SET created_at = ? WHERE id = ?", stamp(at), mid)
 
     await age(6)
     await check("quiet for ten minutes: still active")
     await age(14)
     await check("quiet")
-    await store.aput(("project_memory_consolidation",), "p1",
-                     {"messages_through": (now - timedelta(minutes=24, seconds=30)).isoformat()})
+    put_kv(database, "project_memory_consolidation", "p1",
+           {"messages_through": (now - timedelta(minutes=24, seconds=30)).isoformat()})
     await check("watermark past the first message: too little left")
     await say("m0", now - timedelta(hours=30), text="y" * 300)
-    await store.aput(("project_memory_consolidation",), "p1", {"messages_through": "garbage"})
+    put_kv(database, "project_memory_consolidation", "p1", {"messages_through": "garbage"})
     await check("unreadable watermark counts as none")
 
-    await store.aput(("memory_consolidation",), "state", {"last_run_at": now.isoformat()})
+    put_kv(database, "memory_consolidation", "state", {"last_run_at": now.isoformat()})
     await check("legacy watermark past everything")
-    await store.aput(("memory_consolidation",), "state",
-                     {"messages_through": "", "last_run_at": (now - timedelta(hours=1)).isoformat()})
+    put_kv(database, "memory_consolidation", "state",
+           {"messages_through": "", "last_run_at": (now - timedelta(hours=1)).isoformat()})
     await check("empty watermark falls back to last_run_at")
     await say("r1", now - timedelta(minutes=30), status="running")
     await check("the first new message is a reply still being written")
-    await store.aput(("memory_consolidation",), "state",
-                     {"messages_through": (now - timedelta(minutes=30)).replace(tzinfo=None).isoformat()})
+    put_kv(database, "memory_consolidation", "state",
+           {"messages_through": (now - timedelta(minutes=30)).replace(tzinfo=None).isoformat()})
     await check("a naive watermark exactly at a message is exclusive")
 
 

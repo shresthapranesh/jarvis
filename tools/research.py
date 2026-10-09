@@ -1,6 +1,6 @@
-"""Web research helpers — preloaded into every run_cell kernel (core/kernels.py).
+"""Web research helpers — preloaded into every run_cell kernel (edge/src/kernels/).
 
-These are NOT bound LangChain tools. They are plain sync functions the agent
+These are NOT bound tools. They are plain sync functions the agent
 calls from Python cells (`search("...")`, `read(url)`), keeping web research
 code-first and composable: results land in kernel variables and feed straight
 into later cells.

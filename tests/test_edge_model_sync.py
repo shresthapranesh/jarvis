@@ -24,6 +24,7 @@ import pytest
 
 from edge_support import _relay_text, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 from python_golden import recorded
+from seed import insert
 
 SECRET = "fake-secret"
 IMDS_SECRET = "imds-secret"
@@ -271,49 +272,29 @@ def _closed_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
-
-
 @pytest.fixture
-async def catalog(database):
-    """Custom models and endpoints both sides read, and Python's caches put
-    back afterwards."""
-    from core import model_catalog
-    from db import async_session
-    from db.ops import set_setting
-
-    saved = model_catalog._custom_models, model_catalog._endpoints
-    async with async_session() as s:
-        await set_setting(s, "models.custom", json.dumps([
-            {"id": "openrouter:anthropic/claude-x", "label": "Claude X (mine)", "provider": "openrouter", "context_window": 100000},
-            {"id": "openrouter:gone/model", "label": "Gone"},
-            {"id": "local:qwen-7b", "label": "Qwen"},
-            {"id": "bedrock:anthropic.claude-3-haiku-20240307-v1:0", "label": "Haiku 3"},
-        ]))
-        await s.commit()
-    yield
-    model_catalog._custom_models, model_catalog._endpoints = saved
+def catalog(database: Path) -> Path:
+    """Custom models the catalog reads."""
+    insert(database, "config_settings", key="models.custom", value=json.dumps([
+        {"id": "openrouter:anthropic/claude-x", "label": "Claude X (mine)", "provider": "openrouter", "context_window": 100000},
+        {"id": "openrouter:gone/model", "label": "Gone"},
+        {"id": "local:qwen-7b", "label": "Qwen"},
+        {"id": "bedrock:anthropic.claude-3-haiku-20240307-v1:0", "label": "Haiku 3"},
+    ]))
+    return database
 
 
-async def _endpoints(fake: Fake) -> None:
-    from db import async_session
-    from db.ops import set_setting
-
-    async with async_session() as s:
-        await set_setting(s, "models.endpoints", json.dumps([
-            {"name": "local", "base_url": f"{fake.url}/ep/", "api_key": "ep-key"},
-            {"name": "missing", "base_url": f"{fake.url}/missing"},
-            {"name": "moved", "base_url": f"{fake.url}/moved"},
-            {"name": "down", "base_url": f"http://127.0.0.1:{_closed_port()}/v1"},
-        ]))
-        await s.commit()
+def _endpoints(db: Path, fake: Fake) -> None:
+    insert(db, "config_settings", key="models.endpoints", value=json.dumps([
+        {"name": "local", "base_url": f"{fake.url}/ep/", "api_key": "ep-key"},
+        {"name": "missing", "base_url": f"{fake.url}/missing"},
+        {"name": "moved", "base_url": f"{fake.url}/moved"},
+        {"name": "down", "base_url": f"http://127.0.0.1:{_closed_port()}/v1"},
+    ]))
 
 
 def _env(monkeypatch, tmp_path: Path, values: dict[str, str]) -> dict[str, str]:
-    """Both sides' environment: nothing a provider reads but `values`."""
-    import boto3
-
-    # boto3's default session keeps the credentials it first resolved.
-    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)
+    """The edge's environment: nothing a provider reads but `values`."""
     for var in _PROVIDER_ENV:
         monkeypatch.delenv(var, raising=False)
     env = {
@@ -324,11 +305,6 @@ def _env(monkeypatch, tmp_path: Path, values: dict[str, str]) -> dict[str, str]:
     }
     for k, v in env.items():
         monkeypatch.setenv(k, v)
-    # Python's OpenRouter client reads the constant, not the variable.
-    if "JARVIS_OPENROUTER_BASE_URL" in env:
-        from core import model_catalog
-
-        monkeypatch.setattr(model_catalog, "OPENROUTER_BASE_URL", env["JARVIS_OPENROUTER_BASE_URL"])
     return env
 
 
@@ -378,7 +354,7 @@ def _reports(answer: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 async def test_listings_match_python(catalog, fake, edge_binary, work_dir, tmp_path, monkeypatch):
-    await _endpoints(fake)
+    _endpoints(catalog, fake)
     env = _env(monkeypatch, tmp_path, _providers(fake))
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env) as client:
         answer = await _both(client, {"probe": False})
@@ -460,7 +436,7 @@ async def test_an_instance_role_signs_like_boto3(catalog, fake, edge_binary, wor
 
 
 async def test_probes_match_python(catalog, fake, edge_binary, work_dir, tmp_path, monkeypatch):
-    await _endpoints(fake)
+    _endpoints(catalog, fake)
     env = _env(monkeypatch, tmp_path, _providers(fake))
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env) as client:
         unreachable = {}

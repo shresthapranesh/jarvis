@@ -2,29 +2,30 @@
 
 These are plain sync functions the agent calls from Python code, NOT bound
 LLM tools. Keeping them out of the tool schemas is what keeps the per-call
-prompt small (see core/agents.py `main_tools`); the agent discovers them with
-`jarvis.help()` instead of paying for their schemas on every call.
+prompt small (`edge/src/agent/tools.json` is all that's bound); the agent
+discovers them with `jarvis.help()` instead of paying for their schemas on
+every call.
 
 Two transports, chosen by what the operation needs:
 
 * **Reads** go straight to the app database over a read-only sqlite3
-  connection (`mode=ro` — cannot take write locks against the server), plus
-  `core.embeddings.get_embedder()` for the semantic searches.
-* **Writes** go through the server's own GraphQL API over HTTP. The kernel is
-  a separate process, so a direct DB write would miss the in-process side
-  effects that make a write actually take effect — `_register_scheduler_job`
-  for automations (a missed registration means the cron silently never fires)
-  and `dispatch_board_tasks()` for board tasks. Routing through the mutation
-  runs that code in the server where it belongs, and gets the mutation's own
-  argument validation for free.
+  connection (`mode=ro` — cannot take write locks against the server).
+* **Writes**, and anything that needs the server — embedding a query for
+  `search_memory`, a human's approval — go through the server's GraphQL API
+  over HTTP. The kernel is a separate process, so a direct DB write would miss
+  the side effects that make a write take effect: the scheduler reloading an
+  automation (a missed reload means the cron silently never fires), board
+  dispatch. Routing through the mutation runs that in the server, and gets
+  the mutation's own argument validation for free.
 
-What deliberately stays a bound tool: anything coupled to the agent graph —
-todos (`Command` state deltas), complete/block_task (current-run lifecycle),
-spawn_workers/run_workflow (subgraphs on the parent's LLM), write_artifact
-(its live side-panel event is tied to this run's
-stream writer), and `remember` (there is no createMemory mutation to route to).
+What stays a bound tool: anything coupled to the agent loop — the todo tools,
+complete/block_task (current-run lifecycle), spawn_workers/run_workflow (runs
+on the agent's own model), write_artifact (its live event belongs to the run),
+and `remember`.
 
-Conversation and project scope are injected per kernel by core/kernels.py via
+The SDK needs nothing but the standard library, httpx and numpy: it finds the
+database as the server does (`DATABASE_URL`, else `$WORK_DIR/database.db`),
+and its scope is injected per kernel by the server (`edge/src/kernels/`) via
 `set_conversation()` / `set_project()`.
 """
 
@@ -32,18 +33,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from pathlib import Path
+from typing import Any, NamedTuple
 from uuid import uuid4
 
-from core.text_dedupe import dedupe_against
+from tools.text_dedupe import dedupe_against
 
 _conversation_id: str | None = None
 _project_id: str | None = None
-_embedding_override_applied = False
 
 DEFAULT_API_URL = "http://127.0.0.1:8000/graphql"
 
@@ -60,13 +62,24 @@ def set_project(project_id: str | None) -> None:
     _project_id = project_id
 
 
-def _db_path() -> str:
-    from core.config import get_config
+def _work_dir() -> Path:
+    """`$WORK_DIR`, else `~/.jarvis` — as the server resolves it."""
+    return Path(os.environ.get("WORK_DIR") or Path.home() / ".jarvis")
 
-    url = get_config().database_url
+
+def _db_path() -> str:
+    """`DATABASE_URL` (a `sqlite:///…` URL), else `$WORK_DIR/database.db`."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        return str(_work_dir() / "database.db")
     if "sqlite" not in url:
-        raise RuntimeError(f"jarvis SDK requires a sqlite database_url, got: {url}")
+        raise RuntimeError(f"jarvis SDK requires a sqlite DATABASE_URL, got: {url}")
     return url.rsplit(":///", 1)[-1]
+
+
+def _artifacts_dir() -> Path:
+    """`$ARTIFACTS_DIR`, else `$WORK_DIR/artifacts`."""
+    return Path(os.environ.get("ARTIFACTS_DIR") or _work_dir() / "artifacts")
 
 
 @contextmanager
@@ -85,52 +98,6 @@ def _connect() -> Iterator[sqlite3.Connection]:
         yield conn
     finally:
         conn.close()
-
-
-def _embedder() -> Any:
-    """The app's embeddings client, honoring the `embedding.model` config row."""
-    global _embedding_override_applied
-    from core.embeddings import configure_embedding_model, get_embedder
-
-    if not _embedding_override_applied:
-        _embedding_override_applied = True
-        try:
-            with _connect() as conn:
-                row = conn.execute(
-                    "SELECT value FROM config_settings WHERE key = 'embedding.model'"
-                ).fetchone()
-            if row is not None:
-                value = row["value"]
-                try:
-                    value = json.loads(value)
-                except (ValueError, TypeError):
-                    pass
-                if isinstance(value, str) and value:
-                    configure_embedding_model(value)
-        except sqlite3.Error:
-            pass
-
-    embedder = get_embedder()
-    if embedder is None:
-        raise RuntimeError("No embedding model available (GOOGLE_API_KEY unset?).")
-    return embedder
-
-
-def _cosine_top_k(qvec: Any, rows: list[tuple[bytes, Any]], k: int) -> list[tuple[float, Any]]:
-    """Score (embedding_bytes, payload) rows against qvec, best first."""
-    import numpy as np
-
-    q = np.asarray(qvec, dtype=np.float32)
-    qnorm = float(np.linalg.norm(q)) or 1.0
-    scored: list[tuple[float, Any]] = []
-    for blob, payload in rows:
-        vec = np.frombuffer(blob, dtype=np.float32)
-        if vec.shape != q.shape:  # embedded with a different model — skip
-            continue
-        score = float(np.dot(vec, q) / ((float(np.linalg.norm(vec)) or 1.0) * qnorm))
-        scored.append((score, payload))
-    scored.sort(key=lambda t: t[0], reverse=True)
-    return scored[:k]
 
 
 # ── Artifacts ─────────────────────────────────────────────────────────────────
@@ -154,11 +121,7 @@ def list_artifacts(all_conversations: bool = False) -> list[dict]:
 
 def read_artifact(artifact_id: str, version: int | None = None) -> str:
     """Markdown content of an artifact — latest, or a specific version."""
-    from pathlib import Path
-
-    from core.config import get_config
-
-    artifacts_dir = get_config().artifacts_dir
+    artifacts_dir = _artifacts_dir()
     with _connect() as conn:
         art = conn.execute(
             "SELECT id FROM artifacts WHERE id = ?", (artifact_id,)
@@ -205,6 +168,35 @@ def list_artifact_versions(artifact_id: str) -> list[dict]:
 _CONV_SEARCH_FANOUT = 20
 _SNIPPET_TOKENS = 14
 _MESSAGE_TRUNCATE = 2000
+
+
+_FTS_TOKEN_RE = re.compile(r"[0-9A-Za-z_]+")
+_MAX_FTS_TERMS = 24
+# BM25's IDF already de-weights these to near zero; dropping them keeps the
+# candidate scan from touching most of the table. Deliberately small — an
+# aggressive stoplist eats meaningful tokens ("no", "on", "can").
+_STOPWORDS = frozenset("""
+a an and are as at be by for from has have how i if in is it its of on or that
+the their then there these they this to was what when where which who will with
+you your me my do does did but not can could would should
+""".split())
+
+
+def _fts_match_expr(query: str) -> str | None:
+    """Free text as a safe FTS5 MATCH expression — never raw user text — or
+    None when nothing usable survives (`edge/src/agent/retrieve.rs` has the
+    same)."""
+    seen: set[str] = set()
+    terms: list[str] = []
+    for tok in _FTS_TOKEN_RE.findall(query):
+        low = tok.lower()
+        if len(low) < 2 or low in _STOPWORDS or low in seen:
+            continue
+        seen.add(low)
+        terms.append(f'"{low}"')
+        if len(terms) >= _MAX_FTS_TERMS:
+            break
+    return " OR ".join(terms) if terms else None
 
 
 def _has_fts(conn: sqlite3.Connection, name: str) -> bool:
@@ -275,14 +267,12 @@ def search_conversations(
     The current conversation is excluded — you are already in it. Each hit
     carries a `snippet` and a `conversation_id` to pass to read_conversation.
     """
-    from core.retrieval import fts_match_expr
-
     where, params = _conversation_scope(project_only, surface)
     if _conversation_id:
         where += " AND c.id != ?"
         params.append(_conversation_id)
     cols = "c.id AS conversation_id, c.title, c.surface, c.project_id"
-    expr = fts_match_expr(query)
+    expr = _fts_match_expr(query)
     hits: dict[str, dict] = {}
 
     with _connect() as conn:
@@ -433,14 +423,9 @@ def list_tasks(status: str | None = None) -> list[dict]:
 
 def search_memory(query: str, k: int = 5) -> list[dict]:
     """Top-k long-term memory facts for `query` by cosine similarity."""
-    qvec = _embedder().embed_query(query)
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT id, text, embedding FROM memories"
-            " WHERE kind = 'fact' AND embedding IS NOT NULL"
-        ).fetchall()
-    hits = _cosine_top_k(qvec, [(r["embedding"], r) for r in rows], k)
-    return [{"id": r["id"], "text": r["text"], "score": round(score, 4)} for score, r in hits]
+    data = api("query($q: String!, $k: Int!) { searchMemory(query: $q, k: $k) { id text score } }",
+               {"q": query, "k": k})
+    return data["searchMemory"]
 
 
 # ── GraphQL transport (write paths) ───────────────────────────────────────────
@@ -777,8 +762,8 @@ def delete_skill(skill_id: str) -> bool:
 # (tools/projects.py holds the same cap, but that tool is unbound — this is the
 # only path the agent actually reaches.)
 #
-# The dedup helpers live in core/text_dedupe so the consolidation job's merge
-# mode answers "is this already said?" exactly the way this tool does.
+# The dedup helpers live in tools/text_dedupe, which the server's consolidation
+# merge ports, so both answer "is this already said?" the same way.
 _PROJECT_MEMORY_CAP = 24_000
 
 
@@ -913,13 +898,8 @@ def mcp_call(server: str, tool: str, args: dict | None = None, **kwargs) -> str:
     # always waiting the ceiling: an ungated call that hangs should still fail
     # in seconds, not in half an hour.
     client_timeout = _MCP_CALL_TIMEOUT + 15.0
-    try:
-        from core.tool_policy import mcp_key, needs_approval
-
-        if needs_approval(mcp_key(server, tool)):
-            client_timeout = _gate_timeout() + _MCP_CALL_TIMEOUT + 15.0
-    except Exception:
-        pass
+    if _policy_for(f"mcp:{server}/{tool}").approval:
+        client_timeout = _gate_timeout() + _MCP_CALL_TIMEOUT + 15.0
     data = api(
         "mutation($server: String!, $tool: String!, $args: String!, $t: Float!) {"
         " callMcpTool(server: $server, tool: $tool, argsJson: $args, timeoutSeconds: $t)"
@@ -939,22 +919,63 @@ def mcp_call(server: str, tool: str, args: dict | None = None, **kwargs) -> str:
 
 
 # ── Tool policy ───────────────────────────────────────────────────────────────
-# Every function below is reachable from a `run_cell` kernel, i.e. from a
-# separate process with no LangGraph runtime — the reason the SDK could never
-# use `core/approval.py`'s interrupt. The gate here is the other half of
-# `core/tool_gate.py`: the server records a durable request, and this side
-# *blocks on the row* until a human answers it, polling over the same read-only
-# connection every other read uses. `run_cell`'s 60s cell timeout is suspended
-# while that request is open (see `core/kernels.py:_hold_for_approval`), which
+# Every function below is reachable from a `run_cell` kernel, a separate
+# process from the server. The gate here is the other half of the server's
+# (`edge/src/approvals.rs`): the server records a durable request, and this
+# side *blocks on the row* until a human answers it, polling over the same
+# read-only connection every other read uses. `run_cell`'s cell timeout is
+# suspended while that request is open (`edge/src/kernels/mod.rs:hold`), which
 # is what makes the wait real rather than a minute long.
+#
+# The policy is the `tools.policy` setting: a JSON map of tool key
+# (`sdk:<name>`, `mcp:<server>/<tool>`) to `{enabled, approval}`, holding only
+# what differs from the default (enabled, no approval). It is read at most
+# every `_POLICY_TTL` seconds, so a toggle in Settings reaches a running kernel
+# without any signal from the server; a policy that can't be read is the
+# default.
 
 _GATE_POLL_SECONDS = 1.5
+_POLICY_TTL = 2.0
+_policies: tuple[float, dict[str, Any]] | None = None
+
+
+class _Policy(NamedTuple):
+    enabled: bool = True
+    approval: bool = False
+
+
+def _policy_for(key: str) -> _Policy:
+    global _policies
+    now = time.monotonic()
+    if _policies is None or now - _policies[0] >= _POLICY_TTL:
+        stored: Any = {}
+        try:
+            with _connect() as conn:
+                row = conn.execute("SELECT value FROM config_settings WHERE key = 'tools.policy'").fetchone()
+            stored = json.loads(row["value"]) if row and row["value"] else {}
+        except (sqlite3.Error, ValueError, TypeError):
+            pass
+        _policies = (now, stored if isinstance(stored, dict) else {})
+    entry = _policies[1].get(key)
+    if not isinstance(entry, dict):
+        return _Policy()
+    return _Policy(bool(entry.get("enabled", True)), bool(entry.get("approval", False)))
 
 
 def _gate_timeout() -> float:
-    from core.tool_gate import gate_timeout_seconds
+    """How long a gated call waits for a human before denying itself:
+    `JARVIS_TOOL_GATE_TIMEOUT` (at least 10 s), else 30 minutes — as the
+    server's own gate waits."""
+    try:
+        return max(10.0, float(os.environ["JARVIS_TOOL_GATE_TIMEOUT"]))
+    except (KeyError, ValueError):
+        return 1800.0
 
-    return gate_timeout_seconds()
+
+def _denial(tool: str, answer: str) -> str:
+    """What the agent reads when a human says no (`approvals::denial_message`)."""
+    reason = f" ({answer})" if answer and answer.lower() not in ("no", "deny", "denied") else ""
+    return f"Denied by a human{reason}: `{tool}` was not run. Do not retry it — continue without it, or say what you need and why."
 
 
 def _await_gate(approval_id: str, deadline: float) -> tuple[bool, str]:
@@ -995,10 +1016,8 @@ def _request_gate(tool_key: str, tool_name: str, args: dict) -> str:
 
 def _enforce_policy(fn_name: str, args: dict) -> None:
     """Raise unless this SDK call is allowed to proceed right now."""
-    from core.tool_policy import policy_for, sdk_key
-
-    key = sdk_key(fn_name)
-    policy = policy_for(key)
+    key = f"sdk:{fn_name}"
+    policy = _policy_for(key)
     if not policy.enabled:
         raise RuntimeError(
             f"jarvis.{fn_name} is switched off in Settings → Tools. "
@@ -1010,9 +1029,7 @@ def _enforce_policy(fn_name: str, args: dict) -> None:
     approval_id = _request_gate(key, f"jarvis.{fn_name}", args)
     approved, answer = _await_gate(approval_id, time.time() + _gate_timeout())
     if not approved:
-        from core.tool_gate import denial_message
-
-        raise RuntimeError(denial_message(f"jarvis.{fn_name}", answer))
+        raise RuntimeError(_denial(f"jarvis.{fn_name}", answer))
 
 
 def _policed(fn):
@@ -1092,12 +1109,7 @@ _apply_policy_wrappers()
 
 
 def _is_enabled(fn_name: str) -> bool:
-    from core.tool_policy import is_enabled, sdk_key
-
-    try:
-        return is_enabled(sdk_key(fn_name))
-    except Exception:
-        return True
+    return _policy_for(f"sdk:{fn_name}").enabled
 
 
 def help(category: str | None = None) -> str:  # noqa: A001 — deliberate `jarvis.help`

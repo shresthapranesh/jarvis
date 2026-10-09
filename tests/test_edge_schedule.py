@@ -125,8 +125,9 @@ def test_next_fire_times_match_apscheduler(edge_binary: Path):
 import contextlib  # noqa: E402
 
 from edge_support import _gid, _run_edge, startup_sweep, until  # noqa: E402
-from python_golden import recorded  # noqa: E402
-from test_edge_parity import SESSION_START, _dump, _mask  # noqa: E402
+from python_golden import recorded, started  # noqa: E402
+from seed import insert  # noqa: E402
+from test_edge_parity import _dump, _mask  # noqa: E402
 
 RUNNING = "{ runningTasks { id kind label parentId } }"
 # The dispatcher's tick, shortened: the edge passes on its own every second.
@@ -137,37 +138,28 @@ def _at(*args: int) -> datetime:
     return datetime(*args, tzinfo=timezone.utc)
 
 
-async def _seed_board() -> None:
-    from db import async_session
-    from db.models import BoardTask, BoardTaskLink, Job
+def _seed_board(db: Path) -> None:
+    def task(id_: str, status: str, priority: int = 0, minute: int = 0, job_id: str | None = None) -> None:
+        insert(db, "board_tasks", id=id_, title=f"Task {id_}", status=status, priority=priority, job_id=job_id,
+               created_at=_at(2026, 9, 1, 12, minute), updated_at=_at(2026, 9, 1, 12, minute))
 
-    def task(id_: str, status: str, priority: int = 0, minute: int = 0, job_id: str | None = None) -> BoardTask:
-        return BoardTask(id=id_, title=f"Task {id_}", status=status, priority=priority, job_id=job_id,
-                         created_at=_at(2026, 9, 1, 12, minute), updated_at=_at(2026, 9, 1, 12, minute))
-
-    async with async_session() as s:
-        s.add_all([
-            task("p1", "done"), task("p2", "done"), task("p3", "ready", minute=1),
-            task("joins", "todo", minute=2),            # both parents done → promoted
-            task("waits", "todo", minute=3),            # one parent not done → stays
-            task("parked", "todo", minute=4),           # no parents → never promotes
-            task("high-old", "ready", priority=5, minute=5),
-            task("high-new", "ready", priority=5, minute=6),
-            task("low", "ready", minute=0),
-            task("busy", "ready", priority=9, job_id="j-live"),  # previous run still alive
-        ])
-        s.add_all([
-            BoardTaskLink(id="l1", parent_id="p1", child_id="joins", created_at=_at(2026, 9, 1)),
-            BoardTaskLink(id="l2", parent_id="p2", child_id="joins", created_at=_at(2026, 9, 1)),
-            BoardTaskLink(id="l3", parent_id="p1", child_id="waits", created_at=_at(2026, 9, 1)),
-            BoardTaskLink(id="l4", parent_id="p3", child_id="waits", created_at=_at(2026, 9, 1)),
-            Job(id="j-live", kind="chat", payload="{}", status="running", created_at=_at(2026, 9, 1),
-                updated_at=_at(2026, 9, 1), run_at=_at(2026, 9, 1)),
-            # One board run already in flight: two slots left of three.
-            Job(id="j-board", kind="board_task", payload='{"task_id": "x"}', status="pending", created_at=_at(2026, 9, 1),
-                updated_at=_at(2026, 9, 1), run_at=_at(2026, 9, 1)),
-        ])
-        await s.commit()
+    task("p1", "done")
+    task("p2", "done")
+    task("p3", "ready", minute=1)
+    task("joins", "todo", minute=2)            # both parents done → promoted
+    task("waits", "todo", minute=3)            # one parent not done → stays
+    task("parked", "todo", minute=4)           # no parents → never promotes
+    task("high-old", "ready", priority=5, minute=5)
+    task("high-new", "ready", priority=5, minute=6)
+    task("low", "ready", minute=0)
+    task("busy", "ready", priority=9, job_id="j-live")  # previous run still alive
+    for id_, parent, child in (("l1", "p1", "joins"), ("l2", "p2", "joins"), ("l3", "p1", "waits"), ("l4", "p3", "waits")):
+        insert(db, "board_task_links", id=id_, parent_id=parent, child_id=child, created_at=_at(2026, 9, 1))
+    insert(db, "jobs", id="j-live", kind="chat", payload="{}", status="running", created_at=_at(2026, 9, 1),
+           updated_at=_at(2026, 9, 1), run_at=_at(2026, 9, 1))
+    # One board run already in flight: two slots left of three.
+    insert(db, "jobs", id="j-board", kind="board_task", payload='{"task_id": "x"}', status="pending",
+           created_at=_at(2026, 9, 1), updated_at=_at(2026, 9, 1), run_at=_at(2026, 9, 1))
 
 
 @contextlib.asynccontextmanager
@@ -175,7 +167,7 @@ async def _board_copy(work_dir: Path, tmp_path_factory, edge_binary: Path):
     """The seeded board; the edge, ticking, on a copy of it."""
     import sqlite3
 
-    await _seed_board()
+    _seed_board(work_dir / "database.db")
     # As the edge's start leaves it, on both sides.
     startup_sweep(edge_binary, work_dir, work_dir / "database.db")
     b_dir = tmp_path_factory.mktemp("twin")
@@ -188,7 +180,7 @@ async def _board_copy(work_dir: Path, tmp_path_factory, edge_binary: Path):
 
 def _board(db: Path, dirs: tuple[str, ...]) -> dict[str, list]:
     dump = _dump(db)
-    return {table: _mask(dump[table], SESSION_START, dirs) for table in ("board_tasks", "jobs")}
+    return {table: _mask(dump[table], started(), dirs) for table in ("board_tasks", "jobs")}
 
 
 async def _settles_as(db: Path, dirs: tuple[str, ...], want: dict[str, list]) -> None:

@@ -19,14 +19,12 @@ import pytest
 
 from edge_support import _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 from python_golden import recorded
+from seed import insert
 
 
 @pytest.fixture
-async def files(database, work_dir: Path) -> Path:
+async def files(database: Path, work_dir: Path) -> Path:
     """Artifacts with their files, in shapes the headers vary by."""
-    from db import async_session
-    from db.models import Artifact
-
     d = work_dir / "files"
     d.mkdir()
     (d / "report.md").write_text("# Title\n" + "x" * 300)
@@ -35,15 +33,14 @@ async def files(database, work_dir: Path) -> Path:
     # Fixed times: a file's ETag and Last-Modified are made from its mtime.
     for name in ("report.md", "clip.mp3", "data.bin"):
         os.utime(d / name, (1_700_000_000.123456, 1_700_000_000.123456))
-    async with async_session() as s:
-        s.add_all([
-            Artifact(id="a-md", title="Weekly report", filename=str(d / "report.md"), kind="markdown"),
-            Artifact(id="a-audio", title="Café ✓ take 2", filename=str(d / "clip.mp3"), kind="audio", mime_type="audio/mpeg"),
-            Artifact(id="a-untitled", title="", filename=str(d / "data.bin"), kind="file"),
-            Artifact(id="a-gone", title="Gone", filename=str(d / "missing.pdf"), kind="file"),
-            Artifact(id="a-dir", title="Dir", filename=str(d), kind="file"),
-        ])
-        await s.commit()
+    for row in (
+        dict(id="a-md", title="Weekly report", filename=str(d / "report.md"), kind="markdown"),
+        dict(id="a-audio", title="Café ✓ take 2", filename=str(d / "clip.mp3"), kind="audio", mime_type="audio/mpeg"),
+        dict(id="a-untitled", title="", filename=str(d / "data.bin"), kind="file"),
+        dict(id="a-gone", title="Gone", filename=str(d / "missing.pdf"), kind="file"),
+        dict(id="a-dir", title="Dir", filename=str(d), kind="file"),
+    ):
+        insert(database, "artifacts", **row)
     return d
 
 

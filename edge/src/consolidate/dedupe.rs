@@ -1,7 +1,7 @@
-//! "Is this line already said?" — a port of `core/text_dedupe.py`, with the
+//! "Is this line already said?" — a port of `tools/text_dedupe.py`, with the
 //! part of `difflib.SequenceMatcher` it uses (`ratio()`, autojunk on, no
 //! junk function). The SDK's `jarvis.project_memory(append)` answers the
-//! same question in Python; a change to either is made in both.
+//! same question in the kernel; a change to either is made in both.
 
 use std::collections::HashMap;
 

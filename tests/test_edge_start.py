@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from edge_support import _gid, _run_edge, edge_binary, startup_sweep, until  # noqa: F401 — edge_binary is a fixture
+from seed import insert
 from test_edge_parity import Twin
 
 START = """mutation($input: StartTaskInput!) {
@@ -32,30 +33,26 @@ TRIGGER = "mutation($id: ID!) { triggerAutomation(id: $id) }"
 RUNNING = "{ runningTasks { id kind label parentId startedAt cancelled done } }"
 
 
-async def _seed() -> None:
-    from db import async_session
-    from db.models import Automation, ConfigSetting, Conversation, Project, Workflow
-
-    async with async_session() as s:
-        s.add_all([
-            Conversation(id="c1", title="Existing", model="google_genai:gemma-4-31b-it"),
-            Conversation(id="c2", title="Busy", model="google_genai:gemma-4-31b-it"),
-            Project(id="p1", name="Proj"),
-            Workflow(id="w1", name="Flow", definition='{"nodes": [], "edges": []}'),
-            Automation(id="a1", name="Nightly", input_type="prompt", prompt_text="p"),
-            # A runtime-added model, and an operator default that names it.
-            ConfigSetting(key="models.custom",
-                          value=json.dumps([{"id": "ollama:custom", "label": "Custom"}, {"no": "id"}, "junk"])),
-            ConfigSetting(key="default.model", value="ollama:custom"),
-        ])
-        await s.commit()
+def _seed(db: Path) -> None:
+    for table, row in [
+        ("conversations", dict(id="c1", title="Existing", model="google_genai:gemma-4-31b-it")),
+        ("conversations", dict(id="c2", title="Busy", model="google_genai:gemma-4-31b-it")),
+        ("projects", dict(id="p1", name="Proj")),
+        ("workflows", dict(id="w1", name="Flow", definition='{"nodes": [], "edges": []}')),
+        ("automations", dict(id="a1", name="Nightly", input_type="prompt", prompt_text="p")),
+        # A runtime-added model, and an operator default that names it.
+        ("config_settings", dict(key="models.custom",
+                                 value=json.dumps([{"id": "ollama:custom", "label": "Custom"}, {"no": "id"}, "junk"]))),
+        ("config_settings", dict(key="default.model", value="ollama:custom")),
+    ]:
+        insert(db, table, **row)
 
 
 @pytest.fixture
-async def twin(jarvis, work_dir: Path, tmp_path_factory, edge_binary: Path):
+async def twin(database: Path, work_dir: Path, tmp_path_factory, edge_binary: Path):
     import sqlite3
 
-    await _seed()
+    _seed(database)
     startup_sweep(edge_binary, work_dir, work_dir / "database.db")
     b_dir = tmp_path_factory.mktemp("twin")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
@@ -148,7 +145,7 @@ async def test_run_workflow_and_trigger_automation(twin):
 async def test_a_job_that_ends_unclaimed_leaves_the_running_list(database, work_dir: Path, edge_binary: Path):
     import sqlite3
 
-    await _seed()
+    _seed(database)
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db") as client:
         async def data(query: str, variables: dict | None = None) -> dict:
             body = (await client.post("/graphql", json={"query": query, "variables": variables or {}})).json()

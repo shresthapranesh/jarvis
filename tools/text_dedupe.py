@@ -1,16 +1,12 @@
 """Near-duplicate detection for line-oriented memory documents.
 
-Shared by the two writers of project memory: `jarvis.project_memory(append)`
-(tools/sdk.py, in-band) and the consolidation job's merge mode
-(core/project_memory_consolidation.py). Both need the same question answered —
-"is this line already said?" — and answering it differently in the two places
-would let a fact the tool rejects slip in through the job, or vice versa.
+Two writers of project memory ask "is this line already said?":
+`jarvis.project_memory(append)` (tools/sdk.py, here) and the server's
+consolidation merge (`edge/src/consolidate/dedupe.rs`, a port, difflib's ratio
+included). Answering differently in the two would let a fact one rejects slip
+in through the other — a change here is made there too.
 
-Deliberately dependency-free (re + difflib) so the kernel-side SDK can import
-it without dragging the rest of `core` into the kernel process.
-
-`edge/src/consolidate/dedupe.rs` is a port (difflib's ratio included) — a
-change here is made there too.
+Dependency-free (re + difflib): the kernel imports it at boot.
 """
 
 from __future__ import annotations
