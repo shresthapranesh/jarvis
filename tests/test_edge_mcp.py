@@ -310,29 +310,3 @@ async def test_network_transports(database, work_dir, tmp_path_factory, edge_bin
             done = await twin.run(q, {"t": "echo", "a": '{"text": "over the wire"}'})
             assert done["data"]["callMcpTool"] == {"content": "echo: over the wire", "isError": False}
             await twin.run(q, {"t": "explode", "a": "{}"})
-
-
-# ── conversions ──────────────────────────────────────────────────────────────
-
-
-def test_schemas_convert_as_langchain_converts_them():
-    """`edge/src/mcp/mod.rs:llm_tool` is covered by its own unit tests; this
-    pins the LangChain behaviour those tests were written from."""
-    from langchain_core.tools import StructuredTool
-    from langchain_core.utils.function_calling import convert_to_openai_tool
-
-    async def noop(**_: Any) -> str:
-        return ""
-
-    schema = {"type": "object", "description": "own", "properties": {
-        "title": {"type": "string", "title": "Title"},
-        "node": {"$ref": "#/$defs/Node", "description": "n"},
-        "list": {"anyOf": [{"title": "kept in lists", "type": "null"}]}},
-        "$defs": {"Node": {"type": "object", "title": "Node", "properties": {"next": {"$ref": "#/$defs/Node"}}}}}
-    tool = StructuredTool(name="t", description="", args_schema=schema, coroutine=noop)
-    assert convert_to_openai_tool(tool)["function"] == {
-        "name": "t", "description": "own", "parameters": {"type": "object", "properties": {
-            "title": {"type": "string"},
-            "node": {"type": "object", "properties": {"next": {}}, "description": "n"},
-            "list": {"anyOf": [{"title": "kept in lists", "type": "null"}]}}},
-    }

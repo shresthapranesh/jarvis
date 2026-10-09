@@ -3,23 +3,18 @@
 Multi-agent research assistant. Users submit queries via the web UI, CLI, or Telegram/Discord bots; agents run them and stream results live. Also: automations (scheduled/manual), a kanban task board, visual workflow graphs, projects, skills, persistent memory, notification channels.
 
 Deeper notes live next to the code and load when you work there:
-`edge/CLAUDE.md` (+ `edge/README.md` — the server) · `core/CLAUDE.md` · `tools/CLAUDE.md` (the `jarvis` SDK, web/browser) ·
-`db/CLAUDE.md` · `workflow/CLAUDE.md` · `frontend/CLAUDE.md`.
+`edge/CLAUDE.md` (+ `edge/README.md` — the server) · `tools/CLAUDE.md` (the `jarvis` SDK, web/browser) ·
+`frontend/CLAUDE.md`.
 
 ## Architecture
 
 - **The server is Rust** (`edge/`, axum) — moved off Python so jarvis runs on old, low-RAM hardware. One process on :8000: GraphQL (queries/mutations over HTTP POST `/graphql`, live streams over `graphql-ws` subscriptions on the same path), REST only for what GraphQL can't carry (binary download, `/ws/browser`, log tailing, health), the agent loop, the scheduler, the bots, MCP, and the SPA. Frontend is React 19 + Relay.
-- **Python is the agent's notebook kernels**: the agent writes Python in `run_cell`, in an `ipykernel` the server starts, with the `jarvis` SDK (`tools/sdk.py`) preloaded. SDK writes go through the server's GraphQL. Python's former runtime (`core/agents.py`, its loop, `workflow/`, `main.py`) serves nothing now; it remains while tests diff the server against it — see `edge/ROADMAP.md`.
+- **Python is the agent's notebook kernels**: the agent writes Python in `run_cell`, in an `ipykernel` the server starts, with the `jarvis` SDK (`tools/sdk.py`) preloaded. The SDK reads the database read-only and goes through the server's GraphQL for everything else; it needs only the standard library, `httpx` and the browser libraries — no other Python.
 - **Long-running work goes through a durable SQLite job queue**, never a bare spawned task: a trigger writes the `jobs` row, the agent loop (`edge/src/agent/queue.rs`) claims it. `job.id == task_id` is the single cancellation key.
 
 ```
 edge/            the server and CLI (Rust) — see edge/README.md
 tools/           sdk.py (the kernel-preloaded `jarvis` SDK), research.py / browser.py (web + browser)
-core/            what the SDK imports (config, embeddings, retrieval, tool gate/policy), plus
-                 Python's former agent runtime, kept for the tests that diff against it
-db/              models.py (ORM the SDK reads through), ops.py, engine.py (init + _migrate)
-workflow/        Python's former workflow engine (the server's is edge/src/agent/workflow/)
-main.py          Python's former CLI (the server's is `jarvis-edge`)
 frontend/        React + TanStack Router + Relay + StyleX + Vite
 tests/           pytest; tests/test_edge_*.py drive the binary against Python's recorded answers
 ```
@@ -40,7 +35,7 @@ pnpm schema && pnpm relay                    # after changing the server's Graph
 pnpm typecheck / pnpm build
 ```
 
-Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. `tests/test_edge_*.py` build the binary once per session and compare it against Python's answers, recorded before the Python server was deleted (`tests/python_golden.py`); a deliberate change to an answer is an edit to the recording.
+Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. `tests/test_edge_*.py` build the binary once per session and compare it against Python's answers, recorded before Python's server and runtime were deleted (`tests/python_golden.py`); a deliberate change to an answer is an edit to the recording. Seed test databases with `tests/seed.py` (rows as the ORM wrote them), never by hand-rolled defaults.
 
 ## Rules that are easy to break
 
@@ -58,11 +53,11 @@ Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. `tests/test_edge_*.
 - An agent's (`X-Jarvis-Caller: agent`) destructive write passes `approval::gate_action` when it is one of the deferred actions.
 
 **Database**
-- The server owns the schema (`edge/src/schema.rs`): a change goes in `db/models.py` + `db/engine.py:_migrate` (the SDK reads through them) and is re-captured into `edge/src/schema.sql`, with the `_migrate` step ported (`tests/test_edge_schema.py`).
+- The schema is `edge/src/schema.sql` (a new database) plus `schema.rs:migrate` (an existing one): a change goes in both — `tests/test_edge_schema.py` checks a migrated database has the fresh shape.
 - A write leaves a row exactly as SQLAlchemy did: `uuid4()` ids, its timestamp text, `updated_at` bumped where `onupdate` fired, cascades as explicit DELETEs.
 
 **Scheduling**
-- Cron is `edge/src/cron.rs`, a port of `core/scheduler.py:_cron` (timezone + Unix day-of-week) diffed against APScheduler — change both while that test stands.
+- Cron is `edge/src/cron.rs`, a port of APScheduler's `CronTrigger` (timezone + Unix day-of-week), held to its recorded answers (`tests/test_edge_schedule.py`).
 - Every automation write tells the scheduler (`Scheduler::schedules_changed`).
 
 **Agent tools**
@@ -74,4 +69,4 @@ Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. `tests/test_edge_*.
 - `pnpm fmt` rewrites files you didn't touch — format only what you changed.
 
 ## Security posture
-No runtime LLM safety gates. Safety rests on the operating constraints in `core/system_prompt.md` and on deployment isolation (container / isolated box). Don't add in-process sandboxing or LLM judges.
+No runtime LLM safety gates. Safety rests on the operating constraints in `edge/src/system_prompt.md` (compiled into the server) and on deployment isolation (container / isolated box). Don't add in-process sandboxing or LLM judges.

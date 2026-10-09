@@ -1,9 +1,10 @@
-"""The edge's kernels (`edge/src/kernels/`) diffed against `core/kernels.py`.
+"""The edge's kernels (`edge/src/kernels/`) against `core/kernels.py`.
 
-Each case runs the same cells through Python's `KernelRegistry` and through
-the edge's kernels (`jarvis-edge --kernel-cells`, one JSON command per line),
-and compares what the agent would read. Both start real `ipykernel`
-processes from this venv. Skipped when `cargo` isn't installed.
+Each case runs cells through the edge's kernels (`jarvis-edge
+--kernel-cells`, one JSON command per line) and compares what the agent would
+read with what Python's `KernelRegistry` read for the same cells, recorded.
+The kernels are real `ipykernel` processes from this venv. Skipped when
+`cargo` isn't installed.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from typing import Any
 
 import pytest
 
-from core.kernels import KernelRegistry
 from edge_support import edge_binary  # noqa: F401 — edge_binary is a fixture
 from python_golden import recorded
 from seed import insert
@@ -50,35 +50,15 @@ async def edge(database, work_dir: Path, edge_binary: Path):
     await asyncio.wait_for(proc.wait(), 30)
 
 
-@pytest.fixture
-async def py_kernels():
-    registry = KernelRegistry()
-    yield registry
-    await registry.shutdown_all()
-
-
 async def _edge_run(edge: EdgeKernels, key: str, code: str, **kw: Any) -> str:
     out = await edge.ask({"key": key, "code": code, **kw})
     assert "output" in out, out
     return out["output"]
 
 
-async def _py_run(registry: KernelRegistry, key: str, code: str, timeout: float = 60, **kw: Any) -> str:
-    """As `tools/code.py:run_cell` calls it."""
-    from core.tool_gate import has_open_gate
-
-    async def held() -> bool:
-        return await has_open_gate(kw.get("conversation_id"))
-
-    return await registry.run_cell(key, code, timeout=timeout, hold_check=held, **kw)
-
-
-async def _both(edge: EdgeKernels, registry: KernelRegistry, key: str, cells: list) -> tuple[list, list]:
-    """Each `(code, kwargs)` through Python's registry, then the edge."""
-    async def python_side() -> list[str]:
-        return [await _py_run(registry, key, code, **kw) for code, kw in cells]
-
-    python = await recorded(python_side)
+async def _both(edge: EdgeKernels, key: str, cells: list) -> tuple[list, list]:
+    """What Python's registry read for each `(code, kwargs)`, and the edge."""
+    python = await recorded()
     got = [await _edge_run(edge, key, code, **kw) for code, kw in cells]
     return python, got
 
@@ -101,8 +81,8 @@ CELLS: list[tuple[str, dict[str, Any]]] = [
 ]
 
 
-async def test_cells_read_the_same(edge, py_kernels):
-    python, got = await _both(edge, py_kernels, "k", CELLS)
+async def test_cells_read_the_same(edge):
+    python, got = await _both(edge, "k", CELLS)
     assert got == python
     assert got[1] == "42" and "NameError" in got[4] and got[-1] == "('conv-1', 'p1')"
     # 30,010 characters and a newline, trimmed.
@@ -110,52 +90,47 @@ async def test_cells_read_the_same(edge, py_kernels):
     assert "\x1b[" not in got[5]
 
 
-async def test_a_cell_past_its_timeout_is_interrupted(edge, py_kernels):
+async def test_a_cell_past_its_timeout_is_interrupted(edge):
     cells = [
         ("x = 1", {}),
         ("import time\nprint('started', flush=True)\ntime.sleep(30)", {"timeout": 1}),
         # …and the session survives it.
         ("x", {}),
     ]
-    python, got = await _both(edge, py_kernels, "k", cells)
+    python, got = await _both(edge, "k", cells)
     assert got == python
     assert got[1].startswith("started\n") and "KeyboardInterrupt" in got[1]
     assert got[1].endswith("[execution timed out after 1s — kernel interrupted; session state is preserved]")
     assert got[2] == "1"
 
 
-async def test_an_open_approval_holds_the_timeout(edge, py_kernels, database):
+async def test_an_open_approval_holds_the_timeout(edge, database):
     insert(database, "approvals", source="tool", status="pending", parent_id="conv-h", question="ok?")
     cell = ("import time\ntime.sleep(3)\n'done'", {"timeout": 1, "conversation_id": "conv-h"})
-    python, got = await _both(edge, py_kernels, "k", [cell])
+    python, got = await _both(edge, "k", [cell])
     assert got == python == ["'done'"]
 
 
-async def test_shutdown_forgets_the_session(edge, py_kernels):
-    async def python_side() -> list[str]:
-        await _py_run(py_kernels, "k", "x = 1")
-        await py_kernels.shutdown("k")
-        return [await _py_run(py_kernels, "k", "x")]
-
-    python = await recorded(python_side)
+async def test_shutdown_forgets_the_session(edge):
+    python = await recorded()
     await _edge_run(edge, "k", "x = 1")
     assert await edge.ask({"shutdown": "k"}) == {"ok": True}
     got = [await _edge_run(edge, "k", "x")]
     assert got == python and "NameError" in got[0]
 
 
-async def test_a_dead_kernel_is_restarted(edge, py_kernels):
+async def test_a_dead_kernel_is_restarted(edge):
     cells = [("x = 1", {}), ("import os\nos._exit(1)", {"timeout": 2}), ("x", {})]
-    python, got = await _both(edge, py_kernels, "k", cells)
+    python, got = await _both(edge, "k", cells)
     assert got == python
     assert "NameError" in got[2]
 
 
-async def test_input_fails_at_once(edge, py_kernels):
+async def test_input_fails_at_once(edge):
     """Intended: the edge never offers stdin, so `input()` raises at once.
     Python's client offered it with nobody to answer, so the cell hung until
     its timeout."""
-    python = await recorded(lambda: _py_run(py_kernels, "k", "input('name? ')", timeout=2))
+    python = await recorded()
     assert python.endswith("[execution timed out after 2s — kernel interrupted; session state is preserved]")
     loop = asyncio.get_running_loop()
     started = loop.time()

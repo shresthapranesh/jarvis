@@ -4,7 +4,7 @@ import type {DeleteAgentMemoryMutation} from '../__generated__/DeleteAgentMemory
 import type {Memory} from '../lib/types';
 import {environment} from './environment';
 
-// `main.py memory reset` — deletes the blob entry outright. Distinct from
+// `jarvis-edge memory reset` — deletes the blob entry outright. Distinct from
 // updateMemory(""), which leaves an empty-but-present entry; the agent's
 // fallback branches on `exists`, so the two are not the same state.
 const mutation = graphql`

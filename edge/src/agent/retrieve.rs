@@ -4,8 +4,7 @@
 //!
 //! Hybrid: a dense arm (cosine against stored float32 vectors) and a lexical
 //! one (SQLite FTS5, BM25), fused by rank and cut by `select_hybrid`'s two
-//! rules, so "nothing relevant" is a real answer. A change to any of these is
-//! made in both.
+//! rules, so "nothing relevant" is a real answer.
 
 use std::collections::{HashMap, HashSet};
 

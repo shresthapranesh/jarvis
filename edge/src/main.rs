@@ -106,8 +106,8 @@ fn bare_schema(pool: sqlx::SqlitePool, runs: Arc<runs::Registry>) -> gql::EdgeSc
 /// `--replay-events`: for each stdin line, `{"id", "kind", "events",
 /// "query", "variables"}`, a finished run of those raw `{"event", "data"}`
 /// records registered, and the subscription's results printed as one JSON
-/// array — so every coercer can be diffed against Python's over the same
-/// records.
+/// array — so every coercer can be held to Python's recorded results for
+/// the same records.
 async fn replay_events() {
     use std::io::BufRead;
     for line in std::io::stdin().lock().lines() {

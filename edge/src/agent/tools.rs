@@ -1,9 +1,8 @@
 //! The tools the main agent is bound to, and the ones the edge runs itself.
 //!
-//! The schemas are Python's own (`tools.json`, exported from
-//! `convert_to_openai_tool` and diffed against it by the tests), so the model
-//! sees the same tool list whichever runtime calls it — and a cached prefix
-//! stays byte-stable when a conversation moves between them.
+//! The schemas are `tools.json` — first exported from Python's
+//! `convert_to_openai_tool`, now the source — so a conversation's cached
+//! prefix stayed byte-stable when it moved over from Python.
 //!
 //! The bound tools are `run_cell`, `write_artifact`, the todo tools,
 //! `remember`, `spawn_workers` (`workers.rs`, whose roles' tools are in

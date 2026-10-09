@@ -65,7 +65,7 @@ interface StreamState {
   artifacts: ArtifactRef[];
   todos: TodoItem[] | null;
   error: string | null;
-  // A per-tool gate (core/tool_gate.py) the run is blocked on, inside the tool
+  // A per-tool gate (edge/src/approvals.rs) the run is blocked on, inside the tool
   // call; answering it resolves the durable row `approvalId`.
   pendingInterrupt: {question: string; approvalId: string} | null;
   budget: BudgetInfo | null;
@@ -107,7 +107,7 @@ function patchWorker(
   return copy;
 }
 
-// Must match WORKER_RESULT_PERSIST_CAP in core/streaming.py so the live
+// Must match WORKER_RESULT_PERSIST_CAP in edge/src/agent/events.rs so the live
 // mirror of worker_done matches the persisted Step row.
 const WORKER_RESULT_CAP = 2000;
 
@@ -426,7 +426,7 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             if (conversationId) void loadConversationPage(conversationId);
             break;
           case 'ApprovalRequestEvent': {
-            // A per-tool gate (core/tool_gate.py) carries `approvalId` and is
+            // A per-tool gate (edge/src/approvals.rs) carries `approvalId` and is
             // answered by resolving that row — the run is parked inside the
             // tool call.
             //

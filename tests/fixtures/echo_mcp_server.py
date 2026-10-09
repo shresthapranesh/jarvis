@@ -1,8 +1,8 @@
-"""A minimal stdio MCP server used by tests/test_mcp_integration.py.
+"""A minimal stdio MCP server for the edge's MCP tests.
 
-Deliberately real: it exercises the langchain-mcp-adapters contract we depend
-on (per-server tool loading, ToolCall invocation, isError handling) rather than
-a stand-in that could agree with a wrong assumption.
+Deliberately real: it exercises the MCP contract the edge's client depends on
+(per-server tool loading, tool calls, isError handling) rather than a
+stand-in that could agree with a wrong assumption.
 """
 
 from mcp.server.fastmcp import FastMCP

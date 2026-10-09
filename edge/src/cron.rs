@@ -13,7 +13,7 @@
 //!
 //! So this is a port of the algorithm, not a cron library: field by field,
 //! with Python's datetime-and-zoneinfo arithmetic modelled by [`Wall`]. It is
-//! diffed against APScheduler over thousands of cases in
+//! held to APScheduler's recorded answers over thousands of cases in
 //! `tests/test_edge_schedule.py`.
 
 use chrono::offset::LocalResult;

@@ -1,6 +1,6 @@
 //! The agent's browser, as far as the edge reaches it: where it is, launching
 //! one when nothing listens there (`tools/browser.py`'s "Reaching the
-//! browser" — change both), and the live view of it (`screencast.rs`, `ws.rs`).
+//! browser", which the kernel runs — change both), and the live view of it (`screencast.rs`, `ws.rs`).
 //!
 //! The browser is its own process. The kernel drives it through Playwright;
 //! the edge only finds it, starts it, and watches it.

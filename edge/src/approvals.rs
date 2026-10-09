@@ -1,5 +1,5 @@
-//! Per-tool approval gates — a port of `core/tool_gate.py` and
-//! `core/approval.py`; a change to either is made in both.
+//! Per-tool approval gates — first a port of `core/tool_gate.py`
+//! and `core/approval.py`.
 //!
 //! The `approvals` row is the rendezvous: a gated call records one and polls
 //! it until a human answers (`resolveApproval`, from the chat prompt or the

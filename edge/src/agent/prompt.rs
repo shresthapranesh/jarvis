@@ -18,6 +18,10 @@ use sqlx::SqlitePool;
 
 use crate::llm::shape::Segment;
 
+/// The static system prompt: the agent's operating constraints, which is
+/// where its safety rests (no runtime judge). Compiled in.
+const SYSTEM_PROMPT: &str = include_str!("../system_prompt.md");
+
 /// Stability rank of a cacheable segment, lowest first (`_SEGMENT_STABILITY`).
 fn stability(name: &str) -> u32 {
     match name {
@@ -73,10 +77,7 @@ pub async fn build(
     todos: &[Value],
     retrieved: &[Segment],
 ) -> Result<Context, Unbuilt> {
-    let system = std::fs::read_to_string(crate::config::app_dir().join("core").join("system_prompt.md"))
-        .map_err(|e| Unbuilt(format!("reading core/system_prompt.md: {e}")))?
-        .trim()
-        .to_string();
+    let system = SYSTEM_PROMPT.trim().to_string();
 
     // Retrieved, then project — the order Python concatenates them in
     // before sorting.

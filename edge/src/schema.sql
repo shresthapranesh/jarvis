@@ -1,7 +1,7 @@
--- What `Base.metadata.create_all` (db/models.py) makes, captured from a fresh
--- database in creation order: each table, then its indexes by name. `schema.rs`
--- creates every table missing here (and its indexes), then migrates.
--- Generated: JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_schema.py
+-- The schema a new database gets, in creation order: each table, then its
+-- indexes by name. `schema.rs` creates every table missing here (and its
+-- indexes), then migrates. First captured from Python's `create_all`
+-- (db/models.py); a change here needs its step in `schema.rs:migrate` too.
 
 CREATE TABLE projects (
 	id VARCHAR NOT NULL, 

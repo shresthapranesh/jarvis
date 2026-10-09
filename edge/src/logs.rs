@@ -1,10 +1,8 @@
-//! The in-app log viewer's records — `core/log_setup.py:BroadcastHandler`
-//! and `server/routes_logs.py`, change both — for the edge and the worker
-//! together: the edge's own events (a `tracing` layer) and the records a
-//! linked Python sends over the worker link, in one buffer. So the viewer
-//! never starts Python, and still shows what Python logged while it ran.
+//! The in-app log viewer's records — a port of `core/log_setup.py`'s
+//! `BroadcastHandler` and `server/routes_logs.py`: the server's own events (a
+//! `tracing` layer), in one buffer.
 //!
-//! A record is `{ts, level, logger, message}`, as Python's handler makes it.
+//! A record is `{ts, level, logger, message}`, as Python's handler made it.
 
 use std::collections::VecDeque;
 use std::fmt::Write;

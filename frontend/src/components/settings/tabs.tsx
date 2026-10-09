@@ -75,7 +75,7 @@ export const SETTINGS_TABS = [
       <>
         The <code>config_settings</code> table — bot allowlists, the embedding model, the scheduler
         timezone, which agent actions need approval. The same rows{' '}
-        <code>main.py config set/get/list/delete</code> writes, except that a write here is also
+        <code>jarvis-edge config set/get/list/delete</code> writes, except that a write here is also
         pushed into the running server instead of waiting for a restart. Keys another tab owns are
         shown read-only.
       </>

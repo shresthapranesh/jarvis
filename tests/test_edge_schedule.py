@@ -1,11 +1,11 @@
 """The edge's scheduler (`edge/src/cron.rs`, `edge/src/schedule.rs`).
 
 Schedules are a promise in two places — the UI shows `nextRunAt`, the
-scheduler keeps it — so the cron engine is diffed against the one it
-replaces: APScheduler's `CronTrigger`, built the way `core/scheduler.py:_cron`
-builds it, over every expression shape the app accepts, in zones with every
-kind of DST (none, 1 h, 30 min, southern-hemisphere, negative), at instants
-around each 2026 transition.
+scheduler keeps it — so the cron engine is held to the one it replaced:
+APScheduler's `CronTrigger`, built the way `core/scheduler.py:_cron` built
+it, its answers recorded, over every expression shape the app accepts, in
+zones with every kind of DST (none, 1 h, 30 min, southern-hemisphere,
+negative), at instants around each 2026 transition.
 
 Skipped when `cargo` isn't installed.
 """
@@ -72,25 +72,6 @@ def _instants(zone: str, rng: random.Random) -> list[datetime]:
     return out
 
 
-def _apscheduler(expr: str, zone: str, now: datetime) -> list[str] | None:
-    from apscheduler.triggers.cron import CronTrigger
-
-    from core.scheduler import normalize_crontab
-
-    try:
-        trigger = CronTrigger.from_crontab(normalize_crontab(expr), timezone=ZoneInfo(zone))
-    except Exception:
-        return None
-    fires, prev, when = [], None, now.astimezone(ZoneInfo(zone))
-    for _ in range(CHAIN):
-        nxt = trigger.get_next_fire_time(prev, when)
-        if nxt is None:
-            break
-        fires.append(nxt.isoformat())
-        prev = when = nxt
-    return fires
-
-
 def test_next_fire_times_match_apscheduler(edge_binary: Path):
     rng = random.Random(20261002)
     cases = [
@@ -105,12 +86,9 @@ def test_next_fire_times_match_apscheduler(edge_binary: Path):
     ).stdout.splitlines()
     assert len(out) == len(cases)
 
-    def python() -> bytes:
-        # Compressed: one answer per case is a few megabytes of JSON.
-        fires = [_apscheduler(c["expr"], c["tz"], datetime.fromisoformat(c["now"])) for c in cases]
-        return zlib.compress(json.dumps(fires, separators=(",", ":")).encode(), 9)
-
-    apscheduler = json.loads(zlib.decompress(recorded_sync(python)))
+    # APScheduler's fire times for each case (None: refused), as
+    # `core/scheduler.py:_cron` built the trigger — compressed JSON.
+    apscheduler = json.loads(zlib.decompress(recorded_sync()))
     assert len(apscheduler) == len(cases)
     mismatches = []
     for case, line, expected in zip(cases, out, apscheduler):

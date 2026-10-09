@@ -1,12 +1,11 @@
 """The command line in the edge (`edge/src/cli/`) against `main.py`.
 
-Each command runs twice, as a subprocess: `main.py` over one database and
-`jarvis-edge` over a copy. What they print, their exit codes and what they
-leave in the database are diffed. The edge runs with a `JARVIS_APP_DIR`
-that has no checkout in it, so nothing it does can lean on the Python code;
-only `run`, which reads the system prompt from the checkout, is given it.
+Each command runs as a subprocess of `jarvis-edge`; what it prints, its exit
+code and what it leaves in the database are compared with what `main.py` did
+for the same command, recorded. The edge runs with a `JARVIS_APP_DIR` that
+has no checkout in it: it needs none.
 
-Tables are compared by their contents, not their borders: `main.py` draws
+Tables are compared by their contents, not their borders: `main.py` drew
 Rich tables, the edge aligned columns.
 
 Skipped when `cargo` isn't installed.
@@ -18,18 +17,15 @@ import os
 import re
 import sqlite3
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from edge_support import edge_binary, fresh_db  # noqa: F401 — edge_binary is a fixture
-from python_golden import RECORD, portable, recorded_sync
+from python_golden import portable, recorded_sync
 from test_edge_loop import MODEL, FakeOllama, Reply
 from test_edge_model_sync import _PROVIDER_ENV, Fake, _providers
-
-REPO = Path(__file__).resolve().parent.parent
 
 
 @dataclass
@@ -74,18 +70,11 @@ class Twins:
 
     def python(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None) -> Out:
         """What `main.py` printed and exited with, as recorded."""
-        code, out = recorded_sync(lambda: self._main(*args, stdin=stdin, env=env))
+        code, out = recorded_sync()
         return Out(code, out.replace("<tmp>", str(self.py.parent)))
 
-    def _main(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None) -> tuple[int, str]:
-        proc = subprocess.run([sys.executable, str(REPO / "main.py"), *args], cwd=self.py, input=stdin,
-                              capture_output=True, text=True, env=_env(self.py, env), timeout=120)
-        out = _out(proc)
-        return out.code, out.out.replace(str(self.py.parent), "<tmp>")
-
-    def edge(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None,
-             checkout: bool = False) -> Out:
-        extra = {"JARVIS_APP_DIR": str(REPO if checkout else self.no_python), **(env or {})}
+    def edge(self, *args: str, stdin: str | None = None, env: dict[str, str] | None = None) -> Out:
+        extra = {"JARVIS_APP_DIR": str(self.no_python), **(env or {})}
         proc = subprocess.run([str(self.binary), *args], cwd=self.rs, input=stdin,
                               capture_output=True, text=True, env=_env(self.rs, extra), timeout=120)
         return _out(proc)
@@ -100,7 +89,7 @@ class Twins:
         def read(db: Path) -> list:
             with sqlite3.connect(db) as conn:
                 return conn.execute(sql).fetchall()
-        return recorded_sync(lambda: read(self.py / "database.db")), read(self.rs / "database.db")
+        return recorded_sync(), read(self.rs / "database.db")
 
     def same_rows(self, sql: str) -> list:
         python, edge = (portable(rows) for rows in self.rows(sql))
@@ -125,10 +114,10 @@ KV = "SELECT namespace, key, value FROM kv_store WHERE namespace != 'jarvis.migr
 def twins(tmp_path: Path, edge_binary: Path) -> Twins:
     t = Twins(tmp_path, edge_binary)
     assert t.python("config", "list").code == 0  # Python made its schema
-    fresh_db(edge_binary, t.rs / "database.db")
-    if not RECORD:
-        # Somewhere for seeds to go; what Python read back was recorded.
-        fresh_db(edge_binary, t.py / "database.db")
+    # Somewhere for seeds to go, on each side; what Python read back was
+    # recorded.
+    for side in (t.py, t.rs):
+        fresh_db(edge_binary, side / "database.db")
     return t
 
 
@@ -274,16 +263,12 @@ def test_run(twins, model):
     env = {"OLLAMA_HOST": model.url, "JARVIS_BROWSER_CDP_URL": "http://127.0.0.1:9"}
     script = [Reply("", [("write_todos", {"todos": ["look", "answer"]})]), Reply("The answer is **42**.")]
 
-    def python_run() -> tuple[tuple[int, str], list]:
-        model.reset(script)
-        return twins._main("run", "--model", MODEL, "What is it?", env=env), model.requests
-
-    (code, out), asked = recorded_sync(python_run)
+    (code, out), asked = recorded_sync()
     python = Out(code, out)
     model.reset(script)
-    # The agent reads its prompt from the checkout. That it's the edge, not
-    # Python, shows in the reply: raw Markdown, no Rich panel.
-    edge = twins.edge("run", "--model", MODEL, "What is it?", env=env, checkout=True)
+    # That it's the edge, not Python, shows in the reply: raw Markdown, no
+    # Rich panel.
+    edge = twins.edge("run", "--model", MODEL, "What is it?", env=env)
     assert python.code == edge.code == 0
     assert "The answer is 42." in python.out  # Rich renders the Markdown
     assert edge.out == "The answer is **42**."
@@ -294,7 +279,7 @@ def test_run(twins, model):
     twins.setting('default.model', MODEL)
     model.reset([Reply("ok")])
     edge = subprocess.run([str(twins.binary), "run", "--model", "ollama:typo", "hi"], cwd=twins.rs, capture_output=True,
-                          text=True, env=_env(twins.rs, {**env, "JARVIS_APP_DIR": str(REPO)}), timeout=120)
+                          text=True, env=_env(twins.rs, {**env, "JARVIS_APP_DIR": str(twins.no_python)}), timeout=120)
     assert (edge.returncode, edge.stdout.strip()) == (0, "ok")
     assert "Unknown model 'ollama:typo' — running on ollama:fake instead." in edge.stderr
 

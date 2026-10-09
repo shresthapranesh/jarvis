@@ -1,9 +1,9 @@
 # Moving jarvis to Rust — what's left
 
-The goal is everything in Rust: the Python server gone entirely. Only the
-notebook kernel and the `jarvis` SDK inside it stay Python, because the
-agent writes Python in `run_cell`. Until then, the edge starts Python on
-demand (`JARVIS_WORKER_CMD`) for whatever isn't ported yet.
+The goal is everything in Rust. Only the notebook kernel and the `jarvis`
+SDK inside it stay Python, because the agent writes Python in `run_cell`.
+The Python server and runtime are gone; the SDK needs nothing but the
+standard library, `httpx` and the browser libraries.
 
 Sizes are relative: S ≈ a session, M ≈ a few, L ≈ many. Tick an item when
 it's on `main`.
@@ -59,7 +59,8 @@ it's on `main`.
 - [x] Parity tests diff against Python's answers, recorded (`tests/python_golden.py`)
 - [x] 2a step 11: drop `langgraph-checkpoint-sqlite`, `checkpoints.db` conversion, edge `checkpoints.rs`
 - [x] Delete `server/`, the worker link, the supervisor and the proxy; the server-only Python dependencies
-- [ ] Delete Python's former runtime (`core/agents.py`, the loop, `workflow/`, `main.py`) and langchain — with the kernel decision below
+- [x] Delete Python's former runtime (`core/`, `db/`, `workflow/`, `main.py`, the runtime's `tools/`) and LangChain, SQLAlchemy, APScheduler; the schema is `schema.sql` + `migrate`
+- [ ] Port the unit tests that went with Python's runtime where the Rust side has none: scheduler timezone order (`scheduler.timezone` → `JARVIS_TIMEZONE` → machine), the compaction threshold's clamp, `JARVIS_CACHE_TTL`, the job queue's thread lease — S
 
 ### What still reaches Python (audit, 2026-10-06)
 
@@ -123,13 +124,10 @@ gone, before `server/` can be deleted.
 
 **The kernel** (stays Python by design) — what it still imports
 
-- [ ] The `jarvis` SDK loads `core.config`, `core.embeddings` (and with it
-  `langchain-google-genai` / `langchain-ollama`, for `search_memory`),
-  `core.retrieval`, `core.tool_gate` and `core.tool_policy` (with `db/` and
-  SQLAlchemy, for the in-kernel gate), `core.text_dedupe`, and
-  `tools.research` / `tools.browser`. Decide: keep a slim `core/` + `db/` for the
-  kernel, or route embeddings and gates through the edge so the kernel needs
-  only `httpx` and the browser — decision, M
+- [x] The `jarvis` SDK stands alone: paths from the environment as the server
+  resolves them, the tool policy read from its setting, `search_memory`'s
+  query embedded by the server (`searchMemory`) — decided 2026-10-08 over
+  keeping a slim `core/` + `db/` for the kernel
 
 ## Not yet tried for real
 
