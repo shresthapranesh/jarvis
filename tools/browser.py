@@ -11,7 +11,7 @@ which answers both cases at once. Dropping it also means Playwright needs no
 downloaded browsers at all: `connect_over_cdp` speaks to one you already have.
 
 **The browser is owned by neither process.** `read()` runs in a kernel
-(`core/kernels.py`), while the approval gate and the event stream live in the
+(`edge/src/kernels/`), while the approval gate and the event stream live in the
 server; kernels are per-conversation, capped, and reaped after 30 minutes idle.
 A browser owned by either side would be wrong — one Chrome per conversation, or
 a new transport so the other side can reach it. Attaching over CDP sidesteps
@@ -149,9 +149,9 @@ def profile_dir() -> Path:
     ).strip()
     if configured:
         return Path(configured).expanduser()
-    from core.config import get_config
+    from tools.sdk import _work_dir
 
-    return get_config().work_dir / "browser-profile"
+    return _work_dir() / "browser-profile"
 
 
 def executable() -> str:
@@ -410,7 +410,7 @@ def _ask_human(url: str, marker: str) -> bool:
 
     Reuses the SDK's gate helpers rather than inventing a second mechanism:
     same durable `Approval` row, same inbox, same chat prompt, and
-    `core/kernels.py:_hold_for_approval` already suspends the 60s cell timeout
+    the server's kernels (`edge/src/kernels/mod.rs:hold`) suspend the cell timeout
     while one is open — so this can wait the full gate timeout without the cell
     being killed out from under it.
 

@@ -7,10 +7,10 @@
 //! - `project` — `core/project_memory_consolidation.py`: each project's
 //!   shared memory, merged into or rewritten (every 30 minutes, and
 //!   `consolidateProjectMemory`).
-//! - `dedupe` — `core/text_dedupe.py`, the merge's "already said?".
+//! - `dedupe` — `tools/text_dedupe.py`, the merge's "already said?".
 //!
-//! Ports, all three: a change on either side is made in both. Diffed against
-//! Python in `tests/test_edge_loop.py`.
+//! Ports, all three, tested against Python's recorded sweeps in
+//! `tests/test_edge_loop.py`.
 //!
 //! Both read the messages table past a watermark kept in `kv_store`, call
 //! the model once per batch (`llm::ask`), and write rows. With the agent

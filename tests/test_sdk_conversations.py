@@ -7,42 +7,40 @@ real functions against a real database rather than mocking the query out.
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
+from seed import insert
 
-async def _seed(database) -> dict[str, str]:
+
+async def _seed(database: Path) -> dict[str, str]:
     """Two project siblings, one unrelated chat, one incognito, one bot thread."""
-    from db import ops
-    from db.models import Project
+    def conversation(title: str, **fields) -> str:
+        return insert(database, "conversations", id=str(uuid4()), model="m", title=title, **fields)["id"]
+
+    def say(conv_id: str, role: str, content: str) -> None:
+        insert(database, "messages", id=str(uuid4()), conversation_id=conv_id, role=role, content=content)
 
     ids: dict[str, str] = {}
-    async with database.session() as s:
-        proj = Project(id="p1", name="Ledger", instructions="", memory="")
-        s.add(proj)
-        await s.commit()
+    insert(database, "projects", id="p1", name="Ledger", instructions="", memory="")
+    siblings = [
+        ("Invoice reconciliation", "we settled on idempotency keys for the invoice retry path"),
+        ("Ledger schema", "the postings table needs a composite index on (account_id, posted_at)"),
+    ]
+    for title, body in siblings:
+        ids[title] = conversation(title, project_id="p1")
+        say(ids[title], "user", body)
+        say(ids[title], "assistant", f"noted: {body}")
 
-        siblings = [
-            ("Invoice reconciliation", "we settled on idempotency keys for the invoice retry path"),
-            ("Ledger schema", "the postings table needs a composite index on (account_id, posted_at)"),
-        ]
-        for title, body in siblings:
-            conv = await ops.create_conversation(s, "m", title, project_id="p1")
-            ids[title] = conv.id
-            await ops.add_message(s, conv.id, "user", body)
-            await ops.add_message(s, conv.id, "assistant", f"noted: {body}")
+    ids["other"] = conversation("Unrelated")
+    say(ids["other"], "user", "idempotency keys came up here too")
 
-        other = await ops.create_conversation(s, "m", "Unrelated", project_id=None)
-        ids["other"] = other.id
-        await ops.add_message(s, other.id, "user", "idempotency keys came up here too")
+    ids["ghost"] = conversation("Incognito", project_id="p1", ephemeral=True)
+    say(ids["ghost"], "user", "idempotency keys, but off the record")
 
-        ghost = await ops.create_conversation(s, "m", "Incognito", project_id="p1", ephemeral=True)
-        ids["ghost"] = ghost.id
-        await ops.add_message(s, ghost.id, "user", "idempotency keys, but off the record")
-
-        bot = await ops.create_conversation(s, "m", "Telegram", surface="telegram")
-        ids["bot"] = bot.id
-        await ops.add_message(s, bot.id, "user", "idempotency keys over telegram")
+    ids["bot"] = conversation("Telegram", surface="telegram")
+    say(ids["bot"], "user", "idempotency keys over telegram")
     return ids
 
 

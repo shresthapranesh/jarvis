@@ -220,6 +220,50 @@ impl MemoryQuery {
     async fn memory_usage(&self, ctx: &Context<'_>) -> Result<Vec<MemoryItem>> {
         list_memories(ctx.data()?, None).await
     }
+
+    /// The `k` facts nearest `query` by cosine similarity, best first — the
+    /// `jarvis` SDK's `search_memory`. The query is embedded with the app's
+    /// embedder; facts embedded by another model are skipped.
+    async fn search_memory(
+        &self,
+        ctx: &Context<'_>,
+        query: String,
+        #[graphql(default = 5)] k: i32,
+    ) -> Result<Vec<MemoryHit>> {
+        use crate::agent::embed::{Embedder, Space};
+
+        let pool: &SqlitePool = ctx.data()?;
+        let vector = Embedder::resolve(pool)
+            .await
+            .embed(&ctx.data::<EdgeData>()?.http, &query, Space::Query)
+            .await
+            .map_err(|e| format!("embedding the query failed: {e}"))?;
+        let rows: Vec<(String, String, Option<Vec<u8>>)> = sqlx::query_as(
+            "SELECT id, text, embedding FROM memories WHERE kind = 'fact' AND embedding IS NOT NULL ORDER BY rowid",
+        )
+        .fetch_all(pool)
+        .await?;
+        let texts: std::collections::HashMap<&str, &str> = rows.iter().map(|(id, text, _)| (id.as_str(), text.as_str())).collect();
+        let items: Vec<(String, Option<Vec<u8>>)> = rows.iter().map(|(id, _, blob)| (id.clone(), blob.clone())).collect();
+        Ok(crate::agent::retrieve::cosine_ranking(&vector, &items)
+            .into_iter()
+            .take(usize::try_from(k).unwrap_or(0))
+            .map(|(id, score)| MemoryHit {
+                text: texts[id.as_str()].to_string(),
+                id,
+                score: (score * 10_000.0).round() / 10_000.0,
+            })
+            .collect())
+    }
+}
+
+/// One `searchMemory` result.
+#[derive(SimpleObject)]
+pub struct MemoryHit {
+    pub id: String,
+    pub text: String,
+    /// Cosine similarity, to four places.
+    pub score: f64,
 }
 
 #[derive(Default)]

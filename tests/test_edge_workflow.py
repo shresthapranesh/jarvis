@@ -20,6 +20,7 @@ import pytest
 
 from edge_support import _gid, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 from test_edge_loop import MODEL, START, FakeOllama, Reply, _rows, fake  # noqa: F401 — fake is a fixture
+from seed import insert
 from test_edge_runs import WORKFLOW
 
 REPO = Path(__file__).resolve().parent.parent
@@ -30,28 +31,16 @@ RUN = "mutation($id: ID!, $inputs: JSON) { runWorkflow(id: $id, inputs: $inputs)
 async def edge(database, work_dir: Path, fake: FakeOllama, edge_binary: Path):
     """An edge running the agent loop over a fresh database whose default
     model is the fake."""
-    from db import async_session
-    from db.models import ConfigSetting
-
-    async with async_session() as s:
-        s.add(ConfigSetting(key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}])))
-        s.add(ConfigSetting(key="default.model", value=MODEL))
-        await s.commit()
+    insert(database, "config_settings", key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}]))
+    insert(database, "config_settings", key="default.model", value=MODEL)
     env = {"JARVIS_RUN_JOBS": "1", "OLLAMA_HOST": fake.url, "HOME": str(work_dir), "JARVIS_APP_DIR": str(REPO),
            "JARVIS_BROWSER_CDP_URL": "http://127.0.0.1:1"}
     async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env) as client:
         yield client
 
 
-async def _workflow(graph: dict[str, Any]) -> str:
-    from db import async_session
-    from db.models import Workflow
-
-    async with async_session() as s:
-        wf = Workflow(id=str(uuid4()), name="Flow", definition=json.dumps(graph))
-        s.add(wf)
-        await s.commit()
-        return wf.id
+async def _workflow(work_dir: Path, graph: dict[str, Any]) -> str:
+    return insert(work_dir / "database.db", "workflows", id=str(uuid4()), name="Flow", definition=json.dumps(graph))["id"]
 
 
 async def _gql(client, query: str, variables: dict) -> dict:
@@ -87,7 +76,7 @@ async def _until(db: Path, sql: str, *args: Any) -> list[tuple]:
 
 
 async def test_a_branching_graph_runs_in_the_edge(edge, fake, work_dir):
-    wid = await _workflow({
+    wid = await _workflow(work_dir, {
         "nodes": [
             {"id": "s", "type": "start", "config": {"initial_inputs": {"topic": "maps"}}},
             {"id": "a", "type": "agent", "label": "Draft", "config": {"prompt_template": "Summarize {{topic}}",
@@ -133,7 +122,7 @@ async def test_a_branching_graph_runs_in_the_edge(edge, fake, work_dir):
 
 
 async def test_a_run_paused_on_people_is_answered_through_the_edge(edge, fake, work_dir):
-    wid = await _workflow({
+    wid = await _workflow(work_dir, {
         "nodes": [
             {"id": "h", "type": "human_input", "config": {"prompt": "Name?"}},
             {"id": "p", "type": "approval", "config": {"reason": "Ship it for {{answer}}?", "on_deny": "continue"}},
@@ -176,7 +165,7 @@ async def test_a_run_paused_on_people_is_answered_through_the_edge(edge, fake, w
 
 
 async def test_run_workflow_from_a_chat_turn(edge, fake, work_dir):
-    wid = await _workflow({"nodes": [{"id": "n", "type": "agent", "config": {"prompt_template": "Say {{topic}}"}}],
+    wid = await _workflow(work_dir, {"nodes": [{"id": "n", "type": "agent", "config": {"prompt_template": "Say {{topic}}"}}],
                            "edges": []})
     fake.reset([
         Reply(calls=[("run_workflow", {"workflow_id": wid, "inputs_json": json.dumps({"topic": "hi"})})]),

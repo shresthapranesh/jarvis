@@ -119,3 +119,43 @@ def _gid(type_name: str, raw: str) -> str:
     import base64
 
     return base64.b64encode(f"{type_name}:{raw}".encode()).decode()
+
+
+# Run and row ids, which differ between any two runs.
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_RUN_ID = re.compile(r"(?:lc_run--|run-|run--)" + _UUID.pattern + r"(?:-\d+)?")
+_HEX_SUFFIX = re.compile(r"::w(\d+)::[0-9a-f]{8}")
+
+
+class Normalizer:
+    """Replaces ids with stable placeholders, numbered in order of first sight,
+    so two runs that differ only in their random ids compare equal."""
+
+    def __init__(self, names: dict[str, str] | None = None):
+        self._map: dict[str, str] = dict(names or {})
+        self._n = 0
+
+    def _sub(self, m: re.Match[str]) -> str:
+        key = m.group(0)
+        if key not in self._map:
+            self._n += 1
+            prefix = "run" if not _UUID.fullmatch(key) else "id"
+            self._map[key] = f"<{prefix}{self._n}>"
+        return self._map[key]
+
+    def text(self, s: str) -> str:
+        for raw, name in self._map.items():
+            if raw in s and not raw.startswith("<"):
+                s = s.replace(raw, name)
+        s = _RUN_ID.sub(self._sub, s)
+        s = _UUID.sub(self._sub, s)
+        return _HEX_SUFFIX.sub(r"::w\1::<hex>", s)
+
+    def value(self, v: Any) -> Any:
+        if isinstance(v, str):
+            return self.text(v)
+        if isinstance(v, list):
+            return [self.value(x) for x in v]
+        if isinstance(v, dict):
+            return {self.text(k): self.value(x) for k, x in v.items()}
+        return v

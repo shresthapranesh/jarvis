@@ -25,7 +25,8 @@ import httpx
 import pytest
 
 from edge_support import GENERATED, _gid, _relay_text, _run_edge, edge_binary, startup_sweep  # noqa: F401 — edge_binary is a fixture
-from python_golden import recorded
+from python_golden import recorded, started
+from seed import insert
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -67,10 +68,6 @@ PARITY_OPERATIONS = {
 }
 
 
-# Stamps from this session are the test's own writes (see `_mask`).
-SESSION_START = datetime.now(timezone.utc).replace(microsecond=0)
-
-
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
 
@@ -97,44 +94,36 @@ def _ts(*args: int) -> datetime:
 @pytest.fixture
 async def seeded(database) -> dict[str, str]:
     """A small database exercising every shape the slice has to reproduce."""
-    from db import async_session
-    from db.models import Conversation, Message, Project, Step
+    insert(database, "projects",
+        id="p1", name="Thesis", description=None, instructions="cite sources",
+        memory="- prefers APA", created_at=_ts(2026, 3, 1, 9), updated_at=_ts(2026, 3, 2, 9, 30, 0, 250),
+    )
+    insert(database, "projects", id="p2", name="Empty", description="nothing yet", created_at=_ts(2026, 3, 3))
+    # created_at with a zero fraction: isoformat() drops it.
+    insert(database, "conversations", id="c-old", title="old", model="m", created_at=_ts(2026, 1, 1, 10))
+    insert(database, "conversations", id="c-pinned", title=None, model="m", pinned=True, created_at=_ts(2026, 1, 2, 10, 0, 0, 5))
+    insert(database, "conversations", id="c-ghost", title="incognito", model="m", ephemeral=True, created_at=_ts(2026, 1, 3))
+    insert(database, "conversations", id="telegram_1", title="tg", model="m", surface="telegram", created_at=_ts(2026, 1, 4))
+    insert(database, "conversations", id="c-proj", title="in project", model="m", project_id="p1", created_at=_ts(2026, 1, 5, 1, 2, 3, 456789))
 
-    async with async_session() as s:
-        s.add(Project(
-            id="p1", name="Thesis", description=None, instructions="cite sources",
-            memory="- prefers APA", created_at=_ts(2026, 3, 1, 9), updated_at=_ts(2026, 3, 2, 9, 30, 0, 250),
-        ))
-        s.add(Project(id="p2", name="Empty", description="nothing yet", created_at=_ts(2026, 3, 3)))
-        s.add_all([
-            # created_at with a zero fraction: isoformat() drops it.
-            Conversation(id="c-old", title="old", model="m", created_at=_ts(2026, 1, 1, 10)),
-            Conversation(id="c-pinned", title=None, model="m", pinned=True, created_at=_ts(2026, 1, 2, 10, 0, 0, 5)),
-            Conversation(id="c-ghost", title="incognito", model="m", ephemeral=True, created_at=_ts(2026, 1, 3)),
-            Conversation(id="telegram_1", title="tg", model="m", surface="telegram", created_at=_ts(2026, 1, 4)),
-            Conversation(id="c-proj", title="in project", model="m", project_id="p1", created_at=_ts(2026, 1, 5, 1, 2, 3, 456789)),
-        ])
-        tie = _ts(2026, 1, 1, 10, 5, 0, 123456)
-        s.add_all([
-            Message(id="m1", conversation_id="c-old", role="user", content="hi", created_at=_ts(2026, 1, 1, 10, 1)),
-            Message(
-                id="m2", conversation_id="c-old", role="assistant", content="hello", model="m",
-                input_tokens=120, output_tokens=7, ttft_ms=350.5, llm_ms=900.0, prefill_tps=None,
-                eval_tps=38.25, duration_ms=1500.0, created_at=_ts(2026, 1, 1, 10, 2),
-            ),
-            # Two messages on one timestamp: the cursor's id tiebreak decides.
-            Message(id="m3a", conversation_id="c-old", role="user", content="tie a", created_at=tie),
-            Message(id="m3b", conversation_id="c-old", role="user", content="tie b", created_at=tie),
-            Message(id="m4", conversation_id="c-old", role="assistant", content="", status="error", created_at=_ts(2026, 1, 1, 10, 6)),
-            Message(id="m5", conversation_id="c-proj", role="user", content="q", created_at=_ts(2026, 1, 5, 2)),
-        ])
-        # Inserted out of seq order: the Message.steps list is sorted by seq.
-        s.add_all([
-            Step(id="s3", message_id="m2", conversation_id="c-old", node="tools", source="main", data='{"x": 3}', seq=3, created_at=_ts(2026, 1, 1, 10, 1, 30)),
-            Step(id="s1", message_id="m2", conversation_id="c-old", node="model", source="main", seq=1, created_at=_ts(2026, 1, 1, 10, 1, 10)),
-            Step(id="s2", message_id="m2", conversation_id="c-old", node="tools", source="subagent", subagent="researcher:0", data=None, seq=2, created_at=_ts(2026, 1, 1, 10, 1, 20)),
-        ])
-        await s.commit()
+    tie = _ts(2026, 1, 1, 10, 5, 0, 123456)
+    insert(database, "messages", id="m1", conversation_id="c-old", role="user", content="hi", created_at=_ts(2026, 1, 1, 10, 1))
+    insert(database, "messages",
+        id="m2", conversation_id="c-old", role="assistant", content="hello", model="m",
+        input_tokens=120, output_tokens=7, ttft_ms=350.5, llm_ms=900.0, prefill_tps=None,
+        eval_tps=38.25, duration_ms=1500.0, created_at=_ts(2026, 1, 1, 10, 2),
+    )
+    # Two messages on one timestamp: the cursor's id tiebreak decides.
+    insert(database, "messages", id="m3a", conversation_id="c-old", role="user", content="tie a", created_at=tie)
+    insert(database, "messages", id="m3b", conversation_id="c-old", role="user", content="tie b", created_at=tie)
+    insert(database, "messages", id="m4", conversation_id="c-old", role="assistant", content="", status="error", created_at=_ts(2026, 1, 1, 10, 6))
+    insert(database, "messages", id="m5", conversation_id="c-proj", role="user", content="q", created_at=_ts(2026, 1, 5, 2))
+
+    # Inserted out of seq order: the Message.steps list is sorted by seq.
+    insert(database, "steps", id="s3", message_id="m2", conversation_id="c-old", node="tools", source="main", data='{"x": 3}', seq=3, created_at=_ts(2026, 1, 1, 10, 1, 30))
+    insert(database, "steps", id="s1", message_id="m2", conversation_id="c-old", node="model", source="main", seq=1, created_at=_ts(2026, 1, 1, 10, 1, 10))
+    insert(database, "steps", id="s2", message_id="m2", conversation_id="c-old", node="tools", source="subagent", subagent="researcher:0", data=None, seq=2, created_at=_ts(2026, 1, 1, 10, 1, 20))
+
     return {"conversation": "c-old", "project": "p1"}
 
 
@@ -153,7 +142,7 @@ async def _assert_same(client: httpx.AsyncClient, query: str, variables: dict[st
     expected = await recorded()
     resp = await _edge(client, query, variables)
     assert resp.status_code == 200
-    assert _mask(resp.json(), SESSION_START, _dirs) == expected
+    assert _mask(resp.json(), started(), _dirs) == expected
     return expected
 
 
@@ -231,12 +220,6 @@ async def domains(database, work_dir: Path) -> dict[str, str]:
     shapes that are easy to get subtly wrong."""
     from datetime import timedelta
 
-    from db import async_session
-    from db.models import (
-        Approval, Artifact, ArtifactVersion, Automation, AutomationRun, BoardTask, BoardTaskLink,
-        Conversation, Memory, MemoryActivity, NotificationChannel, Skill, Workflow, WorkflowRun,
-    )
-
     art_dir = work_dir / "artifacts"
     art_dir.mkdir(parents=True, exist_ok=True)
     (art_dir / "a-crlf.md").write_bytes(b"# Title\r\nline two\rline three\n")
@@ -245,79 +228,70 @@ async def domains(database, work_dir: Path) -> dict[str, str]:
     (art_dir / "a-binary.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
     now = datetime.now(timezone.utc)
 
-    async with async_session() as s:
-        s.add(Conversation(id="c1", title="t", model="m", created_at=_ts(2026, 2, 1)))
-        s.add_all([
-            Artifact(id="a-crlf", title="Notes", filename=str(art_dir / "a-crlf.md"), conversation_id="c1",
-                     message_id="m-x", created_at=_ts(2026, 2, 1, 1), updated_at=_ts(2026, 2, 1, 3)),
-            Artifact(id="a-binary", title="Chart", filename=str(art_dir / "a-binary.png"), kind="image",
-                     mime_type="image/png", conversation_id="c1", created_at=_ts(2026, 2, 1, 2), updated_at=_ts(2026, 2, 1, 2)),
-            # The file is gone: content reads as "".
-            Artifact(id="a-missing", title="Gone", filename=str(art_dir / "nope.md"), created_at=_ts(2026, 2, 2), updated_at=_ts(2026, 2, 2)),
-            ArtifactVersion(id="v2", artifact_id="a-crlf", version=2, title="Notes", filename=str(art_dir / "a-crlf_v2.md"), created_at=_ts(2026, 2, 1, 3)),
-            ArtifactVersion(id="v1", artifact_id="a-crlf", version=1, title="Notes", filename=str(art_dir / "a-crlf_v1.md"), created_at=_ts(2026, 2, 1, 1)),
-        ])
-        s.add_all([
-            # Day-of-month AND day-of-week, the APScheduler reading.
-            Automation(id="au-and", name="first monday", input_type="prompt", prompt_text="p", schedule="0 9 1 * 1",
-                       created_at=_ts(2026, 1, 1), updated_at=_ts(2026, 1, 2)),
-            Automation(id="au-weekdays", name="weekdays", input_type="monitor", prompt_text="watch", schedule="30 8 * * 1-5",
-                       notifications='[{"channel": "x"}]', created_at=_ts(2026, 1, 2), updated_at=_ts(2026, 1, 2)),
-            Automation(id="au-off", name="disabled", input_type="code", code_text="print(1)", schedule="0 9 * * *",
-                       enabled=False, stateful=True, created_at=_ts(2026, 1, 3), updated_at=_ts(2026, 1, 3)),
-            Automation(id="au-hook", name="hook", input_type="webhook", webhook_url="http://x", webhook_method="POST",
-                       webhook_headers='{"a": "b"}', webhook_body="{}", schedule="not a cron",
-                       created_at=_ts(2026, 1, 4), updated_at=_ts(2026, 1, 4)),
-            AutomationRun(id="r-old", automation_id="au-and", status="done", triggered_by="schedule", output="o",
-                          started_at=now - timedelta(days=9), finished_at=now - timedelta(days=9)),
-            AutomationRun(id="r-ok", automation_id="au-and", status="no_change", triggered_by="schedule",
-                          started_at=now - timedelta(days=3), finished_at=now - timedelta(days=3)),
-            AutomationRun(id="r-err", automation_id="au-and", status="error", triggered_by="manual", error="boom",
-                          started_at=now - timedelta(days=1)),
-            AutomationRun(id="r-w", automation_id="au-weekdays", status="running", triggered_by="manual",
-                          started_at=now - timedelta(hours=1)),
-        ])
-        s.add_all([
-            BoardTask(id="b-root", title="ship", priority=5, status="todo", created_at=_ts(2026, 3, 1)),
-            BoardTask(id="b-a", title="part a", body="do a", priority=5, status="done", summary="did a",
-                      result_metadata='{"k": 1}', job_id="job-1", started_at=_ts(2026, 3, 1, 1), finished_at=_ts(2026, 3, 1, 2),
-                      created_at=_ts(2026, 3, 1, 0, 0, 1)),
-            BoardTask(id="b-b", title="part b", priority=9, status="blocked", blocked_reason="?", blocked_kind="needs_input",
-                      failure_count=2, created_by="agent", model="m", skill="s", created_at=_ts(2026, 3, 2)),
-            BoardTask(id="b-arch", title="old", status="archived", created_at=_ts(2026, 2, 1)),
-            BoardTaskLink(id="l1", parent_id="b-a", child_id="b-root"),
-            BoardTaskLink(id="l2", parent_id="b-b", child_id="b-root"),
-        ])
-        s.add_all([
-            Workflow(id="w1", name="flow", definition='{"nodes": [], "edges": []}', created_at=_ts(2026, 4, 1), updated_at=_ts(2026, 4, 2)),
-            Workflow(id="w2", name="flow 2", description="d", notifications="[]", created_at=_ts(2026, 4, 3), updated_at=_ts(2026, 4, 3)),
-            WorkflowRun(id="wr1", workflow_id="w1", status="done", inputs='{"a": 1}', outputs="{}", node_results="[]",
-                        started_at=_ts(2026, 4, 2, 1), finished_at=_ts(2026, 4, 2, 2)),
-            WorkflowRun(id="wr2", workflow_id="w1", status="error", error="x", started_at=_ts(2026, 4, 2, 3)),
-        ])
-        s.add_all([
-            NotificationChannel(id="n2", name="discord", type="discord", target="123", created_at=_ts(2026, 5, 2)),
-            NotificationChannel(id="n1", name="tg", type="telegram", target="-100", created_at=_ts(2026, 5, 1)),
-            Skill(id="s2", name="zeta", description="z", body="Z", enabled=False, created_at=_ts(2026, 5, 1)),
-            Skill(id="s1", name="alpha", description="a", body="A", created_at=_ts(2026, 5, 1)),
-        ])
-        s.add_all([
-            Approval(id="ap-block", source="chat", kind="approval", question="delete?", label="Delete", tool="rm",
-                     args_json='{"p": 1}', parent_id="c1", requested_at=_ts(2026, 6, 1, 1, 0, 0, 5),
-                     updated_at=_ts(2026, 6, 1, 1, 0, 0, 5)),
-            Approval(id="ap-deferred", source="deferred", action="delete_workflow", requested_at=_ts(2026, 6, 1, 2),
-                     updated_at=_ts(2026, 6, 1, 2)),
-            Approval(id="ap-done", source="chat", status="approved", requested_at=_ts(2026, 6, 1, 3),
-                     updated_at=_ts(2026, 6, 1, 3)),
-        ])
-        s.add_all([
-            Memory(id="mem-core", kind="core", text="name is Sam", updated_at=_ts(2026, 7, 1)),
-            Memory(id="mem-fact", kind="fact", text="likes tea", updated_at=_ts(2026, 7, 2, 0, 0, 0, 120)),
-            MemoryActivity(id="ma1", memory_id="mem-fact", kind="fact", score=0.81, query="drinks", source="retrieval",
-                           conversation_id="c1", accessed_at=_ts(2026, 7, 3)),
-            MemoryActivity(id="ma2", memory_id="mem-fact", kind="fact", source="explicit_search", accessed_at=_ts(2026, 7, 4, 1, 2, 3, 4)),
-        ])
-        await s.commit()
+    insert(database, "conversations", id="c1", title="t", model="m", created_at=_ts(2026, 2, 1))
+    insert(database, "artifacts", id="a-crlf", title="Notes", filename=str(art_dir / "a-crlf.md"), conversation_id="c1",
+           message_id="m-x", created_at=_ts(2026, 2, 1, 1), updated_at=_ts(2026, 2, 1, 3))
+    insert(database, "artifacts", id="a-binary", title="Chart", filename=str(art_dir / "a-binary.png"), kind="image",
+           mime_type="image/png", conversation_id="c1", created_at=_ts(2026, 2, 1, 2), updated_at=_ts(2026, 2, 1, 2))
+    # The file is gone: content reads as "".
+    insert(database, "artifacts", id="a-missing", title="Gone", filename=str(art_dir / "nope.md"), created_at=_ts(2026, 2, 2), updated_at=_ts(2026, 2, 2))
+    insert(database, "artifact_versions", id="v2", artifact_id="a-crlf", version=2, title="Notes", filename=str(art_dir / "a-crlf_v2.md"), created_at=_ts(2026, 2, 1, 3))
+    insert(database, "artifact_versions", id="v1", artifact_id="a-crlf", version=1, title="Notes", filename=str(art_dir / "a-crlf_v1.md"), created_at=_ts(2026, 2, 1, 1))
+
+    # Day-of-month AND day-of-week, the APScheduler reading.
+    insert(database, "automations", id="au-and", name="first monday", input_type="prompt", prompt_text="p", schedule="0 9 1 * 1",
+           created_at=_ts(2026, 1, 1), updated_at=_ts(2026, 1, 2))
+    insert(database, "automations", id="au-weekdays", name="weekdays", input_type="monitor", prompt_text="watch", schedule="30 8 * * 1-5",
+           notifications='[{"channel": "x"}]', created_at=_ts(2026, 1, 2), updated_at=_ts(2026, 1, 2))
+    insert(database, "automations", id="au-off", name="disabled", input_type="code", code_text="print(1)", schedule="0 9 * * *",
+           enabled=False, stateful=True, created_at=_ts(2026, 1, 3), updated_at=_ts(2026, 1, 3))
+    insert(database, "automations", id="au-hook", name="hook", input_type="webhook", webhook_url="http://x", webhook_method="POST",
+           webhook_headers='{"a": "b"}', webhook_body="{}", schedule="not a cron",
+           created_at=_ts(2026, 1, 4), updated_at=_ts(2026, 1, 4))
+    insert(database, "automation_runs", id="r-old", automation_id="au-and", status="done", triggered_by="schedule", output="o",
+           started_at=now - timedelta(days=9), finished_at=now - timedelta(days=9))
+    insert(database, "automation_runs", id="r-ok", automation_id="au-and", status="no_change", triggered_by="schedule",
+           started_at=now - timedelta(days=3), finished_at=now - timedelta(days=3))
+    insert(database, "automation_runs", id="r-err", automation_id="au-and", status="error", triggered_by="manual", error="boom",
+           started_at=now - timedelta(days=1))
+    insert(database, "automation_runs", id="r-w", automation_id="au-weekdays", status="running", triggered_by="manual",
+           started_at=now - timedelta(hours=1))
+
+    insert(database, "board_tasks", id="b-root", title="ship", priority=5, status="todo", created_at=_ts(2026, 3, 1))
+    insert(database, "board_tasks", id="b-a", title="part a", body="do a", priority=5, status="done", summary="did a",
+           result_metadata='{"k": 1}', job_id="job-1", started_at=_ts(2026, 3, 1, 1), finished_at=_ts(2026, 3, 1, 2),
+           created_at=_ts(2026, 3, 1, 0, 0, 1))
+    insert(database, "board_tasks", id="b-b", title="part b", priority=9, status="blocked", blocked_reason="?", blocked_kind="needs_input",
+           failure_count=2, created_by="agent", model="m", skill="s", created_at=_ts(2026, 3, 2))
+    insert(database, "board_tasks", id="b-arch", title="old", status="archived", created_at=_ts(2026, 2, 1))
+    insert(database, "board_task_links", id="l1", parent_id="b-a", child_id="b-root")
+    insert(database, "board_task_links", id="l2", parent_id="b-b", child_id="b-root")
+
+    insert(database, "workflows", id="w1", name="flow", definition='{"nodes": [], "edges": []}', created_at=_ts(2026, 4, 1), updated_at=_ts(2026, 4, 2))
+    insert(database, "workflows", id="w2", name="flow 2", description="d", notifications="[]", created_at=_ts(2026, 4, 3), updated_at=_ts(2026, 4, 3))
+    insert(database, "workflow_runs", id="wr1", workflow_id="w1", status="done", inputs='{"a": 1}', outputs="{}", node_results="[]",
+           started_at=_ts(2026, 4, 2, 1), finished_at=_ts(2026, 4, 2, 2))
+    insert(database, "workflow_runs", id="wr2", workflow_id="w1", status="error", error="x", started_at=_ts(2026, 4, 2, 3))
+
+    insert(database, "notification_channels", id="n2", name="discord", type="discord", target="123", created_at=_ts(2026, 5, 2))
+    insert(database, "notification_channels", id="n1", name="tg", type="telegram", target="-100", created_at=_ts(2026, 5, 1))
+    insert(database, "skills", id="s2", name="zeta", description="z", body="Z", enabled=False, created_at=_ts(2026, 5, 1))
+    insert(database, "skills", id="s1", name="alpha", description="a", body="A", created_at=_ts(2026, 5, 1))
+
+    insert(database, "approvals", id="ap-block", source="chat", kind="approval", question="delete?", label="Delete", tool="rm",
+           args_json='{"p": 1}', parent_id="c1", requested_at=_ts(2026, 6, 1, 1, 0, 0, 5),
+           updated_at=_ts(2026, 6, 1, 1, 0, 0, 5))
+    insert(database, "approvals", id="ap-deferred", source="deferred", action="delete_workflow", requested_at=_ts(2026, 6, 1, 2),
+           updated_at=_ts(2026, 6, 1, 2))
+    insert(database, "approvals", id="ap-done", source="chat", status="approved", requested_at=_ts(2026, 6, 1, 3),
+           updated_at=_ts(2026, 6, 1, 3))
+
+    insert(database, "memories", id="mem-core", kind="core", text="name is Sam", updated_at=_ts(2026, 7, 1))
+    insert(database, "memories", id="mem-fact", kind="fact", text="likes tea", updated_at=_ts(2026, 7, 2, 0, 0, 0, 120))
+    insert(database, "memory_activities", id="ma1", memory_id="mem-fact", kind="fact", score=0.81, query="drinks", source="retrieval",
+           conversation_id="c1", accessed_at=_ts(2026, 7, 3))
+    insert(database, "memory_activities", id="ma2", memory_id="mem-fact", kind="fact", source="explicit_search", accessed_at=_ts(2026, 7, 4, 1, 2, 3, 4))
+
     return {}
 
 
@@ -408,8 +382,8 @@ RECENT = timedelta(days=30)
 
 def _mask(value: Any, since: datetime, dirs: tuple[str, ...]) -> Any:
     """Replace what legitimately differs between the recording and this run:
-    paths, fresh uuids, and stamps written during the session (`<now>`) or
-    seeded relative to it (`<recent>`)."""
+    paths, fresh uuids, and stamps written during the test (`<now>`, at or after
+    `since`) or seeded relative to its start (`<recent>`)."""
     import base64
 
     if isinstance(value, dict):
@@ -459,7 +433,7 @@ class Twin:
         self.dirs = (str(a_dir), str(b_dir))
         # Anything stamped during this session was written by the test — a
         # seed's default, or a mutation — at a time no recording can share.
-        self.since = SESSION_START
+        self.since = started()
 
     async def run(
         self, query: str, variables: dict[str, Any] | None = None, *, edge_variables: dict[str, Any] | None = None,
@@ -488,23 +462,14 @@ class Twin:
 
 
 @pytest.fixture
-async def twin(seeded, domains, work_dir: Path, tmp_path_factory, edge_binary: Path, one_zone):
+async def twin(seeded, domains, database: Path, work_dir: Path, tmp_path_factory, edge_binary: Path, one_zone):
     import sqlite3
 
-    from core.transcript_store import import_store_once
-    from db import async_session
-    from db.models import Artifact
-
-    async with async_session() as s:
-        # One markdown artifact with a live file and no history (the v1
-        # migration path).
-        (work_dir / "artifacts" / "a-plain.md").write_bytes(b"old\r\nbody")
-        s.add(Artifact(id="a-plain", title="Plain", filename=str(work_dir / "artifacts" / "a-plain.md"),
-                       created_at=_ts(2026, 2, 3), updated_at=_ts(2026, 2, 3)))
-        await s.commit()
-    async with async_session() as s:
-        # A started server's database: the LangGraph store import has run.
-        await import_store_once(s, str(work_dir / "checkpoints.db"))
+    # One markdown artifact with a live file and no history (the v1
+    # migration path).
+    (work_dir / "artifacts" / "a-plain.md").write_bytes(b"old\r\nbody")
+    insert(database, "artifacts", id="a-plain", title="Plain", filename=str(work_dir / "artifacts" / "a-plain.md"),
+           created_at=_ts(2026, 2, 3), updated_at=_ts(2026, 2, 3))
 
     # As the edge's start would leave it, on both sides.
     startup_sweep(edge_binary, work_dir, work_dir / "database.db")

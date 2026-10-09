@@ -23,6 +23,7 @@ import pytest
 
 from edge_support import _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 from python_golden import recorded
+from seed import insert
 
 CHAT = """subscription($id: String!) { taskEvents(taskId: $id) { __typename
   ... on TokenEvent { text source } ... on ThinkingTokenEvent { text source }
@@ -178,29 +179,28 @@ async def test_a_finished_run_replays_identically(database, edge_binary, query):
 
 
 @pytest.fixture
-async def finished_rows(database):
+async def finished_rows(database: Path):
     from datetime import datetime, timezone
 
-    from db import async_session
-    from db.models import AutomationRun, BoardTask, Conversation, Message, Workflow, WorkflowRun
-
     at = datetime(2026, 5, 1, tzinfo=timezone.utc)
-    async with async_session() as s:
-        s.add(Conversation(id="c1", model="m", created_at=at))
-        s.add_all([
-            Message(id="m-done", conversation_id="c1", role="assistant", content="answer", status="done", created_at=at),
-            Message(id="m-err", conversation_id="c1", role="assistant", content="", status="error", created_at=at),
-            Message(id="m-running", conversation_id="c1", role="assistant", content="", status="running", created_at=at),
-            AutomationRun(id="ar-done", automation_id="a", status="done", triggered_by="manual", output="out", started_at=at),
-            AutomationRun(id="ar-err", automation_id="a", status="error", triggered_by="manual", error="", started_at=at),
-            Workflow(id="w", name="w", created_at=at, updated_at=at),
-            WorkflowRun(id="wr-done", workflow_id="w", status="done", outputs='{"k": [1, 2.0]}', started_at=at),
-            WorkflowRun(id="wr-err", workflow_id="w", status="error", error="bad", started_at=at),
-            BoardTask(id="b1", title="t", status="done", summary="did it", job_id="job-done", created_at=at, updated_at=at),
-            BoardTask(id="b2", title="t", status="blocked", blocked_reason=None, job_id="job-blocked", created_at=at,
-                      updated_at=at),
-        ])
-        await s.commit()
+    for table, row in [
+        ("conversations", dict(id="c1", model="m", created_at=at)),
+        ("messages", dict(id="m-done", conversation_id="c1", role="assistant", content="answer", status="done", created_at=at)),
+        ("messages", dict(id="m-err", conversation_id="c1", role="assistant", content="", status="error", created_at=at)),
+        ("messages", dict(id="m-running", conversation_id="c1", role="assistant", content="", status="running", created_at=at)),
+        ("automation_runs", dict(id="ar-done", automation_id="a", status="done", triggered_by="manual", output="out",
+                                 started_at=at)),
+        ("automation_runs", dict(id="ar-err", automation_id="a", status="error", triggered_by="manual", error="",
+                                 started_at=at)),
+        ("workflows", dict(id="w", name="w", created_at=at, updated_at=at)),
+        ("workflow_runs", dict(id="wr-done", workflow_id="w", status="done", outputs='{"k": [1, 2.0]}', started_at=at)),
+        ("workflow_runs", dict(id="wr-err", workflow_id="w", status="error", error="bad", started_at=at)),
+        ("board_tasks", dict(id="b1", title="t", status="done", summary="did it", job_id="job-done", created_at=at,
+                             updated_at=at)),
+        ("board_tasks", dict(id="b2", title="t", status="blocked", blocked_reason=None, job_id="job-blocked",
+                             created_at=at, updated_at=at)),
+    ]:
+        insert(database, table, **row)
 
 
 @pytest.mark.parametrize("query, run_id", [

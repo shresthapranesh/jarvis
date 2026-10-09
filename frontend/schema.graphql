@@ -340,6 +340,18 @@ type MemoryActivity {
 }
 
 """
+One `searchMemory` result.
+"""
+type MemoryHit {
+	id: String!
+	text: String!
+	"""
+	Cosine similarity, to four places.
+	"""
+	score: Float!
+}
+
+"""
 One discrete memory (kind = core | fact). Raw DB id; `updatedAt` is a
 plain string here, not the `DateTime` scalar, as in the Python type.
 """
@@ -740,6 +752,12 @@ type Query {
 	Every memory, for the usage overview — same rows as `memories`.
 	"""
 	memoryUsage: [MemoryItem!]!
+	"""
+	The `k` facts nearest `query` by cosine similarity, best first — the
+	`jarvis` SDK's `search_memory`. The query is embedded with the app's
+	embedder; facts embedded by another model are skipped.
+	"""
+	searchMemory(query: String!, k: Int! = 5): [MemoryHit!]!
 	"""
 	All currently-tracked in-flight tasks, newest first.
 	"""

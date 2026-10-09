@@ -7,7 +7,7 @@ pure helpers behind `jarvis.project_memory(action="append")` — no DB needed.
 
 from __future__ import annotations
 
-from core.text_dedupe import dedupe_against, is_heading, normalize_entry
+from tools.text_dedupe import dedupe_against, is_heading, normalize_entry
 
 EXISTING = """## Stack
 - This project uses FastAPI + Strawberry GraphQL on the backend

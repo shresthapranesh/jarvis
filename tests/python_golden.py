@@ -25,7 +25,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +113,7 @@ _stores: dict[str, _Store] = {}
 class _Current:
     def __init__(self, store: _Store, test: str) -> None:
         self.store, self.test, self.n = store, test, 0
+        self.started = datetime.now(timezone.utc).replace(microsecond=0)
 
 
 # Tests run one at a time; async fixtures and helpers run in tasks of their
@@ -129,6 +130,14 @@ def _python_golden(request):
     yield
     _current = None
     store.save()
+
+
+def started() -> datetime:
+    """When the running test began, before any of its fixtures: a stamp at or
+    after it was written by the test (`<now>` in a recording), one seeded
+    relative to it is older."""
+    assert _current is not None, "started() outside a test"
+    return _current.started
 
 
 def _next(compute: Any) -> tuple[_Current, int, bool]:

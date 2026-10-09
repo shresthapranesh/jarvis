@@ -34,9 +34,9 @@ from typing import Any
 
 import pytest
 
-from agent_harness import Normalizer
-from edge_support import _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
+from edge_support import Normalizer, _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
 from python_golden import RECORD, portable, recorded
+from seed import insert, set_setting
 from test_edge_llm import _intended_ollama, _semantics
 from test_edge_runs import AUTOMATION, BOARD, CHAT
 
@@ -246,49 +246,36 @@ class Turn:
 
 
 @pytest.fixture
-async def twins(request, jarvis, work_dir: Path, tmp_path_factory, fake: FakeOllama, monkeypatch, edge_binary: Path):
+async def twins(request, database: Path, work_dir: Path, tmp_path_factory, fake: FakeOllama, monkeypatch,
+                edge_binary: Path):
     """Python's database at `work_dir` — its recorded runs are put back into
     it — and an edge over a copy, pointed at `fake` and at a CDP port nothing
     listens on. Parametrized indirectly, it sets those environment variables
-    in both. Python's memory sweeps (`core/`) still run here, live."""
-    from core import agents, embeddings, memory_store
-    from db import async_session
-    from db.models import ConfigSetting, Conversation, ConversationEpisode, Memory, Project
-    from db.ops import hydrate_catalog
-
+    for the edge."""
     dead = f"http://127.0.0.1:{_free_port()}"
     # `{fake}` in a value is the fake server's URL.
     extra = {k: v.replace("{fake}", fake.url) for k, v in (getattr(request, "param", None) or {}).items()}
     for key, value in extra.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("OLLAMA_HOST", fake.url)
-    # Python's embedder is Ollama's — the fake — as the edge's is.
+    # The edge's embedder is Ollama's — the fake — as Python's was.
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    embeddings._embedder_cache.clear()
-    embeddings._query_cache.clear()
-    memory_store._core_cache.update(text=None, ts=0.0)
     monkeypatch.setenv("JARVIS_BROWSER_CDP_URL", dead)
-    agents._browser_probe = (0.0, False)
-    agents._retrieval_cache.clear()
-    agents.invalidate_agent_cache()
-    async with async_session() as s:
-        s.add(ConfigSetting(key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}])))
-        s.add(Project(id="p1", name="Atlas", description="Maps.", instructions="Be brief.", memory="Uses Rust."))
-        # Fixed, distinct times: memories are listed by them.
-        for i, text in enumerate(["The user's favourite colour is green", "The user deploys the rust edge",
-                                  "Lunch is at noon"]):
-            at = datetime(2026, 9, 1, 12, i, tzinfo=timezone.utc)
-            s.add(Memory(id=f"m{i}", kind="fact", text=text, embedding=fake_blob(text), created_at=at, updated_at=at))
-        at = datetime(2026, 9, 1, 11, tzinfo=timezone.utc)
-        s.add(Memory(id="core1", kind="core", text="The user is called Sam", embedding=fake_blob("sam"),
-                     created_at=at, updated_at=at))
-        # An episode compacted out of an existing conversation.
-        s.add(Conversation(id="c-old", title="Old", model=MODEL))
-        s.add(ConversationEpisode(id="e1", conversation_id="c-old", text="We chose green for the river maps.",
-                                  embedding=fake_blob("green river maps"),
-                                  created_at=datetime(2026, 10, 1, 9, 30, tzinfo=timezone.utc)))
-        await s.commit()
-        await hydrate_catalog(s)
+    insert(database, "config_settings", key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}]))
+    insert(database, "projects", id="p1", name="Atlas", description="Maps.", instructions="Be brief.", memory="Uses Rust.")
+    # Fixed, distinct times: memories are listed by them.
+    for i, text in enumerate(["The user's favourite colour is green", "The user deploys the rust edge",
+                              "Lunch is at noon"]):
+        at = datetime(2026, 9, 1, 12, i, tzinfo=timezone.utc)
+        insert(database, "memories", id=f"m{i}", kind="fact", text=text, embedding=fake_blob(text), created_at=at, updated_at=at)
+    at = datetime(2026, 9, 1, 11, tzinfo=timezone.utc)
+    insert(database, "memories", id="core1", kind="core", text="The user is called Sam", embedding=fake_blob("sam"),
+           created_at=at, updated_at=at)
+    # An episode compacted out of an existing conversation.
+    insert(database, "conversations", id="c-old", title="Old", model=MODEL)
+    insert(database, "conversation_episodes", id="e1", conversation_id="c-old", text="We chose green for the river maps.",
+           embedding=fake_blob("green river maps"),
+           created_at=datetime(2026, 10, 1, 9, 30, tzinfo=timezone.utc))
 
     edge_dir = tmp_path_factory.mktemp("edge")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
@@ -299,12 +286,11 @@ async def twins(request, jarvis, work_dir: Path, tmp_path_factory, fake: FakeOll
            "HOME": str(edge_dir), "JARVIS_APP_DIR": str(REPO), **extra}
     global _twins
     async with _run_edge(edge_binary, edge_dir, edge_dir / "database.db", env) as client:
-        _twins = Twins(jarvis, client, work_dir / "database.db", edge_dir / "database.db", fake)
+        _twins = Twins(client, work_dir / "database.db", edge_dir / "database.db", fake)
         try:
             yield _twins
         finally:
             _twins = None
-    agents.invalidate_agent_cache()
 
 
 def _dump_all(db: Path) -> dict[str, list[dict]]:
@@ -386,8 +372,8 @@ def _unturn(d: dict[str, Any], db: Path) -> Turn:
 
 
 class Twins:
-    def __init__(self, jarvis: Any, client: Any, python_db: Path, edge_db: Path, fake: FakeOllama):
-        self.jarvis, self.client, self.python_db, self.edge_db, self.fake = jarvis, client, python_db, edge_db, fake
+    def __init__(self, client: Any, python_db: Path, edge_db: Path, fake: FakeOllama):
+        self.client, self.python_db, self.edge_db, self.fake = client, python_db, edge_db, fake
 
     async def python(self, query: str, script: list[Reply], **_: Any) -> tuple[Turn, list[dict]]:
         """Python's turn on `query` — `register_chat_task`, then its job — as
@@ -417,24 +403,14 @@ class Twins:
 
     async def automation(self, **fields: Any) -> str:
         """An automation in both databases, under one id."""
-        from db import async_session
-        from db.models import Automation
-
-        auto = Automation(id=fields.pop("id", "auto-1"), name=fields.pop("name", "Daily"), model=MODEL, **fields)
-        async with async_session() as s:
-            s.add(auto)
-            await s.commit()
-        _copy(self.python_db, self.edge_db, "automations", auto.id)
-        return auto.id
+        auto_id = insert(self.python_db, "automations", id=fields.pop("id", "auto-1"), name=fields.pop("name", "Daily"),
+                         model=MODEL, **fields)["id"]
+        _copy(self.python_db, self.edge_db, "automations", auto_id)
+        return auto_id
 
     async def channel(self, channel_id: str, target: str) -> None:
         """A Telegram notification channel in both databases."""
-        from db import async_session
-        from db.models import NotificationChannel
-
-        async with async_session() as s:
-            s.add(NotificationChannel(id=channel_id, name="phone", type="telegram", target=target))
-            await s.commit()
+        insert(self.python_db, "notification_channels", id=channel_id, name="phone", type="telegram", target=target)
         _copy(self.python_db, self.edge_db, "notification_channels", channel_id)
 
     async def python_automation(self, auto_id: str, script: list[Reply], **_: Any) -> tuple[Turn, list[dict], list[dict]]:
@@ -469,18 +445,13 @@ class Twins:
         `both` (a finished parent); a task to run reaches the edge's only
         when its turn comes (`edge_board`), or its dispatcher would start it
         early."""
-        from db import async_session
-        from db.models import BoardTask, BoardTaskLink
-
-        task = BoardTask(id=fields.pop("id"), title=fields.pop("title", "Task"), model=MODEL, **fields)
-        async with async_session() as s:
-            s.add(task)
-            for i, parent in enumerate(parents):
-                s.add(BoardTaskLink(id=f"{parent}->{task.id}", parent_id=parent, child_id=task.id))
-            await s.commit()
+        task_id = insert(self.python_db, "board_tasks", id=fields.pop("id"), title=fields.pop("title", "Task"),
+                         model=MODEL, **fields)["id"]
+        for parent in parents:
+            insert(self.python_db, "board_task_links", id=f"{parent}->{task_id}", parent_id=parent, child_id=task_id)
         if both:
-            _copy(self.python_db, self.edge_db, "board_tasks", task.id)
-        return task.id
+            _copy(self.python_db, self.edge_db, "board_tasks", task_id)
+        return task_id
 
     async def python_board(self, task_id: str, script: list[Reply], **_: Any) -> tuple[Turn, list[dict]]:
         """Python's dispatcher starting the task and its handler running it,
@@ -772,21 +743,14 @@ async def test_remember(twins):
 
 
 async def test_a_large_skill_catalog_is_ranked(twins):
-    from db import async_session
-    from db.models import Skill
-
     names = ["deploy-app", "review-code", "brew-tea", "make-coffee", "draw-maps", "river-facts", "lunch-plan",
              "colour-pick", "rust-help", "edge-ops"]
-    rows = [Skill(id=f"s{i}", name=n, description=f"How to {n.replace('-', ' ')}", body="...",
-                  embedding=fake_blob(n.replace("-", " "))) for i, n in enumerate(names)]
-    async with async_session() as s:
-        s.add_all(rows)
-        await s.commit()
-    with contextlib.closing(sqlite3.connect(twins.edge_db)) as c:
-        c.executemany("INSERT INTO skills (id, name, description, body, enabled, embedding, created_at, updated_at) "
-                      "VALUES (?, ?, ?, ?, 1, ?, '2026-10-04 00:00:00.000000', '2026-10-04 00:00:00.000000')",
-                      [(r.id, r.name, r.description, r.body, r.embedding) for r in rows])
-        c.commit()
+    for i, n in enumerate(names):
+        skill = dict(id=f"s{i}", name=n, description=f"How to {n.replace('-', ' ')}", body="...",
+                     embedding=fake_blob(n.replace("-", " ")))
+        insert(twins.python_db, "skills", **skill)
+        insert(twins.edge_db, "skills", **skill, created_at="2026-10-04 00:00:00.000000",
+               updated_at="2026-10-04 00:00:00.000000")
     python, edge = await _both(twins, "how should I brew tea or coffee", [Reply("Steep it.")])
     assert edge == python
     # Uncached (Ollama): the volatile sections are in the one system message.
@@ -1236,17 +1200,16 @@ def _approvals_of(db: Path, norm: Normalizer) -> list:
 
 
 async def _gate_run_cell(twins: Twins) -> None:
-    """`bound:run_cell` needs a human's yes, in both databases."""
-    from core import tool_policy
-    from db import async_session
+    """`bound:run_cell` needs a human's yes, in both databases — the
+    `tools.policy` row as Python's `set_tool_policy` stored it."""
+    _policy(twins, "bound:run_cell")
 
-    async with async_session() as s:
-        await tool_policy.set_tool_policy(s, "bound:run_cell", approval=True)
-    with contextlib.closing(sqlite3.connect(twins.python_db)) as a, contextlib.closing(sqlite3.connect(twins.edge_db)) as b:
-        cur = a.execute("SELECT * FROM config_settings WHERE key = 'tools.policy'")
-        cols = [d[0] for d in cur.description]
-        b.execute(f"INSERT INTO config_settings ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", cur.fetchone())
-        b.commit()
+
+def _policy(twins: Twins, key: str) -> None:
+    """`key` needs a human's yes, in both databases."""
+    value = json.dumps({key: {"enabled": True, "approval": True}})
+    for db in (twins.python_db, twins.edge_db):
+        set_setting(db, "tools.policy", value)
 
 
 async def _answer_when_asked(db: Path, answer: Any) -> None:
@@ -1346,17 +1309,8 @@ async def test_mcp_tools_bound_and_advertised(twins):
 
 
 async def test_a_gated_mcp_tool_runs_once_approved(twins):
-    from core import tool_policy
-    from db import async_session
-
     await _mcp(twins)
-    async with async_session() as s:
-        await tool_policy.set_tool_policy(s, "mcp:echo/echo", approval=True)
-    [(policy,)] = _rows(twins.python_db, "SELECT value FROM config_settings WHERE key = 'tools.policy'")
-    with contextlib.closing(sqlite3.connect(twins.edge_db)) as c:
-        c.execute("INSERT INTO config_settings (key, value, updated_at) VALUES ('tools.policy', ?, '2026-01-01 00:00:00')",
-                  (policy,))
-        c.commit()
+    _policy(twins, "mcp:echo/echo")
     script = [Reply("", [("echo", {"text": "gated"})]), Reply("Echoed.")]
     python, edge = await _both_gated(twins, "echo it", script, "approve")
     assert _unid(edge) == _unid(python)
@@ -1471,8 +1425,10 @@ async def test_memory_and_skill_writes_through_the_edge(twins):
     norms = {"python": Normalizer(), "edge": Normalizer()}
 
     def shape(side: str, out: dict) -> Any:
-        # Timestamps by their shape only.
-        return json.loads(re.sub(r"\d{2}:\d{2}:\d{2}\.\d+", "<time>", json.dumps(norms[side].value(out))))
+        # Timestamps written now by their shape only — not even the date,
+        # which isn't the day Python's answers were recorded.
+        return json.loads(re.sub(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+", "<date>T<time>",
+                                 json.dumps(norms[side].value(out))))
 
     async def both(query: str, variables: dict) -> None:
         python = await _python_gql(query, variables)

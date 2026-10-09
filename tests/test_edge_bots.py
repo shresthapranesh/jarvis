@@ -22,9 +22,10 @@ from typing import Any
 import pytest
 
 from edge_support import _free_port, _run_edge, edge_binary, until  # noqa: F401 — edge_binary is a fixture
-from python_golden import recorded
+from python_golden import recorded, started
+from seed import insert
 from test_edge_loop import MODEL, FakeOllama, Reply, fake  # noqa: F401 — fake is a fixture
-from test_edge_parity import SESSION_START, _dump, _mask
+from test_edge_parity import _dump, _mask
 
 REPO = Path(__file__).resolve().parent.parent
 _until = until
@@ -205,19 +206,15 @@ async def _true(value: bool) -> bool:
     return value
 
 
-async def _allow() -> None:
-    from db import async_session
-    from db.models import ConfigSetting
-
-    async with async_session() as s:
-        s.add_all([
-            ConfigSetting(key="telegram.allowed_users", value="42, 43"),
-            ConfigSetting(key="discord.allowed_users", value="7"),
-            # Turns run on the fake model.
-            ConfigSetting(key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}])),
-            ConfigSetting(key="default.model", value=MODEL),
-        ])
-        await s.commit()
+def _allow(db: Path) -> None:
+    for key, value in [
+        ("telegram.allowed_users", "42, 43"),
+        ("discord.allowed_users", "7"),
+        # Turns run on the fake model.
+        ("models.custom", json.dumps([{"id": MODEL, "label": "Fake"}])),
+        ("default.model", MODEL),
+    ]:
+        insert(db, "config_settings", key=key, value=value)
 
 
 @pytest.fixture
@@ -256,7 +253,7 @@ class Bots:
 
 @pytest.fixture
 async def bots(database, work_dir: Path, edge_binary: Path, chat: FakeChat, fake: FakeOllama):
-    await _allow()
+    _allow(database)
     env = {**chat.env(), "JARVIS_RUN_JOBS": "1", "OLLAMA_HOST": fake.url, "JARVIS_APP_DIR": str(REPO),
            "HOME": str(work_dir), "JARVIS_BROWSER_CDP_URL": f"http://127.0.0.1:{_free_port()}"}
     harness = Bots(fake)
@@ -348,7 +345,7 @@ async def test_telegram_voice_notes_and_photos_are_text_only(bots, chat, work_di
 async def test_telegram_writes_what_python_writes(database, work_dir, tmp_path_factory, edge_binary, chat):
     """The edge's bot on a copy of the test database writes what Python's
     handlers wrote. Nothing runs the turn."""
-    await _allow()
+    _allow(database)
     b_dir = tmp_path_factory.mktemp("twin")
     with contextlib.closing(sqlite3.connect(work_dir / "database.db")) as src, \
             contextlib.closing(sqlite3.connect(b_dir / "database.db")) as dst:
@@ -374,7 +371,7 @@ async def test_telegram_writes_what_python_writes(database, work_dir, tmp_path_f
 
     b = _dump(b_dir / "database.db")
     for table in tables:
-        assert _mask(b[table], SESSION_START, dirs) == want[table], table
+        assert _mask(b[table], started(), dirs) == want[table], table
 
 
 # ── Discord ──────────────────────────────────────────────────────────────────
@@ -457,18 +454,3 @@ async def test_discord_resumes_after_reconnect(bots, chat):
     assert resume["d"]["token"] == DC_TOKEN
     assert resume["d"]["session_id"] == "sess-1"
     assert resume["d"]["seq"] >= 1
-
-
-# ── Notifications ────────────────────────────────────────────────────────────
-
-
-async def test_notifications_go_straight_to_the_apis(chat, monkeypatch):
-    from core import notifications
-
-    for k, v in chat.env().items():
-        monkeypatch.setenv(k, v)
-    await notifications._send_telegram("555", "[ERROR] nightly\n\nboom")
-    await notifications._send_discord("777", "x" * 2500)
-    assert chat.sent("sendMessage") == [{"chat_id": "555", "text": "[ERROR] nightly\n\nboom"}]
-    sent = chat.sent("POST /channels/777/messages")
-    assert sent == [{"content": "x" * 1899 + "…", "allowed_mentions": {"parse": []}}]

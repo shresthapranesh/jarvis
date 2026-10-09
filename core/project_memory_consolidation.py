@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from langchain_core.messages import HumanMessage, SystemMessage
 from core.transcript_store import KvStore
 
-from core.text_dedupe import dedupe_against
+from tools.text_dedupe import dedupe_against
 from db.engine import async_session
 from db.models import Project
 from db.ops import (

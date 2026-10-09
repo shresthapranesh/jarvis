@@ -20,6 +20,7 @@ import pytest
 from core.kernels import KernelRegistry
 from edge_support import edge_binary  # noqa: F401 — edge_binary is a fixture
 from python_golden import recorded
+from seed import insert
 
 KERNEL_ENV = {"JARVIS_KERNEL_PYTHON": sys.executable, "JARVIS_APP_DIR": str(Path(__file__).resolve().parent.parent)}
 
@@ -123,12 +124,8 @@ async def test_a_cell_past_its_timeout_is_interrupted(edge, py_kernels):
     assert got[2] == "1"
 
 
-async def test_an_open_approval_holds_the_timeout(edge, py_kernels):
-    from db import ops
-    from db.engine import async_session
-
-    async with async_session() as session:
-        await ops.create_approval(session, source="tool", status="pending", parent_id="conv-h", question="ok?")
+async def test_an_open_approval_holds_the_timeout(edge, py_kernels, database):
+    insert(database, "approvals", source="tool", status="pending", parent_id="conv-h", question="ok?")
     cell = ("import time\ntime.sleep(3)\n'done'", {"timeout": 1, "conversation_id": "conv-h"})
     python, got = await _both(edge, py_kernels, "k", [cell])
     assert got == python == ["'done'"]
