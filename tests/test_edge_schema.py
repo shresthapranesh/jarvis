@@ -230,3 +230,26 @@ async def test_the_langgraph_store_is_copied_once(edge_binary, tmp_path):
     ]
     assert python["rows"]["kv_store"][1][3:] == ("2026-05-03 07:00:24.000000", "2026-05-03 07:00:25.000000")
     assert python["rows"]["kv_store"][2][3:] == ("2026-05-03 07:00:24.500000", "2026-05-03 00:00:00.000000")
+
+
+async def test_store_values_are_kept_as_text(edge_binary, tmp_path):
+    """LangGraph's store holds each value as a BLOB; `kv_store` holds text —
+    whether the import copies it now or copied it as a BLOB before."""
+    cp = tmp_path / "checkpoints.db"
+    with contextlib.closing(sqlite3.connect(cp)) as conn:
+        conn.execute("CREATE TABLE store (prefix text NOT NULL, key text NOT NULL, value text NOT NULL, "
+                     "created_at TIMESTAMP, updated_at TIMESTAMP, PRIMARY KEY (prefix, key))")
+        conn.execute("INSERT INTO store VALUES ('memory', 'AGENTS.md', ?, '2026-05-03 07:00:24', '2026-05-03 07:00:24')",
+                     ('{"content": "café"}'.encode(),))
+        conn.commit()
+    db = tmp_path / "data" / "database.db"
+    db.parent.mkdir()
+    _old_database(db)
+    with contextlib.closing(sqlite3.connect(db)) as conn:
+        conn.execute("INSERT INTO kv_store VALUES ('memory', '/AGENTS.md', ?, "
+                     "'2026-01-01 00:00:00.000000', '2026-01-01 00:00:00.000000')", (b'{"content": "old"}',))
+        conn.commit()
+    _edge_init(edge_binary, db, cp)
+    with contextlib.closing(sqlite3.connect(db)) as conn:
+        got = conn.execute("SELECT key, typeof(value), value FROM kv_store WHERE namespace = 'memory' ORDER BY key").fetchall()
+    assert got == [("/AGENTS.md", "text", '{"content": "old"}'), ("AGENTS.md", "text", '{"content": "café"}')]

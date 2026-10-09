@@ -165,6 +165,9 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
     if !columns(tx, "artifacts").await?.contains("mime_type") {
         exec(tx, "ALTER TABLE artifacts ADD COLUMN mime_type VARCHAR").await?;
     }
+    // The LangGraph store's import copied its values as BLOBs, which no
+    // `kv_store` reader decodes as text.
+    exec(tx, "UPDATE kv_store SET value = CAST(value AS TEXT) WHERE typeof(value) = 'blob'").await?;
     backfill_artifact_message_ids(tx).await?;
     ensure_fts(tx).await;
     Ok(())
@@ -311,9 +314,10 @@ async fn store_rows(path: &Path) -> sqlx::Result<Vec<StoreRow>> {
         .await?;
     let rows = match has {
         // Timestamps as text, as `str()` would see them; anything else reads as now.
+        // LangGraph stores the JSON value as a BLOB; `kv_store` holds text.
         Some(_) => {
             sqlx::query_as(
-                "SELECT prefix, key, value, CAST(created_at AS TEXT), CAST(updated_at AS TEXT) FROM store",
+                "SELECT prefix, key, CAST(value AS TEXT), CAST(created_at AS TEXT), CAST(updated_at AS TEXT) FROM store",
             )
             .fetch_all(&mut conn)
             .await?
