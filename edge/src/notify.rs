@@ -3,7 +3,6 @@
 //! column lists channel refs (`[{id, on}]`); each matching channel gets one
 //! message straight through the Telegram Bot API or Discord's REST API, as
 //! Python sends them. Best-effort: a failed send is logged, never raised.
-//! A change to either is made in both.
 
 use std::time::Duration;
 

@@ -1,13 +1,20 @@
 """The edge creates and migrates the schema (`edge/src/schema.rs`).
 
-`edge/src/schema.sql` is what `Base.metadata.create_all` makes, captured
-from a fresh database in creation order; `schema.rs` creates whichever of
-its tables is missing, then runs its port of `db/engine.py:_migrate` and
-the one-time LangGraph store import. Both runtimes, from the same starting
-database, must end with the same `sqlite_master` and the same rows.
+`edge/src/schema.sql` is the schema a new database is made with: `schema.rs`
+creates whichever of its tables is missing, then runs `migrate` — what an
+older database lacks — and the one-time LangGraph store import.
 
-After a change to `db/models.py`, re-capture the file with
-`JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_schema.py`.
+Two guarantees:
+
+- Fresh and old databases end as Python's `Database.init` left them — its
+  `sqlite_master` and rows, recorded when the schema moved here (Python's
+  `db/models.py` + `_migrate` were the source until then).
+- An old database, migrated, has the shape of a fresh one: every table's
+  columns and every index.
+
+A schema change goes in `schema.sql` (new databases) and a step in
+`schema.rs:migrate` (existing ones). The second guarantee checks the two
+agree; the first one's recording is updated by hand, in the same commit.
 """
 
 from __future__ import annotations
@@ -21,49 +28,10 @@ import sqlite3
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from python_golden import recorded
 from tests.edge_support import EDGE_DIR, edge_binary  # noqa: F401 — fixture
 
 SCHEMA_SQL = EDGE_DIR / "src" / "schema.sql"
-
-HEADER = """\
--- What `Base.metadata.create_all` (db/models.py) makes, captured from a fresh
--- database in creation order: each table, then its indexes by name. `schema.rs`
--- creates every table missing here (and its indexes), then migrates.
--- Generated: JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_schema.py
-"""
-
-
-def _create_all_ddl(tmp: Path) -> str:
-    from sqlalchemy import create_engine
-
-    from db.models import Base
-
-    path = tmp / "create_all.db"
-    engine = create_engine(f"sqlite:///{path}")
-    Base.metadata.create_all(engine)
-    engine.dispose()
-    with contextlib.closing(sqlite3.connect(path)) as conn:
-        tables = conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY rowid").fetchall()
-        statements = []
-        for name, sql in tables:
-            # A table's indexes come out of a set, in no fixed order: by name.
-            indexes = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? "
-                                   "AND sql IS NOT NULL ORDER BY name", (name,)).fetchall()
-            statements += [sql, *(i for (i,) in indexes)]
-    return HEADER + "\n" + "".join(f"{sql};\n\n" for sql in statements)
-
-
-def test_schema_sql_is_what_create_all_makes(tmp_path):
-    want = _create_all_ddl(tmp_path)
-    if os.environ.get("JARVIS_UPDATE_GOLDEN"):
-        SCHEMA_SQL.write_text(want)
-    assert SCHEMA_SQL.read_text() == want, "db/models.py changed: re-capture edge/src/schema.sql (see the docstring)"
-
-
-# ── both runtimes over the same database ─────────────────────────────────────
 
 
 def _edge_init(edge_binary: Path, db: Path, checkpoints: Path) -> None:
@@ -74,27 +42,14 @@ def _edge_init(edge_binary: Path, db: Path, checkpoints: Path) -> None:
     assert out.returncode == 0, out.stderr
 
 
-async def _python_init(db: Path, checkpoints: Path) -> None:
-    from core.transcript_store import import_store_once
-    from db.engine import Database
-
-    database = Database(f"sqlite+aiosqlite:///{db}")
-    try:
-        await database.init()
-        async with database.session() as session:
-            await import_store_once(session, str(checkpoints))
-    finally:
-        await database.close()
-
-
 _STAMP = re.compile(r"\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d(\.\d+)?(\+00:00)?")
 
 
 def _snapshot(db: Path) -> dict:
-    """`sqlite_master`, and every table's rows, with the
-    stamps the two runs write at different instants masked."""
+    """`sqlite_master`, and every table's rows, with the stamps a run writes
+    at the instant it runs masked."""
     with contextlib.closing(sqlite3.connect(db)) as conn:
-        # By name: `create_all` makes a table's indexes in no fixed order.
+        # By name: `create_all` made a table's indexes in no fixed order.
         master = conn.execute("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name").fetchall()
         tables = [n for t, n, _, sql in master if t == "table" and "VIRTUAL" not in (sql or "")
                   and not n.endswith(("_data", "_idx", "_docsize", "_config", "_content"))]
@@ -111,28 +66,29 @@ def _snapshot(db: Path) -> dict:
     return {"master": master, "rows": rows, "fts": fts}
 
 
-async def _twins(edge_binary: Path, tmp: Path, start: Path | None, checkpoints: Path | None = None):
-    """The same starting database (or none) brought up by each runtime."""
-    snaps = []
-    for side in ("python", "edge"):
-        d = tmp / side
-        d.mkdir()
-        db = d / "data" / "database.db"  # a directory that isn't there yet
-        if start is not None:
-            db.parent.mkdir()
-            shutil.copy(start, db)
-        cp = checkpoints or d / "checkpoints.db"
-        if side == "python":
-            async def python(db: Path = db, cp: Path = cp) -> dict:
-                db.parent.mkdir(exist_ok=True)  # Database() makes it; the edge must too
-                await _python_init(db, cp)
-                return _snapshot(db)
+def _shape(db: Path) -> dict:
+    """Each table's columns (by name: a migration appends them) and each
+    index — what a fresh and a migrated database must agree on. Not a
+    column's NOT NULL or default: SQLite adds a column to an existing table
+    only nullable or with a default, so a migrated one has both."""
+    with contextlib.closing(sqlite3.connect(db)) as conn:
+        tables = [n for (n,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+        columns = {t: sorted(conn.execute(f"SELECT name, type, pk FROM pragma_table_info('{t}')")) for t in tables}
+        indexes = conn.execute("SELECT name, tbl_name, sql FROM sqlite_master WHERE type IN ('index', 'trigger') "
+                               "ORDER BY name").fetchall()
+    return {"columns": columns, "indexes": indexes}
 
-            snaps.append(await recorded(python))
-        else:
-            _edge_init(edge_binary, db, cp)
-            snaps.append(_snapshot(db))
-    return snaps
+
+async def _twins(edge_binary: Path, tmp: Path, start: Path | None, checkpoints: Path | None = None):
+    """What Python's init made of the starting database (or none), recorded,
+    and what the edge's makes of it."""
+    db = tmp / "edge" / "data" / "database.db"  # a directory that isn't there yet
+    db.parent.parent.mkdir()
+    if start is not None:
+        db.parent.mkdir()
+        shutil.copy(start, db)
+    _edge_init(edge_binary, db, checkpoints or tmp / "edge" / "checkpoints.db")
+    return await recorded(), _snapshot(db)
 
 
 async def test_a_fresh_database(edge_binary, tmp_path):
@@ -148,12 +104,7 @@ async def test_starting_again_changes_nothing(edge_binary, tmp_path):
     first = _snapshot(db)
     _edge_init(edge_binary, db, cp)
     assert _snapshot(db) == first
-
-    async def python() -> dict:
-        await _python_init(db, cp)
-        return _snapshot(db)
-
-    assert await recorded(python) == first  # and Python found nothing to do either
+    assert await recorded() == first  # and Python found nothing to do either
 
 
 # ── an older database ────────────────────────────────────────────────────────
@@ -226,6 +177,18 @@ async def test_an_old_database_is_migrated_the_same(edge_binary, tmp_path):
             ("a1", "m1"), ("a2", "m2"), ("a3", None)]
         assert {c for (c,) in conn.execute("SELECT name FROM pragma_table_info('messages')")} >= set(_ADDED["messages"])
     assert edge["fts"]["messages_fts"] == [(1, "first"), (2, "second"), (3, "a user turn")]
+
+
+def test_a_migrated_database_has_the_fresh_shape(edge_binary, tmp_path):
+    """`migrate` brings an old database to what `schema.sql` makes new: the
+    same columns, indexes and FTS triggers."""
+    fresh, old = tmp_path / "fresh" / "database.db", tmp_path / "old" / "database.db"
+    for db in (fresh, old):
+        db.parent.mkdir()
+    _old_database(old)
+    for db in (fresh, old):
+        _edge_init(edge_binary, db, db.parent / "checkpoints.db")
+    assert _shape(old) == _shape(fresh)
 
 
 # ── the LangGraph store ──────────────────────────────────────────────────────

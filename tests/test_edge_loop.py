@@ -35,7 +35,7 @@ from typing import Any
 import pytest
 
 from edge_support import Normalizer, _free_port, _run_edge, edge_binary  # noqa: F401 — edge_binary is a fixture
-from python_golden import RECORD, portable, recorded
+from python_golden import portable, recorded
 from seed import insert, set_setting
 from test_edge_llm import _intended_ollama, _semantics
 from test_edge_runs import AUTOMATION, BOARD, CHAT
@@ -319,40 +319,19 @@ def _restore(db: Path, dump: dict[str, list[dict]]) -> None:
 _twins: Twins | None = None
 
 
-async def _python_step(twins: Twins, run: Any = None) -> Any:
+async def _python_step(twins: Twins) -> Any:
     """Python's side of the next step of a scenario, as recorded: its
     database, artifact files and what the fake saw put back as the step left
-    them, and its result returned. With `run` and `JARVIS_RECORD_PYTHON=1`,
-    `run()` is the step, recorded as it goes."""
+    them, and its result returned."""
     home = twins.python_db.parent
-
-    async def step() -> dict[str, Any]:
-        result = await run()
-        fake = twins.fake
-        files = {str(p.relative_to(home)): p.read_bytes() for p in sorted((home / "artifacts").rglob("*")) if p.is_file()}
-        snap = {"result": result, "db": _dump_all(twins.python_db),
-                "fake": [fake.requests, fake.telegram, fake.hooks, fake.embeds]}
-        # Relocatable: this run's directory, and this machine's paths, named.
-        text = json.dumps(portable(json.loads(json.dumps(snap, default=_bytes_out))))
-        return {"snap": text.replace(json.dumps(str(home))[1:-1], "<python_dir>"), "files": files}
-
-    taken = await recorded(step if run is not None else None)
+    taken = await recorded()
     snap = json.loads(taken["snap"].replace("<python_dir>", json.dumps(str(home))[1:-1]), object_hook=_bytes_in)
-    if run is None or not RECORD:
-        _restore(twins.python_db, snap["db"])
-        for rel, data in taken["files"].items():
-            (home / rel).parent.mkdir(parents=True, exist_ok=True)
-            (home / rel).write_bytes(data)
-        twins.fake.requests, twins.fake.telegram, twins.fake.hooks, twins.fake.embeds = snap["fake"]
+    _restore(twins.python_db, snap["db"])
+    for rel, data in taken["files"].items():
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_bytes(data)
+    twins.fake.requests, twins.fake.telegram, twins.fake.hooks, twins.fake.embeds = snap["fake"]
     return snap["result"]
-
-
-def _bytes_out(value: Any) -> Any:
-    if isinstance(value, bytes):
-        import base64
-
-        return {"$b64": base64.b64encode(value).decode()}
-    raise TypeError(type(value).__name__)
 
 
 def _bytes_in(value: dict) -> Any:
@@ -1581,9 +1560,6 @@ async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
     oldest first (incognito left out, stopping before a reply still being
     written), every operation the model can ask for — row for row with
     Python, embeddings included, and the same watermark."""
-    from core.memory_consolidation import consolidate_memory
-    from core.state import get_store
-
     _sql(twins, "INSERT INTO config_settings (key, value, updated_at) VALUES ('default.model', ?, '2026-01-01 00:00:00')", MODEL)
     rows = [("user" if i % 2 == 0 else "assistant", f"{i}: " + "rust edge " * 60, f"2026-01-01 10:{i:02d}:00")
             for i in range(40)]
@@ -1628,7 +1604,7 @@ async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
     _sql(twins, "UPDATE messages SET status = 'done' WHERE conversation_id = 'c-mem'")
     _talk(twins, "c-mem2", [("user", "Forget the lunch thing", "2026-01-02 09:00:00")])
     twins.fake.script = [Reply(json.dumps([{"op": "delete", "id": "m2", "reason": "user_requested"}]))] * 2
-    python = await _python_step(twins, lambda: consolidate_memory(get_store()))
+    python = await _python_step(twins)  # the 6-hourly sweep, on the default model
     assert _edge_sweep(twins, edge_binary, "memory_consolidation") == {"result": python}
     assert python == "consolidated 2 messages in 1 batch(es) → +0 ~0 -1 (+0 seeded)"
     assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
@@ -1642,9 +1618,6 @@ async def test_project_memory_is_consolidated_through_the_edge(twins, edge_binar
     overflow handed to rewrite, the quiet and minimum-material gates — the
     memory, the watermarks and every request as Python's."""
     import base64
-
-    from core.project_memory_consolidation import consolidate_project_memories
-    from core.state import get_store
 
     def gid(raw: str) -> str:
         return base64.b64encode(f"Project:{raw}".encode()).decode()
@@ -1698,7 +1671,7 @@ async def test_project_memory_is_consolidated_through_the_edge(twins, edge_binar
     _talk(twins, "c-b", [("user", "Beacon status? " * 50, "2026-01-01 11:00:00")], project="p2", title="Beacon")
     _talk(twins, "c-t", [("user", "hi", "2026-01-01 11:00:00")], project="p3")
     twins.fake.reset([Reply(r) for r in ["- The beacon ships in March\n- Telemetry goes over LoRa radio", "- Condensed beacon"] * 2])
-    python = await _python_step(twins, lambda: consolidate_project_memories(get_store()))
+    python = await _python_step(twins)  # the 30-minute sweep
     assert _edge_sweep(twins, edge_binary, "project_memory") == {"result": python}
     assert python == f"Beacon: rewrite: {len(full)} → 18 chars"
     for pid in ("p1", "p2", "p3"):
@@ -1970,40 +1943,3 @@ async def test_arguments_a_tool_wont_take_are_answered_for_the_model(twins):
     )
     [(content, status)] = _rows(twins.edge_db, "SELECT content, status FROM messages WHERE id = ?", edge.task_id)
     assert (content, status) == ("On it. Fixed.", "done")
-
-
-# ── the tool schemas ─────────────────────────────────────────────────────────
-
-TOOLS_JSON = REPO / "edge" / "src" / "agent" / "tools.json"
-
-
-def test_the_edge_binds_pythons_tool_schemas(monkeypatch):
-    """`edge/src/agent/tools.json` is Python's own `convert_to_openai_tool`
-    output for every tool the main agent can be bound to, then the ones
-    only its workers' roles are bound to. Re-export with
-    `JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_loop.py -k schemas`
-    after changing a bound tool's signature or docstring, then rebuild the edge."""
-    import os
-
-    from langchain_core.utils.function_calling import convert_to_openai_tool
-
-    from core import agents, tool_policy
-
-    monkeypatch.setattr(agents, "embeddings_available", lambda: True)
-    monkeypatch.setattr(agents, "get_mcp_tools_sync", lambda: [])
-    monkeypatch.setattr(tool_policy, "get_policies", lambda force=False: {})
-    agents.invalidate_agent_cache()
-    try:
-        board = agents._build_agent("google_genai:gemma-4-31b-it", None, board=True)
-    finally:
-        agents.invalidate_agent_cache()
-    from tools.artifacts import list_artifacts, read_artifact
-    from tools.files import list_files, read_file, write_file
-
-    names = {t.name for t in board.tools}
-    workers = [t for t in (read_file, write_file, list_files, read_artifact, list_artifacts) if t.name not in names]
-    python = [convert_to_openai_tool(t)["function"] for t in [*board.tools, *workers]]
-    if os.environ.get("JARVIS_UPDATE_GOLDEN") == "1":
-        TOOLS_JSON.write_text(json.dumps(python, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    assert json.loads(TOOLS_JSON.read_text(encoding="utf-8")) == python
-

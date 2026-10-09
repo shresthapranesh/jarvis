@@ -27,9 +27,8 @@ RUN pnpm build
 FROM rust:1.88-slim-bookworm AS edge
 WORKDIR /app/edge
 COPY edge/Cargo.toml edge/Cargo.lock ./
+# The built-in model catalog and the system prompt are compiled in from src/.
 COPY edge/src ./src
-# The built-in model catalog, compiled in (src/catalog.rs).
-COPY core/builtin_models.json /app/core/builtin_models.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/edge/target \
     cargo build --release --locked \
@@ -63,7 +62,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
-# Headless Chromium for the browser_agent / researcher tools.
+# Chromium for the agent's browser (tools/browser.py).
 # Slim the image by ~500MB with: --build-arg INSTALL_BROWSERS=false
 ARG INSTALL_BROWSERS=true
 RUN if [ "$INSTALL_BROWSERS" = "true" ]; then \
@@ -90,7 +89,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else 1)"
 
 # The server binds 0.0.0.0 INSIDE the container; publish to 127.0.0.1 on the
-# host (compose). It reads the system prompt and runs kernels from /app.
+# host (compose). Its kernels run the Python in /app (tools/, .venv).
 ENV JARVIS_EDGE_BIND=0.0.0.0:8000 \
     JARVIS_APP_DIR=/app
 CMD ["jarvis-edge"]

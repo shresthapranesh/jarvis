@@ -171,44 +171,12 @@ def _edge_due(edge_binary: Path, work_dir: Path) -> dict[str, Any]:
     return json.loads(out.strip().splitlines()[-1])
 
 
-async def _python_due(monkeypatch) -> dict[str, bool]:
-    """Each sweep's own verdict: reaching for an LLM means it found work."""
-    from core import project_memory_consolidation as pmc
-    from core.memory_consolidation import _load_watermark, _transcript_block
-    from core.state import get_store
-    from db import async_session
-    from db.models import Project
-    from db.ops import get_messages_since
-    from sqlalchemy import select
-
-    class Due(Exception):
-        pass
-
-    async def due(*_a, **_k):
-        raise Due
-
-    monkeypatch.setattr(pmc, "_resolve_llm", due)
-    store = get_store()
-    async with async_session() as s:
-        messages = await get_messages_since(s, since=await _load_watermark(store), limit=200)
-        projects = (await s.execute(select(Project.id))).scalars().all()
-    project = False
-    for pid in projects:
-        try:
-            assert (await pmc.consolidate_project_memory(store, pid)).startswith("skipped")
-        except Due:
-            project = True
-    return {
-        "memory_consolidation": _transcript_block(messages)[1] is not None,
-        "project_memory": project,
-    }
-
-
-async def test_maintenance_gates_match_the_sweeps(database: Path, work_dir: Path, edge_binary: Path, monkeypatch):
+async def test_maintenance_gates_match_the_sweeps(database: Path, work_dir: Path, edge_binary: Path):
     now = datetime.now(timezone.utc)
 
     async def check(label: str) -> None:
-        edge, python = _edge_due(edge_binary, work_dir), await recorded(lambda: _python_due(monkeypatch))
+        # Python's: whether each sweep reached for a model, i.e. found work.
+        edge, python = _edge_due(edge_binary, work_dir), await recorded()
         assert edge == python, label
 
     await check("empty")

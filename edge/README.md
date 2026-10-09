@@ -5,7 +5,8 @@ streams, the agent loop that runs every chat turn, automation, board task and
 workflow, the scheduler, the Telegram and Discord bots, MCP, the live browser
 view and the REST routes. Only the agent's notebook kernels run Python — the
 agent writes Python in `run_cell`, and the `jarvis` SDK it calls there
-(`tools/sdk.py`) is Python.
+(`tools/sdk.py`) is Python; it reads the database read-only and asks this
+server for everything else.
 
 ```
 browser / SDK / bots ──▶ jarvis-edge :8000 ──▶ SQLite (database.db)
@@ -15,7 +16,8 @@ browser / SDK / bots ──▶ jarvis-edge :8000 ──▶ SQLite (database.db)
 ```
 
 It began as an edge in front of the Python server, taking over one operation
-at a time; the name stayed. The Python server is gone (see `ROADMAP.md`).
+at a time; the name stayed. Python's server and runtime are gone (see
+`ROADMAP.md`); the module docs that name a Python file say what was ported.
 
 ## Running it
 
@@ -28,14 +30,14 @@ cd edge && JARVIS_APP_DIR=.. cargo run
 |---|---|---|
 | `JARVIS_EDGE_BIND` | `127.0.0.1:8000` | listen address |
 | `JARVIS_EDGE_LOG` | `info` | `error`…`trace` |
-| `DATABASE_URL` / `WORK_DIR` | as `core/config.py` | the database file the kernels' SDK reads too |
-| `ARTIFACTS_DIR` | as `core/config.py` | artifact files |
-| `JARVIS_APP_DIR` | the current directory | the jarvis checkout: `core/system_prompt.md`, the Python kernels run on (`tools/`, `.venv`), and `static/dist`, the SPA served here |
+| `DATABASE_URL` / `WORK_DIR` | `$WORK_DIR/database.db`, `WORK_DIR` `~/.jarvis` | the database file — the kernels' SDK finds it the same way |
+| `ARTIFACTS_DIR` | `$WORK_DIR/artifacts` | artifact files |
+| `JARVIS_APP_DIR` | the current directory | the jarvis checkout: the Python kernels run on (`tools/`, `.venv`), and `static/dist`, the SPA served here |
 | `JARVIS_KERNEL_PYTHON` | `$JARVIS_APP_DIR/.venv/bin/python`, else `python3` | the interpreter kernels and code automations run on |
 | `JARVIS_RUN_JOBS` | on | `0` queues runs without running them — for tests that look at what a write queued |
 
-The built-in model list is compiled in from `core/builtin_models.json`, so
-rebuild after editing it.
+The built-in model list (`src/builtin_models.json`) and the system prompt
+(`src/system_prompt.md`) are compiled in, so rebuild after editing them.
 
 The same binary is the command line (`src/cli/`, see below): `jarvis-edge`
 with no command serves, `jarvis-edge start [--host] [--port] [--debug]` too.
@@ -117,8 +119,8 @@ Every timer the Python server ran, ported:
   `CronTrigger.from_crontab` (after `normalize_crontab`) with Python's
   `zoneinfo` arithmetic: day-of-month AND day-of-week, a fire time in a
   spring-forward gap keeping its wall clock with the pre-transition offset,
-  `fold` in an overlap. `tests/test_edge_schedule.py` diffs it against
-  APScheduler on 13,200 cases — 14 zones, every 2026 DST transition, 50
+  `fold` in an overlap. `tests/test_edge_schedule.py` holds it to
+  APScheduler's recorded answers on 13,200 cases — 14 zones, every 2026 DST transition, 50
   expression shapes — and `Automation.nextRunAt` against Python's.
 - **Firing follows APScheduler's job options**: missed runs coalesce, a run
   later than its grace period (60 s for automations) is skipped, and nothing
@@ -136,8 +138,8 @@ Every timer the Python server ran, ported:
   and holds 600+ characters. The watermarks are `kv_store` rows in
   `database.db`. Where unsure (an unreadable watermark, a
   failed read) the answer is yes, and the sweep decides.
-  `tests/test_edge_serving.py` diffs every gate against Python's sweep it
-  guards, through `jarvis-edge --maintenance-due`. One thing waits longer: the
+  `tests/test_edge_serving.py` holds every gate to the recorded verdict of
+  the Python sweep it guards, through `jarvis-edge --maintenance-due`. One thing waits longer: the
   first-run seeding of discrete memory from the old blob now happens with the
   first pass that has a message to read.
 
@@ -150,7 +152,7 @@ its token is set (`TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`).
   (`src/gql/start.rs`), with the bot's surface and its conversation id
   (`telegram_<chat>`, `discord_<channel>`): a run already going on that chat
   takes it as a queued message (and the bot says so), otherwise a new run
-  starts. The rows are diffed against Python's own handlers, recorded
+  starts. The rows are compared with Python's own handlers', recorded
   (`tests/test_edge_bots.py`).
 - **The reply follows the run**: `token` events from the main agent, edited
   into the chat at most once a second, created on the first text — never a
@@ -171,7 +173,7 @@ its token is set (`TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`).
 
 The agent's notebooks — one `ipykernel` per session key (a conversation, or a
 worker's own key), started on its first cell — are the server's children. A
-port of `core/kernels.py`; **a change to either is made in both.**
+port of `core/kernels.py`;
 
 - **The wire** (`wire.rs`, `kernel.rs`): the Jupyter messaging protocol over
   ZeroMQ — the pure-Rust `zeromq` crate, so no libzmq to build — on `ipc`
@@ -195,8 +197,8 @@ port of `core/kernels.py`; **a change to either is made in both.**
   — Python's cancel path has that race.
 - **`--kernel-cells`** drives the kernels from stdin, one JSON command per
   line (`{key, code, timeout?, conversation_id?, project_id?}` or
-  `{shutdown: key}`); `tests/test_edge_kernels.py` diffs it against
-  `core/kernels.py`.
+  `{shutdown: key}`); `tests/test_edge_kernels.py` compares it with
+  `core/kernels.py`'s recorded output.
 - **Departures**, named in `tests/test_edge_kernels.py`: stdin is never
   offered, so `input()` raises at once (Python's client offered it with nobody
   to answer, and the cell hung until its timeout).
@@ -204,7 +206,6 @@ port of `core/kernels.py`; **a change to either is made in both.**
 ## MCP (`src/mcp/`)
 
 A port of `core/mcp.py` and of what `langchain_mcp_adapters` does for it;
-**a change to either is made in both.**
 
 - **Config** (`config.rs`): `JARVIS_MCP_SERVERS` < the first `mcp.json` that
   names a server (`~/.jarvis/`, then the checkout) < the `mcp.servers`
@@ -256,15 +257,13 @@ Every chat turn, automation run, board task and workflow run.
   (read from the checkout), memory how-to, core and relevant memories, the
   skill catalog (ranked against the request past 8), earlier episodes, the
   live browser, the project, then the todo list or the planning directive.
-  Retrieval runs once per user message, as Python's cache does. **A change to
-  `core/agents.py`'s prompt is made in both.**
+  Retrieval runs once per user message, as Python's cache does.
 - **Retrieval** (`retrieve.rs`, `embed.rs`) ports `core/retrieval.py`
   (FTS5 + cosine, rank fusion, `select_hybrid`'s cutoffs), `search_memory`
   (with its access log), `search_skills`, `search_episodes` and
   `upsert_memory`. The embedder is the one Python picks — Gemini's
   `batchEmbedContents` with `GOOGLE_API_KEY`, else Ollama's `/api/embed`,
-  model from `embedding.model` — with Python's query cache. **A change to
-  either is made in both.**
+  model from `embedding.model` — with Python's query cache.
 - **Summarizing** (`summarize.rs`, the pure half in `llm/compact.rs`) ports
   `maybe_compact` and `record_episode`: past the model's threshold, the older
   groups are summarized by the turn's own model (merged into the running
@@ -273,8 +272,7 @@ Every chat turn, automation run, board task and workflow run.
   episode. History is counted from the last call's usage less the rest of the
   request, except on Ollama; otherwise by chars/4, which is what Python's
   fallback comes to for every provider here but Google (its countTokens API —
-  a named departure). **A change to `core/compaction.py` or
-  `core/episodes.py` is made in both.**
+  a named departure).
 - **Automations** (`automation.rs`) port `automation_job_handler` around the
   same turn: the `AutomationRun` row (created at claim for a scheduled run),
   the thread (`automation_{id}` for a stateful run or a monitor, else
@@ -287,9 +285,7 @@ Every chat turn, automation run, board task and workflow run.
   re-claimed run replaces it (Python gives it a fresh one). Code runs are
   the script on jarvis's interpreter (`JARVIS_KERNEL_PYTHON`, else the
   checkout's `.venv`) with output streamed by line, 60 s then killed, a stop
-  terminating it; webhook runs are one request, 30 s, no redirects. **A
-  change to `server/automation_runtime.py` or `core/notifications.py` is
-  made in both.**
+  terminating it; webhook runs are one request, 30 s, no redirects.
 - **Board tasks** (`board.rs`) port `board_task_job_handler` and
   `tools/board.py` around the same turn, with `complete_task`/`block_task`
   bound (`tools::bound_for(…, board)`): the claim re-asserted and a waiting
@@ -300,15 +296,13 @@ Every chat turn, automation run, board task and workflow run.
   `_finish_task`, which never overwrites a task the run no longer owns. A
   task that finishes done starts a dispatch pass (which otherwise runs every
   15 s; `JARVIS_BOARD_DISPATCH_EVERY` shortens it, as the tests do). Steps are announced, not
-  written; the board budget applies. **A change to
-  `server/task_board_runtime.py` or `tools/board.py` is made in both.**
+  written; the board budget applies.
 - **Stops through the job**: a running job's `cancel_requested` is polled
   every 5 s (`watch_queue_cancel`), so a stop that only reached the job (one
   written before the run was taken, or by another process) still stops the
   run. `stopBoardTask` stops it at once.
-- **Tools** (`tools.rs`): the schemas are Python's own, exported to
-  `tools.json` (re-export with `JARVIS_UPDATE_GOLDEN=1 uv run pytest
-  tests/test_edge_loop.py -k schemas`). An unknown tool gets ToolNode's
+- **Tools** (`tools.rs`): the schemas are `tools.json` — first exported from
+  Python's own tools, now the source. An unknown tool gets ToolNode's
   error; arguments a tool's signature won't take get `invoke_tool`'s, read
   as Pydantic's lax mode reads them (`tools::Args`: extra keys ignored, an
   integer from a whole float or a numeric string, a boolean from 0/1 or a
@@ -319,8 +313,7 @@ Every chat turn, automation run, board task and workflow run.
   the `artifact` event; an artifact from before versioning gets its file
   saved as v1 first. A file's type is `mimetypes.guess_type`'s
   (`src/mimetypes.rs`: Python's built-in table in `mimetypes.json`, then the
-  system's `mime.types` files Python reads). **A change to
-  `tools/artifacts.py` is made in both.**
+  system's `mime.types` files Python reads).
 - **Events and steps** (`events.rs`): tokens batched as `TokenCoalescer`
   does, each step's row written before its event.
 
@@ -338,7 +331,7 @@ Every chat turn, automation run, board task and workflow run.
   the Python worker queued before it went (`runtime` unset) are claimed like
   any other.
 - **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
-  roles in `core/agents.py` — change both): `spawn_workers` runs its tasks at
+  roles in `core/agents.py`): `spawn_workers` runs its tasks at
   once, each on the run's model with its role's prompt and tools (the file
   and artifact tools are `files.rs`, `artifacts.rs`, ports of
   `tools/files.py`, `tools/artifacts.py`), a
@@ -350,7 +343,7 @@ Every chat turn, automation run, board task and workflow run.
   in-flight worker call finish and counts it); a batch's calls run in order
   (Python runs them at once).
 - **Approvals** (`src/approvals.rs`, a port of `core/tool_gate.py` and
-  `core/approval.py` — change both): a call whose policy needs a human's yes
+  `core/approval.py`): a call whose policy needs a human's yes
   records an `approvals` row, is shown in the chat (`approval_request`), and
   waits on the row, polled every 1.5 s, for `JARVIS_TOOL_GATE_TIMEOUT` (30
   minutes) before it expires as denied. Every gate in a batch is answered, in
@@ -408,7 +401,7 @@ Every chat turn, automation run, board task and workflow run.
 
 Tested in `tests/test_edge_agent.py` (the queue, recovery, runs that can't
 start) and `tests/test_edge_loop.py`, which runs scripted turns against a
-fake Ollama and diffs the events a subscriber gets, the step rows, the
+fake Ollama and compares the events a subscriber gets, the step rows, the
 message, the thread and every model request against Python's runs of the
 same turns, recorded. Departures are named there.
 
@@ -418,11 +411,11 @@ Model calls, which the agent loop (`src/agent/`) makes.
 `--llm-shape` and `--llm-call` drive it alone, reading one request as JSON
 on stdin.
 
-- `transcript.rs` — the v1 record (`core/transcript_format.md`). A row Python
+- `transcript.rs` — the v1 record (`edge/transcript_format.md`). A row Python
   wrote reads and writes back equal, `null`s included.
 - `shape.rs` — a port of `core/messages.py` (`strip_historical_thinking`,
   `repair_orphan_tool_calls`, `build_llm_messages`) and the cache layout in
-  `core/context_cache.py`. **A change to either is made in both.** The
+  `core/context_cache.py`. The
   result is a `Prompt` with breakpoints as flags; each provider spells them.
 - One module per wire format, hand-written. No client library sits above
   our request builder, so the request is ours byte for byte. Each renders a
@@ -476,9 +469,9 @@ Endpoints and keys come from the environment:
 - `JARVIS_GOOGLE_BASE_URL` and `JARVIS_OPENROUTER_BASE_URL` exist for the
   tests.
 
-`tests/test_edge_llm.py` diffs the edge against the Python path through one
-fake provider server: the shaped prompt, the request body, and the record
-built from the same reply. Where the edge differs on purpose, the test undoes
+`tests/test_edge_llm.py` compares the edge with what the Python path
+(LangChain) did through one fake provider server, recorded: the shaped
+prompt, the request body, and the record built from the same reply. Where the edge differs on purpose, the test undoes
 the difference by name. Examples: LangChain dropped an assistant's text when it
 sat next to tool calls or was stored as a bare string, its tool-schema
 conversion was lossy, and it threw away reasoning. Add
@@ -486,7 +479,7 @@ to it when adding a provider.
 
 ## The command line (`src/cli/`)
 
-A port of `main.py` (change both): `run "<query>" [--model] [--no-save]
+A port of `main.py`: `run "<query>" [--model] [--no-save]
 [--debug]`, `config set|get|list|delete`, `model list|add|remove|set-default|sync`,
 `memory show|set|reset`, `start`, and a global `--work-dir`. Arguments are
 clap's; the test hooks (`--print-schema`, `--cron-next`, `--llm-call`, …) keep
@@ -517,35 +510,32 @@ their raw flags and skip it.
   `reports/` any more). `download-voice` and `maintenance *` are gone from
   both: voice was removed, and the maintenance commands converted
   `checkpoints.db`.
-- Diffed against `main.py` — output, exit codes and rows — in
+- Compared with `main.py`'s recorded output, exit codes and rows in
   `tests/test_edge_cli.py`, with `run` on the fake Ollama of
   `test_edge_loop.py` and `model sync` on the fake providers of
   `test_edge_model_sync.py`.
 
-## What's shared with Python
+## The database, files and routes
 
-- **The schema is the server's** (`src/schema.rs`). At start, and before a
-  command-line command, it creates every table missing from `schema.sql` —
-  what `Base.metadata.create_all` made, captured from `db/models.py` — then
-  runs its port of `db/engine.py:_migrate` (columns, indexes, the artifact
-  backfill, the FTS5 mirrors) and the one-time LangGraph store import. The
-  kernels' SDK reads the same file through `db/models.py`, so a schema change
-  is made in `db/models.py` + `_migrate` and here: re-capture `schema.sql`
-  and port the migration step; `tests/test_edge_schema.py` diffs the two
-  over fresh and old databases. The file is opened with Python's pragmas,
+- **The schema** (`src/schema.rs`). At start, and before a command-line
+  command, it creates every table missing from `schema.sql` (first captured
+  from Python's `create_all`), then runs `migrate` (columns, indexes, the
+  artifact backfill, the FTS5 mirrors — a port of `db/engine.py:_migrate`)
+  and the one-time LangGraph store import. A schema change goes in
+  `schema.sql` and `migrate`; `tests/test_edge_schema.py` checks a migrated
+  database has the fresh shape. The kernels' SDK reads the same file
+  (read-only, plain `sqlite3`). The file is opened with Python's pragmas,
   plus `foreign_keys = OFF`, which sqlx would otherwise turn on.
-- **Exported from Python**: the bound tools' schemas (`src/agent/tools.json`)
-  and the SDK catalogue the `tools` query lists (`src/gql/sdk_tools.json`) —
-  re-export after changing a tool or an SDK function (see their tests). The
-  built-in models (`core/builtin_models.json`) and the system prompt
-  (`core/system_prompt.md`) are read from the checkout.
+- **The SDK catalogue** the `tools` query lists (`src/gql/sdk_tools.json`) is
+  exported from `tools/sdk.py` — re-export after changing an SDK function
+  (`JARVIS_UPDATE_GOLDEN=1 uv run pytest tests/test_edge_parity.py -k catalogue`).
 - **REST** (`src/rest.rs`, `src/logs.rs` — ports of `routes_artifacts.py` and
   `routes_logs.py`). Downloads answer as Starlette's `FileResponse` did: its
   headers (ETag = md5 of `"{st_mtime}-{size}"`), one byte range, `HEAD` a
   405; several ranges, or a range number only `int()` reads, get the whole
   file, and a path that isn't a file is missing. The log viewer is the
   server's `tracing` events as Python's handler shaped records, refused to a
-  cross-origin page and to anything but a loopback peer. Diffed in
+  cross-origin page and to anything but a loopback peer. Compared in
   `tests/test_edge_rest.py`.
 - **`/ws/browser`** (`src/browser/` — ports of `routes_browser.py`,
   `core/browser_stream.py` and `tools/browser.py`'s `ensure_running`; change

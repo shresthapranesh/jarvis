@@ -7,7 +7,7 @@ import {channels, colors, type} from '../theme/tokens.stylex';
 interface Props {
   question: string;
   /**
-   * The per-tool approval gate (core/tool_gate.py) the run is blocked on. The
+   * The per-tool approval gate (edge/src/approvals.rs) the run is blocked on. The
    * run is parked inside the tool call, so the answer goes to the durable row.
    */
   approvalId: string;

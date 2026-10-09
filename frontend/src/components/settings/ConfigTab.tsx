@@ -16,7 +16,7 @@ import {configNew, settings as sx, tools as toolStyles} from './settings.styles'
 
 type Setting = TSettingsQuery['response']['settings'][number];
 
-// The generic editor over `config_settings` — the table `main.py config
+// The generic editor over `config_settings` — the table `jarvis-edge config
 // set/get/list/delete` writes. Keys another tab owns are shown read-only:
 // they hold serialized state that tab rewrites wholesale, so a hand edit here
 // is discarded the next time it writes.
@@ -53,7 +53,7 @@ export function ConfigTab() {
       <h2 {...stylex.props(page.sectionTitle)}>
         Config <span {...stylex.props(page.count)}>{settings.length}</span>
         <span {...stylex.props(page.sectionHint)}>
-          {setCount} set · the same rows as <code>main.py config list</code>
+          {setCount} set · the same rows as <code>jarvis-edge config list</code>
         </span>
       </h2>
 

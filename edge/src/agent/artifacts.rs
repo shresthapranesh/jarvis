@@ -1,5 +1,5 @@
-//! `write_artifact` — a port of `tools/artifacts.py`; a change to either is
-//! made in both. A deliverable the user keeps: a markdown body or a file the
+//! `write_artifact` — first a port of `tools/artifacts.py`. A
+//! deliverable the user keeps: a markdown body or a file the
 //! agent already wrote, stored under the artifact directory as the live file
 //! plus one copy per version, with an `artifacts` row and one
 //! `artifact_versions` row per version.

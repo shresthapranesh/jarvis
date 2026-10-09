@@ -1,14 +1,13 @@
-//! The database schema: the edge creates and migrates it, at start and before
-//! a command-line command, as `db/engine.py:Database.init` does for Python
-//! alone.
+//! The database schema: the server creates and migrates it, at start and
+//! before a command-line command.
 //!
-//! `schema.sql` is what `Base.metadata.create_all` makes, captured from a fresh
-//! database (`tests/test_edge_schema.py` re-captures it): every table missing
-//! from the file is created with its indexes, then `migrate` — a port of
-//! `_migrate` — adds what older databases lack. Then, once, the store
-//! LangGraph left in `checkpoints.db` is copied into `kv_store`
-//! (`core/transcript_store.py:import_store_once`). A change to any of these is
-//! made in both; the test diffs the two runtimes over fresh and old databases.
+//! `schema.sql` is the schema a new database gets: every table missing from
+//! it is created with its indexes, then `migrate` adds what older databases
+//! lack. Then, once, the store LangGraph left in `checkpoints.db` is copied
+//! into `kv_store`. A schema change is made in both `schema.sql` and
+//! `migrate`; `tests/test_edge_schema.py` checks a migrated database has the
+//! fresh one's shape, and holds both to what Python's `db/engine.py` made
+//! when the schema moved here (recorded).
 
 use std::collections::HashSet;
 use std::path::Path;

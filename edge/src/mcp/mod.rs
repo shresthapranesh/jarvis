@@ -1,5 +1,5 @@
-//! MCP servers and their tools — `core/mcp.py`'s `McpManager`, owned by the
-//! edge. Change both.
+//! MCP servers and their tools — a port of `core/mcp.py`'s
+//! `McpManager`.
 //!
 //! The configured servers (`config.rs`) are each asked for their tools once,
 //! at start and on every reload; the listings are cached here, attributed to

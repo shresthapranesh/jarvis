@@ -1,5 +1,5 @@
-//! Which MCP servers are configured — the config half of `core/mcp.py`.
-//! Change both.
+//! Which MCP servers are configured — the config half of what
+//! `core/mcp.py` was.
 //!
 //! Three sources, merged per server name, later winning: the
 //! `JARVIS_MCP_SERVERS` env var, the first config file that names any server

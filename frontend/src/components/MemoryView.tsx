@@ -356,9 +356,8 @@ function LegacyBlob({
           </>
         ) : (
           <>
-            The free-text blob kept in the LangGraph store — the keyless fallback, and whatever
-            predates the split into discrete items. Same entry as{' '}
-            <code>main.py memory show/set/reset</code>.
+            The free-text blob — the keyless fallback, and whatever predates the split into
+            discrete items. Same entry as <code>jarvis-edge memory show/set/reset</code>.
           </>
         )}
       </p>

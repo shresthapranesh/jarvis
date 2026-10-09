@@ -1,8 +1,7 @@
 //! The workflow engine in the edge — ports of `workflow/engine.py`
 //! (`engine.rs`), `workflow/nodes.py` (`nodes.rs`, `agent.rs`),
 //! `core/workflow_template.py` (`template.rs`), `server/workflow_runtime.py`
-//! (`serve` here) and `tools/workflows.py:run_workflow` (`Call`) — a change
-//! to either side is made in both.
+//! (`serve` here) and `tools/workflows.py:run_workflow` (`Call`).
 //!
 //! A run triggered while the edge's agent loop is on is queued as an edge
 //! job and run here start to finish. A paused node waits on its `approvals` row,

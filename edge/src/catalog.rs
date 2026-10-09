@@ -1,10 +1,9 @@
 //! The model catalog: which model a run should use — `db.ops.resolve_model`
 //! — and the `models` query's listing of it.
 //!
-//! The built-in models are compiled in from the same file Python loads
-//! (`core/builtin_models.json`); the runtime-added ones are a settings row
-//! both processes read (`models.custom`). So the edge resolves exactly what
-//! Python would, without asking it.
+//! The built-in models are compiled in (`builtin_models.json`, the first
+//! entry the default); the runtime-added ones are a settings row
+//! (`models.custom`).
 
 use std::sync::OnceLock;
 
@@ -12,7 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sqlx::SqlitePool;
 
-const BUILTIN_MODELS: &str = include_str!("../../core/builtin_models.json");
+const BUILTIN_MODELS: &str = include_str!("builtin_models.json");
 
 /// `KNOWN_PROVIDERS` — those with code of their own — sorted.
 pub const KNOWN_PROVIDERS: &[&str] = &["anthropic", "bedrock", "google_genai", "meta", "ollama", "openrouter"];
@@ -31,7 +30,7 @@ pub struct Spec {
 
 fn builtins() -> &'static [Spec] {
     static SPECS: OnceLock<Vec<Spec>> = OnceLock::new();
-    SPECS.get_or_init(|| serde_json::from_str(BUILTIN_MODELS).expect("core/builtin_models.json parses"))
+    SPECS.get_or_init(|| serde_json::from_str(BUILTIN_MODELS).expect("builtin_models.json parses"))
 }
 
 fn builtin_ids() -> Vec<&'static str> {

@@ -1,24 +1,23 @@
-"""The edge's LLM layer (`edge/src/llm/`) diffed against the Python path it
-replaces: `core/messages.py` shaping, then the LangChain integrations.
+"""The edge's LLM layer (`edge/src/llm/`) against what Python's path did:
+`core/messages.py` shaping, then the LangChain integrations, recorded
+(`tests/python_golden.py`).
 
-One fake provider server records what each side sends and replays the same
-stream to both. Compared:
+One fake provider server records what the edge sends and replays a stream.
+Compared with Python's recorded answers:
 
 - the shaped prompt (`--llm-shape`) against `build_llm_messages` over
   `strip_historical_thinking` + `repair_orphan_tool_calls`;
-- the request body (`--llm-call`) against what `ChatGoogleGenerativeAI` /
-  `ChatOllama` send for the same history — equal except for the differences
-  the edge makes on purpose, each undone by name in `_INTENDED_*` below;
-- the record each side builds from the same reply;
-- and that a record the edge wrote goes back out through Python intact, so a
-  thread can move between the runtimes.
+- the request body (`--llm-call`) against what the LangChain integrations
+  sent for the same history — equal except for the differences the edge makes
+  on purpose, each undone by name in `_INTENDED_*` below;
+- the record each made of the same reply;
+- and the next request after a reply either side recorded.
 
 Skipped when `cargo` isn't installed.
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import copy
 import json
@@ -29,20 +28,12 @@ import threading
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.messages.utils import message_chunk_to_message
 
-from core.compaction import apply_per_call_compaction
-from core.context_cache import CacheSegment
-from core.model_catalog import ModelSpec, honors_cache_control
-from core.runner import RunnerConfig
-from core.messages import build_llm_messages, repair_orphan_tool_calls, strip_historical_thinking
-from core.transcript import decode, encode
 from edge_support import edge_binary  # noqa: F401 — a fixture
-from python_golden import GOLDEN_DIR, RECORD, recorded_sync
+from python_golden import GOLDEN_DIR, recorded_sync
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\nfake image bytes").decode()
 
@@ -71,180 +62,23 @@ TOOLS = [
 ]
 
 SEGMENTS = [
-    CacheSegment(name="skills", content="## Skills\n\n- research"),
-    CacheSegment(name="project", content="## Project\n\nJarvis"),
-    CacheSegment(name="memories", content="## Memories\n\nlikes tea", cacheable=False),
+    {"name": "skills", "content": "## Skills\n\n- research", "cacheable": True},
+    {"name": "project", "content": "## Project\n\nJarvis", "cacheable": True},
+    {"name": "memories", "content": "## Memories\n\nlikes tea", "cacheable": False},
 ]
 
 
 # ── histories ────────────────────────────────────────────────────────────────
 
-
-def _gemini_ai(text: str, calls: list[tuple[str, str, dict, str | None]], thinking: str | None = None) -> AIMessage:
-    """An assistant message as langchain-google-genai records one."""
-    content: list[Any] = []
-    if thinking:
-        content.append({"type": "thinking", "thinking": thinking, "index": 0})
-    if text:
-        content.append(text)
-    sigs = {cid: sig for cid, _, _, sig in calls if sig}
-    kwargs: dict[str, Any] = {}
-    if sigs:
-        kwargs["__gemini_function_call_thought_signatures__"] = sigs
-    if calls:
-        kwargs["function_call"] = {"name": calls[0][1], "arguments": json.dumps(calls[0][2])}
-    return AIMessage(
-        content=content or "",
-        tool_calls=[{"id": cid, "name": name, "args": args} for cid, name, args, _ in calls],
-        additional_kwargs=kwargs,
-        response_metadata={"model_provider": "google_genai", "model_name": "gemma-4-31b-it", "finish_reason": "STOP"},
-        usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
-        id="lc_run--a",
-    )
-
-
-def _chat() -> list:
-    return [
-        SystemMessage("Summary of earlier turns: the user is planning a trip."),
-        HumanMessage("Where should I go in May?", id="u1"),
-        _gemini_ai("Try Lisbon.", [], thinking="They like warm places."),
-        HumanMessage("And in June?", id="u2"),
-    ]
-
-
-def _tool_loop() -> list:
-    return [
-        HumanMessage("Add 1 and 1, then plan the week.", id="u1"),
-        _gemini_ai(
-            "",
-            [("c1", "run_cell", {"code": "1+1"}, "c2lnLWMx"), ("c2", "write_todos", {"todos": ["a", "b"]}, None)],
-            thinking="Two things to do.",
-        ),
-        ToolMessage(content='{"stdout": "2"}', tool_call_id="c1", name="run_cell"),
-        ToolMessage(content='["a", "b"]', tool_call_id="c2", name="write_todos"),
-        _gemini_ai("Done: 2.", []),
-        HumanMessage(
-            content=[{"type": "text", "text": "What is in this picture?"},
-                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}}],
-            id="u2",
-        ),
-        _gemini_ai("", [("c3", "run_cell", {"code": "inspect()"}, "c2lnLWMz")]),
-        ToolMessage(content="Traceback: boom", tool_call_id="c3", status="error"),
-        # Cancelled between the model step and its tools: no result.
-        _gemini_ai("", [("c4", "run_cell", {"code": "retry()"}, "c2lnLWM0")]),
-        HumanMessage("Never mind.", id="u3"),
-    ]
-
-
-def _foreign_calls() -> list:
-    """Calls recorded without thought signatures — a thread from another model."""
-    return [
-        HumanMessage("Look it up.", id="u1"),
-        AIMessage(content="", tool_calls=[{"id": "x1", "name": "run_cell", "args": {"code": "search()"}},
-                                          {"id": "x2", "name": "run_cell", "args": {"code": "read()"}}]),
-        ToolMessage(content="found", tool_call_id="x1"),
-        ToolMessage(content="read", tool_call_id="x2"),
-    ]
-
-
-def _responses_thread() -> list:
-    """A thread from Meta's Responses API, as LangChain recorded it: opaque
-    reasoning and function_call items, text tagged with its item id and phase."""
-    records = [
-        {"v": 1, "role": "user", "content": "What do you know about me?"},
-        {"v": 1, "role": "assistant", "id": "resp_6a57", "content": [
-            {"type": "opaque", "data": {"id": "rs_6a57:rs_bf48", "summary": [], "type": "reasoning", "index": 0}},
-            {"type": "text", "text": "I'll check what I have stored.",
-             "extras": {"phase": "commentary", "index": 1, "id": "msg_84dd"}},
-            {"type": "opaque", "data": {"type": "function_call", "name": "run_cell",
-                                        "arguments": "{\"code\": \"search_memory('user')\"}",
-                                        "call_id": "call_b002", "id": "fc_9121", "index": 2}}],
-         "tool_calls": [{"id": "call_b002", "name": "run_cell", "args": {"code": "search_memory('user')"}}],
-         "usage": {"input": 8027, "output": 307, "total": 8334, "input_details": {"cache_read": 0},
-                   "output_details": {"reasoning": 172}},
-         "model": {"provider": "openai", "name": "muse-spark-1.1"},
-         "extras": {"response_metadata": {"id": "resp_6a57", "model": "muse-spark-1.1", "object": "response",
-                                          "status": "completed"}}},
-        {"v": 1, "role": "tool", "name": "run_cell", "content": "[]", "tool_call_id": "call_b002", "status": "success"},
-        {"v": 1, "role": "assistant", "id": "resp_6a58", "content": [
-            {"type": "opaque", "data": {"id": "rs_6a58:rs_9240", "summary": [], "type": "reasoning", "index": 0}},
-            {"type": "text", "text": "Nothing yet — café orders aside.", "extras": {"index": 1}}],
-         "model": {"provider": "openai", "name": "muse-spark-1.1"}},
-        {"v": 1, "role": "user", "content": "Remember that I like tea."},
-    ]
-    return [decode(r) for r in records]
-
-
-def _long_loop() -> list:
-    """Enough turns for per-call compaction to bite: eight tool rounds, then
-    four plain exchanges. The oldest four groups collapse to stubs; the long
-    results of the other four are clipped."""
-    out: list = [HumanMessage("Crunch the numbers.", id="u1")]
-    for i in range(8):
-        cid = f"r{i}"
-        out.append(_gemini_ai("", [(cid, "run_cell", {"code": f"step({i})"}, f"c2lnLXI{i}")]))
-        # Non-ASCII, so a byte count and a character count disagree.
-        output = "ok" if i == 5 else f"{i}: " + "é…x" * 1000
-        out.append(ToolMessage(content=output, tool_call_id=cid, name="run_cell"))
-    for i in range(4):
-        out.append(_gemini_ai(f"Summary {i}.", []))
-        out.append(HumanMessage(f"More {i}?", id=f"m{i}"))
-    return out
-
-
-def _image_results() -> list:
-    history: list = [HumanMessage("Look.", id="u1")]
-    image: list[Any] = [{"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}}]
-    for i in range(8):
-        history.append(_gemini_ai("", [(f"i{i}", "run_cell", {"code": "show()"}, None)]))
-        history.append(ToolMessage(content=image, tool_call_id=f"i{i}", name="run_cell"))
-    return history
-
-
-def _blank_text() -> list:
-    return [
-        HumanMessage("", id="u1"),
-        AIMessage(content="   "),
-        HumanMessage(content=[{"type": "text", "text": " "}, "", {"type": "text", "text": "go"}], id="u2"),
-        AIMessage(content="", tool_calls=[{"id": "b1", "name": "run_cell", "args": {"code": "1"}}]),
-        ToolMessage(content="", tool_call_id="b1"),
-        HumanMessage("next", id="u3"),
-        HumanMessage("and more", id="u4"),
-    ]
-
-
+# Threads as Python's transcript encoder recorded them (records and their
+# blobs): a chat, a tool loop with an image and a cancelled call, calls from
+# another model, a Responses API thread, one long enough to compact — and two
+# edge cases, results that are only images and blank text.
 HISTORIES = ["chat", "tool_loop", "foreign_calls", "responses_thread", "long_loop"]
-_BUILDERS = {
-    "chat": _chat, "tool_loop": _tool_loop, "foreign_calls": _foreign_calls, "responses_thread": _responses_thread,
-    "long_loop": _long_loop, "image_results": _image_results, "blank_text": _blank_text,
+HISTORY: dict[str, tuple[list[dict], dict[str, str]]] = {
+    name: (records, blobs)
+    for name, (records, blobs) in json.loads((GOLDEN_DIR / "test_edge_llm_histories.json").read_text()).items()
 }
-_HISTORY_FILE = GOLDEN_DIR / "test_edge_llm_histories.json"
-
-
-def _load_histories() -> dict[str, tuple[list[dict], dict[str, str]]]:
-    """Each history as Python encoded it into transcript records (and blobs)."""
-    if RECORD:
-        data = {name: _records(make()) for name, make in _BUILDERS.items()}
-        _HISTORY_FILE.write_text(json.dumps(data, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
-    return {name: (records, blobs) for name, (records, blobs) in json.loads(_HISTORY_FILE.read_text()).items()}
-
-
-
-def _records(history: list) -> tuple[list[dict], dict[str, str]]:
-    records, blobs = [], {}
-    for m in history:
-        rec, bs = encode(m)
-        records.append(json.loads(json.dumps(rec)))
-        blobs.update({b.hash: base64.b64encode(b.data).decode() for b in bs})
-    return records, blobs
-
-
-def _python_history(records: list[dict], blobs: dict[str, str]) -> list:
-    raw = {h: base64.b64decode(b) for h, b in blobs.items()}
-    return [decode(r, raw) for r in records]
-
-
-HISTORY = _load_histories()
 
 
 # ── the fake provider ────────────────────────────────────────────────────────
@@ -503,24 +337,6 @@ def _endpoint_rows(url: str) -> list[dict]:
     return [{"name": "local", "base_url": url, "api_key": "test-key"}, {"name": "keyless", "base_url": f"{url}/"}]
 
 
-@pytest.fixture(autouse=True)
-def _aws_env(monkeypatch):
-    """boto3, in this process, reads no profile or file of the machine's."""
-    for k in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_SESSION_TOKEN"):
-        monkeypatch.delenv(k, raising=False)
-    for k, v in _AWS.items():
-        monkeypatch.setenv(k, v)
-
-
-@pytest.fixture(autouse=True)
-def _endpoint_cache():
-    from core import model_catalog
-
-    saved = model_catalog._endpoints
-    yield
-    model_catalog._endpoints = saved
-
-
 def _edge(edge_binary: Path, flag: str, tmp_path: Path, payload: dict, provider: _Provider | None = None) -> list:
     env = {k: v for k, v in os.environ.items() if k not in _PROVIDER_ENV}
     if provider:
@@ -540,23 +356,14 @@ def _edge(edge_binary: Path, flag: str, tmp_path: Path, payload: dict, provider:
     return [json.loads(line) for line in out.stdout.splitlines()]
 
 
-def _python_prompt(history: list, *, cache: bool, provider: str, segments=SEGMENTS) -> list:
-    shaped = repair_orphan_tool_calls(strip_historical_thinking(apply_per_call_compaction(history)))
-    cacheable = [s for s in segments if s.cacheable]
-    volatile = "\n\n".join([s.content for s in segments if not s.cacheable] + [VOLATILE])
-    return build_llm_messages(
-        SYSTEM, cache, shaped, volatile_suffix=volatile, cache_segments=cacheable or None, cache_provider=provider
-    )
-
-
 def _edge_input(model: str, records, blobs, *, cache: bool, segments=SEGMENTS) -> dict:
     return {
         "model": model,
         "system": SYSTEM,
         # The agent step folds the non-cacheable segments into the volatile
         # text in Python; the edge takes them as segments and does it itself.
-        "segments": [{"name": s.name, "content": s.content, "cacheable": s.cacheable} for s in segments if s.cacheable],
-        "volatile": "\n\n".join([s.content for s in segments if not s.cacheable] + [VOLATILE]),
+        "segments": [s for s in segments if s["cacheable"]],
+        "volatile": "\n\n".join([s["content"] for s in segments if not s["cacheable"]] + [VOLATILE]),
         "cache": cache,
         "history": records,
         "tools": TOOLS,
@@ -564,125 +371,12 @@ def _edge_input(model: str, records, blobs, *, cache: bool, segments=SEGMENTS) -
     }
 
 
-def _llm(model: str, url: str):
-    provider, _, name = model.partition(":")
-    if provider == "bedrock":
-        from langchain_aws import ChatBedrockConverse
-
-        # As `ModelSpec.build_llm` builds it, at the fake's address.
-        return ChatBedrockConverse(model=name, base_url=url)
-    if provider == "anthropic":
-        from langchain_anthropic import ChatAnthropic
-
-        # As `ModelSpec.build_llm` builds it, at the fake's address.
-        return ChatAnthropic(model_name=name, timeout=None, stop=None, api_key="test-key", base_url=url)
-    if provider == "google_genai":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        return ChatGoogleGenerativeAI(model=name, base_url=url, google_api_key="test-key")
-    if provider == "openrouter":
-        from langchain_openai import ChatOpenAI
-
-        # As `ModelSpec.build_llm` builds it, at the fake's address.
-        return ChatOpenAI(model=name, base_url=url, api_key="test-key", stream_usage=True)
-    if provider == "meta":
-        from langchain_meta import ChatMetaModel
-
-        return ChatMetaModel(model=name, api_key="test-key", base_url=f"{url}/")
-    if provider == "ollama":
-        from langchain_ollama import ChatOllama
-
-        return ChatOllama(model=name, base_url=url)
-    # An endpoint: the catalog's own path, as a run builds it.
-    from core.model_catalog import load_endpoints
-
-    load_endpoints(_endpoint_rows(url))
-    return ModelSpec(id=model, label=model, provider=provider).build_llm()
-
-
-def _cache(model: str) -> bool:
-    """Whether the agent lays this model's prompt out for a cache
-    (`JarvisRunner.should_use_cache` with the default providers)."""
-    provider = model.partition(":")[0]
-    spec = ModelSpec(id=model, label=model, provider=provider)
-    return honors_cache_control(spec, RunnerConfig().cache_enabled_providers)
-
-
-def _python_call(model: str, url: str, messages: list) -> BaseMessage:
-    llm = _llm(model, url).bind_tools([{"type": "function", "function": t} for t in TOOLS])
-
-    async def run() -> BaseMessage:
-        out: Any = None
-        async for chunk in llm.astream(messages):
-            out = chunk if out is None else out + chunk
-        return message_chunk_to_message(cast(BaseMessage, out))
-
-    return asyncio.run(run())
-
-
-def _py_prompt(records, blobs, *, cache: bool, provider: str, segments=SEGMENTS) -> list:
-    return _python_prompt(_python_history(records, blobs), cache=cache, provider=provider, segments=segments)
-
-
-def _py_request(provider: _Provider, model: str, records, blobs, *, cache: bool) -> dict:
-    """What Python sends the fake for `records`."""
-    _python_call(model, provider.url, _py_prompt(records, blobs, cache=cache, provider=model.split(":")[0]))
-    return provider.take()
-
-
-def _py_reply(provider: _Provider, model: str, records, blobs, *, cache: bool) -> dict:
-    """The record Python makes of the fake's reply."""
-    reply = _python_call(model, provider.url, _py_prompt(records, blobs, cache=cache, provider=model.split(":")[0]))
-    provider.take()
-    return json.loads(json.dumps(encode(reply)[0]))
-
-
-def _py_failure(provider: _Provider, model: str, records, blobs) -> str:
-    """How Python refuses to send `records`."""
-    try:
-        _python_call(model, provider.url, _py_prompt(records, blobs, cache=_cache(model), provider=model.split(":")[0]))
-    except Exception as e:  # noqa: BLE001 — what it raised is the answer
-        return f"{type(e).__name__}: {e}"
-    finally:
-        provider.requests.clear()
-    raise AssertionError("Python sent it")
-
-
 def _cached(model: str) -> bool:
-    return recorded_sync(lambda: _cache(model))
+    """Whether Python laid this model's prompt out for a cache, as recorded."""
+    return recorded_sync()
 
 
 # ── shaping ──────────────────────────────────────────────────────────────────
-
-
-def _neutral_python(messages: list) -> dict:
-    """`build_llm_messages`' output in the shape `--llm-shape` prints:
-    breakpoints as flags, content as `normalize_history_content` leaves it."""
-    system, *rest = messages
-    blocks: list[dict] = []
-    content = system.content if isinstance(system.content, list) else [system.content]
-    for b in content:
-        if isinstance(b, dict) and "cachePoint" in b:
-            blocks[-1]["breakpoint"] = True
-        elif isinstance(b, str):
-            blocks.append({"text": b, "breakpoint": False})
-        else:
-            blocks.append({"text": b["text"], "breakpoint": "cache_control" in b})
-    out, marked = [], None
-    for i, m in enumerate(rest):
-        rec, _ = encode(m)
-        parts = rec["content"] if isinstance(rec["content"], list) else None
-        if parts and isinstance(parts[-1], dict) and parts[-1].get("type") == "opaque" \
-                and "cachePoint" in parts[-1]["data"]:
-            parts.pop()
-            marked = i
-        elif parts and isinstance(parts[-1], dict) and "cache_control" in (parts[-1].get("extras") or {}):
-            parts[-1]["extras"].pop("cache_control")
-            if not parts[-1]["extras"]:
-                del parts[-1]["extras"]
-            marked = i
-        out.append(rec)
-    return {"system": blocks, "messages": out, "history_breakpoint": marked}
 
 
 def _normalized(prompt: dict) -> dict:
@@ -700,7 +394,7 @@ def _normalized(prompt: dict) -> dict:
 @pytest.mark.parametrize("cache", [True, False])
 def test_shaping_matches_python(edge_binary, tmp_path, name, provider_id, cache):
     records, blobs = HISTORY[name]
-    expected = recorded_sync(lambda: _neutral_python(_py_prompt(records, blobs, cache=cache, provider=provider_id)))
+    expected = recorded_sync()
     [got] = _edge(edge_binary, "--llm-shape", tmp_path, _edge_input(f"{provider_id}:m", records, blobs, cache=cache))
     if cache:
         got = _normalized(got)
@@ -709,8 +403,7 @@ def test_shaping_matches_python(edge_binary, tmp_path, name, provider_id, cache)
 
 def test_shaping_without_segments(edge_binary, tmp_path):
     records, blobs = HISTORY["chat"]
-    expected = recorded_sync(lambda: _neutral_python(_py_prompt(records, blobs, cache=False, provider="ollama",
-                                                                segments=[])))
+    expected = recorded_sync()
     [got] = _edge(edge_binary, "--llm-shape", tmp_path,
                   _edge_input("ollama:m", records, blobs, cache=False, segments=[]))
     assert got == expected
@@ -729,7 +422,7 @@ def test_stub_leaves_a_result_without_text_unquoted(edge_binary, tmp_path):
     """Intended: a collapsed result with no text isn't quoted. Python quotes
     the repr of its content — a truncated data URL the model pays for."""
     records, blobs = HISTORY["image_results"]
-    expected = recorded_sync(lambda: _neutral_python(_py_prompt(records, blobs, cache=False, provider="ollama")))
+    expected = recorded_sync()
     [got] = _edge(edge_binary, "--llm-shape", tmp_path, _edge_input("ollama:m", records, blobs, cache=False))
     for m in expected["messages"][1:5]:
         assert m["content"].startswith("[Previous tool activity: run_cell => run_cell: [{'type': 'image_url'")
@@ -837,7 +530,7 @@ INTENDED = {
 def _both(edge_binary, tmp_path, provider, model, records, blobs) -> tuple[dict, dict, list]:
     """What Python and the edge each send for `records`, and the edge's output."""
     cache = _cached(model)
-    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=cache))
+    python = recorded_sync()
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=cache), provider)
     assert "message" in out[-1], out[-1]
     return python, provider.take(), out
@@ -850,7 +543,7 @@ def test_request_matches_python(edge_binary, tmp_path, provider, name, model):
     if model.startswith("bedrock") and name == "responses_thread":
         # Neither can send Bedrock another provider's call items: LangChain
         # raises, and the edge fails the call with the same words.
-        refused = recorded_sync(lambda: _py_failure(provider, model, records, blobs))
+        refused = recorded_sync()
         assert refused.startswith("ValueError: Unsupported content block type")
         out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=_cached(model)), provider)
         assert out[-1]["error"]["message"] == "Unsupported content block type: function_call"
@@ -859,7 +552,7 @@ def test_request_matches_python(edge_binary, tmp_path, provider, name, model):
     if model.startswith("ollama") and name == "responses_thread":
         # LangChain can't send Ollama a thread that came from the Responses
         # API: the function_call item left in the content is a ValueError.
-        refused = recorded_sync(lambda: _py_failure(provider, model, records, blobs))
+        refused = recorded_sync()
         assert refused.startswith("ValueError: Unsupported message content type")
         out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
         assert "message" in out[-1], out[-1]
@@ -884,19 +577,14 @@ def test_anthropic_request_without_a_cache_matches_python(edge_binary, tmp_path,
     system string) is what a run with caching turned off would send."""
     model = MODELS[0]
     records, blobs = HISTORY[name]
-    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=False))["body"]
+    python = recorded_sync()["body"]
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     assert provider.take()["body"] == python
 
 
 def test_anthropic_max_tokens_follow_langchains_profiles(edge_binary, tmp_path, provider):
-    def python() -> dict[str, int]:
-        from langchain_anthropic.data._profiles import _PROFILES
-
-        return {name: _llm(f"anthropic:{name}", provider.url).max_tokens for name in [*_PROFILES, "claude-unknown-9"]}
-
     records, blobs = HISTORY["chat"]
-    for name, expected in recorded_sync(python).items():
+    for name, expected in recorded_sync().items():
         _edge(edge_binary, "--llm-call", tmp_path, _edge_input(f"anthropic:{name}", records, blobs, cache=False),
               provider)
         assert provider.take()["body"]["max_tokens"] == expected, name
@@ -942,7 +630,7 @@ def _semantics(rec: dict) -> dict:
 @pytest.mark.parametrize("model", [MODELS[0], MODELS[2], MODELS[4], MODELS[5], MODELS[7], MODELS[8], MODELS[10]])
 def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     records, blobs = HISTORY["chat"]
-    python_rec = recorded_sync(lambda: _py_reply(provider, model, records, blobs, cache=False))
+    python_rec = recorded_sync()
     python = _semantics(python_rec)
     if model.startswith(("openrouter", "meta", "local")):
         # LangChain named the provider by wire format; the edge records the
@@ -992,27 +680,6 @@ def test_reply_matches_python(edge_binary, tmp_path, provider, model):
     assert all(c["id"] for c in edge_rec["tool_calls"])
 
 
-def _python_run_events(model: str, url: str, messages: list) -> tuple[list[dict], dict | None]:
-    """The events a Python run of one model call emits for its budget and
-    throughput, and the perf it stores on the Message row."""
-    from core.budget import BudgetCallbackHandler, BudgetTracker, get_budget_limits_for_task
-    from core.perf import PerfCallbackHandler, PerfTracker
-    from core.state import TaskState
-
-    state = TaskState()
-    budget = BudgetTracker(get_budget_limits_for_task("chat"), task_state=state)
-    perf = PerfTracker(task_state=state)
-    llm = _llm(model, url).bind_tools([{"type": "function", "function": t} for t in TOOLS])
-
-    async def run() -> None:
-        config: Any = {"callbacks": [BudgetCallbackHandler(budget, state), PerfCallbackHandler(perf)]}
-        async for _ in llm.astream(messages, config=config):
-            pass
-
-    asyncio.run(run())
-    return [{"event": e["event"], "data": json.loads(e["data"])} for e in state.events], perf.message_perf()
-
-
 # Read off the wall clock, so equal only in whether they were measured.
 _WALL_CLOCK = {"ttft_ms", "llm_ms", "total_ms", "elapsed_seconds", "decode_ms"}
 # Wall-clock rates: whether one clears the 5 ms floor depends on the machine.
@@ -1050,13 +717,7 @@ def test_run_events_match_python(edge_binary, tmp_path, provider, model):
     chat turn stores, as Python's callback handlers produce them."""
     records, blobs = HISTORY["chat"]
 
-    def python_run() -> tuple[list[dict], dict | None]:
-        run = _python_run_events(model, provider.url,
-                                 _py_prompt(records, blobs, cache=False, provider=model.split(":")[0]))
-        provider.take()
-        return run
-
-    python, python_perf = recorded_sync(python_run)
+    python, python_perf = recorded_sync()
     out = _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     edge = [line for line in out if "event" in line]
     assert [e["event"] for e in edge] == ["budget_update", "perf_update"]
@@ -1091,7 +752,7 @@ def test_edge_record_goes_back_out_through_python(edge_binary, tmp_path, provide
         reply,
         *({"v": 1, "role": "tool", "content": "ok", "tool_call_id": c["id"], "status": "success"} for c in calls),
     ]
-    sent = recorded_sync(lambda: _py_request(provider, model, follow, blobs, cache=False))["body"]["contents"]
+    sent = recorded_sync()["body"]["contents"]
     model_turn = [c for c in sent if c["role"] == "model"][-1]
     assert [p.get("thoughtSignature") for p in model_turn["parts"] if "functionCall" in p] == ["Y2FsbC1zaWc=", None]
     # …and the edge itself sends it back with the text's signature too.
@@ -1132,7 +793,7 @@ def test_a_reply_python_recorded_goes_back_out_the_same(edge_binary, tmp_path, p
     assistant turn, on both sides)."""
     model = MODELS[0]
     records, blobs = HISTORY["chat"]
-    rec = recorded_sync(lambda: _py_reply(provider, model, records, blobs, cache=True))
+    rec = recorded_sync()
     assert [p.get("data", {}).get("type") for p in rec["content"] if p["type"] == "opaque"] == ["tool_use", "tool_use"]
     follow = [
         *records,
@@ -1166,7 +827,7 @@ def test_bedrock_request_without_a_cache_matches_python(edge_binary, tmp_path, p
     if name == "responses_thread":
         return  # refused by both, above
     records, blobs = HISTORY[name]
-    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=False))["body"]
+    python = recorded_sync()["body"]
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=False), provider)
     assert provider.take()["body"] == python
 
@@ -1177,7 +838,7 @@ def test_a_bedrock_reply_python_recorded_goes_back_out_the_same(edge_binary, tmp
     LangChain does, and the calls' string inputs as the objects they are."""
     model = MODELS[10]
     records, blobs = HISTORY["chat"]
-    rec = recorded_sync(lambda: _py_reply(provider, model, records, blobs, cache=True))
+    rec = recorded_sync()
     follow = [
         *records,
         rec,
@@ -1197,7 +858,7 @@ def test_bedrock_blank_text_is_a_dot(edge_binary, tmp_path, provider, cache):
     place, and drops an empty bare string."""
     model = MODELS[10]
     records, blobs = HISTORY["blank_text"]
-    python = recorded_sync(lambda: _py_request(provider, model, records, blobs, cache=cache))["body"]
+    python = recorded_sync()["body"]
     _edge(edge_binary, "--llm-call", tmp_path, _edge_input(model, records, blobs, cache=cache), provider)
     assert provider.take()["body"] == python
     assert {"text": "."} in python["messages"][0]["content"]

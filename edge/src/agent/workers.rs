@@ -1,6 +1,5 @@
 //! `spawn_workers` — a port of `tools/workers.py` and the worker roles of
-//! `core/agents.py` (`_ROLE_PROMPTS`, `_ROLE_TOOLS`, `_make_role_factory`);
-//! a change to either is made in both.
+//! `core/agents.py` (`_ROLE_PROMPTS`, `_ROLE_TOOLS`, `_make_role_factory`).
 //!
 //! Each task runs on a worker, all at once: the run's model, a role's prompt
 //! and tools, a history of its own in memory, a kernel of its own. What a

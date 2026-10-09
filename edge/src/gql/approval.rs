@@ -1,6 +1,5 @@
 //! `resolveApproval` (`server/graphql/mutations/approval.py`, `core/approvals.py:resolve`)
-//! and `requestToolApproval` (`server/graphql/mutations/tool.py`) — a change
-//! to either is made in both.
+//! and `requestToolApproval` (`server/graphql/mutations/tool.py`) — ports.
 //!
 //! Every answer lives in a row: a tool gate (the waiter polls the row), a
 //! board task's question, a paused workflow node, and a deferred action — a

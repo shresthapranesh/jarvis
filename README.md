@@ -116,7 +116,7 @@ pnpm build      # build to ../static/dist/ for production
 
 ### Add a new AI model
 
-Settings → Models in the UI, or `jarvis-edge model add`. A built-in one goes in `core/builtin_models.json` (compiled into the server — rebuild it).
+Settings → Models in the UI, or `jarvis-edge model add`. A built-in one goes in `edge/src/builtin_models.json` (compiled into the server — rebuild it).
 
 ### Add a new tool
 
