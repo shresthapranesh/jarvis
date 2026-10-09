@@ -85,6 +85,43 @@ pub fn with_mode(cfg: &Connection, mode: &str) -> Connection {
     out
 }
 
+/// What a saved secret reads as: header and env values never leave the
+/// server, and one sent back unchanged keeps what is stored.
+pub const MASK: &str = "••••";
+const SECRET_MAPS: [&str; 2] = ["headers", "env"];
+
+/// `cfg` with every set header and env value masked.
+pub fn redact(cfg: &Connection) -> Connection {
+    let mut out = cfg.clone();
+    for key in SECRET_MAPS {
+        if let Some(Value::Object(map)) = out.get_mut(key) {
+            for v in map.values_mut() {
+                if pyjson::truthy(v) {
+                    *v = Value::String(MASK.into());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `incoming` with each masked value put back from `stored`, refused when
+/// there's nothing stored to put back.
+pub fn unmask(incoming: &mut Value, stored: Option<&Connection>) -> Result<(), String> {
+    let Value::Object(cfg) = incoming else { return Ok(()) };
+    for key in SECRET_MAPS {
+        let Some(Value::Object(map)) = cfg.get_mut(key) else { continue };
+        for (name, v) in map.iter_mut() {
+            if v.as_str() != Some(MASK) {
+                continue;
+            }
+            let saved = stored.and_then(|s| s.get(key)).and_then(|m| m.get(name)).filter(|s| s.as_str() != Some(MASK));
+            *v = saved.cloned().ok_or_else(|| format!("No saved value for {key} {name:?} — enter it again"))?;
+        }
+    }
+    Ok(())
+}
+
 /// `_normalize_servers`: the shapes people write — Claude Desktop's
 /// `{"mcpServers": {...}}`, `{name: config}`, `[{name, ...}]` — as
 /// name → connection dict, with a `transport` guessed when absent.
@@ -228,5 +265,22 @@ mod tests {
         assert_eq!(mode_for(None, LAZY), LAZY);
         let moved = with_mode(&cfg(json!({"x-jarvis-load": "lazy", "command": "c"})), ALWAYS);
         assert_eq!(Value::Object(moved), json!({"command": "c", "x-jarvis-load": "always"}));
+    }
+
+    #[test]
+    fn secrets_never_leave_and_masks_keep_them() {
+        let stored = json!({"url": "u", "headers": {"Authorization": "Bearer t", "X-Empty": ""}, "env": {"K": "v"}});
+        let stored = stored.as_object().unwrap();
+        let shown = Value::Object(redact(stored));
+        assert_eq!(shown, json!({"url": "u", "headers": {"Authorization": MASK, "X-Empty": ""}, "env": {"K": MASK}}));
+
+        let mut back = shown.clone();
+        unmask(&mut back, Some(stored)).unwrap();
+        assert_eq!(&back, &Value::Object(stored.clone()));
+
+        let mut replaced = json!({"headers": {"Authorization": "Bearer new", "X-Key": MASK}});
+        assert_eq!(unmask(&mut replaced, Some(stored)).unwrap_err(), "No saved value for headers \"X-Key\" — enter it again");
+        let mut fresh = json!({"env": {"K": MASK}});
+        assert!(unmask(&mut fresh, None).is_err());
     }
 }

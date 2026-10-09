@@ -280,8 +280,23 @@ fn inventory(rows: Vec<Row>, written: Option<&str>) -> Vec<Setting> {
     out
 }
 
-/// `redact`: endpoint API keys never leave the server.
+/// `redact`: endpoint API keys and MCP header/env values never leave the
+/// server.
 fn redact(key: &str, value: &str) -> String {
+    if key == crate::mcp::config::SERVERS_KEY {
+        return match serde_json::from_str::<Value>(value) {
+            Ok(Value::Object(servers)) => crate::pyjson::dumps(&Value::Object(
+                servers
+                    .into_iter()
+                    .map(|(name, cfg)| match cfg {
+                        Value::Object(cfg) => (name, Value::Object(crate::mcp::config::redact(&cfg))),
+                        other => (name, other),
+                    })
+                    .collect(),
+            )),
+            _ => value.to_string(),
+        };
+    }
     if key != "models.endpoints" || value.is_empty() {
         return value.to_string();
     }
@@ -458,6 +473,11 @@ mod tests {
         );
         assert_eq!(redact("models.endpoints", "{not json"), "{not json");
         assert_eq!(redact("models.custom", raw), raw);
+        let mcp = r#"{"a": {"url": "u", "headers": {"Authorization": "Bearer t"}}, "b": {"command": "c", "env": {"K": ""}}}"#;
+        assert_eq!(
+            redact("mcp.servers", mcp),
+            r#"{"a": {"url": "u", "headers": {"Authorization": "\u2022\u2022\u2022\u2022"}}, "b": {"command": "c", "env": {"K": ""}}}"#
+        );
     }
 
     #[test]
