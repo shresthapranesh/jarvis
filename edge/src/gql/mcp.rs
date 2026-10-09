@@ -95,7 +95,7 @@ fn parse_json(raw: &str, what: &str) -> Result<Value> {
     serde_json::from_str(raw).map_err(|e| format!("{what} is not valid JSON: {e}").into())
 }
 
-async fn write_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()> {
+pub(crate) async fn write_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<()> {
     let mut tx = crate::db::write_tx(pool).await?;
     upsert(&mut tx, key, value).await?;
     tx.commit().await?;
@@ -110,7 +110,7 @@ fn single(name: &str, cfg: &Value) -> Value {
 }
 
 /// `add_mcp_server_to_db`: the server upserted into the `mcp.servers` setting.
-async fn add_to_db(pool: &SqlitePool, name: &str, cfg: &Value) -> Result<()> {
+pub(crate) async fn add_to_db(pool: &SqlitePool, name: &str, cfg: &Value) -> Result<()> {
     let mut servers = config::from_db(pool).await;
     let normalized = config::normalize(&single(name, cfg));
     if normalized.is_empty() {
