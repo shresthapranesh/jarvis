@@ -23,7 +23,7 @@ tests/           pytest; tests/test_edge_*.py drive the binary against Python's 
 
 ```bash
 cd edge && JARVIS_APP_DIR=.. cargo run       # the server on :8000
-edge/target/debug/jarvis-edge run|config|model|memory …   # the CLI
+edge/target/debug/jarvis-edge run|config|model|memory|mcp …   # the CLI
 cd edge && cargo test                        # unit tests
 
 uv add <package>                             # Python dependency (pyproject.toml + uv.lock) — for the kernels
