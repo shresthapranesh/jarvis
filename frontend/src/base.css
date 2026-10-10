@@ -89,7 +89,7 @@ html {
 
 /* ── Caller-authored content ──────────────────────────────────────────
    Two places take markup this app does not render itself and so cannot
-   attach a compiled style to: HTML strings from `marked`, and JSX passed
+   attach a compiled style to: the elements `Markdown` renders, and JSX passed
    as a prop (a dialog's `message`). Both are keyed off a data attribute
    rather than a class, so the element still gets all its own styling
    from StyleX with no className to collide with. */
@@ -119,8 +119,9 @@ html {
 }
 
 /* ── Rendered markdown ───────────────────────────────────────────────
-   `marked` output reaches the DOM as an HTML string, so these descendants
-   exist only at runtime and no compiled style can reach them. The host
+   `Markdown` (components/Markdown.tsx) emits bare <p>/<pre>/<table>
+   elements with no styles of their own, and a parent cannot style its
+   children in StyleX, so these rules reach them from here. The host
    element carries `data-md` (never a class) so it still takes all of its
    own styling from StyleX, and forwards the handful of tokens these rules
    need as plain custom properties — StyleX's variable names are hashed and

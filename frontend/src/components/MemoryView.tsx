@@ -1,5 +1,4 @@
 import * as stylex from '@stylexjs/stylex';
-import {marked} from 'marked';
 import {useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -18,6 +17,7 @@ import {commitUpdateMemory} from '../relay/UpdateMemoryMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
+import {Markdown} from './Markdown';
 import {item, kindDotStyle, kindDot, memory, seg} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
 import {btn, codeField, field, iconBtn, page, prose} from './ui';
@@ -402,11 +402,9 @@ function LegacyBlob({
         </>
       ) : (
         <>
-          <div
-            {...stylex.props(prose.vars, styles.blobBody)}
-            data-md
-            dangerouslySetInnerHTML={{__html: marked.parse(blob.content) as string}}
-          />
+          <div {...stylex.props(prose.vars, styles.blobBody)} data-md>
+            <Markdown text={blob.content} />
+          </div>
           <div {...stylex.props(codeField.actions)}>
             <button
               {...stylex.props(btn.base)}

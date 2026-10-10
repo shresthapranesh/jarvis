@@ -1,5 +1,4 @@
 import * as stylex from '@stylexjs/stylex';
-import {marked} from 'marked';
 import {Suspense, useEffect, useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -13,6 +12,7 @@ import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
 import {commitRestoreArtifactVersion} from '../relay/RestoreArtifactVersionMutation';
 import {commitUpdateArtifact} from '../relay/UpdateArtifactMutation';
 import {detail as detailStyles, diff, editor, panel, version} from './ArtifactPanel.styles';
+import {Markdown} from './Markdown';
 import {btn, closeBtn, prose} from './ui';
 
 const svg = (path: React.ReactNode, w = 2) => (
@@ -506,11 +506,9 @@ function renderArtifactBody(
       return <img {...stylex.props(detailStyles.media)} src={src} alt={detail.title} />;
     case 'markdown':
       return (
-        <div
-          {...stylex.props(prose.base, detailStyles.content)}
-          data-md
-          dangerouslySetInnerHTML={{__html: marked.parse(detail.content) as string}}
-        />
+        <div {...stylex.props(prose.base, detailStyles.content)} data-md>
+          <Markdown text={detail.content} />
+        </div>
       );
     default:
       return (
