@@ -135380,6 +135380,32 @@
        },
        {
         "available": true,
+        "description": "Automation runs, newest first, with status and a preview of the output.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automation_runs",
+        "inPrompt": false,
+        "key": "sdk:list_automation_runs",
+        "kind": "sdk",
+        "name": "jarvis.list_automation_runs",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "One automation run in full: status, times, its whole output and error.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:read_automation_run",
+        "inPrompt": false,
+        "key": "sdk:read_automation_run",
+        "kind": "sdk",
+        "name": "jarvis.read_automation_run",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Create an automation — a task that runs on a cron schedule or on demand.",
         "detail": "",
         "enabled": true,
@@ -136590,6 +136616,32 @@
         "key": "sdk:list_automations",
         "kind": "sdk",
         "name": "jarvis.list_automations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Automation runs, newest first, with status and a preview of the output.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automation_runs",
+        "inPrompt": false,
+        "key": "sdk:list_automation_runs",
+        "kind": "sdk",
+        "name": "jarvis.list_automation_runs",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "One automation run in full: status, times, its whole output and error.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:read_automation_run",
+        "inPrompt": false,
+        "key": "sdk:read_automation_run",
+        "kind": "sdk",
+        "name": "jarvis.read_automation_run",
         "requiresApproval": false
        },
        {
@@ -137808,6 +137860,32 @@
        },
        {
         "available": true,
+        "description": "Automation runs, newest first, with status and a preview of the output.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automation_runs",
+        "inPrompt": false,
+        "key": "sdk:list_automation_runs",
+        "kind": "sdk",
+        "name": "jarvis.list_automation_runs",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "One automation run in full: status, times, its whole output and error.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:read_automation_run",
+        "inPrompt": false,
+        "key": "sdk:read_automation_run",
+        "kind": "sdk",
+        "name": "jarvis.read_automation_run",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Create an automation — a task that runs on a cron schedule or on demand.",
         "detail": "",
         "enabled": true,
@@ -139018,6 +139096,32 @@
         "key": "sdk:list_automations",
         "kind": "sdk",
         "name": "jarvis.list_automations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Automation runs, newest first, with status and a preview of the output.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automation_runs",
+        "inPrompt": false,
+        "key": "sdk:list_automation_runs",
+        "kind": "sdk",
+        "name": "jarvis.list_automation_runs",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "One automation run in full: status, times, its whole output and error.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:read_automation_run",
+        "inPrompt": false,
+        "key": "sdk:read_automation_run",
+        "kind": "sdk",
+        "name": "jarvis.read_automation_run",
         "requiresApproval": false
        },
        {
@@ -140236,6 +140340,32 @@
        },
        {
         "available": true,
+        "description": "Automation runs, newest first, with status and a preview of the output.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automation_runs",
+        "inPrompt": false,
+        "key": "sdk:list_automation_runs",
+        "kind": "sdk",
+        "name": "jarvis.list_automation_runs",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "One automation run in full: status, times, its whole output and error.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:read_automation_run",
+        "inPrompt": false,
+        "key": "sdk:read_automation_run",
+        "kind": "sdk",
+        "name": "jarvis.read_automation_run",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Create an automation — a task that runs on a cron schedule or on demand.",
         "detail": "",
         "enabled": true,
@@ -141446,6 +141576,32 @@
         "key": "sdk:list_automations",
         "kind": "sdk",
         "name": "jarvis.list_automations",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Automation runs, newest first, with status and a preview of the output.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:list_automation_runs",
+        "inPrompt": false,
+        "key": "sdk:list_automation_runs",
+        "kind": "sdk",
+        "name": "jarvis.list_automation_runs",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "One automation run in full: status, times, its whole output and error.",
+        "detail": "",
+        "enabled": true,
+        "group": "automations",
+        "id": "sdk:read_automation_run",
+        "inPrompt": false,
+        "key": "sdk:read_automation_run",
+        "kind": "sdk",
+        "name": "jarvis.read_automation_run",
         "requiresApproval": false
        },
        {

@@ -494,6 +494,56 @@ def list_automations() -> list[dict]:
         ]
 
 
+_RUN_PREVIEW = 200
+
+
+def list_automation_runs(automation_id: str | None = None, limit: int = 20) -> list[dict]:
+    """Automation runs, newest first, with status and a preview of the output.
+
+    One automation's runs, or every automation's when automation_id is None.
+    status: "pending" | "running" | "done" | "no_change" (a monitor saw nothing
+    new) | "error" | "stopped" | "skipped". `preview` is the start of the output,
+    or of the error when there is none; read_automation_run has the whole text.
+    """
+    sql = (
+        "SELECT r.id, r.automation_id, a.name AS automation, r.status, r.triggered_by,"
+        " r.started_at, r.finished_at, r.output, r.error"
+        " FROM automation_runs r JOIN automations a ON a.id = r.automation_id"
+    )
+    params: tuple = ()
+    with _connect() as conn:
+        if automation_id is not None:
+            if conn.execute("SELECT 1 FROM automations WHERE id = ?", (automation_id,)).fetchone() is None:
+                raise LookupError(f"Automation not found: {automation_id}")
+            sql += " WHERE r.automation_id = ?"
+            params = (automation_id,)
+        sql += " ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?"
+        rows = conn.execute(sql, (*params, max(1, limit))).fetchall()
+    runs = []
+    for row in rows:
+        run = dict(row)
+        output, error = run.pop("output"), run.pop("error")
+        text = (output or error or "").strip()
+        run["preview"] = text[:_RUN_PREVIEW] + ("…" if len(text) > _RUN_PREVIEW else "")
+        runs.append(run)
+    return runs
+
+
+def read_automation_run(run_id: str) -> dict:
+    """One automation run in full: status, times, its whole output and error."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT r.id, r.automation_id, a.name AS automation, r.status, r.triggered_by,"
+            " r.started_at, r.finished_at, r.output, r.error"
+            " FROM automation_runs r JOIN automations a ON a.id = r.automation_id"
+            " WHERE r.id = ?",
+            (run_id,),
+        ).fetchone()
+    if row is None:
+        raise LookupError(f"Automation run not found: {run_id}")
+    return dict(row)
+
+
 def create_automation(
     name: str,
     input_type: str,
@@ -1066,7 +1116,14 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     ),
     "automations": (
         "scheduled or on-demand tasks (cron, code, webhook, monitor)",
-        [list_automations, create_automation, update_automation, delete_automation],
+        [
+            list_automations,
+            list_automation_runs,
+            read_automation_run,
+            create_automation,
+            update_automation,
+            delete_automation,
+        ],
     ),
     "board": (
         "durable background tasks that run on their own agent",
