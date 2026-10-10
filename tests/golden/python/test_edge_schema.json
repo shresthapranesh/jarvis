@@ -402,6 +402,14 @@
     {
      "$tuple": [
       "index",
+      "sqlite_autoindex_mcp_oauth_1",
+      "mcp_oauth",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
       "sqlite_autoindex_memories_1",
       "memories",
       null
@@ -645,6 +653,14 @@
       "kv_store",
       "kv_store",
       "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "mcp_oauth",
+      "mcp_oauth",
+      "CREATE TABLE mcp_oauth (\n\tserver VARCHAR NOT NULL, \n\turl VARCHAR NOT NULL, \n\tresource VARCHAR NOT NULL, \n\ttoken_endpoint VARCHAR NOT NULL, \n\tclient_id VARCHAR NOT NULL, \n\tclient_secret VARCHAR, \n\ttoken_auth_method VARCHAR, \n\taccess_token TEXT NOT NULL, \n\trefresh_token TEXT, \n\texpires_at DATETIME, \n\tscope VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (server)\n)"
      ]
     },
     {
@@ -927,6 +943,7 @@
       ]
      }
     ],
+    "mcp_oauth": [],
     "memories": [],
     "memory_activities": [],
     "messages": [],
@@ -1364,6 +1381,14 @@
     {
      "$tuple": [
       "index",
+      "sqlite_autoindex_mcp_oauth_1",
+      "mcp_oauth",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
       "sqlite_autoindex_memories_1",
       "memories",
       null
@@ -1607,6 +1632,14 @@
       "kv_store",
       "kv_store",
       "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "mcp_oauth",
+      "mcp_oauth",
+      "CREATE TABLE mcp_oauth (\n\tserver VARCHAR NOT NULL, \n\turl VARCHAR NOT NULL, \n\tresource VARCHAR NOT NULL, \n\ttoken_endpoint VARCHAR NOT NULL, \n\tclient_id VARCHAR NOT NULL, \n\tclient_secret VARCHAR, \n\ttoken_auth_method VARCHAR, \n\taccess_token TEXT NOT NULL, \n\trefresh_token TEXT, \n\texpires_at DATETIME, \n\tscope VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (server)\n)"
      ]
     },
     {
@@ -1966,6 +1999,7 @@
       ]
      }
     ],
+    "mcp_oauth": [],
     "memories": [],
     "memory_activities": [],
     "messages": [
@@ -2439,6 +2473,14 @@
     {
      "$tuple": [
       "index",
+      "sqlite_autoindex_mcp_oauth_1",
+      "mcp_oauth",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
       "sqlite_autoindex_memories_1",
       "memories",
       null
@@ -2682,6 +2724,14 @@
       "kv_store",
       "kv_store",
       "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "mcp_oauth",
+      "mcp_oauth",
+      "CREATE TABLE mcp_oauth (\n\tserver VARCHAR NOT NULL, \n\turl VARCHAR NOT NULL, \n\tresource VARCHAR NOT NULL, \n\ttoken_endpoint VARCHAR NOT NULL, \n\tclient_id VARCHAR NOT NULL, \n\tclient_secret VARCHAR, \n\ttoken_auth_method VARCHAR, \n\taccess_token TEXT NOT NULL, \n\trefresh_token TEXT, \n\texpires_at DATETIME, \n\tscope VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (server)\n)"
      ]
     },
     {
@@ -2964,6 +3014,7 @@
       ]
      }
     ],
+    "mcp_oauth": [],
     "memories": [],
     "memory_activities": [],
     "messages": [],
@@ -3401,6 +3452,14 @@
     {
      "$tuple": [
       "index",
+      "sqlite_autoindex_mcp_oauth_1",
+      "mcp_oauth",
+      null
+     ]
+    },
+    {
+     "$tuple": [
+      "index",
       "sqlite_autoindex_memories_1",
       "memories",
       null
@@ -3644,6 +3703,14 @@
       "kv_store",
       "kv_store",
       "CREATE TABLE kv_store (\n\tnamespace VARCHAR NOT NULL, \n\t\"key\" VARCHAR NOT NULL, \n\tvalue TEXT NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (namespace, \"key\")\n)"
+     ]
+    },
+    {
+     "$tuple": [
+      "table",
+      "mcp_oauth",
+      "mcp_oauth",
+      "CREATE TABLE mcp_oauth (\n\tserver VARCHAR NOT NULL, \n\turl VARCHAR NOT NULL, \n\tresource VARCHAR NOT NULL, \n\ttoken_endpoint VARCHAR NOT NULL, \n\tclient_id VARCHAR NOT NULL, \n\tclient_secret VARCHAR, \n\ttoken_auth_method VARCHAR, \n\taccess_token TEXT NOT NULL, \n\trefresh_token TEXT, \n\texpires_at DATETIME, \n\tscope VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (server)\n)"
      ]
     },
     {
@@ -4039,6 +4106,7 @@
       ]
      }
     ],
+    "mcp_oauth": [],
     "memories": [],
     "memory_activities": [],
     "messages": [

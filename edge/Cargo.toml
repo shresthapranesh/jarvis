@@ -38,7 +38,7 @@ libc = "0.2"
 # The SPA's file paths, as Python decoded them.
 percent-encoding = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "fs", "io-util"] }
 # rustls: the Discord gateway (`bots/discord.rs`).
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 tracing = "0.1"

@@ -3,21 +3,32 @@
 //! UI shows them. A running server is told to reconnect after a write and
 //! asked which tools each server has; with none running, a write waits for
 //! the next start.
+//!
+//! `mcp login|logout` — OAuth sign-in (`mcp/oauth.rs`). The browser comes
+//! back to a listener on this machine's loopback, which every authorization
+//! server accepts; when the browser is elsewhere, the address it lands on
+//! can be pasted instead.
 
 use std::io::{BufRead, IsTerminal, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use clap::Subcommand;
+use reqwest::Url;
 use serde_json::{Map, Value, json};
 use sqlx::SqlitePool;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 use super::{Done, Fail, bold, dim, ok, table, yellow};
 use crate::config::Config;
 use crate::mcp::config::{self, Connection};
+use crate::mcp::oauth;
 use crate::pyjson;
 
 const TRANSPORTS: [&str; 4] = ["http", "streamable-http", "sse", "websocket"];
+/// How long a sign-in may take.
+const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Subcommand)]
 pub enum Cmd {
@@ -57,8 +68,33 @@ pub enum Cmd {
         /// The server's name.
         name: String,
     },
-    /// Remove a server added here or in the UI.
+    /// Remove a server added here or in the UI, and its sign-in.
     Remove {
+        /// The server's name.
+        name: String,
+    },
+    /// Sign in to a server with OAuth, in the browser.
+    #[command(after_help = "Jarvis listens on localhost for the browser to come back. If the browser is on \
+        another machine, paste the address it lands on, or forward the port: ssh -L <port>:localhost:<port>.")]
+    Login {
+        /// The server's name.
+        name: String,
+        /// A client id registered with the server's sign-in, for one that
+        /// doesn't let apps register themselves.
+        #[arg(long)]
+        client_id: Option<String>,
+        /// That client's secret; `-` asks for it without echoing it.
+        #[arg(long, requires = "client_id")]
+        client_secret: Option<String>,
+        /// The port the browser comes back to (default: any free one).
+        #[arg(long)]
+        callback_port: Option<u16>,
+        /// Print the sign-in link without opening a browser.
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// Forget a server's sign-in.
+    Logout {
         /// The server's name.
         name: String,
     },
@@ -114,6 +150,10 @@ pub async fn run(cfg: &Config, pool: &SqlitePool, cmd: Cmd) -> Done {
             println!("Load: {}", config::mode_for(Some(c), config::default_mode(pool).await));
             let from = if config::from_db(pool).await.contains_key(&name) { "settings" } else { "mcp.json or JARVIS_MCP_SERVERS" };
             println!("From: {from}");
+            if let Some(grant) = oauth::load(pool, &name).await? {
+                let renew = if grant.can_refresh() { ", renewed as it expires" } else { "" };
+                println!("Sign-in: OAuth{renew} — `jarvis-edge mcp logout {name}` to sign out");
+            }
             let q = "query($s: String) { mcpTools(server: $s) { name } }";
             match ask(cfg.bind, q, json!({"s": name})).await {
                 None => println!("{}", dim("Tools: the server isn't running.")),
@@ -137,11 +177,145 @@ pub async fn run(cfg: &Config, pool: &SqlitePool, cmd: Cmd) -> Done {
             }
             let value = pyjson::dumps(&serde_json::to_value(&saved).map_err(|e| error(e.to_string()))?);
             crate::gql::mcp::write_setting(pool, config::SERVERS_KEY, &value).await.map_err(|e| error(e.message))?;
+            oauth::forget(pool, &name).await?;
             println!("{}", ok(&format!("Removed MCP server {name}")));
             reconnect(cfg.bind, None).await;
         }
+        Cmd::Login { name, client_id, client_secret, callback_port, no_browser } => {
+            let servers = config::merged(pool, &cfg.app_dir).await;
+            let Some(c) = servers.get(&name) else { return Err(not_found(&name)) };
+            let Some(url) = c.get("url").and_then(Value::as_str).map(String::from) else {
+                return Err(error(format!("{name} runs a command; sign-in is for a server reached by URL")));
+            };
+            if transport(c) == "websocket" {
+                return Err(error("sign-in is for an HTTP server, not a websocket one"));
+            }
+            let client = oauth::client();
+            let found = oauth::discover(&client, &url).await.map_err(error)?;
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, callback_port.unwrap_or(0)))
+                .await
+                .map_err(|e| error(format!("can't listen for the browser on port {}: {e}", callback_port.unwrap_or(0))))?;
+            let port = listener.local_addr().map_err(|e| error(e.to_string()))?.port();
+            let redirect = format!("http://localhost:{port}/callback");
+            let reg = match (client_id, &found.registration_endpoint) {
+                (Some(client_id), _) => {
+                    let client_secret = match client_secret.as_deref() {
+                        Some("-") => Some(read_secret("Client secret: ").map_err(|e| error(e.to_string()))?.trim().to_string()),
+                        other => other.map(String::from),
+                    };
+                    oauth::Registration { client_id, client_secret, auth_method: None }
+                }
+                (None, Some(endpoint)) => oauth::register(&client, endpoint, &redirect).await.map_err(error)?,
+                (None, None) => {
+                    return Err(error(format!(
+                        "{name}'s sign-in doesn't let apps register themselves. Register one with them, with \
+                         {redirect} as its redirect URI (keep the port with --callback-port {port}), and pass --client-id"
+                    )));
+                }
+            };
+            let pkce = oauth::pkce();
+            let state = oauth::state();
+            let link = oauth::authorize_url(&found, &reg.client_id, &redirect, &pkce, &state).map_err(error)?;
+            println!("Sign in to {name} at:\n\n  {link}\n");
+            if !no_browser {
+                open_browser(&link);
+            }
+            println!("{}", dim("Waiting for the sign-in. If your browser is on another machine, paste the address it lands on here."));
+            let code = tokio::time::timeout(SIGN_IN_TIMEOUT, returned(listener, &state))
+                .await
+                .map_err(|_| error(format!("no sign-in after {} minutes", SIGN_IN_TIMEOUT.as_secs() / 60)))??;
+            let tokens = oauth::exchange(&client, &found, &reg, &code, &pkce.verifier, &redirect)
+                .await
+                .map_err(|e| error(format!("the sign-in couldn't be completed: {e}")))?;
+            oauth::save(pool, &name, &url, &found, &reg, &tokens).await?;
+            println!("{}", ok(&format!("Signed in to {name}")));
+            reconnect(cfg.bind, Some(&name)).await;
+        }
+        Cmd::Logout { name } => {
+            if oauth::forget(pool, &name).await? {
+                println!("{}", ok(&format!("Signed out of {name}")));
+                reconnect(cfg.bind, None).await;
+            } else {
+                println!("{} {name}", yellow("Not signed in:"));
+            }
+        }
     }
     Ok(0)
+}
+
+/// The browser, opened on `link` where this machine has one.
+fn open_browser(link: &str) {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    let _ = std::process::Command::new(opener)
+        .arg(link)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// What an address the sign-in came back to says: the code, a refusal, or
+/// nothing yet (`None`).
+fn outcome(url: &Url, state: &str) -> Option<Result<String, Fail>> {
+    let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+    if let Some(e) = q.get("error") {
+        let said = q.get("error_description").unwrap_or(e);
+        return Some(Err(error(format!("the sign-in was refused: {said}"))));
+    }
+    let code = q.get("code")?;
+    if q.get("state").map(String::as_str) != Some(state) {
+        return Some(Err(error("the sign-in came back for a different attempt — start again")));
+    }
+    Some(Ok(code.clone()))
+}
+
+/// The code, from the browser's request to `listener` or an address pasted
+/// on stdin, whichever comes first.
+async fn returned(listener: TcpListener, state: &str) -> Result<String, Fail> {
+    let (lines, mut pasted) = tokio::sync::mpsc::unbounded_channel::<String>();
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut stdin_open = true;
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                let Ok((mut stream, _)) = accepted else { continue };
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]);
+                let target = head.split_whitespace().nth(1).unwrap_or("/");
+                let found = Url::parse(&format!("http://localhost{target}"))
+                    .ok()
+                    .filter(|u| u.path() == "/callback")
+                    .and_then(|u| outcome(&u, state));
+                let (status, page) = match &found {
+                    None => ("404 Not Found", "Not the sign-in."),
+                    Some(Ok(_)) => ("200 OK", "Signed in to Jarvis. You can close this tab."),
+                    Some(Err(_)) => ("400 Bad Request", "The sign-in didn't work — see the terminal."),
+                };
+                let body = format!("<!doctype html><meta charset=utf-8><title>Jarvis</title><p style=\"font:16px system-ui;margin:3em\">{page}</p>");
+                let reply = format!("HTTP/1.1 {status}\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+                let _ = stream.write_all(reply.as_bytes()).await;
+                let _ = stream.shutdown().await;
+                if let Some(result) = found {
+                    return result;
+                }
+            }
+            line = pasted.recv(), if stdin_open => match line {
+                None => stdin_open = false,
+                Some(line) if line.trim().is_empty() => {}
+                Some(line) => match Url::parse(line.trim()).ok().and_then(|u| outcome(&u, state)) {
+                    Some(result) => return result,
+                    None => println!("{}", yellow("That address has no sign-in code in it — paste the whole address the browser landed on.")),
+                },
+            },
+        }
+    }
 }
 
 fn error(message: impl Into<String>) -> Fail {
@@ -175,9 +349,8 @@ fn connection(
             }
             out.insert("transport".into(), "stdio".into());
             out.insert("command".into(), command[0].clone().into());
-            if command.len() > 1 {
-                out.insert("args".into(), command[1..].iter().cloned().map(Value::String).collect());
-            }
+            // A stdio connection needs `args`, even none.
+            out.insert("args".into(), command[1..].iter().cloned().map(Value::String).collect());
             let vars = pairs(env, '=', "--env", "KEY=value")?;
             if !vars.is_empty() {
                 out.insert("env".into(), Value::Object(vars));
@@ -296,6 +469,12 @@ async fn reconnect(bind: SocketAddr, name: Option<&str>) {
     match tools {
         Some(1) => println!("{}", ok("Connected — 1 tool")),
         Some(n) if n > 1 => println!("{}", ok(&format!("Connected — {n} tools"))),
-        _ => println!("{}", yellow("Not connected — the server's log has why. `jarvis-edge mcp remove` and add it again to fix it.")),
+        _ => println!(
+            "{}",
+            yellow(&format!(
+                "Not connected — the server's log has why. If it needs sign-in: `jarvis-edge mcp login {name}`; \
+                 to change it, `jarvis-edge mcp remove {name}` and add it again."
+            ))
+        ),
     }
 }

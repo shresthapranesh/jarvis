@@ -395,3 +395,22 @@ CREATE INDEX ix_artifact_versions_artifact_id ON artifact_versions (artifact_id)
 
 CREATE UNIQUE INDEX ix_artifact_versions_artifact_version ON artifact_versions (artifact_id, version);
 
+-- An MCP server's OAuth sign-in (`mcp/oauth.rs`), by server name. Not
+-- exposed by any query: the tokens never leave the server.
+CREATE TABLE mcp_oauth (
+	server VARCHAR NOT NULL, 
+	url VARCHAR NOT NULL, 
+	resource VARCHAR NOT NULL, 
+	token_endpoint VARCHAR NOT NULL, 
+	client_id VARCHAR NOT NULL, 
+	client_secret VARCHAR, 
+	token_auth_method VARCHAR, 
+	access_token TEXT NOT NULL, 
+	refresh_token TEXT, 
+	expires_at DATETIME, 
+	scope VARCHAR, 
+	created_at DATETIME NOT NULL, 
+	updated_at DATETIME NOT NULL, 
+	PRIMARY KEY (server)
+);
+

@@ -2,25 +2,30 @@
 
 The edge's own commands — `main.py` had none, so nothing is recorded: each
 test says what it expects. A saved token never prints; a running server is
-told to reconnect and asked for tools.
+told to reconnect and asked for tools. `login` signs in to a fake OAuth
+server (`fixtures/oauth_mcp_server.py`), the test playing the browser.
 
 Skipped when `cargo` isn't installed.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import pytest
 
-from edge_support import _run_edge, edge_binary, fresh_db  # noqa: F401 — edge_binary is a fixture
+from edge_support import _free_port, _run_edge, edge_binary, fresh_db  # noqa: F401 — edge_binary is a fixture
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -151,3 +156,147 @@ async def test_a_running_server_connects_it(cli, edge_binary):
         assert cli("remove", "ping").code == 0
         servers = (await client.post("/graphql", json={"query": "{ mcpServers { name } }"})).json()
         assert servers["data"]["mcpServers"] == []
+
+
+# ── login ────────────────────────────────────────────────────────────────────
+
+
+@contextlib.contextmanager
+def _guarded(**env: str):
+    """The OAuth-protected MCP server, its base URL."""
+    port = _free_port()
+    proc = subprocess.Popen([sys.executable, str(FIXTURES / "oauth_mcp_server.py"), str(port)],
+                            env={**os.environ, **env})
+    try:
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+                break
+            except OSError:
+                assert time.monotonic() < deadline, "the OAuth fixture didn't start"
+                time.sleep(0.05)
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def _login(cli: Cli, name: str, *extra: str, paste: bool = False) -> Out:
+    """`mcp login`, the test following its link as a browser would — back to
+    the CLI's listener, or pasting where it lands."""
+    proc = subprocess.Popen([str(cli.binary), "mcp", "login", name, "--no-browser", *extra], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=cli.env, cwd=cli.work)
+    seen = []
+    assert proc.stdout is not None and proc.stdin is not None
+    for line in proc.stdout:
+        seen.append(line)
+        if "/authorize?" in line:
+            back = httpx.get(line.strip(), follow_redirects=False)
+            assert back.status_code == 302, back.text
+            if paste:
+                proc.stdin.write(back.headers["location"] + "\n")
+                proc.stdin.flush()
+            else:
+                page = httpx.get(back.headers["location"])
+                assert (page.status_code, "Signed in to Jarvis" in page.text) == (200, True)
+            break
+    out, err = proc.communicate(timeout=60)
+    return Out(proc.returncode, "".join(seen) + out, err)
+
+
+def _grant(cli: Cli, name: str) -> dict | None:
+    with contextlib.closing(sqlite3.connect(cli.db)) as c:
+        c.row_factory = sqlite3.Row
+        row = c.execute("SELECT * FROM mcp_oauth WHERE server = ?", (name,)).fetchone()
+    return dict(row) if row else None
+
+
+@pytest.mark.parametrize("paste, env", [(False, {}), (True, {"NO_HINT": "1"})], ids=["browser", "pasted-no-hint"])
+def test_login_signs_in(cli, paste, env):
+    with _guarded(**env) as base:
+        assert cli("add", "g", f"{base}/mcp").code == 0
+        out = _login(cli, "g", paste=paste)
+        assert out.code == 0, out.err
+        assert "Signed in to g" in out.out
+        grant = _grant(cli, "g")
+        assert grant is not None
+        assert (grant["url"], grant["resource"], grant["token_endpoint"], grant["scope"]) == (
+            f"{base}/mcp", f"{base}/mcp", f"{base}/token", "mcp")
+        assert grant["access_token"] and grant["refresh_token"] and grant["expires_at"]
+        assert grant["access_token"] not in out.out + out.err
+        assert "Sign-in: OAuth, renewed as it expires" in cli("get", "g").out
+        assert httpx.get(f"{base}/log").json() == ["authorization_code"]
+        # Signing in again replaces the grant.
+        assert _login(cli, "g").code == 0
+        assert _grant(cli, "g")["access_token"] != grant["access_token"]
+
+        assert "Signed out of g" in cli("logout", "g").out
+        assert _grant(cli, "g") is None
+        assert "Not signed in: g" in cli("logout", "g").out
+
+
+def test_a_server_without_registration_takes_a_client_id(cli):
+    with _guarded(NO_REGISTRATION="1") as base:
+        cli("add", "g", f"{base}/mcp")
+        out = _login(cli, "g")
+        assert out.code == 1
+        assert "doesn't let apps register themselves" in out.err and "--client-id" in out.err
+        out = _login(cli, "g", "--client-id", "fixed")
+        assert out.code == 0, out.err
+        assert _grant(cli, "g")["client_id"] == "fixed"
+
+
+def test_login_refusals(cli):
+    with _guarded() as base:
+        cli("add", "cmd", "--", "npx", "x")
+        cli("add", "open", f"{base}/log")  # answers without asking for sign-in
+        for name, message in [("nope", "No MCP server named"), ("cmd", "runs a command"),
+                              ("open", "didn't ask for sign-in (HTTP 405)")]:
+            out = cli("login", name, "--no-browser")
+            assert (out.code, message in out.err) == (1, True), (name, out.err)
+
+
+def test_removing_a_server_forgets_its_sign_in(cli):
+    with _guarded() as base:
+        cli("add", "g", f"{base}/mcp")
+        assert _login(cli, "g").code == 0
+        assert cli("remove", "g").code == 0
+        assert _grant(cli, "g") is None
+
+
+async def test_a_running_server_uses_and_renews_the_sign_in(cli, edge_binary):
+    call = 'mutation { callMcpTool(server: "g", tool: "whoami", argsJson: "{}") { content isError } }'
+    with _guarded() as base:
+        cli("add", "g", f"{base}/mcp")
+        assert _login(cli, "g").code == 0
+        env = {"HOME": cli.env["HOME"], "JARVIS_APP_DIR": str(cli.app)}
+        async with _run_edge(edge_binary, cli.work, cli.db, env) as client:
+            client.timeout = httpx.Timeout(60)
+            cli.env["JARVIS_EDGE_BIND"] = str(client.base_url).removeprefix("http://").rstrip("/")
+
+            async def gql(q: str) -> dict:
+                return (await client.post("/graphql", json={"query": q})).json()["data"]
+
+            assert (await gql(call))["callMcpTool"] == {"content": "signed in", "isError": False}
+
+            # Turned away: renewed and tried again.
+            httpx.post(f"{base}/revoke-all")
+            assert (await gql(call))["callMcpTool"] == {"content": "signed in", "isError": False}
+            assert httpx.get(f"{base}/log").json() == ["authorization_code", "refresh_token"]
+
+            # Expired: renewed before it's sent.
+            with contextlib.closing(sqlite3.connect(cli.db)) as c:
+                c.execute("UPDATE mcp_oauth SET expires_at = '2020-01-01 00:00:00.000000'")
+                c.commit()
+            servers = (await gql("mutation { reloadMcpServers { name toolCount } }"))["reloadMcpServers"]
+            assert servers == [{"name": "g", "toolCount": 1}]
+            assert httpx.get(f"{base}/log").json()[-1] == "refresh_token"
+            assert _grant(cli, "g")["expires_at"] > "2026"
+
+            # Signed out: refused, and adding one that needs sign-in says so.
+            assert "Signed out of g" in cli("logout", "g").out
+            servers = (await gql("{ mcpServers { name toolCount } }"))["mcpServers"]
+            assert servers == [{"name": "g", "toolCount": 0}]
+            added = cli("add", "g2", f"{base}/mcp")
+            assert "Not connected" in added.out and "jarvis-edge mcp login g2" in added.out

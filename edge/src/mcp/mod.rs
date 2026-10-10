@@ -9,12 +9,16 @@
 //!
 //! An `always` server's tools are bound to the agent (`agent/turn.rs`); a
 //! `lazy` one's are reached through `jarvis.mcp_call` (`callMcpTool`).
+//!
+//! A server signed in to with `jarvis-edge mcp login` (`oauth.rs`) gets its
+//! access token on every connection, renewed when it expires or is refused.
 //! Python behind the edge has no MCP client of its own: it reads this
 //! manager's state and calls through it (`internal.rs`,
 //! `core/mcp.py:EdgeMcp`), and is told to re-read after every change.
 
 pub mod config;
 mod http;
+pub mod oauth;
 mod session;
 mod stdio;
 mod ws;
@@ -282,13 +286,50 @@ impl Mcp {
         s
     }
 
+    /// `cfg` carrying `server`'s sign-in as its bearer token, and the token,
+    /// when it has one.
+    async fn signed_in(&self, server: &str, cfg: &Connection, refused: Option<&str>) -> Result<(Connection, Option<String>), String> {
+        let Some(url) = cfg.get("url").and_then(Value::as_str) else { return Ok((cfg.clone(), None)) };
+        let Some(token) = oauth::bearer(&self.pool, server, url, refused).await? else { return Ok((cfg.clone(), None)) };
+        let mut cfg = cfg.clone();
+        let mut headers = match cfg.get("headers") {
+            Some(Value::Object(h)) => h.clone(),
+            _ => Map::new(),
+        };
+        headers.retain(|k, _| !k.eq_ignore_ascii_case("authorization"));
+        headers.insert("Authorization".into(), Value::String(format!("Bearer {token}")));
+        cfg.insert("headers".into(), Value::Object(headers));
+        Ok((cfg, Some(token)))
+    }
+
+    /// `op` over `server`'s connection, signed in; a token the server turns
+    /// away is renewed and `op` tried once more.
+    async fn with_sign_in<T, F, Fut>(&self, server: &str, cfg: &Connection, op: F) -> Result<T, String>
+    where
+        F: Fn(Connection) -> Fut,
+        Fut: std::future::Future<Output = Result<T, String>>,
+    {
+        let (signed, token) = self.signed_in(server, cfg, None).await?;
+        match (op(signed).await, token) {
+            (Err(e), Some(token)) if e.contains("'401 Unauthorized'") => {
+                let (signed, _) = self.signed_in(server, cfg, Some(&token)).await?;
+                op(signed).await
+            }
+            (Err(e), None) if e.contains("'401 Unauthorized'") => {
+                Err(format!("{e} — it needs sign-in: `jarvis-edge mcp login {server}`"))
+            }
+            (r, _) => r,
+        }
+    }
+
     /// `_initialize_locked`: every configured server asked for its tools,
     /// concurrently; one that can't answer has none.
     async fn load(&self) -> Arc<Snapshot> {
         let connections = self.configured().await;
         let default_mode = self.default_mode().await;
         let listings = futures_util::future::join_all(connections.iter().map(|(name, cfg)| async move {
-            let result = match tokio::time::timeout(LIST_TIMEOUT, list(cfg)).await {
+            let listed = self.with_sign_in(name, cfg, |c| async move { list(&c).await });
+            let result = match tokio::time::timeout(LIST_TIMEOUT, listed).await {
                 Ok(r) => r,
                 Err(_) => Err(format!("timed out after {}s", LIST_TIMEOUT.as_secs())),
             };
@@ -358,7 +399,7 @@ impl Mcp {
         let snapshot = self.snapshot().await;
         let found = snapshot.find(server, tool)?;
         let cfg = snapshot.connections.get(server).expect("find checked the server");
-        let ran = call(cfg, &found.name, args);
+        let ran = self.with_sign_in(server, cfg, |c| async move { call(&c, &found.name, args).await });
         match timeout {
             None => ran.await,
             Some(secs) => match tokio::time::timeout(Duration::from_secs_f64(secs.max(0.0)), ran).await {
