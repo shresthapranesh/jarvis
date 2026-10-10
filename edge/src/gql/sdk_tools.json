@@ -35,6 +35,16 @@
   "group": "automations"
  },
  {
+  "name": "list_automation_runs",
+  "description": "Automation runs, newest first, with status and a preview of the output.",
+  "group": "automations"
+ },
+ {
+  "name": "read_automation_run",
+  "description": "One automation run in full: status, times, its whole output and error.",
+  "group": "automations"
+ },
+ {
   "name": "create_automation",
   "description": "Create an automation — a task that runs on a cron schedule or on demand.",
   "group": "automations"
