@@ -204,6 +204,7 @@ impl McpMutation {
             return Err(format!("MCP server {} not found in DB (found: {})", pyjson::repr_str(&name), pyjson::py_repr(&found)).into());
         }
         write_setting(mcp.pool(), config::SERVERS_KEY, &pyjson::dumps(&serde_json::to_value(&servers)?)).await?;
+        crate::mcp::oauth::forget(mcp.pool(), &name).await?;
         mcp.reload().await;
         Ok(true)
     }
