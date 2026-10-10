@@ -1,5 +1,4 @@
 import * as stylex from '@stylexjs/stylex';
-import {marked} from 'marked';
 import {useEffect, useMemo, useRef, useState} from 'react';
 
 import type {WorkerInfo} from '../hooks/useTaskEvents';
@@ -7,6 +6,7 @@ import {describeStep, getStepPreview} from '../lib/steps';
 import {messageAnchorId} from '../lib/thread';
 import type {ArtifactCard, Message, Step} from '../lib/types';
 import {GlobeIcon} from './icons';
+import {Markdown, StreamingMarkdown} from './Markdown';
 import {MessageArtifacts} from './MessageArtifacts';
 import {actions, browseChip, bubble, debug, media, safety, working} from './MessageBubble.styles';
 import {chipBtn, prose, stream, ThinkingDots, turn} from './ui';
@@ -297,8 +297,6 @@ function MultimodalUserContent({parts}: {parts: ContentPart[]}) {
   );
 }
 
-marked.use({gfm: true, breaks: true});
-
 interface StreamingBubbleProps {
   text: string;
   thinkingText: string;
@@ -328,7 +326,6 @@ export function StreamingBubble({
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
-  const html = useMemo(() => marked.parse(text) as string, [text]);
 
   // Auto-scroll thinking block to bottom as new reasoning tokens arrive.
   useEffect(() => {
@@ -386,7 +383,7 @@ export function StreamingBubble({
               token, which restarts the fade-in over the whole accumulated
               message and reads as flicker. The fade belongs to the bubble
               mounting once, not to each token. */}
-          <span dangerouslySetInnerHTML={{__html: html}} />
+          <StreamingMarkdown text={text} />
           <span {...stylex.props(stream.cursor)} />
         </div>
       ) : (
@@ -517,7 +514,6 @@ export function MessageBubble({
     );
   }
 
-  const html = marked.parse(message.content) as string;
   const blocked = message.status === 'blocked';
 
   return (
@@ -525,11 +521,9 @@ export function MessageBubble({
       {blocked && (
         <SafetyBanner layer={message.content.startsWith('[OUTPUT REDACTED') ? 'output' : 'input'} />
       )}
-      <div
-        {...stylex.props(prose.base, blocked && prose.blocked)}
-        data-md
-        dangerouslySetInnerHTML={{__html: html}}
-      />
+      <div {...stylex.props(prose.base, blocked && prose.blocked)} data-md>
+        <Markdown text={message.content} />
+      </div>
       {artifacts && artifacts.length > 0 && (
         <MessageArtifacts
           artifacts={artifacts}

@@ -96,18 +96,18 @@ export const worker = stylex.create({
 });
 
 /**
- * A container for `marked` output.
+ * A container for `Markdown` output.
  *
  * `data-md` on the element is what the descendant rules in base.css hook —
- * those style <p>/<pre>/<table> nodes that only exist as an HTML string at
- * runtime. This half carries the container's own typography plus the token
- * hand-off: a stylesheet cannot name StyleX's hashed variables, so the tokens
+ * those style the bare <p>/<pre>/<table> elements `Markdown` renders. This
+ * half carries the container's own typography plus the token hand-off: a
+ * stylesheet cannot name StyleX's hashed variables, so the tokens
  * those rules need are re-published here under stable `--md-*` names.
  */
 export const prose = stylex.create({
   /**
    * The `--md-*` publication on its own, for a container that renders
-   * `marked` output but sets its own type scale. `[data-md]` in base.css
+   * `Markdown` output but sets its own type scale. `[data-md]` in base.css
    * reads these; the element still needs the `data-md` attribute.
    */
   vars: {

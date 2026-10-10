@@ -1,6 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
 import {Link, useParams} from '@tanstack/react-router';
-import {marked} from 'marked';
 import {useEffect, useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
@@ -24,6 +23,7 @@ import {commitStopAutomationRun} from '../relay/StopAutomationRunMutation';
 import {detail, run as runStyles} from './AutomationDetail.styles';
 import {RunStatusPill} from './AutomationParts';
 import {CalendarIcon, ChevronLeftIcon, CursorClickIcon, StopIcon} from './icons';
+import {Markdown, StreamingMarkdown} from './Markdown';
 import {QueryBoundary, useQueryRetry} from './QueryBoundary';
 import {btn, errorBubble, page, prose, stream, ThinkingDots} from './ui';
 
@@ -198,11 +198,9 @@ function LiveOutput({runId, automationId}: {runId: string; automationId: string}
   }
   return (
     <div {...stylex.props(runStyles.output)}>
-      <div
-        {...stylex.props(prose.vars)}
-        data-md
-        dangerouslySetInnerHTML={{__html: marked.parse(text) as string}}
-      />
+      <div {...stylex.props(prose.vars)} data-md>
+        <StreamingMarkdown text={text} />
+      </div>
       {streaming && <span {...stylex.props(stream.cursor)} />}
     </div>
   );
@@ -222,11 +220,9 @@ function StoredOutput({run}: {run: AutomationRun}) {
     <>
       {run.error && <div {...stylex.props(errorBubble.base, runStyles.output)}>{run.error}</div>}
       {run.output && (
-        <div
-          {...stylex.props(runStyles.output, prose.vars)}
-          data-md
-          dangerouslySetInnerHTML={{__html: marked.parse(run.output) as string}}
-        />
+        <div {...stylex.props(runStyles.output, prose.vars)} data-md>
+          <Markdown text={run.output} />
+        </div>
       )}
     </>
   );
