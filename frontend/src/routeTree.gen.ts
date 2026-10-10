@@ -24,6 +24,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkflowIndexRouteImport } from './routes/workflow.index'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
+import { Route as AutomationIndexRouteImport } from './routes/automation.index'
 import { Route as WorkflowIdRouteImport } from './routes/workflow.$id'
 import { Route as SettingsToolsRouteImport } from './routes/settings.tools'
 import { Route as SettingsNotificationsRouteImport } from './routes/settings.notifications'
@@ -32,8 +33,11 @@ import { Route as SettingsMcpRouteImport } from './routes/settings.mcp'
 import { Route as SettingsConfigRouteImport } from './routes/settings.config'
 import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
 import { Route as CIdRouteImport } from './routes/c.$id'
+import { Route as AutomationIdRouteImport } from './routes/automation.$id'
 import { Route as WorkflowIdIndexRouteImport } from './routes/workflow.$id.index'
+import { Route as AutomationIdIndexRouteImport } from './routes/automation.$id.index'
 import { Route as WorkflowIdRunsRunIdRouteImport } from './routes/workflow.$id.runs.$runId'
+import { Route as AutomationIdRunsRunIdRouteImport } from './routes/automation.$id.runs.$runId'
 
 const WorkflowRoute = WorkflowRouteImport.update({
   id: '/workflow',
@@ -110,6 +114,11 @@ const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ProjectsRoute,
 } as any)
+const AutomationIndexRoute = AutomationIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AutomationRoute,
+} as any)
 const WorkflowIdRoute = WorkflowIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -150,22 +159,37 @@ const CIdRoute = CIdRouteImport.update({
   path: '/c/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AutomationIdRoute = AutomationIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AutomationRoute,
+} as any)
 const WorkflowIdIndexRoute = WorkflowIdIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => WorkflowIdRoute,
+} as any)
+const AutomationIdIndexRoute = AutomationIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AutomationIdRoute,
 } as any)
 const WorkflowIdRunsRunIdRoute = WorkflowIdRunsRunIdRouteImport.update({
   id: '/runs/$runId',
   path: '/runs/$runId',
   getParentRoute: () => WorkflowIdRoute,
 } as any)
+const AutomationIdRunsRunIdRoute = AutomationIdRunsRunIdRouteImport.update({
+  id: '/runs/$runId',
+  path: '/runs/$runId',
+  getParentRoute: () => AutomationIdRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/approvals': typeof ApprovalsRoute
   '/artifacts': typeof ArtifactsRoute
-  '/automation': typeof AutomationRoute
+  '/automation': typeof AutomationRouteWithChildren
   '/board': typeof BoardRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
@@ -174,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
+  '/automation/$id': typeof AutomationIdRouteWithChildren
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/settings/config': typeof SettingsConfigRoute
@@ -182,17 +207,19 @@ export interface FileRoutesByFullPath {
   '/settings/notifications': typeof SettingsNotificationsRoute
   '/settings/tools': typeof SettingsToolsRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
+  '/automation/': typeof AutomationIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/workflow/': typeof WorkflowIndexRoute
+  '/automation/$id/': typeof AutomationIdIndexRoute
   '/workflow/$id/': typeof WorkflowIdIndexRoute
+  '/automation/$id/runs/$runId': typeof AutomationIdRunsRunIdRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/approvals': typeof ApprovalsRoute
   '/artifacts': typeof ArtifactsRoute
-  '/automation': typeof AutomationRoute
   '/board': typeof BoardRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
@@ -205,10 +232,13 @@ export interface FileRoutesByTo {
   '/settings/models': typeof SettingsModelsRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
   '/settings/tools': typeof SettingsToolsRoute
+  '/automation': typeof AutomationIndexRoute
   '/projects': typeof ProjectsIndexRoute
   '/settings': typeof SettingsIndexRoute
   '/workflow': typeof WorkflowIndexRoute
+  '/automation/$id': typeof AutomationIdIndexRoute
   '/workflow/$id': typeof WorkflowIdIndexRoute
+  '/automation/$id/runs/$runId': typeof AutomationIdRunsRunIdRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
 }
 export interface FileRoutesById {
@@ -216,7 +246,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/approvals': typeof ApprovalsRoute
   '/artifacts': typeof ArtifactsRoute
-  '/automation': typeof AutomationRoute
+  '/automation': typeof AutomationRouteWithChildren
   '/board': typeof BoardRoute
   '/logs': typeof LogsRoute
   '/memory': typeof MemoryRoute
@@ -225,6 +255,7 @@ export interface FileRoutesById {
   '/skills': typeof SkillsRoute
   '/tasks': typeof TasksRoute
   '/workflow': typeof WorkflowRouteWithChildren
+  '/automation/$id': typeof AutomationIdRouteWithChildren
   '/c/$id': typeof CIdRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/settings/config': typeof SettingsConfigRoute
@@ -233,10 +264,13 @@ export interface FileRoutesById {
   '/settings/notifications': typeof SettingsNotificationsRoute
   '/settings/tools': typeof SettingsToolsRoute
   '/workflow/$id': typeof WorkflowIdRouteWithChildren
+  '/automation/': typeof AutomationIndexRoute
   '/projects/': typeof ProjectsIndexRoute
   '/settings/': typeof SettingsIndexRoute
   '/workflow/': typeof WorkflowIndexRoute
+  '/automation/$id/': typeof AutomationIdIndexRoute
   '/workflow/$id/': typeof WorkflowIdIndexRoute
+  '/automation/$id/runs/$runId': typeof AutomationIdRunsRunIdRoute
   '/workflow/$id/runs/$runId': typeof WorkflowIdRunsRunIdRoute
 }
 export interface FileRouteTypes {
@@ -254,6 +288,7 @@ export interface FileRouteTypes {
     | '/skills'
     | '/tasks'
     | '/workflow'
+    | '/automation/$id'
     | '/c/$id'
     | '/projects/$id'
     | '/settings/config'
@@ -262,17 +297,19 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/tools'
     | '/workflow/$id'
+    | '/automation/'
     | '/projects/'
     | '/settings/'
     | '/workflow/'
+    | '/automation/$id/'
     | '/workflow/$id/'
+    | '/automation/$id/runs/$runId'
     | '/workflow/$id/runs/$runId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/approvals'
     | '/artifacts'
-    | '/automation'
     | '/board'
     | '/logs'
     | '/memory'
@@ -285,10 +322,13 @@ export interface FileRouteTypes {
     | '/settings/models'
     | '/settings/notifications'
     | '/settings/tools'
+    | '/automation'
     | '/projects'
     | '/settings'
     | '/workflow'
+    | '/automation/$id'
     | '/workflow/$id'
+    | '/automation/$id/runs/$runId'
     | '/workflow/$id/runs/$runId'
   id:
     | '__root__'
@@ -304,6 +344,7 @@ export interface FileRouteTypes {
     | '/skills'
     | '/tasks'
     | '/workflow'
+    | '/automation/$id'
     | '/c/$id'
     | '/projects/$id'
     | '/settings/config'
@@ -312,10 +353,13 @@ export interface FileRouteTypes {
     | '/settings/notifications'
     | '/settings/tools'
     | '/workflow/$id'
+    | '/automation/'
     | '/projects/'
     | '/settings/'
     | '/workflow/'
+    | '/automation/$id/'
     | '/workflow/$id/'
+    | '/automation/$id/runs/$runId'
     | '/workflow/$id/runs/$runId'
   fileRoutesById: FileRoutesById
 }
@@ -323,7 +367,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApprovalsRoute: typeof ApprovalsRoute
   ArtifactsRoute: typeof ArtifactsRoute
-  AutomationRoute: typeof AutomationRoute
+  AutomationRoute: typeof AutomationRouteWithChildren
   BoardRoute: typeof BoardRoute
   LogsRoute: typeof LogsRoute
   MemoryRoute: typeof MemoryRoute
@@ -442,6 +486,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsIndexRouteImport
       parentRoute: typeof ProjectsRoute
     }
+    '/automation/': {
+      id: '/automation/'
+      path: '/'
+      fullPath: '/automation/'
+      preLoaderRoute: typeof AutomationIndexRouteImport
+      parentRoute: typeof AutomationRoute
+    }
     '/workflow/$id': {
       id: '/workflow/$id'
       path: '/$id'
@@ -498,12 +549,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/automation/$id': {
+      id: '/automation/$id'
+      path: '/$id'
+      fullPath: '/automation/$id'
+      preLoaderRoute: typeof AutomationIdRouteImport
+      parentRoute: typeof AutomationRoute
+    }
     '/workflow/$id/': {
       id: '/workflow/$id/'
       path: '/'
       fullPath: '/workflow/$id/'
       preLoaderRoute: typeof WorkflowIdIndexRouteImport
       parentRoute: typeof WorkflowIdRoute
+    }
+    '/automation/$id/': {
+      id: '/automation/$id/'
+      path: '/'
+      fullPath: '/automation/$id/'
+      preLoaderRoute: typeof AutomationIdIndexRouteImport
+      parentRoute: typeof AutomationIdRoute
     }
     '/workflow/$id/runs/$runId': {
       id: '/workflow/$id/runs/$runId'
@@ -512,8 +577,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkflowIdRunsRunIdRouteImport
       parentRoute: typeof WorkflowIdRoute
     }
+    '/automation/$id/runs/$runId': {
+      id: '/automation/$id/runs/$runId'
+      path: '/runs/$runId'
+      fullPath: '/automation/$id/runs/$runId'
+      preLoaderRoute: typeof AutomationIdRunsRunIdRouteImport
+      parentRoute: typeof AutomationIdRoute
+    }
   }
 }
+
+interface AutomationIdRouteChildren {
+  AutomationIdIndexRoute: typeof AutomationIdIndexRoute
+  AutomationIdRunsRunIdRoute: typeof AutomationIdRunsRunIdRoute
+}
+
+const AutomationIdRouteChildren: AutomationIdRouteChildren = {
+  AutomationIdIndexRoute: AutomationIdIndexRoute,
+  AutomationIdRunsRunIdRoute: AutomationIdRunsRunIdRoute,
+}
+
+const AutomationIdRouteWithChildren = AutomationIdRoute._addFileChildren(
+  AutomationIdRouteChildren,
+)
+
+interface AutomationRouteChildren {
+  AutomationIdRoute: typeof AutomationIdRouteWithChildren
+  AutomationIndexRoute: typeof AutomationIndexRoute
+}
+
+const AutomationRouteChildren: AutomationRouteChildren = {
+  AutomationIdRoute: AutomationIdRouteWithChildren,
+  AutomationIndexRoute: AutomationIndexRoute,
+}
+
+const AutomationRouteWithChildren = AutomationRoute._addFileChildren(
+  AutomationRouteChildren,
+)
 
 interface ProjectsRouteChildren {
   ProjectsIdRoute: typeof ProjectsIdRoute
@@ -583,7 +683,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApprovalsRoute: ApprovalsRoute,
   ArtifactsRoute: ArtifactsRoute,
-  AutomationRoute: AutomationRoute,
+  AutomationRoute: AutomationRouteWithChildren,
   BoardRoute: BoardRoute,
   LogsRoute: LogsRoute,
   MemoryRoute: MemoryRoute,
