@@ -310,8 +310,10 @@ impl<'c, 'a> Worker<'c, 'a> {
     async fn model_step(&mut self, history: &[Message]) -> Result<Message, String> {
         let ctx = self.ctx;
         let provider = ctx.model.split_once(':').map_or("", |(p, _)| p);
-        let shaped = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(compact::per_call(history.to_vec())));
-        let layout = Layout { system: self.prompt, segments: &[], volatile: "", cache: ctx.cache, provider };
+        let history = compact::per_call_for(&ctx.model, history.to_vec());
+        let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(&ctx.model, history));
+        let append_only = llm::preserves_thinking(&ctx.model);
+        let layout = Layout { system: self.prompt, segments: &[], volatile: "", cache: ctx.cache, provider, append_only };
         let prompt = shape::build(&layout, shaped);
         let blobs = Default::default();
         let req = Request {

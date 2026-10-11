@@ -21,7 +21,7 @@ use sqlx::SqlitePool;
 use super::embed::{self, Embedder, Space};
 use crate::gql::codec::{new_id, now_stored};
 use crate::llm::compact::{self, Eviction};
-use crate::llm::shape::{Prompt, SystemBlock};
+use crate::llm::shape::{self, Prompt, SystemBlock};
 use crate::llm::transcript::{Content, Message, Part, Role, Typed};
 use crate::llm::{self, Blobs, Endpoints, Request, Tool};
 use crate::pyjson;
@@ -29,9 +29,10 @@ use crate::pyjson;
 /// What one check produced. `messages` is what the call sees either way.
 pub struct Compaction {
     pub messages: Vec<Message>,
-    /// The thread's change, written with the reply: ids to evict and the
-    /// running summary that replaces them.
-    pub update: Option<(Vec<String>, Message)>,
+    /// The thread's change, written with the reply: ids to evict, then the
+    /// messages to write — the running summary that replaces them, after any
+    /// kept message rewritten without its thinking.
+    pub update: Option<(Vec<String>, Vec<Message>)>,
     /// The evicted stretch's own summary and the ids it covers.
     pub episode: Option<(String, Vec<String>)>,
 }
@@ -61,7 +62,7 @@ pub struct Summarizer<'a> {
 /// in tokens, to count from the last call's reported usage; `None` when the
 /// provider's input count leaves out a cached prefix (Ollama).
 pub async fn maybe_compact(s: &Summarizer<'_>, history: &[Message], threshold: i64, overhead: Option<i64>) -> Compaction {
-    let leaned = compact::per_call(history.to_vec());
+    let leaned = compact::per_call_for(s.model, history.to_vec());
     let heuristic = compact::heuristic(&leaned);
     let from_usage = overhead
         .and_then(|o| compact::history_tokens_from_usage(history, o))
@@ -74,7 +75,7 @@ pub async fn maybe_compact(s: &Summarizer<'_>, history: &[Message], threshold: i
     if count <= threshold {
         return keep(leaned);
     }
-    let Some(Eviction { for_summary, old_summary, kept, removed, evicted }) = compact::eviction(history) else {
+    let Some(Eviction { for_summary, old_summary, mut kept, removed, evicted }) = compact::eviction(history) else {
         return keep(leaned);
     };
     tracing::info!(
@@ -111,9 +112,27 @@ pub async fn maybe_compact(s: &Summarizer<'_>, history: &[Message], threshold: i
         id: Some(new_id()),
         ..Message::new(Role::System, Content::Text(format!("[Conversation summary]\n{summary}")))
     };
-    let mut seen = vec![summary.clone()];
+    // A model that preserves thinking: the kept turns' blocks were made with
+    // the evicted turns before them, so they can't go back after the
+    // summary. They lose their thinking here and in the thread, once.
+    let mut written = vec![];
+    if llm::preserves_thinking(s.model) {
+        for m in &mut kept {
+            let had = m.content.clone();
+            *m = shape::strip_historical_thinking(vec![m.clone()]).pop().expect("one in, one out");
+            if m.content != had {
+                written.push(m.clone());
+            }
+        }
+    }
+    written.push(summary.clone());
+    let mut seen = vec![summary];
     seen.extend(kept);
-    Compaction { messages: compact::per_call(seen), update: Some((removed, summary)), episode: Some((delta, evicted)) }
+    Compaction {
+        messages: compact::per_call_for(s.model, seen),
+        update: Some((removed, written)),
+        episode: Some((delta, evicted)),
+    }
 }
 
 fn keep(leaned: Vec<Message>) -> Compaction {

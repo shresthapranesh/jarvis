@@ -94,7 +94,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         let mut history = vec![Message::new(Role::User, Content::Text(query))];
         loop {
             self.take_step()?;
-            let reply = self.model_step(&history).await?;
+            let reply = self.model_step(&mut history).await?;
             history.push(reply.clone());
             if let Some(why) = llm::cut_short(&reply) {
                 return Err(why);
@@ -116,7 +116,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         Ok(())
     }
 
-    async fn model_step(&mut self, history: &[Message]) -> Result<Message, String> {
+    async fn model_step(&mut self, history: &mut [Message]) -> Result<Message, String> {
         let pool = &self.env.agent.pool;
         let context = prompt::build(pool, &self.query, None, &self.todos, &self.retrieved)
             .await
@@ -128,8 +128,13 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             volatile: &context.volatile,
             cache: turn::honors_cache_control(self.model),
             provider,
+            append_only: llm::preserves_thinking(self.model),
         };
-        let shaped = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(compact::per_call(history.to_vec())));
+        if layout.append_only {
+            shape::carry_turn_context(history, shape::turn_context(&layout));
+        }
+        let history = compact::per_call_for(self.model, history.to_vec());
+        let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(self.model, history));
         let prompt = shape::build(&layout, shaped);
         let blobs = Default::default();
         let req = Request {

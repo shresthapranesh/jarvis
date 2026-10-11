@@ -40,7 +40,8 @@ Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. `tests/test_edge_*.
 ## Rules that are easy to break
 
 **Agent / LLM calls** (`edge/src/agent/`, `edge/src/llm/`)
-- Every model call shapes its history through `llm/shape.rs` (`strip_historical_thinking`, `repair_orphan_tool_calls`, the cache layout) or Bedrock/Anthropic reject it. Thinking types include `thinking`, `redacted_thinking` **and** `reasoning` — threads are shared across models.
+- Every model call shapes its history through `llm/shape.rs` (`strip_thinking_for`, `repair_orphan_tool_calls`, the cache layout) and `compact::per_call_for`, or Bedrock/Anthropic reject it. Thinking types include `thinking`, `redacted_thinking` **and** `reasoning` — threads are shared across models.
+- A model that preserves thinking (`llm::preserves_thinking`: Anthropic's 5-generation Claude) keeps an **append-only** history: Claude's own thinking goes back, old tool output is cleared server-side, the turn context is stored on the message it followed (`shape::carry_turn_context`). Never edit, reorder or drop an earlier message for it — that drops every later thinking block (`tests/test_edge_preserved_thinking.py`).
 - A new prompt segment needs its place in the stability order (`agent/prompt.rs`); per-turn or live-edited content stays out of the cached region.
 - Pick a run's model with `catalog::resolve_model` — stored model ids can outlive the catalog.
 

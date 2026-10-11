@@ -417,6 +417,12 @@ on stdin.
   `repair_orphan_tool_calls`, `build_llm_messages`) and the cache layout in
   `core/context_cache.py`. The
   result is a `Prompt` with breakpoints as flags; each provider spells them.
+  A model that preserves thinking (`llm::preserves_thinking`) gets an
+  append-only history instead: Claude's own thinking kept
+  (`strip_thinking_for`), no client-side trimming (`compact::per_call_for`;
+  the Anthropic request clears old tool output server-side), the turn
+  context stored on the message it followed (`carry_turn_context`), and a
+  compaction strips the kept turns' thinking once, in the thread too.
 - One module per wire format, hand-written. No client library sits above
   our request builder, so the request is ours byte for byte. Each renders a
   `Prompt`, streams the reply (text and thinking deltas) and builds the

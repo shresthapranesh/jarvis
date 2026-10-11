@@ -71,9 +71,16 @@ that part (a stream `index`, an OpenAI item `id`, `phase`, `cache_control`).
 and couldn't be rebuilt byte for byte from the bytes. `extras.lc_type` records
 which LangChain spelling (`image_url`, `media`) an image or file came in.
 
-Thinking from one provider must not reach another (`core/messages.py:
-strip_historical_thinking`): `thinking`, `redacted_thinking`, and `opaque`
-parts from a different `model.provider` are dropped before a call.
+Thinking from one provider must not reach another (`shape::strip_thinking_for`):
+`thinking`, `redacted_thinking`, and `opaque` parts from a different
+`model.provider` are dropped before a call. A model that preserves thinking
+(`llm::preserves_thinking`) is sent Anthropic's own signed blocks back; every
+other model is sent none.
+
+`extras.turn_context` on a user or tool message is the turn context sent
+right after it, for a model whose history only grows: each call sends every
+stored copy where it was (`shape::carry_turn_context`). Other models ignore it.
+`extras.stop_details` on an assistant message is why Anthropic refused.
 
 ## Tables (`database.db`)
 

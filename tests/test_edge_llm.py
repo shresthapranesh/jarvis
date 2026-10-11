@@ -477,13 +477,40 @@ def _intended_ollama(python: dict, edge: dict) -> None:
             m["content"] = m["content"][1:]
 
 
+def _unmarked(value):
+    """`value` without its cache breakpoints."""
+    if isinstance(value, list):
+        return [_unmarked(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _unmarked(v) for k, v in value.items() if k != "cache_control"}
+    return value
+
+
 def _intended_anthropic(python: dict, edge: dict) -> None:
     if python["model"] == "claude-opus-5-5":
         # LangChain's profiles didn't know the model and sent their 4096
         # fallback, which cut its replies off; the edge sends its real limit.
         python["max_tokens"] = 128_000
-        # It thinks by default, as empty blocks unless asked for a summary.
-        python["thinking"] = {"type": "adaptive", "display": "summarized"}
+        # It thinks by default, as empty blocks unless asked for a summary,
+        # and preserves thinking (`llm::preserves_thinking`): a block bound
+        # to a history that changed is dropped rather than refused, and old
+        # tool output is cleared server-side, not collapsed client-side.
+        python["thinking"] = {"type": "adaptive", "display": "summarized",
+                              "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
+        python["context_management"] = {"edits": [{
+            "type": "clear_tool_uses_20250919",
+            "trigger": {"type": "input_tokens", "value": 100_000},
+            "keep": {"type": "tool_uses", "value": 4},
+            "clear_at_least": {"type": "input_tokens", "value": 20_000},
+        }]}
+        # Its history only grows: the turn context is stored where it was
+        # sent, so the history breakpoint takes it in too.
+        collapsed = "[Previous tool activity" in json.dumps(python["messages"])
+        if collapsed:
+            assert "[Previous tool activity" not in json.dumps(edge["messages"])
+        else:
+            assert _unmarked(edge["messages"]) == _unmarked(python["messages"])
+        python["messages"] = edge["messages"]
 
 
 def _intended_openai_chat(python: dict, edge: dict) -> None:
@@ -602,6 +629,9 @@ def test_anthropic_max_tokens_follow_langchains_profiles(edge_binary, tmp_path, 
 @pytest.mark.parametrize("model,header,value", [
     (MODELS[0], "x-api-key", "test-key"),
     (MODELS[0], "anthropic-version", "2023-06-01"),
+    (MODELS[0], "anthropic-beta", None),
+    # Preserves thinking: server-side clearing and the binding controls.
+    (MODELS[1], "anthropic-beta", "context-management-2025-06-27,thinking-binding-controls-2026-08-01"),
     (MODELS[2], "x-goog-api-key", "test-key"),
     (MODELS[5], "authorization", "Bearer test-key"),
     (MODELS[7], "authorization", "Bearer test-key"),

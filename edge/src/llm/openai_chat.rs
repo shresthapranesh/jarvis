@@ -325,7 +325,7 @@ mod tests {
             {"v": 1, "role": "assistant", "content": "", "tool_calls": [{"id": "c1", "name": "f", "args": {"q": "é"}}]},
             {"v": 1, "role": "tool", "content": "r", "tool_call_id": "c1", "status": "success"},
         ]));
-        let layout = Layout { system: "S", segments: &[], volatile: "todo", cache: true, provider: "openrouter" };
+        let layout = Layout { system: "S", segments: &[], volatile: "todo", cache: true, provider: "openrouter", append_only: false };
         let p = build(&layout, history);
         let b = render("anthropic/claude", &Request { model: "", prompt: &p, tools: &[], blobs: &Blobs::new(), effort: None }).unwrap();
         assert_eq!(

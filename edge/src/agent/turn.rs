@@ -269,7 +269,7 @@ impl<'a> Turn<'a> {
 
     async fn model_step(&mut self, thread: &mut Thread, bound: &[llm::Tool], mcp: &crate::mcp::Snapshot) -> Result<Message, Stop> {
         // Mid-run messages are a chat's; nothing queues behind other runs.
-        let queued = match self.kind {
+        let mut queued = match self.kind {
             Kind::Chat => self.drain_queued().await.map_err(Stop::Failed)?,
             Kind::Automation(_) | Kind::Board(_) => vec![],
         };
@@ -299,6 +299,25 @@ impl<'a> Turn<'a> {
         };
 
         let provider = self.model.split_once(':').map_or("", |(p, _)| p);
+        let layout = Layout {
+            system: &context.system,
+            segments: &context.segments,
+            volatile: &context.volatile,
+            cache: honors_cache_control(&self.model),
+            provider,
+            append_only: llm::preserves_thinking(&self.model),
+        };
+        // An append-only history keeps each turn context where it was sent:
+        // stored on the newest message — a thread message now, a queued one
+        // with the reply.
+        if layout.append_only
+            && let Some(at) = shape::carry_turn_context(&mut history, shape::turn_context(&layout))
+        {
+            match at.checked_sub(thread.messages.len()) {
+                Some(i) => queued[i] = history[at].clone(),
+                None => thread.apply(self.pool(), vec![history[at].clone()]).await.map_err(Stop::Failed)?,
+            }
+        }
         let ends = Endpoints {
             compatible: crate::catalog::endpoints(self.pool()).await.unwrap_or_default(),
             ..Endpoints::from_env()
@@ -326,14 +345,7 @@ impl<'a> Turn<'a> {
             }
         }
 
-        let layout = Layout {
-            system: &context.system,
-            segments: &context.segments,
-            volatile: &context.volatile,
-            cache: honors_cache_control(&self.model),
-            provider,
-        };
-        let shaped = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(compaction.messages));
+        let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(&self.model, compaction.messages));
         let prompt = shape::build(&layout, shaped);
         let req = Request {
             model: &self.model,
@@ -365,10 +377,7 @@ impl<'a> Turn<'a> {
 
         let message = reply.message;
         // The compaction lands with the reply, as Python's step returns it.
-        let (removed, mut update) = match compaction.update {
-            Some((removed, summary)) => (removed, vec![summary]),
-            None => (vec![], vec![]),
-        };
+        let (removed, mut update) = compaction.update.unwrap_or_default();
         update.extend(queued);
         update.push(message.clone());
         thread.update(self.pool(), &removed, update).await.map_err(Stop::Failed)?;
@@ -950,6 +959,10 @@ async fn compact_threshold(pool: &SqlitePool, model: &str) -> i64 {
         Ok(Ok((_, specs))) => specs.into_iter().find(|s| s.id == model).and_then(|s| s.context_window),
         _ => None,
     };
+    // Every model that preserves thinking has a million-token window; the
+    // Models API listing doesn't say so, and 80k would summarize ahead of
+    // the server-side clearing of old tool output.
+    let window = window.or_else(|| llm::preserves_thinking(model).then_some(1_000_000));
     match window {
         Some(w) if w > 0 => ((w as f64 * 0.4) as i64).clamp(12_000, 200_000),
         _ => 80_000,

@@ -218,6 +218,18 @@ pub async fn complete(
     Ok(Reply { message, perf })
 }
 
+/// Whether calls to `model` keep the history append-only and send Claude's
+/// past thinking back: Anthropic's API, for the models that think by
+/// default. Their thinking blocks are bound to the conversation that
+/// produced them — any edit to what came before (stripped thinking, clipped
+/// tool output, a rebuilt context message) drops every later block — so for
+/// them old tool output is cleared server-side (`anthropic::render`) and the
+/// turn context is stored where it was sent (`shape::carry_turn_context`).
+/// Other models get the history trimmed and stripped on every call.
+pub fn preserves_thinking(model: &str) -> bool {
+    matches!(model.split_once(':'), Some(("anthropic", name)) if anthropic::thinks_by_default(name))
+}
+
 /// How many times a transient failure is retried.
 const RETRIES: u32 = 3;
 
@@ -408,10 +420,16 @@ pub async fn cli(call: bool) {
         volatile: &input.volatile,
         cache: input.cache,
         provider,
+        append_only: preserves_thinking(&input.model),
     };
-    // The agent step's order: compact, then strip and repair.
-    let history = compact::per_call(input.history);
-    let history = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(history));
+    // The agent step's order: the turn context stored (append-only), then
+    // compact, strip and repair.
+    let mut history = input.history;
+    if layout.append_only {
+        shape::carry_turn_context(&mut history, shape::turn_context(&layout));
+    }
+    let history = compact::per_call_for(&input.model, history);
+    let history = shape::repair_orphan_tool_calls(shape::strip_thinking_for(&input.model, history));
     let prompt = shape::build(&layout, history);
     if !call {
         println!("{}", serde_json::to_string(&prompt).expect("serializes"));

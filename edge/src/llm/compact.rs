@@ -42,6 +42,13 @@ pub fn per_call(messages: Vec<Message>) -> Vec<Message> {
     collapse_old_tool_groups(elide_stale_tool_results(messages))
 }
 
+/// `per_call`, for the models that take it: one that preserves thinking
+/// (`super::preserves_thinking`) is sent its history as it is and has old
+/// tool output cleared server-side instead.
+pub fn per_call_for(model: &str, messages: Vec<Message>) -> Vec<Message> {
+    if super::preserves_thinking(model) { messages } else { per_call(messages) }
+}
+
 /// The first `n` of the steps `stale` covers — a boundary that only moves
 /// once `step` more have gone stale.
 fn stepped(stale: usize, step: usize) -> usize {

@@ -94,6 +94,39 @@ pub fn strip_historical_thinking(messages: Vec<Message>) -> Vec<Message> {
         .collect()
 }
 
+/// What a call to `model` keeps of past thinking. A model that preserves
+/// thinking (`llm::preserves_thinking`) is sent Anthropic's own blocks back
+/// unchanged — the API drops another model's, unbilled — and loses only what
+/// it can't read: another provider's reasoning, and a block with no
+/// signature. Every other model is sent none (`strip_historical_thinking`).
+pub fn strip_thinking_for(model: &str, messages: Vec<Message>) -> Vec<Message> {
+    if !super::preserves_thinking(model) {
+        return strip_historical_thinking(messages);
+    }
+    messages
+        .into_iter()
+        .map(|mut m| {
+            if m.role != Role::Assistant {
+                return m;
+            }
+            let native = m.model.as_ref().and_then(|r| r.provider.as_deref()) == Some("anthropic");
+            if !native {
+                return strip_historical_thinking(vec![m]).pop().expect("one in, one out");
+            }
+            // A Claude block that lost its signature can't be sent back.
+            if let Content::Parts(parts) = &mut m.content
+                && parts.iter().any(|p| matches!(p, Part::Typed(Typed::Thinking { signature: None, .. })))
+            {
+                parts.retain(|p| !matches!(p, Part::Typed(Typed::Thinking { signature: None, .. })));
+                if parts.is_empty() {
+                    parts.push(Part::Typed(Typed::Text { text: String::new(), signature: None, extras: Map::new() }));
+                }
+            }
+            m
+        })
+        .collect()
+}
+
 // ── repair_orphan_tool_calls ─────────────────────────────────────────────────
 
 pub const MISSING_RESULT: &str = "[Tool result missing — previous run was cancelled or interrupted.]";
@@ -182,8 +215,16 @@ pub fn repair_orphan_tool_calls(messages: Vec<Message>) -> Vec<Message> {
 
 /// Volatile context rides at the end as a user message, so it says plainly
 /// that the user didn't write it.
+///
+/// For a model that preserves thinking the history must only grow, so the
+/// context isn't rebuilt at the end of every call: it is stored on the
+/// message it followed (`TURN_CONTEXT_KEY` in that message's extras, by
+/// `carry_turn_context`), and every call sends each stored copy where it
+/// was. The model acts on the newest.
 pub const TURN_CONTEXT_OPEN: &str = "<turn_context>\nContext the application attached for this step (memories retrieved for the current request, task list, project state). It is not a message from the user.\n\n";
 pub const TURN_CONTEXT_CLOSE: &str = "\n</turn_context>";
+/// Where a message keeps the turn context sent after it.
+pub const TURN_CONTEXT_KEY: &str = "turn_context";
 
 /// Providers whose breakpoint is a standalone block after the content.
 const CACHE_POINT_PROVIDERS: [&str; 1] = ["bedrock"];
@@ -202,6 +243,44 @@ pub struct Layout<'a> {
     pub cache: bool,
     /// Picks the breakpoint spelling and which messages can carry one.
     pub provider: &'a str,
+    /// The history only grows (`llm::preserves_thinking`): the turn context
+    /// goes where each copy was stored, not rebuilt at the end.
+    pub append_only: bool,
+}
+
+/// The turn context for this call: the uncacheable segments and the
+/// volatile tail, wrapped — `None` when there is none.
+pub fn turn_context(layout: &Layout) -> Option<String> {
+    let tail: Vec<&str> = layout
+        .segments
+        .iter()
+        .filter(|s| !s.cacheable && !blank(&s.content))
+        .map(|s| s.content.as_str())
+        .chain(Some(layout.volatile.trim()).filter(|v| !v.is_empty()))
+        .collect();
+    (!tail.is_empty()).then(|| format!("{TURN_CONTEXT_OPEN}{}{TURN_CONTEXT_CLOSE}", tail.join("\n\n")))
+}
+
+/// Store `context` on the newest message when it differs from the newest
+/// copy already stored — the append-only turn context. Returns the index of
+/// the message it was stored on, which the caller writes back. Nothing is
+/// stored after an assistant message (a call never continues one).
+pub fn carry_turn_context(history: &mut [Message], context: Option<String>) -> Option<usize> {
+    let context = context?;
+    let stored = history.iter().rev().find_map(|m| m.extras.get(TURN_CONTEXT_KEY).and_then(Value::as_str));
+    if stored == Some(context.as_str()) {
+        return None;
+    }
+    let last = history.len().checked_sub(1)?;
+    if history[last].role == Role::Assistant {
+        return None;
+    }
+    history[last].extras.insert(TURN_CONTEXT_KEY.into(), Value::String(context));
+    Some(last)
+}
+
+fn context_message(text: String) -> Message {
+    Message::new(Role::User, Content::Parts(vec![Part::Typed(Typed::Text { text, signature: None, extras: Map::new() })]))
 }
 
 fn blank(s: &str) -> bool {
@@ -236,7 +315,7 @@ pub fn build(layout: &Layout, history: Vec<Message>) -> Prompt {
             rest.push(m);
         }
     }
-    if layout.cache {
+    if layout.cache || layout.append_only {
         cached(layout, rest, summaries)
     } else {
         uncached(layout, rest, summaries)
@@ -306,21 +385,24 @@ fn cached(layout: &Layout, rest: Vec<Message>, summaries: Vec<String>) -> Prompt
         system.push(SystemBlock { text: layout.system.to_string(), breakpoint: false });
     }
 
+    if layout.append_only {
+        // Each stored copy right after the message it followed — a user
+        // turn the provider merges with that message's own.
+        let mut messages = Vec::with_capacity(rest.len());
+        for m in rest {
+            let carried = m.extras.get(TURN_CONTEXT_KEY).and_then(Value::as_str).map(str::to_string);
+            messages.push(m);
+            if let Some(text) = carried {
+                messages.push(context_message(text));
+            }
+        }
+        let history_breakpoint = messages.iter().rposition(|m| markable(m, layout.provider));
+        return Prompt { system, messages, history_breakpoint, cached: true };
+    }
     let history_breakpoint = rest.iter().rposition(|m| markable(m, layout.provider));
     let mut messages = rest;
-    let tail: Vec<&str> = layout
-        .segments
-        .iter()
-        .filter(|s| !s.cacheable && !blank(&s.content))
-        .map(|s| s.content.as_str())
-        .chain(Some(layout.volatile.trim()).filter(|v| !v.is_empty()))
-        .collect();
-    if !tail.is_empty() {
-        let text = format!("{TURN_CONTEXT_OPEN}{}{TURN_CONTEXT_CLOSE}", tail.join("\n\n"));
-        messages.push(Message::new(
-            Role::User,
-            Content::Parts(vec![Part::Typed(Typed::Text { text, signature: None, extras: Map::new() })]),
-        ));
+    if let Some(text) = turn_context(layout) {
+        messages.push(context_message(text));
     }
     Prompt { system, messages, history_breakpoint, cached: true }
 }
@@ -431,7 +513,7 @@ mod tests {
     fn uncached_is_one_system_text() {
         let summary = msg(json!({"v": 1, "role": "system", "content": " earlier "}));
         let user = msg(json!({"v": 1, "role": "user", "content": "hi"}));
-        let layout = Layout { system: "S", segments: &[], volatile: " todos ", cache: false, provider: "google_genai" };
+        let layout = Layout { system: "S", segments: &[], volatile: " todos ", cache: false, provider: "google_genai", append_only: false };
         let p = build(&layout, vec![summary.clone(), user.clone()]);
         assert_eq!(p.system, vec![SystemBlock { text: "S\n\ntodos\n\nearlier".into(), breakpoint: false }]);
         assert_eq!(p.messages, vec![user.clone()]);
@@ -446,7 +528,7 @@ mod tests {
         let summary = msg(json!({"v": 1, "role": "system", "content": "earlier"}));
         let user = msg(json!({"v": 1, "role": "user", "content": "hi"}));
         let segs = [seg("skills", "K", true), seg("project", "P", true), seg("memories", "M", false)];
-        let layout = Layout { system: "S", segments: &segs, volatile: "todos", cache: true, provider: "anthropic" };
+        let layout = Layout { system: "S", segments: &segs, volatile: "todos", cache: true, provider: "anthropic", append_only: false };
         let p = build(&layout, vec![summary, user, ai_calling(&["a"]), tool("a")]);
         let sys: Vec<_> = p.system.iter().map(|b| (b.text.as_str(), b.breakpoint)).collect();
         assert_eq!(sys, vec![("S", true), ("K", false), ("P", false), ("earlier", true)]);
@@ -458,6 +540,64 @@ mod tests {
         let user = msg(json!({"v": 1, "role": "user", "content": "hi"}));
         let p = build(&layout, vec![user, ai_calling(&["a"]), tool("a")]);
         assert_eq!(p.history_breakpoint, Some(0));
+    }
+
+    fn claude(content: Value) -> Message {
+        msg(json!({"v": 1, "role": "assistant", "content": content,
+                   "model": {"provider": "anthropic", "name": "claude-opus-5-5"}}))
+    }
+
+    #[test]
+    fn a_model_that_preserves_thinking_gets_claudes_own_back() {
+        let signed = claude(json!([{"type": "thinking", "thinking": "", "signature": "s"}, {"type": "text", "text": "t"}]));
+        let unsigned = claude(json!([{"type": "thinking", "thinking": "x"}, {"type": "text", "text": "t"}]));
+        let other = msg(json!({"v": 1, "role": "assistant", "content": [
+            {"type": "thinking", "thinking": "g", "signature": "s"}, {"type": "text", "text": "t"}],
+            "model": {"provider": "google_genai", "name": "gemini"}}));
+        let out = strip_thinking_for("anthropic:claude-opus-5-5", vec![signed.clone(), unsigned, other]);
+        assert_eq!(out[0], signed);
+        let text_only = json!([{"type": "text", "text": "t"}]);
+        assert_eq!(serde_json::to_value(&out[1].content).unwrap(), text_only);
+        assert_eq!(serde_json::to_value(&out[2].content).unwrap(), text_only);
+        // Every other model is sent none, Claude's included.
+        let out = strip_thinking_for("anthropic:claude-opus-4-7", vec![signed]);
+        assert_eq!(serde_json::to_value(&out[0].content).unwrap(), text_only);
+    }
+
+    #[test]
+    fn the_turn_context_is_stored_once_per_change() {
+        let mut history = vec![msg(json!({"v": 1, "role": "user", "content": "go"}))];
+        assert_eq!(carry_turn_context(&mut history, Some("A".into())), Some(0));
+        assert_eq!(carry_turn_context(&mut history, Some("A".into())), None);
+        assert_eq!(carry_turn_context(&mut history, None), None);
+        history.push(ai_calling(&["a"]));
+        // Never after an assistant message.
+        assert_eq!(carry_turn_context(&mut history, Some("B".into())), None);
+        history.push(tool("a"));
+        assert_eq!(carry_turn_context(&mut history, Some("B".into())), Some(2));
+        assert_eq!(history[2].extras[TURN_CONTEXT_KEY], "B");
+        assert_eq!(history[0].extras[TURN_CONTEXT_KEY], "A");
+    }
+
+    #[test]
+    fn append_only_sends_each_context_where_it_was_stored() {
+        let layout = Layout { system: "S", segments: &[], volatile: "", cache: true, provider: "anthropic", append_only: true };
+        let mut user = msg(json!({"v": 1, "role": "user", "content": "go"}));
+        user.extras.insert(TURN_CONTEXT_KEY.into(), "<ctx A>".into());
+        let mut result = tool("a");
+        result.extras.insert(TURN_CONTEXT_KEY.into(), "<ctx B>".into());
+        let p = build(&layout, vec![user, ai_calling(&["a"]), result]);
+        let said: Vec<_> = p.messages.iter().map(|m| (m.role, m.text())).collect();
+        assert_eq!(said, vec![
+            (Role::User, "go".into()),
+            (Role::User, "<ctx A>".into()),
+            (Role::Assistant, String::new()),
+            (Role::Tool, "r".into()),
+            (Role::User, "<ctx B>".into()),
+        ]);
+        // Nothing is rebuilt at the end from the volatile tail.
+        let layout = Layout { volatile: "todos", ..layout };
+        assert_eq!(build(&layout, vec![msg(json!({"v": 1, "role": "user", "content": "go"}))]).messages.len(), 1);
     }
 
     #[test]

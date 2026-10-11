@@ -16,7 +16,13 @@
 //!   limit (`MAX_OUTPUT_TOKENS`), not its 4096 fallback;
 //! - models that think by default are asked for a summary of the thinking,
 //!   which they would otherwise stream as empty blocks (`thinking`), and a
-//!   call's effort is sent to the models that take it (`takes_effort`).
+//!   call's effort is sent to the models that take it (`takes_effort`);
+//! - those models preserve thinking (`llm::preserves_thinking`): their past
+//!   blocks go back, old tool output is cleared server-side
+//!   (`context_management`) rather than clipped here, and a block the API
+//!   finds bound to a different history is dropped rather than refused
+//!   (`block_binding`). A reply keeps where its tool calls were among its
+//!   blocks when thinking came after one, so it goes back in that order.
 
 use std::sync::OnceLock;
 
@@ -39,14 +45,11 @@ pub async fn complete(
     on_delta: &mut (dyn FnMut(Delta) + Send),
 ) -> Result<Message, Error> {
     let body = render(name, req)?;
-    let resp = http
-        .post(format!("{base}/v1/messages"))
-        .header("x-api-key", key)
-        .header("anthropic-version", VERSION)
-        .json(&body)
-        .send()
-        .await
-        .map_err(Error::connection)?;
+    let mut post = http.post(format!("{base}/v1/messages")).header("x-api-key", key).header("anthropic-version", VERSION);
+    if thinks_by_default(name) {
+        post = post.header("anthropic-beta", PRESERVED_THINKING_BETAS.join(","));
+    }
+    let resp = post.json(&body).send().await.map_err(Error::connection)?;
     if !resp.status().is_success() {
         return Err(Error::from_response(resp).await);
     }
@@ -119,11 +122,39 @@ fn family(name: &str, families: &[&str]) -> bool {
     families.iter().any(|f| name.strip_prefix(f).is_some_and(|rest| rest.is_empty() || rest.starts_with('-')))
 }
 
+/// What a model that preserves thinking is sent with: server-side context
+/// editing, and the controls for a thinking block bound to another history.
+const PRESERVED_THINKING_BETAS: [&str; 2] = ["context-management-2025-06-27", "thinking-binding-controls-2026-08-01"];
+
 /// The `thinking` a call sends: only for a model that thinks anyway, so
 /// what it thinks shows. Turning thinking on for the others would change
-/// what they do, and the loop strips past thinking from the history.
+/// what they do, and the loop strips their past thinking from the history.
+///
+/// The history is append-only, so no block should fail the API's check
+/// that what came before it is unchanged — but a system prompt that moved
+/// between two requests (a project edited, the browser started) would, and
+/// then the blocks from there on are dropped rather than the call refused.
 fn thinking(name: &str) -> Option<Value> {
-    family(name, THINKS_BY_DEFAULT).then(|| json!({"type": "adaptive", "display": "summarized"}))
+    family(name, THINKS_BY_DEFAULT).then(|| {
+        json!({"type": "adaptive", "display": "summarized",
+               "block_binding": {"prefix_mismatch_behavior": "drop_block"}})
+    })
+}
+
+/// Old tool results cleared server-side, which doesn't count as an edit to
+/// the history: past 100k input tokens, all but the newest four, and only
+/// when that frees 20k — a clear restarts the cache from there.
+fn context_management() -> Value {
+    json!({"edits": [{
+        "type": "clear_tool_uses_20250919",
+        "trigger": {"type": "input_tokens", "value": 100_000},
+        "keep": {"type": "tool_uses", "value": 4},
+        "clear_at_least": {"type": "input_tokens", "value": 20_000},
+    }]})
+}
+
+pub fn thinks_by_default(name: &str) -> bool {
+    family(name, THINKS_BY_DEFAULT)
 }
 
 fn takes_effort(name: &str) -> bool {
@@ -217,6 +248,7 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
     });
     if let Some(thinking) = thinking(name) {
         body["thinking"] = thinking;
+        body["context_management"] = context_management();
     }
     if let Some(effort) = req.effort.filter(|_| takes_effort(name)) {
         body["output_config"] = json!({"effort": effort});
@@ -484,6 +516,12 @@ impl Reply {
                 if m["usage"].is_object() {
                     self.usage = Some(m["usage"].clone());
                 }
+                // Thinking blocks the API dropped, and why: a
+                // `prefix_binding_mismatch` means the history sent before
+                // them changed since they were made.
+                if m["input_transformations"].as_array().is_some_and(|a| !a.is_empty()) {
+                    tracing::info!("{}: the API transformed the input: {}", self.model, m["input_transformations"]);
+                }
             }
             "content_block_start" => {
                 let b = &event["content_block"];
@@ -547,6 +585,10 @@ impl Reply {
                 if let Some(d) = event["delta"].get("stop_details").filter(|d| d.is_object()) {
                     self.stop_details = Some(d.clone());
                 }
+                let edits = &event["context_management"]["applied_edits"];
+                if edits.as_array().is_some_and(|a| !a.is_empty()) {
+                    tracing::info!("{}: context cleared server-side: {edits}", self.model);
+                }
                 // Cumulative: the final counts, cache reads and writes too.
                 if let Some(u) = event["usage"].as_object() {
                     let mut merged = self.usage.take().and_then(|v| v.as_object().cloned()).unwrap_or_default();
@@ -566,6 +608,14 @@ impl Reply {
         let mut parts = vec![];
         let mut calls = vec![];
         let mut thought = false;
+        // Thinking after a call: the calls keep their place among the parts
+        // (`assistant_content` sends each at its `tool_use`), as the blocks
+        // go back in the order they came.
+        let interleaved = self
+            .blocks
+            .iter()
+            .skip_while(|b| !matches!(b, Block::Call { .. }))
+            .any(|b| matches!(b, Block::Thinking { .. } | Block::Redacted(_)));
         for b in self.blocks {
             match b {
                 Block::Text(text) if !text.is_empty() => {
@@ -580,7 +630,14 @@ impl Reply {
                     thought = true;
                     parts.push(Part::Typed(Typed::RedactedThinking { data, extras: Map::new() }));
                 }
-                Block::Call { id, name, args } => calls.push((id, name, args)),
+                Block::Call { id, name, args } => {
+                    let id = if id.is_empty() { new_id() } else { id };
+                    if interleaved {
+                        let at = json!({"type": "tool_use", "id": id, "name": name});
+                        parts.push(Part::Typed(Typed::Opaque { data: at, extras: Map::new() }));
+                    }
+                    calls.push((id, name, args))
+                }
                 Block::Text(_) | Block::Other => {}
             }
         }
@@ -600,7 +657,6 @@ impl Reply {
         let mut m = Message::new(Role::Assistant, content);
         m.id = Some(self.id.unwrap_or_else(new_id));
         for (id, name, args) in calls {
-            let id = if id.is_empty() { new_id() } else { id };
             match super::parse_args(&args) {
                 Ok(args) => m.tool_calls.push(ToolCall { id: Some(id), name, args, signature: None }),
                 Err(error) => m.invalid_tool_calls.push(json!({"id": id, "name": name, "args": args, "error": error})),
@@ -689,17 +745,118 @@ mod tests {
             render(name, &Request { model: "", prompt: &p, tools: &[], blobs: &Default::default(), effort }).unwrap()
         };
         let current = body("claude-opus-5-5", Some("medium"));
-        assert_eq!(current["thinking"], json!({"type": "adaptive", "display": "summarized"}));
+        assert_eq!(
+            current["thinking"],
+            json!({"type": "adaptive", "display": "summarized",
+                   "block_binding": {"prefix_mismatch_behavior": "drop_block"}})
+        );
         assert_eq!(current["output_config"], json!({"effort": "medium"}));
+        assert_eq!(current["context_management"]["edits"][0]["type"], "clear_tool_uses_20250919");
         // Thinks only when asked: thinking stays off, effort goes.
         let opus47 = body("claude-opus-4-7", Some("high"));
-        assert!(opus47.get("thinking").is_none());
+        assert!(opus47.get("thinking").is_none() && opus47.get("context_management").is_none());
         assert_eq!(opus47["output_config"], json!({"effort": "high"}));
         // Rejects effort; and no effort asked, none sent.
         assert!(body("claude-haiku-4-5-20251001", Some("low")).get("output_config").is_none());
         assert!(body("claude-sonnet-5-5", None).get("output_config").is_none());
         // A family name is matched whole, not as a prefix of another.
         assert!(body("claude-opus-50", None).get("thinking").is_none());
+    }
+
+    #[test]
+    fn calls_keep_their_place_when_thinking_follows_them() {
+        let start = |i: u64, block: Value| json!({"type": "content_block_start", "index": i, "content_block": block});
+        let sig = |i: u64| json!({"type": "content_block_delta", "index": i, "delta": {"type": "signature_delta", "signature": "s"}});
+        let events = [
+            start(0, json!({"type": "thinking", "thinking": "a", "signature": ""})),
+            sig(0),
+            start(1, json!({"type": "tool_use", "id": "toolu_1", "name": "run_cell", "input": {"code": "1"}})),
+            start(2, json!({"type": "thinking", "thinking": "b", "signature": ""})),
+            sig(2),
+            start(3, json!({"type": "tool_use", "id": "toolu_2", "name": "run_cell", "input": {"code": "2"}})),
+        ];
+        let mut reply = Reply::new("claude-opus-5-5");
+        for e in &events {
+            reply.absorb(e, &mut |_| {});
+        }
+        let m = reply.finish();
+        assert_eq!(m.tool_calls.len(), 2);
+        let order: Vec<String> = assistant_content(&m, false, &Default::default()).unwrap().as_array().unwrap()
+            .iter()
+            .map(|b| format!("{}:{}", b["type"].as_str().unwrap(), b["id"].as_str().or(b["thinking"].as_str()).unwrap()))
+            .collect();
+        assert_eq!(order, ["thinking:a", "tool_use:toolu_1", "thinking:b", "tool_use:toolu_2"]);
+        // Calls after all the thinking stay as they were stored.
+        let mut plain = Reply::new("claude-opus-5-5");
+        for e in &events[..2] {
+            plain.absorb(e, &mut |_| {});
+        }
+        plain.absorb(&events[2], &mut |_| {});
+        let m = plain.finish();
+        let Content::Parts(parts) = &m.content else { panic!("thinking makes parts") };
+        assert!(parts.iter().all(|p| p.opaque_type().is_none()));
+    }
+
+    /// Two steps of a tool loop, shaped and rendered as the turn does: the
+    /// second request's messages start with the first's, unchanged — what
+    /// keeps every thinking block valid. Breakpoints may move.
+    #[test]
+    fn an_append_only_history_only_grows() {
+        use crate::llm::shape::{self, Layout};
+        let model = "anthropic:claude-opus-5-5";
+        let request = |history: &[Message], volatile: &str| {
+            let layout =
+                Layout { system: "S", segments: &[], volatile, cache: true, provider: "anthropic", append_only: true };
+            let mut history = history.to_vec();
+            shape::carry_turn_context(&mut history, shape::turn_context(&layout));
+            let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(model, history.clone()));
+            let prompt = shape::build(&layout, shaped);
+            let mut body = render("claude-opus-5-5", &Request {
+                model, prompt: &prompt, tools: &[], blobs: &Default::default(), effort: None,
+            })
+            .unwrap();
+            fn unmark(v: &mut Value) {
+                match v {
+                    Value::Object(o) => {
+                        o.remove("cache_control");
+                        o.values_mut().for_each(unmark);
+                    }
+                    Value::Array(a) => a.iter_mut().for_each(unmark),
+                    _ => {}
+                }
+            }
+            unmark(&mut body["messages"]);
+            (history, body["messages"].as_array().unwrap().clone())
+        };
+        let reply = |id: &str| {
+            let mut r = Reply::new("claude-opus-5-5");
+            r.absorb(&json!({"type": "content_block_start", "index": 0,
+                             "content_block": {"type": "thinking", "thinking": "hm", "signature": "sig"}}), &mut |_| {});
+            r.absorb(&json!({"type": "content_block_start", "index": 1,
+                             "content_block": {"type": "tool_use", "id": id, "name": "run_cell", "input": {"code": "1"}}}),
+                     &mut |_| {});
+            r.finish()
+        };
+        let result = |id: &str| {
+            let mut m = Message::new(Role::Tool, Content::Text("out".into()));
+            m.tool_call_id = Some(id.into());
+            m.name = Some("run_cell".into());
+            m
+        };
+
+        let (mut history, first) =
+            request(&[Message::new(Role::User, Content::Text("go".into()))], "## Current Tasks\n[ ] one");
+        history.extend([reply("toolu_1"), result("toolu_1")]);
+        let (mut history, second) = request(&history, "## Current Tasks\n[~] one");
+        history.extend([reply("toolu_2"), result("toolu_2")]);
+        // Unchanged context: nothing new stored.
+        let (_, third) = request(&history, "## Current Tasks\n[~] one");
+
+        assert_eq!(second[..first.len()], first[..]);
+        assert_eq!(third[..second.len()], second[..]);
+        assert!(second.len() > first.len() && third.len() > second.len());
+        // Claude's thinking went back with its call.
+        assert_eq!(second[1]["content"][0], json!({"type": "thinking", "thinking": "hm", "signature": "sig"}));
     }
 
     #[test]
