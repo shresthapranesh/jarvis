@@ -135749,6 +135749,32 @@
        },
        {
         "available": true,
+        "description": "Correct a long-term memory in place — e.g. when the user contradicts it.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:update_memory",
+        "inPrompt": false,
+        "key": "sdk:update_memory",
+        "kind": "sdk",
+        "name": "jarvis.update_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a long-term memory — when the user asks to forget it, or it's wrong.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:forget_memory",
+        "inPrompt": false,
+        "key": "sdk:forget_memory",
+        "kind": "sdk",
+        "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Read or update the shared memory of this conversation's project.",
         "detail": "",
         "enabled": true,
@@ -136985,6 +137011,32 @@
         "key": "sdk:search_memory",
         "kind": "sdk",
         "name": "jarvis.search_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Correct a long-term memory in place — e.g. when the user contradicts it.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:update_memory",
+        "inPrompt": false,
+        "key": "sdk:update_memory",
+        "kind": "sdk",
+        "name": "jarvis.update_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a long-term memory — when the user asks to forget it, or it's wrong.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:forget_memory",
+        "inPrompt": false,
+        "key": "sdk:forget_memory",
+        "kind": "sdk",
+        "name": "jarvis.forget_memory",
         "requiresApproval": false
        },
        {
@@ -138229,6 +138281,32 @@
        },
        {
         "available": true,
+        "description": "Correct a long-term memory in place — e.g. when the user contradicts it.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:update_memory",
+        "inPrompt": false,
+        "key": "sdk:update_memory",
+        "kind": "sdk",
+        "name": "jarvis.update_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a long-term memory — when the user asks to forget it, or it's wrong.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:forget_memory",
+        "inPrompt": false,
+        "key": "sdk:forget_memory",
+        "kind": "sdk",
+        "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Read or update the shared memory of this conversation's project.",
         "detail": "",
         "enabled": true,
@@ -139465,6 +139543,32 @@
         "key": "sdk:search_memory",
         "kind": "sdk",
         "name": "jarvis.search_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Correct a long-term memory in place — e.g. when the user contradicts it.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:update_memory",
+        "inPrompt": false,
+        "key": "sdk:update_memory",
+        "kind": "sdk",
+        "name": "jarvis.update_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a long-term memory — when the user asks to forget it, or it's wrong.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:forget_memory",
+        "inPrompt": false,
+        "key": "sdk:forget_memory",
+        "kind": "sdk",
+        "name": "jarvis.forget_memory",
         "requiresApproval": false
        },
        {
@@ -140709,6 +140813,32 @@
        },
        {
         "available": true,
+        "description": "Correct a long-term memory in place — e.g. when the user contradicts it.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:update_memory",
+        "inPrompt": false,
+        "key": "sdk:update_memory",
+        "kind": "sdk",
+        "name": "jarvis.update_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a long-term memory — when the user asks to forget it, or it's wrong.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:forget_memory",
+        "inPrompt": false,
+        "key": "sdk:forget_memory",
+        "kind": "sdk",
+        "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Read or update the shared memory of this conversation's project.",
         "detail": "",
         "enabled": true,
@@ -141945,6 +142075,32 @@
         "key": "sdk:search_memory",
         "kind": "sdk",
         "name": "jarvis.search_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Correct a long-term memory in place — e.g. when the user contradicts it.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:update_memory",
+        "inPrompt": false,
+        "key": "sdk:update_memory",
+        "kind": "sdk",
+        "name": "jarvis.update_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Delete a long-term memory — when the user asks to forget it, or it's wrong.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:forget_memory",
+        "inPrompt": false,
+        "key": "sdk:forget_memory",
+        "kind": "sdk",
+        "name": "jarvis.forget_memory",
         "requiresApproval": false
        },
        {

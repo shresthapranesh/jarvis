@@ -428,6 +428,29 @@ def search_memory(query: str, k: int = 5) -> list[dict]:
     return data["searchMemory"]
 
 
+def update_memory(memory_id: str, text: str, kind: str | None = None) -> dict:
+    """Correct a long-term memory in place — e.g. when the user contradicts it.
+
+    `memory_id` is the id shown next to the memory in your context, or from
+    search_memory. `kind`: "core" | "fact" to move it; omit to keep its kind.
+    """
+    data = api(
+        "mutation($id: String!, $text: String!, $kind: String) {"
+        " updateMemoryItem(id: $id, text: $text, kind: $kind) { id kind text } }",
+        {"id": memory_id, "text": text, "kind": kind},
+    )
+    return data["updateMemoryItem"]
+
+
+def forget_memory(memory_id: str) -> bool:
+    """Delete a long-term memory — when the user asks to forget it, or it's wrong.
+
+    False when there was no memory with that id.
+    """
+    data = api("mutation($id: String!) { deleteMemory(id: $id) }", {"id": memory_id})
+    return bool(data["deleteMemory"])
+
+
 # ── GraphQL transport (write paths) ───────────────────────────────────────────
 
 def _global_id(type_name: str, raw_id: str) -> str:
@@ -1139,7 +1162,7 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     ),
     "memory": (
         "long-term facts and per-project shared memory",
-        [search_memory, project_memory],
+        [search_memory, update_memory, forget_memory, project_memory],
     ),
     "mcp": (
         "external MCP tool servers loaded on demand",

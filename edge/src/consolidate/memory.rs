@@ -68,12 +68,17 @@ Output ONLY the JSON array — no prose, no markdown fences.
 "#;
 
 const SPLIT_SYSTEM_PROMPT: &str = r#"You convert an existing free-text memory document into discrete
-memory items. Output ONLY a JSON array of objects:
+memory items about the user. Output ONLY a JSON array of objects:
   {"text": "<one atomic, self-contained fact>", "kind": "core" | "fact"}
 
 - "core": durable identity and strong preferences that should ALWAYS be in mind.
 - "fact": everything else worth remembering.
 - One atomic fact per item; keep each short and self-contained.
+- Keep only what is about the user and their world: who they are, their work, projects, plans,
+  preferences, and how they want the assistant to treat them.
+- Leave out instructions about how an assistant or agent works — its role, methodology, tools,
+  output conventions. Such documents often hold an old system prompt; none of it is a memory.
+- If nothing qualifies, output [].
 - Output ONLY the JSON array — no prose, no markdown fences.
 "#;
 
@@ -319,17 +324,29 @@ async fn consolidate_items(pool: &SqlitePool, http: &reqwest::Client, model: Opt
     Ok(format!("consolidated {consumed} messages in {batches} batch(es) → +{added} ~{updated} -{deleted} (+{seeded} seeded){tail}"))
 }
 
-/// `_seed_from_blob`: once, with no items yet, the legacy `AGENTS.md` blob
-/// split into items. The blob stays as a backup.
+/// `_seed_from_blob`: once, with no items yet, the legacy blobs split into
+/// items — the user's facts only. The blobs stay as a backup.
+///
+/// Departure: both keys are read. Python read only `AGENTS.md`, which on
+/// older installs can hold the agent's old system prompt while the user's
+/// own facts sit under the pre-fix `/AGENTS.md` (`migrate_legacy_key` copies
+/// that only onto an empty canonical key).
 async fn seed_from_blob(pool: &SqlitePool, http: &reqwest::Client, model: &str) -> Result<i64, String> {
-    let Some(value) = kv_get(pool, "memory", "AGENTS.md").await? else { return Ok(0) };
-    let raw = match value.get("content") {
-        None => String::new(),
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Array(lines)) => lines.iter().map(py_str).collect::<Vec<_>>().join("\n"),
-        Some(other) => return Err(format!("'{}' object has no attribute 'strip'", crate::pyjson::py_type(other))),
-    };
-    let blob = pystr::strip(&raw);
+    let mut docs: Vec<String> = vec![];
+    for key in ["AGENTS.md", "/AGENTS.md"] {
+        let Some(value) = kv_get(pool, "memory", key).await? else { continue };
+        let raw = match value.get("content") {
+            None => String::new(),
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Array(lines)) => lines.iter().map(py_str).collect::<Vec<_>>().join("\n"),
+            Some(other) => return Err(format!("'{}' object has no attribute 'strip'", crate::pyjson::py_type(other))),
+        };
+        let doc = pystr::strip(&raw).to_string();
+        if !doc.is_empty() && !docs.contains(&doc) {
+            docs.push(doc);
+        }
+    }
+    let blob = docs.join("\n\n---\n\n");
     if blob.is_empty() {
         return Ok(0);
     }
@@ -338,7 +355,7 @@ async fn seed_from_blob(pool: &SqlitePool, http: &reqwest::Client, model: &str) 
         http,
         model,
         SPLIT_SYSTEM_PROMPT,
-        format!("Existing memory document:\n---\n{}\n---\n\nSplit it into items:", pystr::prefix(blob, 32_000)),
+        format!("Existing memory document:\n---\n{}\n---\n\nSplit it into items:", pystr::prefix(&blob, 32_000)),
     )
     .await?;
     let mut written = 0;
@@ -351,7 +368,7 @@ async fn seed_from_blob(pool: &SqlitePool, http: &reqwest::Client, model: &str) 
         crate::agent::retrieve::upsert_memory(pool, http, &text, kind).await?;
         written += 1;
     }
-    tracing::info!("memory: seeded {written} items from legacy AGENTS.md blob");
+    tracing::info!("memory: seeded {written} items from the legacy AGENTS.md blobs");
     Ok(written)
 }
 

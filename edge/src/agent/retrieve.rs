@@ -127,7 +127,12 @@ pub(super) async fn lexical(pool: &SqlitePool, sql: &str, binds: &[&str]) -> Vec
 
 /// `search_memory(query, k)`: the `fact` items that clear the cutoff, as
 /// `(id, text)`. May be fewer than `k`, or none. Logs the access.
-pub async fn search_memory(pool: &SqlitePool, http: &reqwest::Client, query: &str, k: usize) -> Result<Vec<String>, String> {
+pub async fn search_memory(
+    pool: &SqlitePool,
+    http: &reqwest::Client,
+    query: &str,
+    k: usize,
+) -> Result<Vec<(String, String)>, String> {
     if super::prompt::trivial(query) {
         return Ok(vec![]);
     }
@@ -165,7 +170,7 @@ pub async fn search_memory(pool: &SqlitePool, http: &reqwest::Client, query: &st
     let scores: HashMap<&str, f64> = dense.iter().map(|(i, s)| (i.as_str(), *s)).collect();
     let hits: Vec<(String, String)> = keep.into_iter().filter_map(|id| Some((texts.get(&id)?.clone(), id))).map(|(t, id)| (id, t)).collect();
     touch(pool, &hits.iter().map(|(id, _)| (id.as_str(), scores.get(id.as_str()).copied().unwrap_or(0.0))).collect::<Vec<_>>(), query).await;
-    Ok(hits.into_iter().map(|(_, t)| t).collect())
+    Ok(hits)
 }
 
 /// `touch_memories`: the access log, best-effort. The score is rounded as
@@ -341,9 +346,15 @@ pub async fn earlier_episodes(pool: &SqlitePool, http: &reqwest::Client, convers
     ))
 }
 
+/// One memory as the prompt lists it: with its id, so the agent can
+/// correct or forget it (`jarvis.update_memory` / `forget_memory`).
+pub fn memory_line(id: &str, text: &str) -> String {
+    format!("- {text} (id: {id})")
+}
+
 /// What `search_memory` reports as text, for the prompt.
-pub fn relevant_memories(hits: &[String]) -> String {
-    let lines: Vec<String> = hits.iter().map(|t| format!("- {t}")).collect();
+pub fn relevant_memories(hits: &[(String, String)]) -> String {
+    let lines: Vec<String> = hits.iter().map(|(id, t)| memory_line(id, t)).collect();
     format!("## Relevant Memories\n\n{}", lines.join("\n"))
 }
 

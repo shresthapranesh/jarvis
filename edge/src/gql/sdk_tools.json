@@ -125,6 +125,16 @@
   "group": "memory"
  },
  {
+  "name": "update_memory",
+  "description": "Correct a long-term memory in place — e.g. when the user contradicts it.",
+  "group": "memory"
+ },
+ {
+  "name": "forget_memory",
+  "description": "Delete a long-term memory — when the user asks to forget it, or it's wrong.",
+  "group": "memory"
+ },
+ {
   "name": "project_memory",
   "description": "Read or update the shared memory of this conversation's project.",
   "group": "memory"

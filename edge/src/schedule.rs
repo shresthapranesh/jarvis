@@ -4,14 +4,16 @@
 //! |---|---|---|
 //! | each enabled automation | its cron schedule | enqueues an `automation` job |
 //! | board dispatch | every 15 s, and on request | `dispatch_board_tasks`, here |
-//! | memory consolidation | `0 */6 * * *` | the sweep, here (`consolidate/`) |
+//! | memory consolidation | every 30 min, once the user has gone quiet | the sweep, here (`consolidate/`) |
 //! | project memory | every 30 min | the sweep, here (`consolidate/`) |
 //! | memory-activity prune | `0 4 * * *` | deletes old access-log rows, here |
 //!
 //! Firing follows APScheduler's rules for the jobs it replaces: times are
 //! `cron.rs`'s, a run that is late by more than the job's grace period is
 //! skipped, several missed runs coalesce into one, and nothing missed while
-//! the server was down is caught up on.
+//! the server was down is caught up on. The memory sweeps alone first check
+//! a couple of minutes after start: on a machine that isn't always up, a
+//! timer that only fires on the clock rarely gets to run.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,6 +37,13 @@ const RELOAD_EVERY: Duration = Duration::from_secs(60);
 /// A schedule change may be reported just before its commit; wait out the
 /// commit before re-reading.
 const RELOAD_SETTLE: Duration = Duration::from_millis(300);
+/// The memory sweeps' first check after start.
+const MAINTENANCE_FIRST: chrono::Duration = chrono::Duration::minutes(2);
+/// The user's memory waits until they've been quiet this long, so a
+/// conversation is read once it has settled rather than mid-thought…
+const MEMORY_QUIET_MINUTES: f64 = 15.0;
+/// …or until the oldest unread message has waited this long.
+const MEMORY_MAX_WAIT_HOURS: f64 = 6.0;
 
 /// The zone cron expressions are read in — `get_scheduler_timezone`: the
 /// `scheduler.timezone` setting, else `JARVIS_TIMEZONE`, else the machine's
@@ -100,6 +109,14 @@ impl Entry {
             When::Every(every) => Some(Wall::from_utc(now + *every, tz)),
         };
         Entry { action, when, grace: chrono::Duration::seconds(grace_secs), next }
+    }
+
+    /// First fire `after` from `now`, not one interval in.
+    fn first_after(mut self, after: chrono::Duration, now: DateTime<Utc>) -> Self {
+        if let Some(next) = self.next {
+            self.next = Some(Wall::from_utc(now + after, next.tz));
+        }
+        self
     }
 
     /// If due, move past `now` and say whether to run: the latest due time,
@@ -172,8 +189,8 @@ impl Scheduler {
         let minutes = |m: i64| When::Every(chrono::Duration::minutes(m));
         vec![
             Entry::new(Action::Dispatch, When::Every(chrono::Duration::seconds(dispatch_every())), 30, self.tz, now),
-            Entry::new(Action::Maintenance("memory_consolidation"), cron("0 */6 * * *"), 300, self.tz, now),
-            Entry::new(Action::Maintenance("project_memory"), minutes(30), 300, self.tz, now),
+            Entry::new(Action::Maintenance("memory_consolidation"), minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
+            Entry::new(Action::Maintenance("project_memory"), minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
             Entry::new(Action::ActivityPrune, cron("0 4 * * *"), 300, self.tz, now),
         ]
     }
@@ -336,8 +353,9 @@ impl Scheduler {
         Ok(raw.and_then(|r| serde_json::from_str(&r).ok()))
     }
 
-    /// `consolidate_memory`: a message past the watermark, and the first of
-    /// them not a reply still being written (`_transcript_block` stops there).
+    /// `consolidate_memory`: a message past the watermark, the first of them
+    /// not a reply still being written (`_transcript_block` stops there), and
+    /// the user gone quiet — or the oldest of them waiting long enough.
     async fn memory_due(&self) -> sqlx::Result<bool> {
         let meta = self.kv_get("memory_consolidation", "state").await?;
         let raw = meta.as_ref().and_then(|m| {
@@ -356,10 +374,28 @@ impl Scheduler {
              WHERE m.role IN ('user', 'assistant') AND c.ephemeral = 0{} ORDER BY m.created_at ASC LIMIT 1",
             if since.is_some() { " AND m.created_at > ?" } else { "" }
         ))
-        .bind(since)
+        .bind(&since)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(first.is_some_and(|status| status.as_deref() != Some("running")))
+        if !first.is_some_and(|status| status.as_deref() != Some("running")) {
+            return Ok(false);
+        }
+        let (oldest, newest): (Option<String>, Option<String>) = sqlx::query_as(&format!(
+            "SELECT MIN(m.created_at), MAX(m.created_at) FROM messages m JOIN conversations c ON m.conversation_id = c.id \
+             WHERE m.role IN ('user', 'assistant') AND c.ephemeral = 0{}",
+            if since.is_some() { " AND m.created_at > ?" } else { "" }
+        ))
+        .bind(&since)
+        .fetch_one(&self.pool)
+        .await?;
+        // Unreadable stamps: the sweep's to judge.
+        let (Some(oldest), Some(newest)) = (oldest.as_deref().and_then(naive), newest.as_deref().and_then(naive)) else {
+            return Ok(true);
+        };
+        let now = Utc::now().naive_utc();
+        let quiet_minutes = (now - newest).num_microseconds().unwrap_or(i64::MAX) as f64 / 60e6;
+        let waiting_hours = (now - oldest).num_microseconds().unwrap_or(i64::MAX) as f64 / 3600e6;
+        Ok(quiet_minutes >= MEMORY_QUIET_MINUTES || waiting_hours >= MEMORY_MAX_WAIT_HOURS)
     }
 
     /// `consolidate_project_memories`: a project with new messages that has

@@ -121,7 +121,9 @@ fn db<T>(r: sqlx::Result<T>) -> Result<T, Unbuilt> {
 const MEMORY_HOWTO: &str = "## Memory\n\nYou have long-term memory that persists across conversations. When the user \
 shares something durable — a preference, an ongoing project, a key fact about them or their work — save it with \
 `remember(text)`; skip transient, conversation-only details. The most relevant memories are injected below \
-automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced.";
+automatically; run `jarvis.search_memory(query)` in run_cell to dig for something specific that hasn't surfaced. \
+When the user corrects or contradicts a memory, or asks you to forget one, fix it right away with \
+`jarvis.update_memory(id, text)` or `jarvis.forget_memory(id)` — each memory shows its id.";
 
 /// `load_core`'s cap on the always-on memory text.
 const CORE_MAX_CHARS: usize = 2000;
@@ -130,8 +132,8 @@ const CORE_MAX_CHARS: usize = 2000;
 /// always has (Gemini with a key, else Ollama's).
 async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, Unbuilt> {
     let mut parts = vec![seg("memory_howto", MEMORY_HOWTO, true)];
-    let core: Vec<String> = db(sqlx::query_scalar(
-        "SELECT text FROM memories WHERE kind = 'core' ORDER BY updated_at DESC",
+    let core: Vec<(String, String)> = db(sqlx::query_as(
+        "SELECT id, text FROM memories WHERE kind = 'core' ORDER BY updated_at DESC",
     )
     .fetch_all(pool)
     .await)?;
@@ -152,9 +154,9 @@ async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Resul
     Ok(parts)
 }
 
-/// `load_core`: `- text` lines, capped, saying how many were left out.
-fn core_text(rows: &[String]) -> String {
-    let text = rows.iter().map(|t| format!("- {t}")).collect::<Vec<_>>().join("\n");
+/// `load_core`: a line per `(id, text)`, capped, saying how many were left out.
+fn core_text(rows: &[(String, String)]) -> String {
+    let text = rows.iter().map(|(id, t)| super::retrieve::memory_line(id, t)).collect::<Vec<_>>().join("\n");
     if text.chars().count() <= CORE_MAX_CHARS {
         return text;
     }
@@ -465,11 +467,11 @@ mod tests {
 
     #[test]
     fn core_memory_is_capped_like_load_core() {
-        let rows: Vec<String> = (0..200).map(|i| format!("fact number {i} about the user")).collect();
+        let rows: Vec<(String, String)> = (0..200).map(|i| (format!("m{i}"), format!("fact number {i} about the user"))).collect();
         let text = core_text(&rows);
         assert!(text.chars().count() < 2200);
         assert!(text.ends_with("more core memories (use search_memory to find specific ones)"));
-        assert_eq!(core_text(&["a".into(), "b".into()]), "- a\n- b");
+        assert_eq!(core_text(&[("x".into(), "a".into()), ("y".into(), "b".into())]), "- a (id: x)\n- b (id: y)");
     }
 
     #[test]
