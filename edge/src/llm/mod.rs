@@ -27,6 +27,7 @@ pub mod shape;
 pub mod transcript;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -53,6 +54,9 @@ pub struct Request<'a> {
     pub prompt: &'a Prompt,
     pub tools: &'a [Tool],
     pub blobs: &'a Blobs,
+    /// How hard the model works on this call (`low` … `max`), for the
+    /// models that take it; `None` leaves the model's default.
+    pub effort: Option<&'a str>,
 }
 
 /// What arrives while the reply streams: its text and thinking, and the
@@ -68,36 +72,50 @@ pub enum Delta<'a> {
     Timings(perf::ServerTimings),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Error {
-    /// A server error, a rate limit or a dropped connection: worth one retry.
+    /// A server error, a rate limit or a dropped connection: worth a retry.
     pub transient: bool,
     pub status: Option<u16>,
     pub message: String,
+    /// How long the server asked us to wait before trying again.
+    pub retry_after: Option<Duration>,
 }
 
 impl Error {
     fn fatal(message: impl Into<String>) -> Self {
-        Error { transient: false, status: None, message: message.into() }
+        Error { message: message.into(), ..Default::default() }
     }
 
     fn connection(e: reqwest::Error) -> Self {
-        Error { transient: true, status: None, message: e.to_string() }
+        Error { transient: true, message: e.to_string(), ..Default::default() }
     }
 
     /// From a non-2xx response: 429 and 5xx are worth a retry, the rest
     /// (bad input, context overflow, auth) fail fast.
     async fn from_response(resp: reqwest::Response) -> Self {
         let status = resp.status().as_u16();
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|s| s.is_finite() && *s >= 0.0)
+            .map(Duration::from_secs_f64);
         let body = resp.text().await.unwrap_or_default();
-        Error { transient: status == 429 || status >= 500, status: Some(status), message: format!("{status}: {body}") }
+        Error {
+            transient: status == 429 || status >= 500,
+            status: Some(status),
+            message: format!("{status}: {body}"),
+            retry_after,
+        }
     }
 
     /// An error object sent inside a stream, with an HTTP-like `code` when
     /// the server gives one.
     fn from_stream(err: &Value) -> Self {
         let status = err.get("code").and_then(Value::as_u64).and_then(|c| u16::try_from(c).ok());
-        Error { transient: status.is_some_and(|c| c == 429 || c >= 500), status, message: err.to_string() }
+        Error { transient: status.is_some_and(|c| c == 429 || c >= 500), status, message: err.to_string(), ..Default::default() }
     }
 }
 
@@ -164,39 +182,72 @@ pub struct Reply {
 /// One model call: the reply as an assistant record, its text and thinking
 /// handed to `on_delta` as they arrive.
 ///
-/// A transient failure before any text streamed is retried once; after,
-/// it isn't — a retry would show the user the same tokens twice. The
-/// throughput is the attempt that answered.
+/// A transient failure before any text streamed is retried, up to
+/// `RETRIES` times, after the wait the server asked for or a doubling
+/// backoff; once text has streamed it isn't — a retry would show the user
+/// the same tokens twice. The throughput is the attempt that answered.
 pub async fn complete(
     http: &reqwest::Client,
     ends: &Endpoints,
     req: &Request<'_>,
     on_delta: &mut (dyn FnMut(Delta) + Send),
 ) -> Result<Reply, Error> {
-    let mut clock = perf::Clock::start();
-    let mut shown = false;
-    let first = call(http, ends, req, &mut |d: Delta| {
-        shown |= matches!(d, Delta::Text(_) | Delta::Thinking(_));
-        clock.saw(&d);
-        on_delta(d)
-    })
-    .await;
-    let message = match first {
-        Err(e) if e.transient && !shown => {
-            tracing::warn!("{}: {e} — retrying once", req.model);
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            clock = perf::Clock::start();
-            call(http, ends, req, &mut |d: Delta| {
-                clock.saw(&d);
-                on_delta(d)
-            })
-            .await?
+    let mut attempt = 0;
+    let (message, clock) = loop {
+        let mut clock = perf::Clock::start();
+        let mut shown = false;
+        let result = call(http, ends, req, &mut |d: Delta| {
+            shown |= matches!(d, Delta::Text(_) | Delta::Thinking(_));
+            clock.saw(&d);
+            on_delta(d)
+        })
+        .await;
+        match result {
+            Ok(message) => break (message, clock),
+            Err(e) if e.transient && !shown && attempt < RETRIES => {
+                let wait = backoff(attempt, e.retry_after);
+                attempt += 1;
+                tracing::warn!("{}: {e} — retry {attempt} of {RETRIES} in {:.1}s", req.model, wait.as_secs_f64());
+                tokio::time::sleep(wait).await;
+            }
+            Err(e) => return Err(e),
         }
-        r => r?,
     };
     let name = req.model.split_once(':').map_or(req.model, |(_, n)| n);
     let perf = perf::CallPerf::measure(name, &message, &clock);
     Ok(Reply { message, perf })
+}
+
+/// How many times a transient failure is retried.
+const RETRIES: u32 = 3;
+
+/// The wait before retry `attempt + 1`: what the server asked for, capped,
+/// else 1s, 2s, 4s.
+fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
+    const MAX_WAIT: Duration = Duration::from_secs(30);
+    retry_after.map_or_else(|| Duration::from_secs(1 << attempt), |d| d.min(MAX_WAIT))
+}
+
+/// Why a reply ended before the model was done — its output limit, a full
+/// context window, or the model declining — from the finish reason as each
+/// provider spells it. `None` for a reply that ended on its own or to call
+/// tools. What it said is kept, but its calls may be cut off mid-argument,
+/// so nothing should run them.
+pub fn cut_short(m: &Message) -> Option<String> {
+    let reason = m.finish_reason.as_ref()?.as_str()?;
+    Some(match reason {
+        // Anthropic and Bedrock; OpenAI-style and Ollama; Gemini; Responses.
+        "max_tokens" | "length" | "MAX_TOKENS" | "incomplete" => "the reply hit the model's output limit".into(),
+        "model_context_window_exceeded" => "the conversation no longer fits in the model's context window".into(),
+        "refusal" | "content_filter" | "content_filtered" | "guardrail_intervened" | "SAFETY" | "PROHIBITED_CONTENT"
+        | "BLOCKLIST" | "SPII" | "RECITATION" => {
+            match m.extras.get("stop_details").and_then(|d| d["category"].as_str()) {
+                Some(category) => format!("the model declined to continue ({category})"),
+                None => "the model declined to continue".into(),
+            }
+        }
+        _ => return None,
+    })
 }
 
 async fn call(
@@ -247,7 +298,7 @@ pub async fn ask(
         cached: false,
     };
     let ends = Endpoints { compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(), ..Endpoints::from_env() };
-    let req = Request { model, prompt: &prompt, tools: &[], blobs: &Default::default() };
+    let req = Request { model, prompt: &prompt, tools: &[], blobs: &Default::default(), effort: None };
     let reply = complete(http, &ends, &req, &mut |_| {}).await?;
     Ok(match reply.message.content {
         Content::Text(s) => vec![s],
@@ -324,6 +375,8 @@ struct CliInput {
     /// The run kind whose budget the call counts against.
     #[serde(default = "chat")]
     kind: String,
+    #[serde(default)]
+    effort: Option<String>,
 }
 
 fn chat() -> String {
@@ -365,7 +418,13 @@ pub async fn cli(call: bool) {
         return;
     }
     let http = reqwest::Client::new();
-    let req = Request { model: &input.model, prompt: &prompt, tools: &input.tools, blobs: &input.blobs };
+    let req = Request {
+        model: &input.model,
+        prompt: &prompt,
+        tools: &input.tools,
+        blobs: &input.blobs,
+        effort: input.effort.as_deref(),
+    };
     let mut print = |d: Delta| match d {
         Delta::Text(t) => println!("{}", serde_json::json!({"text": t})),
         Delta::Thinking(t) => println!("{}", serde_json::json!({"thinking": t})),
@@ -389,5 +448,42 @@ pub async fn cli(call: bool) {
             "{}",
             serde_json::json!({"error": {"message": e.message, "status": e.status, "transient": e.transient}})
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use transcript::{Content, Role};
+
+    fn ended(reason: &str) -> Message {
+        let mut m = Message::new(Role::Assistant, Content::Text("partial".into()));
+        m.finish_reason = Some(Value::String(reason.into()));
+        m
+    }
+
+    #[test]
+    fn cut_short_reads_every_providers_spelling() {
+        for reason in ["end_turn", "tool_use", "stop", "tool_calls", "STOP", "completed", "pause_turn"] {
+            assert_eq!(cut_short(&ended(reason)), None, "{reason}");
+        }
+        for reason in ["max_tokens", "length", "MAX_TOKENS", "incomplete"] {
+            assert_eq!(cut_short(&ended(reason)).as_deref(), Some("the reply hit the model's output limit"), "{reason}");
+        }
+        for reason in ["refusal", "content_filter", "SAFETY", "guardrail_intervened"] {
+            assert_eq!(cut_short(&ended(reason)).as_deref(), Some("the model declined to continue"), "{reason}");
+        }
+        assert!(cut_short(&ended("model_context_window_exceeded")).unwrap().contains("context window"));
+        let mut unset = ended("x");
+        unset.finish_reason = Some(Value::Null);
+        assert_eq!(cut_short(&unset), None);
+    }
+
+    #[test]
+    fn backoff_doubles_unless_the_server_says() {
+        let waits: Vec<u64> = (0..RETRIES).map(|a| backoff(a, None).as_secs()).collect();
+        assert_eq!(waits, [1, 2, 4]);
+        assert_eq!(backoff(0, Some(Duration::from_secs(7))), Duration::from_secs(7));
+        assert_eq!(backoff(0, Some(Duration::from_secs(600))), Duration::from_secs(30));
     }
 }

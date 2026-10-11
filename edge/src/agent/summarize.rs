@@ -129,7 +129,7 @@ async fn summarize(s: &Summarizer<'_>, instructions: &str, messages: Vec<Message
         history_breakpoint: None,
         cached: false,
     };
-    let req = Request { model: s.model, prompt: &prompt, tools: &[], blobs: s.blobs };
+    let req = Request { model: s.model, prompt: &prompt, tools: &[], blobs: s.blobs, effort: None };
     let reply = llm::complete(s.http, s.ends, &req, &mut |_| {}).await.map_err(|e| e.message)?;
     Ok(reply_text(&reply.message))
 }

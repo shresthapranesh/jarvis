@@ -278,7 +278,7 @@ mod tests {
         ]))
         .unwrap();
         let p = Prompt { system: vec![SystemBlock { text: "S".into(), breakpoint: false }], messages: msgs, history_breakpoint: None, cached: false };
-        let b = render("gemma4:26b", &Request { model: "", prompt: &p, tools: &[], blobs: &Blobs::new() }).unwrap();
+        let b = render("gemma4:26b", &Request { model: "", prompt: &p, tools: &[], blobs: &Blobs::new(), effort: None }).unwrap();
         assert_eq!(
             b,
             json!({"model": "gemma4:26b", "stream": true, "messages": [

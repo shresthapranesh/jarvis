@@ -278,6 +278,9 @@ impl<'c, 'a> Worker<'c, 'a> {
             let reply = self.model_step(&history).await?;
             history.push(reply.clone());
             self.step("model_request", super::turn::model_step_data(&reply));
+            if let Some(why) = llm::cut_short(&reply) {
+                return Err(why);
+            }
             if reply.tool_calls.is_empty() {
                 return Ok(answer(&reply));
             }
@@ -311,7 +314,13 @@ impl<'c, 'a> Worker<'c, 'a> {
         let layout = Layout { system: self.prompt, segments: &[], volatile: "", cache: ctx.cache, provider };
         let prompt = shape::build(&layout, shaped);
         let blobs = Default::default();
-        let req = Request { model: &ctx.model, prompt: &prompt, tools: &self.tools.schemas, blobs: &blobs };
+        let req = Request {
+            model: &ctx.model,
+            prompt: &prompt,
+            tools: &self.tools.schemas,
+            blobs: &blobs,
+            effort: super::effort("worker"),
+        };
         let tail = &mut self.tail;
         let mut on_delta = |d: Delta| {
             // Text only: a worker's thinking stays out of its tail.

@@ -11,7 +11,12 @@
 //! - a stored PDF goes as a `document` block; LangChain sent its own `media`
 //!   block, which Anthropic rejects;
 //! - the reply keeps its stop reason as the finish reason (LangChain left it
-//!   in the response metadata).
+//!   in the response metadata), and a refusal's `stop_details`;
+//! - the models LangChain's profiles didn't know yet get their real output
+//!   limit (`MAX_OUTPUT_TOKENS`), not its 4096 fallback;
+//! - models that think by default are asked for a summary of the thinking,
+//!   which they would otherwise stream as empty blocks (`thinking`), and a
+//!   call's effort is sent to the models that take it (`takes_effort`).
 
 use std::sync::OnceLock;
 
@@ -64,8 +69,8 @@ fn stream_error(err: &Value) -> Error {
     let kind = err["type"].as_str().unwrap_or_default();
     Error {
         transient: matches!(kind, "overloaded_error" | "api_error" | "rate_limit_error"),
-        status: None,
         message: err.to_string(),
+        ..Default::default()
     }
 }
 
@@ -75,8 +80,10 @@ fn stream_error(err: &Value) -> Error {
 /// what `ChatAnthropic` sends as `max_tokens` when none is set.
 const MAX_OUTPUT_TOKENS: &[(&str, i64)] = &[
     ("claude-fable-5", 128_000),
+    ("claude-fable-5-1", 128_000),
     ("claude-haiku-4-5", 64_000),
     ("claude-haiku-4-5-20251001", 64_000),
+    ("claude-haiku-5-5", 128_000),
     ("claude-opus-4-1", 32_000),
     ("claude-opus-4-1-20250805", 32_000),
     ("claude-opus-4-5", 64_000),
@@ -85,10 +92,12 @@ const MAX_OUTPUT_TOKENS: &[(&str, i64)] = &[
     ("claude-opus-4-7", 128_000),
     ("claude-opus-4-8", 128_000),
     ("claude-opus-5", 128_000),
+    ("claude-opus-5-5", 128_000),
     ("claude-sonnet-4-5", 64_000),
     ("claude-sonnet-4-5-20250929", 64_000),
     ("claude-sonnet-4-6", 128_000),
     ("claude-sonnet-5", 128_000),
+    ("claude-sonnet-5-5", 128_000),
 ];
 
 /// `_FALLBACK_MAX_OUTPUT_TOKENS`: a model the profiles don't list.
@@ -96,6 +105,29 @@ const FALLBACK_MAX_TOKENS: i64 = 4096;
 
 pub fn max_tokens(name: &str) -> i64 {
     MAX_OUTPUT_TOKENS.iter().find(|(id, _)| *id == name).map_or(FALLBACK_MAX_TOKENS, |(_, n)| *n)
+}
+
+/// Families that think whether asked or not (adaptive thinking is their
+/// default) and return it as empty blocks unless asked for a summary.
+const THINKS_BY_DEFAULT: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable-5", "claude-mythos-5"];
+
+/// Families that take `output_config.effort` at `low`/`medium`/`high`
+/// (Sonnet 4.5 and Haiku 4.5 reject it).
+const TAKES_EFFORT: &[&str] = &["claude-opus-4-5", "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-8"];
+
+fn family(name: &str, families: &[&str]) -> bool {
+    families.iter().any(|f| name.strip_prefix(f).is_some_and(|rest| rest.is_empty() || rest.starts_with('-')))
+}
+
+/// The `thinking` a call sends: only for a model that thinks anyway, so
+/// what it thinks shows. Turning thinking on for the others would change
+/// what they do, and the loop strips past thinking from the history.
+fn thinking(name: &str) -> Option<Value> {
+    family(name, THINKS_BY_DEFAULT).then(|| json!({"type": "adaptive", "display": "summarized"}))
+}
+
+fn takes_effort(name: &str) -> bool {
+    family(name, THINKS_BY_DEFAULT) || family(name, TAKES_EFFORT)
 }
 
 /// `ContextCacheConfig.cache_control()` for Anthropic: `ttl` only when
@@ -183,6 +215,12 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
         "system": system,
         "stream": true,
     });
+    if let Some(thinking) = thinking(name) {
+        body["thinking"] = thinking;
+    }
+    if let Some(effort) = req.effort.filter(|_| takes_effort(name)) {
+        body["output_config"] = json!({"effort": effort});
+    }
     if !req.tools.is_empty() {
         let tools: Vec<Value> = req
             .tools
@@ -422,11 +460,13 @@ struct Reply {
     blocks: Vec<Block>,
     usage: Option<Value>,
     stop_reason: Option<String>,
+    /// Why it declined, on a refusal.
+    stop_details: Option<Value>,
 }
 
 impl Reply {
     fn new(model: &str) -> Self {
-        Reply { id: None, model: model.to_string(), blocks: vec![], usage: None, stop_reason: None }
+        Reply { id: None, model: model.to_string(), blocks: vec![], usage: None, stop_reason: None, stop_details: None }
     }
 
     fn block(&mut self, index: &Value) -> Option<&mut Block> {
@@ -504,6 +544,9 @@ impl Reply {
                 if let Some(r) = event["delta"]["stop_reason"].as_str() {
                     self.stop_reason = Some(r.to_string());
                 }
+                if let Some(d) = event["delta"].get("stop_details").filter(|d| d.is_object()) {
+                    self.stop_details = Some(d.clone());
+                }
                 // Cumulative: the final counts, cache reads and writes too.
                 if let Some(u) = event["usage"].as_object() {
                     let mut merged = self.usage.take().and_then(|v| v.as_object().cloned()).unwrap_or_default();
@@ -566,6 +609,9 @@ impl Reply {
         m.usage = self.usage.as_ref().map(usage);
         m.model = Some(ModelRef { provider: Some("anthropic".into()), name: Some(self.model) });
         m.finish_reason = self.stop_reason.map(Value::String);
+        if let Some(details) = self.stop_details {
+            m.extras.insert("stop_details".into(), details);
+        }
         m
     }
 }
@@ -626,7 +672,46 @@ mod tests {
     fn max_tokens_follow_the_profiles() {
         assert_eq!(max_tokens("claude-sonnet-4-6"), 128_000);
         assert_eq!(max_tokens("claude-haiku-4-5-20251001"), 64_000);
-        assert_eq!(max_tokens("claude-opus-5-5"), 4096);
+        assert_eq!(max_tokens("claude-opus-5-5"), 128_000);
+        assert_eq!(max_tokens("claude-unknown-9"), 4096);
+    }
+
+    #[test]
+    fn thinking_and_effort_go_to_the_models_that_take_them() {
+        use crate::llm::shape::{Prompt, SystemBlock};
+        let p = Prompt {
+            system: vec![SystemBlock { text: "S".into(), breakpoint: false }],
+            messages: vec![Message::new(Role::User, Content::Text("hi".into()))],
+            history_breakpoint: None,
+            cached: false,
+        };
+        let body = |name: &str, effort| {
+            render(name, &Request { model: "", prompt: &p, tools: &[], blobs: &Default::default(), effort }).unwrap()
+        };
+        let current = body("claude-opus-5-5", Some("medium"));
+        assert_eq!(current["thinking"], json!({"type": "adaptive", "display": "summarized"}));
+        assert_eq!(current["output_config"], json!({"effort": "medium"}));
+        // Thinks only when asked: thinking stays off, effort goes.
+        let opus47 = body("claude-opus-4-7", Some("high"));
+        assert!(opus47.get("thinking").is_none());
+        assert_eq!(opus47["output_config"], json!({"effort": "high"}));
+        // Rejects effort; and no effort asked, none sent.
+        assert!(body("claude-haiku-4-5-20251001", Some("low")).get("output_config").is_none());
+        assert!(body("claude-sonnet-5-5", None).get("output_config").is_none());
+        // A family name is matched whole, not as a prefix of another.
+        assert!(body("claude-opus-50", None).get("thinking").is_none());
+    }
+
+    #[test]
+    fn a_refusal_keeps_its_details() {
+        let mut reply = Reply::new("claude-opus-5-5");
+        reply.absorb(
+            &json!({"type": "message_delta", "delta": {"stop_reason": "refusal",
+                    "stop_details": {"type": "refusal", "category": "cyber", "explanation": null}}}),
+            &mut |_| {},
+        );
+        let m = reply.finish();
+        assert_eq!(crate::llm::cut_short(&m).as_deref(), Some("the model declined to continue (cyber)"));
     }
 
     #[test]

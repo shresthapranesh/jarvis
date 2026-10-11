@@ -60,8 +60,9 @@ pub async fn complete(
                 transient: status == 429 || status >= 500 || code.contains("Throttl"),
                 status: Some(status),
                 message: format!("An error occurred ({code}) when calling the ConverseStream operation: {message}"),
+                ..Default::default()
             },
-            Err(_) => Error { transient: status >= 500, status: Some(status), message: format!("{status}") },
+            Err(_) => Error { transient: status >= 500, status: Some(status), message: format!("{status}"), ..Default::default() },
         });
     }
     let mut frames = Frames::new(resp);
@@ -86,6 +87,7 @@ pub async fn complete(
                     ),
                     status: None,
                     message: format!("Received AWS exception {kind}: {message}"),
+                    ..Default::default()
                 });
             }
             _ => {
@@ -150,7 +152,7 @@ impl Frames {
                 Some(Ok(chunk)) => self.buf.extend_from_slice(&chunk),
                 Some(Err(e)) => return Err(Error::connection(e)),
                 None if self.buf.is_empty() => return Ok(None),
-                None => return Err(Error { transient: true, status: None, message: "the event stream ended mid-frame".into() }),
+                None => return Err(Error { transient: true, message: "the event stream ended mid-frame".into(), ..Default::default() }),
             }
         }
     }

@@ -44,6 +44,34 @@ const CANCEL_POLL: Duration = Duration::from_secs(5);
 /// Turns running here at once.
 const MAX_RUNNING: usize = 8;
 
+/// The effort a run's model calls ask for, by the run's kind: unattended
+/// work (automations, board tasks, workflows) thinks harder than a chat or
+/// a worker. `JARVIS_EFFORT` sets one level for every run (`low`, `medium`,
+/// `high`, `xhigh` or `max`), or `default` to leave each model its own.
+/// Only the models that take an effort are sent one (`llm/anthropic.rs`).
+fn effort(kind: &str) -> Option<&'static str> {
+    static SET: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let set = SET.get_or_init(|| {
+        let v = std::env::var("JARVIS_EFFORT").ok()?.trim().to_lowercase();
+        match v.as_str() {
+            "" => None,
+            "low" | "medium" | "high" | "xhigh" | "max" | "default" => Some(v),
+            _ => {
+                tracing::warn!("JARVIS_EFFORT={v:?} isn't low, medium, high, xhigh, max or default — ignored");
+                None
+            }
+        }
+    });
+    match set.as_deref() {
+        Some("default") => None,
+        Some(level) => Some(level),
+        None => Some(match kind {
+            "automation" | "board_task" | "workflow" => "high",
+            _ => "medium",
+        }),
+    }
+}
+
 pub struct Agent {
     pool: SqlitePool,
     runs: Arc<Registry>,

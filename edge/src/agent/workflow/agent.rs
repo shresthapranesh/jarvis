@@ -96,6 +96,9 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             self.take_step()?;
             let reply = self.model_step(&history).await?;
             history.push(reply.clone());
+            if let Some(why) = llm::cut_short(&reply) {
+                return Err(why);
+            }
             if reply.tool_calls.is_empty() {
                 return Ok(reply);
             }
@@ -129,7 +132,13 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         let shaped = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(compact::per_call(history.to_vec())));
         let prompt = shape::build(&layout, shaped);
         let blobs = Default::default();
-        let req = Request { model: self.model, prompt: &prompt, tools: &self.bound.schemas, blobs: &blobs };
+        let req = Request {
+            model: self.model,
+            prompt: &prompt,
+            tools: &self.bound.schemas,
+            blobs: &blobs,
+            effort: crate::agent::effort("workflow"),
+        };
         let (env, node_id, text) = (self.env, self.node_id, &mut self.text);
         let mut on_delta = |d: Delta| {
             if let Delta::Text(t) = d {

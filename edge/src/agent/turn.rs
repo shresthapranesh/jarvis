@@ -237,6 +237,11 @@ impl<'a> Turn<'a> {
         loop {
             self.take_step()?;
             let reply = self.model_step(thread, &bound.schemas, &mcp).await?;
+            // What it said stays in the thread; calls it may have been cut
+            // off in the middle of don't run.
+            if let Some(why) = llm::cut_short(&reply) {
+                return Err(Stop::Failed(why));
+            }
             if reply.tool_calls.is_empty() {
                 return Ok(());
             }
@@ -330,7 +335,13 @@ impl<'a> Turn<'a> {
         };
         let shaped = shape::repair_orphan_tool_calls(shape::strip_historical_thinking(compaction.messages));
         let prompt = shape::build(&layout, shaped);
-        let req = Request { model: &self.model, prompt: &prompt, tools: bound, blobs: &thread.blobs };
+        let req = Request {
+            model: &self.model,
+            prompt: &prompt,
+            tools: bound,
+            blobs: &thread.blobs,
+            effort: super::effort(self.kind.name()),
+        };
 
         let events = &mut self.events;
         let text = &mut self.text;

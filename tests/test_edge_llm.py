@@ -477,6 +477,15 @@ def _intended_ollama(python: dict, edge: dict) -> None:
             m["content"] = m["content"][1:]
 
 
+def _intended_anthropic(python: dict, edge: dict) -> None:
+    if python["model"] == "claude-opus-5-5":
+        # LangChain's profiles didn't know the model and sent their 4096
+        # fallback, which cut its replies off; the edge sends its real limit.
+        python["max_tokens"] = 128_000
+        # It thinks by default, as empty blocks unless asked for a summary.
+        python["thinking"] = {"type": "adaptive", "display": "summarized"}
+
+
 def _intended_openai_chat(python: dict, edge: dict) -> None:
     for m in python["messages"]:
         if m["role"] == "assistant" and isinstance(m["content"], list):
@@ -498,7 +507,7 @@ def _intended_openai_responses(python: dict, edge: dict) -> None:
 
 MODELS = [
     "anthropic:claude-sonnet-4-6",
-    # Not in langchain-anthropic's profiles: its fallback max_tokens.
+    # Not in langchain-anthropic's profiles (`_intended_anthropic`).
     "anthropic:claude-opus-5-5",
     "google_genai:gemma-4-31b-it",
     "google_genai:gemini-3.1-flash-lite",
@@ -516,7 +525,7 @@ MODELS = [
     "bedrock:amazon.nova-pro-v1:0",
 ]
 INTENDED = {
-    "anthropic": lambda python, edge: None,
+    "anthropic": _intended_anthropic,
     "bedrock": lambda python, edge: None,
     "google_genai": _intended_gemini,
     "ollama": _intended_ollama,
