@@ -55,3 +55,25 @@ async def test_independent_calls_run_together(database: Path, work_dir: Path, ed
         spans[label] = (float(start), float(end))
     # Each slept 1.5s; run one after the other, the second would start after the first ended.
     assert spans["second"][0] < spans["first"][1] and spans["first"][0] < spans["second"][1], spans
+
+
+async def test_workers_run_on_the_worker_model(database: Path, work_dir: Path, edge_binary: Path):
+    """`workers.model` names a model in the catalog: the workers run on it,
+    the run itself on its own."""
+    haiku = "anthropic:claude-haiku-5-5"
+    fake = FakeAnthropic([("spawn_workers", {"tasks": [{"task": "Look it up", "role": "researcher"}]}),
+                          "Found it.", "Done."])
+    try:
+        insert(database, "config_settings", key="models.custom",
+               value=json.dumps([{"id": MODEL, "label": "Opus"}, {"id": haiku, "label": "Haiku"}]))
+        insert(database, "config_settings", key="workers.model", value=haiku)
+        env = _edge_env(work_dir, {**EDGE_ON, "ANTHROPIC_BASE_URL": fake.url, "ANTHROPIC_API_KEY": "test-key",
+                                   "OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}", "GOOGLE_API_KEY": ""})
+        async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env) as client:
+            task_id = await _start(client, query="Find it", model=MODEL)
+            job = await _finished(work_dir / "database.db", task_id, timeout=60)
+    finally:
+        fake.server.shutdown()
+    assert job["status"] == "done", job
+    assert [r["body"]["model"] for r in fake.requests] == ["claude-opus-5-5", "claude-haiku-5-5", "claude-opus-5-5"]
+    assert "You are a research worker." in json.dumps(fake.requests[1]["body"]["system"])

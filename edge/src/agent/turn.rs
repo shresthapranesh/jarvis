@@ -515,13 +515,14 @@ impl<'a> Turn<'a> {
     async fn spawn_workers(&mut self, tasks: Vec<workers::Task>, policy: &Policy, mcp: &crate::mcp::Snapshot) -> Result<String, Stop> {
         let (notes, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let chat = matches!(self.kind, Kind::Chat);
+        let model = workers::model_for(self.pool(), &self.model).await;
         let ctx = workers::Ctx {
             agent: self.agent,
             policy,
             mcp,
-            model: self.model.clone(),
+            cache: honors_cache_control(&model),
+            model,
             ends: Endpoints { compatible: crate::catalog::endpoints(self.pool()).await.unwrap_or_default(), ..Endpoints::from_env() },
-            cache: honors_cache_control(&self.model),
             conversation: self.conversation.clone(),
             project_id: self.project_id.clone(),
             message_id: chat.then(|| self.task_id.clone()),

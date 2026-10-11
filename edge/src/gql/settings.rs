@@ -42,6 +42,16 @@ const KNOWN: &[Spec] = &[
         restart_required: false,
     },
     Spec {
+        key: "workers.model",
+        label: "Worker model",
+        description: "Model the workers `spawn_workers` starts run on — a cheaper one suits their reading-heavy sub-tasks. Unset, or not in the catalog, they run on the run's own model.",
+        managed_by: "",
+        kind: "text",
+        choices: &[],
+        placeholder: "anthropic:claude-haiku-5-5",
+        restart_required: false,
+    },
+    Spec {
         key: "embedding.model",
         label: "Embedding model",
         description: "Gemini embedding model for vector memory, skills and episodes. Needs GOOGLE_API_KEY. Applied immediately; already-embedded content keeps its old vectors.",

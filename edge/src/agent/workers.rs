@@ -1,8 +1,9 @@
 //! `spawn_workers` — a port of `tools/workers.py` and the worker roles of
 //! `core/agents.py` (`_ROLE_PROMPTS`, `_ROLE_TOOLS`, `_make_role_factory`).
 //!
-//! Each task runs on a worker, all at once: the run's model, a role's prompt
-//! and tools, a history of its own in memory, a kernel of its own. What a
+//! Each task runs on a worker, all at once: the run's model (or the
+//! `workers.model` setting's), a role's prompt and tools, a history of its
+//! own in memory, a kernel of its own. What a
 //! worker does reaches the run as `Note`s — its `worker_*` events, which the
 //! turn writes and announces in order as `core/streaming.py` does, and its
 //! model and tool calls, which count against the run's budget and usage as
@@ -120,6 +121,22 @@ pub enum Note {
     Llm { input: Option<i64>, output: Option<i64>, perf: CallPerf },
     /// A tool call starting.
     Tool,
+}
+
+/// The model a run's workers use: `workers.model` when it names one in the
+/// catalog, else the run's own.
+pub async fn model_for(pool: &sqlx::SqlitePool, run_model: &str) -> String {
+    let set = crate::catalog::setting(pool, "workers.model").await.ok().flatten();
+    let Some(model) = set.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()) else {
+        return run_model.to_string();
+    };
+    match crate::catalog::is_valid_model(pool, &model).await {
+        Ok(true) => model,
+        _ => {
+            tracing::warn!("workers.model {model:?} is not in the catalog — workers run on {run_model}");
+            run_model.to_string()
+        }
+    }
 }
 
 /// What the workers share with the run that spawned them: its model and
