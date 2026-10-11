@@ -429,42 +429,46 @@ impl<'a> Turn<'a> {
                 other => other,
             });
         }
+        // The calls that touch nothing the turn holds start now, all at
+        // once; the rest run in order, each of these awaited in its place,
+        // so results are written in call order as before.
+        let mut beside: Vec<Option<Beside>> = ready.iter().map(|step| self.start_beside(step)).collect();
         let mut results = Vec::with_capacity(calls.len());
-        for (call, step) in calls.iter().zip(ready) {
+        for ((call, step), beside) in calls.iter().zip(ready).zip(beside.iter_mut()) {
             if self.cancelled() {
                 return Err(Stop::Cancelled);
             }
-            let (content, status, artifact) = match step {
-                Step::Refused(error) | Step::Denied(error) => (Content::Text(error), "error", None),
-                Step::Gated(_) => unreachable!("gates are answered first"),
-                Step::Run(Native::SpawnWorkers { tasks }) => {
-                    self.count_tool();
-                    (Content::Text(self.spawn_workers(tasks, policy, mcp).await?), "success", None)
-                }
-                Step::Run(Native::RunWorkflow { workflow_id, inputs_json }) => {
-                    self.count_tool();
-                    (Content::Text(self.run_workflow(&workflow_id, inputs_json.as_deref()).await?), "success", None)
-                }
-                Step::Run(Native::Mcp { server, tool, args }) => {
-                    self.count_tool();
-                    let run = self.run.clone();
-                    // No timeout: Python's bound MCP tools have none.
-                    let ran = tokio::select! {
-                        r = self.agent.mcp.call(&server, &tool, &args, None) => r,
-                        () = until_stopped(run) => return Err(Stop::Cancelled),
-                    };
-                    let r = ran.map_err(Stop::Failed)?;
-                    (mcp_content(&r.blocks), if r.is_error { "error" } else { "success" }, r.artifact)
-                }
-                Step::Run(native) => {
+            let (content, status, artifact) = match (step, beside.take()) {
+                (_, Some(mut task)) => {
                     self.count_tool();
                     let run = self.run.clone();
                     let ran = tokio::select! {
-                        r = self.run_native(thread, native) => r,
+                        r = &mut task.0 => r,
                         () = until_stopped(run) => return Err(Stop::Cancelled),
                     };
-                    (Content::Text(ran.map_err(Stop::Failed)?), "success", None)
+                    ran.map_err(|e| Stop::Failed(e.to_string()))?.map_err(Stop::Failed)?
                 }
+                (step, None) => match step {
+                    Step::Refused(error) | Step::Denied(error) => (Content::Text(error), "error", None),
+                    Step::Gated(_) => unreachable!("gates are answered first"),
+                    Step::Run(Native::SpawnWorkers { tasks }) => {
+                        self.count_tool();
+                        (Content::Text(self.spawn_workers(tasks, policy, mcp).await?), "success", None)
+                    }
+                    Step::Run(Native::RunWorkflow { workflow_id, inputs_json }) => {
+                        self.count_tool();
+                        (Content::Text(self.run_workflow(&workflow_id, inputs_json.as_deref()).await?), "success", None)
+                    }
+                    Step::Run(native) => {
+                        self.count_tool();
+                        let run = self.run.clone();
+                        let ran = tokio::select! {
+                            r = self.run_native(thread, native) => r,
+                            () = until_stopped(run) => return Err(Stop::Cancelled),
+                        };
+                        (Content::Text(ran.map_err(Stop::Failed)?), "success", None)
+                    }
+                },
             };
             let result = Message {
                 name: Some(call.name.clone()),
@@ -481,6 +485,29 @@ impl<'a> Turn<'a> {
         }
         self.events.step("tools", tools_step_data(&results)).await.map_err(Stop::Failed)?;
         Ok(())
+    }
+
+    /// A call that can run beside the rest of its batch, started: a bound
+    /// MCP tool (each call opens its own session; no timeout, as Python's
+    /// bound MCP tools had none) or `remember`. Anything else stays in
+    /// `step` to run in order.
+    fn start_beside(&self, step: &Step) -> Option<Beside> {
+        let task = match step {
+            Step::Run(Native::Mcp { server, tool, args }) => {
+                let (mcp, server, tool, args) = (self.agent.mcp.clone(), server.clone(), tool.clone(), args.clone());
+                tokio::spawn(async move {
+                    let r = mcp.call(&server, &tool, &args, None).await?;
+                    Ok((mcp_content(&r.blocks), if r.is_error { "error" } else { "success" }, r.artifact))
+                })
+            }
+            Step::Run(Native::Remember { text, kind }) => {
+                let (pool, http, ephemeral) = (self.agent.pool.clone(), self.agent.http.clone(), self.ephemeral);
+                let (text, kind) = (text.clone(), kind.clone());
+                tokio::spawn(async move { Ok((Content::Text(remember(&pool, &http, ephemeral, &text, &kind).await), "success", None)) })
+            }
+            _ => return None,
+        };
+        Some(Beside(task))
     }
 
     /// `spawn_workers`: the workers run while what they tell the run is
@@ -606,7 +633,6 @@ impl<'a> Turn<'a> {
                 thread.set_todos(self.pool(), merged).await?;
                 Ok(tools::todos_written(items.len()))
             }
-            Native::Remember { text, kind } => Ok(self.remember(&text, &kind).await),
             Native::WriteArtifact { title, content, file_path, artifact_id } => {
                 let cwd = crate::config::app_dir();
                 let scope = super::artifacts::Scope {
@@ -647,25 +673,8 @@ impl<'a> Turn<'a> {
                 }
                 Err(answer) => Ok(answer),
             },
-            Native::Mcp { .. } | Native::SpawnWorkers { .. } | Native::RunWorkflow { .. } => unreachable!("runs in tool_step"),
-        }
-    }
-
-    /// `remember`: a durable fact, merged into a near-duplicate. Its answer
-    /// is the model's, failures included.
-    async fn remember(&self, text: &str, kind: &str) -> String {
-        if text.trim().is_empty() {
-            return "Nothing to remember (empty text).".into();
-        }
-        if self.ephemeral {
-            return "Skipped: this is an incognito chat, nothing is saved to long-term memory.".into();
-        }
-        let kind = if kind == "core" || kind == "fact" { kind } else { "fact" };
-        match super::retrieve::upsert_memory(self.pool(), &self.agent.http, text, kind).await {
-            Ok(_) => format!("Remembered ({kind})."),
-            Err(e) => {
-                tracing::warn!("remember failed: {e}");
-                format!("Could not save memory: {e}")
+            Native::Mcp { .. } | Native::Remember { .. } | Native::SpawnWorkers { .. } | Native::RunWorkflow { .. } => {
+                unreachable!("runs in tool_step")
             }
         }
     }
@@ -897,6 +906,39 @@ impl<'a> Turn<'a> {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
+/// A call running beside its batch (`Turn::start_beside`): what it answers
+/// the model with, or why the run fails. Dropped — the run stopped or
+/// failed — it is aborted.
+struct Beside(tokio::task::JoinHandle<Result<Answered, String>>);
+
+/// A tool's answer: its content, `success` or `error`, and its artifact.
+type Answered = (Content, &'static str, Option<Value>);
+
+impl Drop for Beside {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// `remember`: a durable fact, merged into a near-duplicate. Its answer
+/// is the model's, failures included.
+async fn remember(pool: &SqlitePool, http: &reqwest::Client, ephemeral: bool, text: &str, kind: &str) -> String {
+    if text.trim().is_empty() {
+        return "Nothing to remember (empty text).".into();
+    }
+    if ephemeral {
+        return "Skipped: this is an incognito chat, nothing is saved to long-term memory.".into();
+    }
+    let kind = if kind == "core" || kind == "fact" { kind } else { "fact" };
+    match super::retrieve::upsert_memory(pool, http, text, kind).await {
+        Ok(_) => format!("Remembered ({kind})."),
+        Err(e) => {
+            tracing::warn!("remember failed: {e}");
+            format!("Could not save memory: {e}")
+        }
+    }
+}
 
 /// Resolves once the run is stopped — by a human, or by its budget.
 pub(super) async fn until_stopped(run: Arc<Run>) {

@@ -26,7 +26,7 @@ MODEL = "anthropic:claude-opus-5-5"
 class FakeAnthropic:
     """`/v1/messages`, streamed: the agent's request n is answered with
     `script[n]` — a thinking block signed `sig-n`, then a call
-    `(name, input)` or text — reporting `input_tokens[n]` (else 100). A summarizer's
+    `(name, input)`, a list of them, or text — reporting `input_tokens[n]` (else 100). A summarizer's
     request (compaction) is answered "Earlier work, summarized." and kept
     in `summaries`."""
 
@@ -60,14 +60,16 @@ class FakeAnthropic:
                     "input_transformations": []}})
                 self._event({"type": "content_block_start", "index": 0,
                              "content_block": {"type": "thinking", "thinking": f"step {n}", "signature": f"sig-{n}"}})
-                if isinstance(step, tuple):
-                    name, args = step
-                    block = {"type": "tool_use", "id": f"toolu_{n}", "name": name, "input": args}
+                if isinstance(step, (tuple, list)):
+                    calls = step if isinstance(step, list) else [step]
+                    blocks = [{"type": "tool_use", "id": f"toolu_{n}_{i}", "name": name, "input": args}
+                              for i, (name, args) in enumerate(calls)]
                     stop = "tool_use"
                 else:
-                    block = {"type": "text", "text": step}
+                    blocks = [{"type": "text", "text": step}]
                     stop = "end_turn"
-                self._event({"type": "content_block_start", "index": 1, "content_block": block})
+                for i, block in enumerate(blocks, start=1):
+                    self._event({"type": "content_block_start", "index": i, "content_block": block})
                 self._event({"type": "message_delta", "delta": {"stop_reason": stop}, "usage": {"output_tokens": 9}})
                 self._event({"type": "message_stop"})
 
@@ -123,6 +125,7 @@ async def test_each_request_starts_with_the_last(database: Path, work_dir: Path,
     # Claude's thinking went back with its call, signature and all.
     assert sent[1][1]["content"][0] == {"type": "thinking", "thinking": "step 0", "signature": "sig-0"}
     assert sent[2][3]["content"][0]["signature"] == "sig-1"
+    assert sent[1][1]["content"][1]["id"] == "toolu_0_0"
     # Each turn context where it was sent: the plan directive, then the
     # list as written, then with its first step done.
     contexts = [b["text"] for m in sent[-1] if m["role"] == "user" for b in m["content"]
