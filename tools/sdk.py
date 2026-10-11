@@ -421,11 +421,23 @@ def list_tasks(status: str | None = None) -> list[dict]:
 
 # ── Memory ────────────────────────────────────────────────────────────────────
 
-def search_memory(query: str, k: int = 5) -> list[dict]:
-    """Top-k long-term memory facts for `query` by cosine similarity."""
-    data = api("query($q: String!, $k: Int!) { searchMemory(query: $q, k: $k) { id text score } }",
-               {"q": query, "k": k})
+def search_memory(query: str, k: int = 5, include_archived: bool = False) -> list[dict]:
+    """Top-k long-term memory facts for `query` by cosine similarity.
+
+    Facts unused for months are archived out of your context;
+    `include_archived=True` searches them too (restore one with
+    restore_memory).
+    """
+    data = api("query($q: String!, $k: Int!, $a: Boolean!) {"
+               " searchMemory(query: $q, k: $k, includeArchived: $a) { id text score } }",
+               {"q": query, "k": k, "a": include_archived})
     return data["searchMemory"]
+
+
+def restore_memory(memory_id: str) -> dict:
+    """Bring back a memory archived for going unused, so it is recalled again."""
+    data = api("mutation($id: String!) { restoreMemory(id: $id) { id kind text } }", {"id": memory_id})
+    return data["restoreMemory"]
 
 
 def update_memory(memory_id: str, text: str, kind: str | None = None) -> dict:
@@ -1162,7 +1174,7 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     ),
     "memory": (
         "long-term facts and per-project shared memory",
-        [search_memory, update_memory, forget_memory, project_memory],
+        [search_memory, update_memory, forget_memory, restore_memory, project_memory],
     ),
     "mcp": (
         "external MCP tool servers loaded on demand",

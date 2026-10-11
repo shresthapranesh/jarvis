@@ -113,7 +113,7 @@ Every timer the Python server ran, ported:
 | board dispatch | every 15 s, and after a board write that readies a card | `dispatch_board_tasks` |
 | memory consolidation | every 30 min, first 2 min after start | the sweep (`src/consolidate/`), once the user has been quiet 15 min (or the oldest new message waited 6 h) |
 | project memory | every 30 min, first 2 min after start | the sweep (`src/consolidate/`), if due |
-| memory-activity prune | `0 4 * * *` | deletes old access-log rows |
+| memory housekeeping | once a day, checked every 30 min, first 2 min after start | archives unused facts (`src/consolidate/stale.rs`), then deletes access-log rows older than 90 days |
 
 - **Cron is APScheduler's, not a library's.** `cron.rs` ports
   `CronTrigger.from_crontab` (after `normalize_crontab`) with Python's

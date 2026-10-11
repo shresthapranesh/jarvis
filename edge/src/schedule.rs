@@ -6,12 +6,12 @@
 //! | board dispatch | every 15 s, and on request | `dispatch_board_tasks`, here |
 //! | memory consolidation | every 30 min, once the user has gone quiet | the sweep, here (`consolidate/`) |
 //! | project memory | every 30 min | the sweep, here (`consolidate/`) |
-//! | memory-activity prune | `0 4 * * *` | deletes old access-log rows, here |
+//! | memory housekeeping | once a day, checked every 30 min | archives unused facts (`consolidate/stale.rs`), then deletes old access-log rows, here |
 //!
 //! Firing follows APScheduler's rules for the jobs it replaces: times are
 //! `cron.rs`'s, a run that is late by more than the job's grace period is
 //! skipped, several missed runs coalesce into one, and nothing missed while
-//! the server was down is caught up on. The memory sweeps alone first check
+//! the server was down is caught up on. The memory jobs alone first check
 //! a couple of minutes after start: on a machine that isn't always up, a
 //! timer that only fires on the clock rarely gets to run.
 
@@ -85,7 +85,9 @@ enum Action {
     Dispatch,
     /// A memory sweep: `core/scheduler.py:MAINTENANCE_TASKS`.
     Maintenance(&'static str),
-    ActivityPrune,
+    /// Once a day (`kv_store` keeps the day it last ran): unused facts
+    /// archived, then the access log pruned. Was Python's `0 4 * * *` prune.
+    Housekeeping,
 }
 
 enum When {
@@ -185,13 +187,12 @@ impl Scheduler {
         fn dispatch_every() -> i64 {
             std::env::var("JARVIS_BOARD_DISPATCH_EVERY").ok().and_then(|v| v.trim().parse().ok()).filter(|&n| n > 0).unwrap_or(15)
         }
-        let cron = |expr: &str| When::Cron(Trigger::parse(expr, self.tz).expect("a valid built-in schedule"));
         let minutes = |m: i64| When::Every(chrono::Duration::minutes(m));
         vec![
             Entry::new(Action::Dispatch, When::Every(chrono::Duration::seconds(dispatch_every())), 30, self.tz, now),
             Entry::new(Action::Maintenance("memory_consolidation"), minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
             Entry::new(Action::Maintenance("project_memory"), minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
-            Entry::new(Action::ActivityPrune, cron("0 4 * * *"), 300, self.tz, now),
+            Entry::new(Action::Housekeeping, minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
         ]
     }
 
@@ -282,7 +283,7 @@ impl Scheduler {
             Action::Automation { id, schedule } => self.fire_automation(id, schedule).await,
             Action::Dispatch => self.dispatch().await.map(|_| ()),
             Action::Maintenance(task) => self.fire_maintenance(task).await,
-            Action::ActivityPrune => self.prune_activities().await,
+            Action::Housekeeping => self.housekeeping().await,
         };
         if let Err(e) = result {
             tracing::error!("{action:?} failed: {e}");
@@ -445,9 +446,36 @@ impl Scheduler {
         Ok(false)
     }
 
+    /// The day's housekeeping, unless it ran today already. Archiving reads
+    /// the access log, so it goes first.
+    async fn housekeeping(&self) -> sqlx::Result<()> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let last = self.kv_get("memory_housekeeping", "state").await?;
+        if last.as_ref().and_then(|v| v.get("day")).and_then(|d| d.as_str()) == Some(today.as_str()) {
+            return Ok(());
+        }
+        match crate::consolidate::stale::archive_stale(&self.pool).await {
+            Ok(summary) => tracing::info!("memory housekeeping: {summary}"),
+            Err(e) => tracing::error!("memory housekeeping: archiving failed: {e}"),
+        }
+        self.prune_activities().await?;
+        let now = now_stored();
+        sqlx::query(
+            "INSERT INTO kv_store (namespace, key, value, created_at, updated_at) VALUES ('memory_housekeeping', 'state', ?, ?, ?) \
+             ON CONFLICT (namespace, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        )
+        .bind(json!({"day": today}).to_string())
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// `prune_memory_activities(older_than_days=90)`.
     async fn prune_activities(&self) -> sqlx::Result<()> {
-        let cutoff = (Utc::now() - chrono::Duration::days(90)).format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+        let days = crate::consolidate::stale::LOG_DAYS;
+        let cutoff = (Utc::now() - chrono::Duration::days(days)).format("%Y-%m-%d %H:%M:%S%.6f").to_string();
         let pruned =
             sqlx::query("DELETE FROM memory_activities WHERE accessed_at < ?").bind(cutoff).execute(&self.pool).await?;
         if pruned.rows_affected() > 0 {

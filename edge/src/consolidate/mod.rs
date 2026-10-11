@@ -9,6 +9,7 @@
 //!   shared memory, merged into or rewritten (every 30 minutes, and
 //!   `consolidateProjectMemory`).
 //! - `dedupe` — `tools/text_dedupe.py`, the merge's "already said?".
+//! - `stale` — the edge's own: unused facts archived, once a day.
 //!
 //! Ports, all three, tested against Python's recorded sweeps in
 //! `tests/test_edge_loop.py`.
@@ -21,6 +22,7 @@
 pub mod dedupe;
 pub mod memory;
 pub mod project;
+pub mod stale;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
 use serde_json::Value;
@@ -32,6 +34,7 @@ pub async fn sweep(pool: &SqlitePool, http: &reqwest::Client, task: &str) -> Res
     match task {
         "memory_consolidation" => memory::consolidate(pool, http, None).await,
         "project_memory" => project::consolidate_all(pool, http).await,
+        "stale_memories" => stale::archive_stale(pool).await,
         other => Err(format!("unknown maintenance task {}", crate::pyjson::repr_str(other))),
     }
 }

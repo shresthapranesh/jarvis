@@ -261,9 +261,14 @@ fn existing_block(existing: &[(String, String, String)]) -> String {
     existing.iter().map(|(id, kind, text)| format!("- id={id} [{kind}] {text}")).collect::<Vec<_>>().join("\n")
 }
 
-/// `list_memories`: (id, kind, text), most recently updated first.
+/// `list_memories`: (id, kind, text), most recently updated first. Not the
+/// archived ones (`stale.rs`): a restated one comes back as an add, which
+/// `upsert_memory` matches to it.
 async fn list_memories(pool: &SqlitePool) -> Result<Vec<(String, String, String)>, String> {
-    sqlx::query_as("SELECT id, kind, text FROM memories ORDER BY updated_at DESC").fetch_all(pool).await.map_err(|e| e.to_string())
+    sqlx::query_as("SELECT id, kind, text FROM memories WHERE archived_at IS NULL ORDER BY updated_at DESC")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// `consolidate_memory`: one pass, unless one is running. The summary

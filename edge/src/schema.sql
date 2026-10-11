@@ -155,6 +155,8 @@ CREATE TABLE memories (
 	source VARCHAR, 
 	conversation_id VARCHAR, 
 	last_confirmed_at DATETIME, 
+	last_retrieved_at DATETIME, 
+	archived_at DATETIME, 
 	PRIMARY KEY (id)
 );
 

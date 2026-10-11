@@ -375,6 +375,11 @@ type MemoryItem {
 	"""
 	lastConfirmedAt: String
 	"""
+	When it was archived for going unused (`restoreMemory` brings it
+	back). None while it is live.
+	"""
+	archivedAt: String
+	"""
 	When this memory was last surfaced.
 	"""
 	lastUsedAt: String
@@ -570,6 +575,7 @@ type Mutation {
 	updateMemory(content: String!): Memory!
 	consolidateMemory(model: String): String!
 	deleteAgentMemory: Memory!
+	restoreMemory(id: String!): MemoryItem!
 	deleteMemory(id: String!): Boolean!
 	stopRunningTask(taskId: String!): StopRunningTaskPayload!
 	stopTask(taskId: String!): Boolean!
@@ -751,9 +757,10 @@ type Query {
 	"""
 	setting(key: String!): Setting!
 	"""
-	Discrete memory items (empty on keyless setups, which use the blob).
+	Discrete memory items (empty on keyless setups, which use the blob):
+	the live ones, or with `archived` those archived for going unused.
 	"""
-	memories(kind: String): [MemoryItem!]!
+	memories(kind: String, archived: Boolean! = false): [MemoryItem!]!
 	"""
 	Audit log for when a specific memory was surfaced.
 	"""
@@ -769,9 +776,10 @@ type Query {
 	"""
 	The `k` facts nearest `query` by cosine similarity, best first — the
 	`jarvis` SDK's `search_memory`. The query is embedded with the app's
-	embedder; facts embedded by another model are skipped.
+	embedder; facts embedded by another model are skipped. Archived facts
+	only with `includeArchived`.
 	"""
-	searchMemory(query: String!, k: Int! = 5): [MemoryHit!]!
+	searchMemory(query: String!, k: Int! = 5, includeArchived: Boolean! = false): [MemoryHit!]!
 	"""
 	All currently-tracked in-flight tasks, newest first.
 	"""

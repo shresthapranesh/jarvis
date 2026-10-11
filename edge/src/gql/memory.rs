@@ -31,6 +31,9 @@ pub struct MemoryItem {
     #[graphql(skip)]
     #[sqlx(rename = "last_confirmed_at")]
     pub confirmed: Option<DateTime>,
+    #[graphql(skip)]
+    #[sqlx(rename = "archived_at")]
+    pub archived: Option<DateTime>,
 }
 
 #[ComplexObject]
@@ -42,6 +45,12 @@ impl MemoryItem {
     /// When it was last stated — made, restated or corrected.
     async fn last_confirmed_at(&self) -> Option<String> {
         self.confirmed.as_ref().map(|at| at.0.clone())
+    }
+
+    /// When it was archived for going unused (`restoreMemory` brings it
+    /// back). None while it is live.
+    async fn archived_at(&self) -> Option<String> {
+        self.archived.as_ref().map(|at| at.0.clone())
     }
 
     /// When this memory was last surfaced.
@@ -107,7 +116,7 @@ impl MemoryActivity {
 impl MemoryItem {
     async fn by_id(pool: &SqlitePool, id: &str) -> Result<Option<Self>> {
         Ok(sqlx::query_as(
-            "SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at FROM memories WHERE id = ?",
+            "SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at, archived_at FROM memories WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(pool)
@@ -115,10 +124,12 @@ impl MemoryItem {
     }
 }
 
-async fn list_memories(pool: &SqlitePool, kind: Option<&str>) -> Result<Vec<MemoryItem>> {
-    let mut sql = String::from("SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at FROM memories");
+/// The live items, or with `archived` the archived ones.
+async fn list_memories(pool: &SqlitePool, kind: Option<&str>, archived: bool) -> Result<Vec<MemoryItem>> {
+    let mut sql = String::from("SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at, archived_at FROM memories");
+    sql.push_str(if archived { " WHERE archived_at IS NOT NULL" } else { " WHERE archived_at IS NULL" });
     if kind.is_some() {
-        sql.push_str(" WHERE kind = ?");
+        sql.push_str(" AND kind = ?");
     }
     sql.push_str(" ORDER BY updated_at DESC");
     let mut q = sqlx::query_as(&sql);
@@ -197,9 +208,15 @@ pub struct MemoryQuery;
 
 #[Object]
 impl MemoryQuery {
-    /// Discrete memory items (empty on keyless setups, which use the blob).
-    async fn memories(&self, ctx: &Context<'_>, kind: Option<String>) -> Result<Vec<MemoryItem>> {
-        list_memories(ctx.data()?, kind.as_deref()).await
+    /// Discrete memory items (empty on keyless setups, which use the blob):
+    /// the live ones, or with `archived` those archived for going unused.
+    async fn memories(
+        &self,
+        ctx: &Context<'_>,
+        kind: Option<String>,
+        #[graphql(default = false)] archived: bool,
+    ) -> Result<Vec<MemoryItem>> {
+        list_memories(ctx.data()?, kind.as_deref(), archived).await
     }
 
     /// Audit log for when a specific memory was surfaced.
@@ -237,17 +254,19 @@ impl MemoryQuery {
 
     /// Every memory, for the usage overview — same rows as `memories`.
     async fn memory_usage(&self, ctx: &Context<'_>) -> Result<Vec<MemoryItem>> {
-        list_memories(ctx.data()?, None).await
+        list_memories(ctx.data()?, None, false).await
     }
 
     /// The `k` facts nearest `query` by cosine similarity, best first — the
     /// `jarvis` SDK's `search_memory`. The query is embedded with the app's
-    /// embedder; facts embedded by another model are skipped.
+    /// embedder; facts embedded by another model are skipped. Archived facts
+    /// only with `includeArchived`.
     async fn search_memory(
         &self,
         ctx: &Context<'_>,
         query: String,
         #[graphql(default = 5)] k: i32,
+        #[graphql(default = false)] include_archived: bool,
     ) -> Result<Vec<MemoryHit>> {
         use crate::agent::embed::{Embedder, Space};
 
@@ -258,8 +277,10 @@ impl MemoryQuery {
             .await
             .map_err(|e| format!("embedding the query failed: {e}"))?;
         let rows: Vec<(String, String, Option<Vec<u8>>)> = sqlx::query_as(
-            "SELECT id, text, embedding FROM memories WHERE kind = 'fact' AND embedding IS NOT NULL ORDER BY rowid",
+            "SELECT id, text, embedding FROM memories WHERE kind = 'fact' AND embedding IS NOT NULL \
+             AND (? OR archived_at IS NULL) ORDER BY rowid",
         )
+        .bind(include_archived)
         .fetch_all(pool)
         .await?;
         let texts: std::collections::HashMap<&str, &str> = rows.iter().map(|(id, text, _)| (id.as_str(), text.as_str())).collect();
@@ -376,6 +397,19 @@ impl MemoryMutation {
             .await?;
         tx.commit().await?;
         Ok(Memory::absent())
+    }
+
+    // An archived item live again, confirmed now so the next housekeeping
+    // pass doesn't archive it straight back. A live one is left as it is.
+    async fn restore_memory(&self, ctx: &Context<'_>, id: String) -> Result<MemoryItem> {
+        let pool: &SqlitePool = ctx.data()?;
+        let now = now_stored();
+        sqlx::query("UPDATE memories SET archived_at = NULL, last_confirmed_at = ? WHERE id = ? AND archived_at IS NOT NULL")
+            .bind(&now)
+            .bind(&id)
+            .execute(pool)
+            .await?;
+        MemoryItem::by_id(pool, &id).await?.ok_or_else(|| "memory not found".into())
     }
 
     // False when there was nothing to delete. The item's access log is left

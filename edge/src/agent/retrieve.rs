@@ -125,25 +125,37 @@ pub(super) async fn lexical(pool: &SqlitePool, sql: &str, binds: &[&str]) -> Vec
 
 // ── memory ──────────────────────────────────────────────────────────────────
 
-/// `search_memory(query, k)`: the `fact` items that clear the cutoff, as
-/// `(id, text)`. May be fewer than `k`, or none. Logs the access, against
-/// `conversation_id` when it was for one.
+/// A memory as the prompt shows it: `confirmed` is its stored
+/// `last_confirmed_at`, none for items from before that was kept.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recalled {
+    pub id: String,
+    pub text: String,
+    pub confirmed: Option<String>,
+}
+
+/// `search_memory(query, k)`: the live (not archived) `fact` items that
+/// clear the cutoff. May be fewer than `k`, or none. Logs the access,
+/// against `conversation_id` when it was for one.
 pub async fn search_memory(
     pool: &SqlitePool,
     http: &reqwest::Client,
     query: &str,
     k: usize,
     conversation_id: Option<&str>,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<Vec<Recalled>, String> {
     if super::prompt::trivial(query) {
         return Ok(vec![]);
     }
     let embedder = Embedder::resolve(pool).await;
     let qvec = embedder.query(http, query, true).await;
-    let rows = sqlx::query("SELECT id, text, embedding FROM memories WHERE kind = 'fact' ORDER BY updated_at DESC")
-        .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    let rows = sqlx::query(
+        "SELECT id, text, embedding, last_confirmed_at FROM memories WHERE kind = 'fact' AND archived_at IS NULL \
+         ORDER BY updated_at DESC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     if rows.is_empty() {
         return Ok(vec![]);
     }
@@ -152,7 +164,7 @@ pub async fn search_memory(
             lexical(
                 pool,
                 "SELECT m.id FROM memories_fts f JOIN memories m ON m.rowid = f.rowid \
-                 WHERE memories_fts MATCH ? AND m.kind = ? ORDER BY bm25(memories_fts) LIMIT ?",
+                 WHERE memories_fts MATCH ? AND m.kind = ? AND m.archived_at IS NULL ORDER BY bm25(memories_fts) LIMIT ?",
                 &[&expr, "fact"],
             )
             .await
@@ -168,20 +180,31 @@ pub async fn search_memory(
         env_float("JARVIS_MEMORY_MIN_COSINE", 0.30),
         env_float("JARVIS_MEMORY_REL_DROP", 0.75),
     );
-    let texts: HashMap<String, String> = rows.iter().map(|r| (r.get("id"), r.get("text"))).collect();
+    let by_id: HashMap<String, Recalled> = rows
+        .iter()
+        .map(|r| {
+            let id: String = r.get("id");
+            (id.clone(), Recalled { id, text: r.get("text"), confirmed: r.get("last_confirmed_at") })
+        })
+        .collect();
     let scores: HashMap<&str, f64> = dense.iter().map(|(i, s)| (i.as_str(), *s)).collect();
-    let hits: Vec<(String, String)> = keep.into_iter().filter_map(|id| Some((texts.get(&id)?.clone(), id))).map(|(t, id)| (id, t)).collect();
-    let scored: Vec<(&str, f64)> = hits.iter().map(|(id, _)| (id.as_str(), scores.get(id.as_str()).copied().unwrap_or(0.0))).collect();
+    let hits: Vec<Recalled> = keep.into_iter().filter_map(|id| by_id.get(&id).cloned()).collect();
+    let scored: Vec<(&str, f64)> = hits.iter().map(|h| (h.id.as_str(), scores.get(h.id.as_str()).copied().unwrap_or(0.0))).collect();
     touch(pool, &scored, query, conversation_id).await;
     Ok(hits)
 }
 
-/// `touch_memories`: the access log, best-effort. The score is rounded as
+/// `touch_memories`: the access log, and each item's `last_retrieved_at`
+/// (which outlives the log), best-effort. The score is rounded as
 /// `search_memory` reports it. A thread that isn't a conversation (a
 /// workflow agent's) logs none.
 async fn touch(pool: &SqlitePool, hits: &[(&str, f64)], query: &str, conversation_id: Option<&str>) {
     let query: String = query.chars().take(500).collect();
+    let now = now_stored();
     for (id, score) in hits {
+        if let Err(e) = sqlx::query("UPDATE memories SET last_retrieved_at = ? WHERE id = ?").bind(&now).bind(id).execute(pool).await {
+            tracing::warn!("memory last_retrieved_at failed: {e}");
+        }
         let r = sqlx::query(
             "INSERT INTO memory_activities (id, memory_id, conversation_id, kind, score, query, source, accessed_at) \
              VALUES (?, ?, (SELECT id FROM conversations WHERE id = ?), 'fact', ?, ?, 'retrieval', ?)",
@@ -191,7 +214,7 @@ async fn touch(pool: &SqlitePool, hits: &[(&str, f64)], query: &str, conversatio
         .bind(conversation_id)
         .bind((score * 10_000.0).round() / 10_000.0)
         .bind(&query)
-        .bind(now_stored())
+        .bind(&now)
         .execute(pool)
         .await;
         if let Err(e) = r {
@@ -221,7 +244,8 @@ pub struct Origin<'a> {
 
 /// `upsert_memory`: embed `text` in document space, then replace a
 /// restatement of it of the same kind, or insert it. The id it landed on.
-/// A restatement keeps the item's origin and counts as confirming it.
+/// A restatement keeps the item's origin and counts as confirming it — and
+/// brings it back if it was archived for going unused.
 pub async fn upsert_memory(
     pool: &SqlitePool,
     http: &reqwest::Client,
@@ -232,7 +256,7 @@ pub async fn upsert_memory(
     let text = text.trim();
     let blob = embed::for_storage(pool, http, text).await?;
     let vec = embed::from_blob(&blob);
-    let rows = sqlx::query("SELECT id, embedding FROM memories WHERE kind = ? ORDER BY updated_at DESC")
+    let rows = sqlx::query("SELECT id, embedding, archived_at IS NOT NULL AS archived FROM memories WHERE kind = ? ORDER BY updated_at DESC")
         .bind(kind)
         .fetch_all(pool)
         .await
@@ -241,16 +265,20 @@ pub async fn upsert_memory(
     let now = now_stored();
     match cosine_ranking(&vec, &items).first() {
         Some((id, score)) if *score >= merge_cosine() => {
-            sqlx::query("UPDATE memories SET text = ?, embedding = ?, updated_at = ?, last_confirmed_at = ? WHERE id = ?")
-                .bind(text)
-                .bind(&blob)
-                .bind(&now)
-                .bind(&now)
-                .bind(id)
-                .execute(pool)
-                .await
-                .map_err(|e| e.to_string())?;
-            tracing::info!("memory: merged into {id} (cosine={score:.3})");
+            sqlx::query(
+                "UPDATE memories SET text = ?, embedding = ?, updated_at = ?, last_confirmed_at = ?, archived_at = NULL \
+                 WHERE id = ?",
+            )
+            .bind(text)
+            .bind(&blob)
+            .bind(&now)
+            .bind(&now)
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            let revived = rows.iter().any(|r| r.get::<String, _>("id") == *id && r.get::<bool, _>("archived"));
+            tracing::info!("memory: merged into {id} (cosine={score:.3}){}", if revived { ", unarchived" } else { "" });
             Ok(id.clone())
         }
         _ => {
@@ -380,21 +408,47 @@ pub async fn earlier_episodes(pool: &SqlitePool, http: &reqwest::Client, convers
     ))
 }
 
+/// A memory last confirmed longer ago than this shows when, so the agent
+/// takes it with care — and confirms or corrects it.
+const CONFIRMED_LONG_AGO_DAYS: i64 = 182;
+
 /// One memory as the prompt lists it: with its id, so the agent can
-/// correct or forget it (`jarvis.update_memory` / `forget_memory`).
-pub fn memory_line(id: &str, text: &str) -> String {
-    format!("- {text} (id: {id})")
+/// correct or forget it (`jarvis.update_memory` / `forget_memory`), and the
+/// month it was last confirmed, when that was long ago.
+pub fn memory_line(m: &Recalled) -> String {
+    match long_ago(m.confirmed.as_deref(), chrono::Utc::now().naive_utc()) {
+        Some(month) => format!("- {} (id: {}; last confirmed {month})", m.text, m.id),
+        None => format!("- {} (id: {})", m.text, m.id),
+    }
+}
+
+/// `confirmed`'s month, when it is more than `CONFIRMED_LONG_AGO_DAYS`
+/// before `now`. None for an unknown or unreadable stamp.
+fn long_ago(confirmed: Option<&str>, now: chrono::NaiveDateTime) -> Option<String> {
+    let at = chrono::NaiveDateTime::parse_from_str(confirmed?, "%Y-%m-%d %H:%M:%S%.f").ok()?;
+    ((now - at).num_days() > CONFIRMED_LONG_AGO_DAYS).then(|| at.format("%Y-%m").to_string())
 }
 
 /// What `search_memory` reports as text, for the prompt.
-pub fn relevant_memories(hits: &[(String, String)]) -> String {
-    let lines: Vec<String> = hits.iter().map(|(id, t)| memory_line(id, t)).collect();
+pub fn relevant_memories(hits: &[Recalled]) -> String {
+    let lines: Vec<String> = hits.iter().map(memory_line).collect();
     format!("## Relevant Memories\n\n{}", lines.join("\n"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_old_confirmation_shows_its_month() {
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 10, 11).unwrap().and_hms_opt(12, 0, 0).unwrap();
+        assert_eq!(long_ago(Some("2026-03-01 09:00:00.000000"), now).as_deref(), Some("2026-03"));
+        assert_eq!(long_ago(Some("2026-06-01 09:00:00.000000"), now), None);
+        assert_eq!(long_ago(None, now), None);
+        assert_eq!(long_ago(Some("garbage"), now), None);
+        let m = Recalled { id: "m1".into(), text: "Lunch is at noon".into(), confirmed: None };
+        assert_eq!(memory_line(&m), "- Lunch is at noon (id: m1)");
+    }
 
     #[test]
     fn match_expr_is_fts_match_expr() {

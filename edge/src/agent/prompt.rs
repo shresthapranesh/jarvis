@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use sqlx::SqlitePool;
 
+use super::retrieve::Recalled;
 use crate::llm::shape::Segment;
 
 /// The static system prompt: the agent's operating constraints, which is
@@ -132,11 +133,12 @@ const CORE_MAX_CHARS: usize = 2000;
 /// always has (Gemini with a key, else Ollama's).
 async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str, conversation_id: &str) -> Result<Vec<Segment>, Unbuilt> {
     let mut parts = vec![seg("memory_howto", MEMORY_HOWTO, true)];
-    let core: Vec<(String, String)> = db(sqlx::query_as(
-        "SELECT id, text FROM memories WHERE kind = 'core' ORDER BY updated_at DESC",
+    let core: Vec<(String, String, Option<String>)> = db(sqlx::query_as(
+        "SELECT id, text, last_confirmed_at FROM memories WHERE kind = 'core' AND archived_at IS NULL ORDER BY updated_at DESC",
     )
     .fetch_all(pool)
     .await)?;
+    let core: Vec<Recalled> = core.into_iter().map(|(id, text, confirmed)| Recalled { id, text, confirmed }).collect();
     let text = core_text(&core);
     if !text.is_empty() {
         parts.push(seg("core_memory", format!("## Agent Memory\n\n{text}"), true));
@@ -155,8 +157,8 @@ async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str, conversa
 }
 
 /// `load_core`: a line per `(id, text)`, capped, saying how many were left out.
-fn core_text(rows: &[(String, String)]) -> String {
-    let text = rows.iter().map(|(id, t)| super::retrieve::memory_line(id, t)).collect::<Vec<_>>().join("\n");
+fn core_text(rows: &[Recalled]) -> String {
+    let text = rows.iter().map(super::retrieve::memory_line).collect::<Vec<_>>().join("\n");
     if text.chars().count() <= CORE_MAX_CHARS {
         return text;
     }
@@ -467,11 +469,12 @@ mod tests {
 
     #[test]
     fn core_memory_is_capped_like_load_core() {
-        let rows: Vec<(String, String)> = (0..200).map(|i| (format!("m{i}"), format!("fact number {i} about the user"))).collect();
+        let item = |id: &str, text: &str| Recalled { id: id.into(), text: text.into(), confirmed: None };
+        let rows: Vec<Recalled> = (0..200).map(|i| item(&format!("m{i}"), &format!("fact number {i} about the user"))).collect();
         let text = core_text(&rows);
         assert!(text.chars().count() < 2200);
         assert!(text.ends_with("more core memories (use search_memory to find specific ones)"));
-        assert_eq!(core_text(&[("x".into(), "a".into()), ("y".into(), "b".into())]), "- a (id: x)\n- b (id: y)");
+        assert_eq!(core_text(&[item("x", "a"), item("y", "b")]), "- a (id: x)\n- b (id: y)");
     }
 
     #[test]

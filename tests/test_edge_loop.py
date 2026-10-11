@@ -1425,6 +1425,11 @@ async def test_memory_and_skill_writes_through_the_edge(twins):
         assert shape("edge", edge) == shape("python", python), variables
 
     add = "mutation($t: String!, $k: String!) { addMemory(text: $t, kind: $k) { id kind text updatedAt useCount } }"
+    # The edge's own: the fact restated below was archived for going unused,
+    # and restating it brings it back (`upsert_memory`).
+    with contextlib.closing(sqlite3.connect(twins.edge_db)) as c:
+        c.execute("UPDATE memories SET archived_at = '2026-01-01 00:00:00.000000' WHERE id = 'm0'")
+        c.commit()
     for text, kind in (("  Tea at noon  ", "fact"), ("The user's favourite colour is green!", "fact"),
                        ("Coffee after lunch", "weird"), ("Sam drinks coffee", "core"), ("   ", "fact")):
         await both(add, {"t": text, "k": kind})
@@ -1454,6 +1459,7 @@ async def test_memory_and_skill_writes_through_the_edge(twins):
     assert _rows(twins.edge_db, "SELECT embedding FROM skills WHERE name = 'deploy'") == [(fake_blob("How to deploy the edge"),)]
     # The near-duplicate replaced the fact it repeats.
     assert _rows(twins.edge_db, "SELECT text FROM memories WHERE id = 'm0'") == [("The user's favourite colour is green!",)]
+    assert _rows(twins.edge_db, "SELECT archived_at, last_confirmed_at IS NOT NULL FROM memories WHERE id = 'm0'") == [(None, 1)]
 
 
 async def test_a_board_task_is_decomposed_through_the_edge(twins):

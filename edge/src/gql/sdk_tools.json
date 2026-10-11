@@ -135,6 +135,11 @@
   "group": "memory"
  },
  {
+  "name": "restore_memory",
+  "description": "Bring back a memory archived for going unused, so it is recalled again.",
+  "group": "memory"
+ },
+ {
   "name": "project_memory",
   "description": "Read or update the shared memory of this conversation's project.",
   "group": "memory"

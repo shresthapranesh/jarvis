@@ -180,6 +180,21 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
         exec(tx, "ALTER TABLE memories ADD COLUMN last_confirmed_at DATETIME").await?;
         exec(tx, "UPDATE memories SET last_confirmed_at = updated_at").await?;
     }
+    // When it was last retrieved — the access log is pruned after 90 days,
+    // too short to tell a fact unused (`consolidate/stale.rs`) — and when it
+    // was archived for going unused.
+    if !mem.contains("last_retrieved_at") {
+        exec(tx, "ALTER TABLE memories ADD COLUMN last_retrieved_at DATETIME").await?;
+        exec(
+            tx,
+            "UPDATE memories SET last_retrieved_at = (SELECT MAX(a.accessed_at) FROM memory_activities a \
+             WHERE a.memory_id = memories.id AND a.source = 'retrieval')",
+        )
+        .await?;
+    }
+    if !mem.contains("archived_at") {
+        exec(tx, "ALTER TABLE memories ADD COLUMN archived_at DATETIME").await?;
+    }
     // The LangGraph store's import copied its values as BLOBs, which no
     // `kv_store` reader decodes as text.
     exec(tx, "UPDATE kv_store SET value = CAST(value AS TEXT) WHERE typeof(value) = 'blob'").await?;

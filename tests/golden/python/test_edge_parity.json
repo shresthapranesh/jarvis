@@ -441,7 +441,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -452,7 +454,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -1185,7 +1189,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -1196,7 +1202,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -1922,7 +1930,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -1933,7 +1943,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -2673,7 +2685,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -2684,7 +2698,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -3424,7 +3440,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -3435,7 +3453,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -4175,7 +4195,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -4186,7 +4208,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -4919,7 +4943,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -4930,7 +4956,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -5670,7 +5698,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -5681,7 +5711,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -6421,7 +6453,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -6432,7 +6466,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -7172,7 +7208,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -7183,7 +7221,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -7931,7 +7971,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -7942,7 +7984,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -8703,7 +8747,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -8714,7 +8760,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -9487,7 +9535,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -9498,7 +9548,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -10278,7 +10330,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -10289,7 +10343,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -11064,7 +11120,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -11075,7 +11133,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -11850,7 +11910,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -11861,7 +11923,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -12676,7 +12740,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -12687,7 +12753,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -13473,7 +13541,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -13484,7 +13554,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -14221,7 +14293,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -14232,7 +14306,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -14960,7 +15036,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -14971,7 +15049,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -15957,7 +16037,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -15968,7 +16050,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -16785,7 +16869,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -16796,7 +16882,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -17632,7 +17720,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -17643,7 +17733,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -18498,7 +18590,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -18509,7 +18603,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -19349,7 +19445,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -19360,7 +19458,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -20200,7 +20300,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -20211,7 +20313,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -21051,7 +21155,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -21062,7 +21168,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -21902,7 +22010,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -21913,7 +22023,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -22753,7 +22865,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -22764,7 +22878,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -23619,7 +23735,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -23630,7 +23748,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -24485,7 +24605,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -24496,7 +24618,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -25336,7 +25460,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -25347,7 +25473,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -26187,7 +26315,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -26198,7 +26328,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -27038,7 +27170,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -27049,7 +27183,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -27844,7 +27980,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -27855,7 +27993,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -28585,7 +28725,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -28596,7 +28738,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -29332,7 +29476,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -29343,7 +29489,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -30639,7 +30787,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -30650,7 +30800,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -31523,7 +31675,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -31534,7 +31688,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -32443,7 +32599,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -32454,7 +32612,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -33344,7 +33504,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -33355,7 +33517,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -34245,7 +34409,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -34256,7 +34422,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -35159,7 +35327,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -35170,7 +35340,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -36054,7 +36226,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -36065,7 +36239,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -36949,7 +37125,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -36960,7 +37138,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -37844,7 +38024,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -37855,7 +38037,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -38755,7 +38939,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -38766,7 +38952,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -39666,7 +39854,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -39677,7 +39867,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -40561,7 +40753,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -40572,7 +40766,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -41456,7 +41652,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -41467,7 +41665,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -42351,7 +42551,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -42362,7 +42564,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -43246,7 +43450,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -43257,7 +43463,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -44157,7 +44365,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -44168,7 +44378,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -45086,7 +45298,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -45097,7 +45311,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -45999,7 +46215,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -46010,7 +46228,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -46912,7 +47132,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -46923,7 +47145,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -47825,7 +48049,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -47836,7 +48062,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -48738,7 +48966,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -48749,7 +48979,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -49685,7 +49917,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -49696,7 +49930,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -50616,7 +50852,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -50627,7 +50865,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -51498,7 +51738,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -51509,7 +51751,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -52370,7 +52614,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -52381,7 +52627,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -53056,7 +53304,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -53067,7 +53317,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -53749,7 +54001,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -53760,7 +54014,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -54442,7 +54698,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -54453,7 +54711,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -55135,7 +55395,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -55146,7 +55408,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -55828,7 +56092,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -55839,7 +56105,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -56525,7 +56793,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -56536,7 +56806,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -57224,7 +57496,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -57235,7 +57509,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -57923,7 +58199,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -57934,7 +58212,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -58622,7 +58902,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -58633,7 +58915,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -59882,7 +60166,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -59893,7 +60179,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -60631,7 +60919,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -60642,7 +60932,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -61385,7 +61677,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -61396,7 +61690,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -62130,7 +62426,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -62141,7 +62439,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -62870,7 +63170,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -62881,7 +63183,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -63866,7 +64170,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -63877,7 +64183,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -64763,7 +65071,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -64774,7 +65084,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -65512,7 +65824,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -65523,7 +65837,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -66261,7 +66577,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -66272,7 +66590,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -67010,7 +67330,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -67021,7 +67343,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -67759,7 +68083,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -67770,7 +68096,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -68508,7 +68836,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -68519,7 +68849,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -69405,7 +69737,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -69416,7 +69750,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -70154,7 +70490,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -70165,7 +70503,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -70903,7 +71243,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -70914,7 +71256,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -71652,7 +71996,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -71663,7 +72009,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -72556,7 +72904,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -72567,7 +72917,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -73305,7 +73657,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -73316,7 +73670,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -74054,7 +74410,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -74065,7 +74423,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -74958,7 +75318,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -74969,7 +75331,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -75867,7 +76231,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -75878,7 +76244,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -76621,7 +76989,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -76632,7 +77002,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -77523,7 +77895,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -77534,7 +77908,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -78277,7 +78653,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -78288,7 +78666,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -79031,7 +79411,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -79042,7 +79424,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -79785,7 +80169,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -79796,7 +80182,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -80694,7 +81082,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -80705,7 +81095,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -81610,7 +82002,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -81621,7 +82015,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -82364,7 +82760,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -82375,7 +82773,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -83118,7 +83518,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -83129,7 +83531,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -83872,7 +84276,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -83883,7 +84289,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -84626,7 +85034,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -84637,7 +85047,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -85542,7 +85954,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -85553,7 +85967,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -86458,7 +86874,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -86469,7 +86887,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -87374,7 +87794,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -87385,7 +87807,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -88128,7 +88552,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -88139,7 +88565,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -88882,7 +89310,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -88893,7 +89323,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -89636,7 +90068,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -89647,7 +90081,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -90545,7 +90981,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -90556,7 +90994,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -91447,7 +91887,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -91458,7 +91900,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -92342,7 +92786,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -92353,7 +92799,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -93096,7 +93544,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -93107,7 +93557,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -93953,7 +94405,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -93964,7 +94418,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -94700,7 +95156,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -94711,7 +95169,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -95447,7 +95907,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -95458,7 +95920,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -96195,7 +96659,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -96206,7 +96672,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -96943,7 +97411,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -96954,7 +97424,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -97690,7 +98162,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -97701,7 +98175,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -98437,7 +98913,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -98448,7 +98926,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -99180,7 +99660,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -99191,7 +99673,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -99927,7 +100411,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -99938,7 +100424,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -100668,7 +101156,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -100679,7 +101169,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -101407,7 +101899,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -101418,7 +101912,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -102151,7 +102647,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -102162,7 +102660,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -102902,7 +103402,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -102913,7 +103415,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -103659,7 +104163,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -103670,7 +104176,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -104419,7 +104927,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -104430,7 +104940,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -105179,7 +105691,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -105190,7 +105704,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -105936,7 +106452,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -105947,7 +106465,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -106693,7 +107213,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -106704,7 +107226,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -107450,7 +107974,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -107461,7 +107987,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -108207,7 +108735,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -108218,7 +108748,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -108962,7 +109494,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -108973,7 +109507,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -109719,7 +110255,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -109730,7 +110268,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -110476,7 +111016,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -110487,7 +111029,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -111233,7 +111777,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -111244,7 +111790,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -111984,7 +112532,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -111995,7 +112545,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -112732,7 +113284,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -112743,7 +113297,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -113951,7 +114507,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -113962,7 +114520,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -114714,7 +115274,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -114725,7 +115287,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -115477,7 +116041,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -115488,7 +116054,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -116240,7 +116808,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -116251,7 +116821,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -117003,7 +117575,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -117014,7 +117588,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -118075,7 +118651,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -118086,7 +118664,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -119147,7 +119727,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -119158,7 +119740,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -120224,7 +120808,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -120235,7 +120821,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -121306,7 +121894,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -121317,7 +121907,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -122080,7 +122672,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -122091,7 +122685,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -122854,7 +123450,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -122865,7 +123463,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -123628,7 +124228,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -123639,7 +124241,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -124402,7 +125006,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -124413,7 +125019,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -125484,7 +126092,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -125495,7 +126105,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -126546,7 +127158,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -126557,7 +127171,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -127608,7 +128224,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -127619,7 +128237,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -128665,7 +129285,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -128676,7 +129298,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -129429,7 +130053,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -129440,7 +130066,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -130164,7 +130792,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -130175,7 +130805,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -130893,7 +131525,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -130904,7 +131538,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -131616,7 +132252,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -132328,7 +132966,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -133045,7 +133685,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -133762,7 +134404,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -134479,7 +135123,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -135197,7 +135843,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -135915,7 +136563,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -136272,7 +136922,7 @@
   }
  ],
  "test_the_schema_keeps_every_field_python_had": [
-  "type AgentTool {\n  id: ID!\n  key: String!\n  kind: String!\n  name: String!\n  description: String!\n  group: String!\n  enabled: Boolean!\n  requiresApproval: Boolean!\n  inPrompt: Boolean!\n  available: Boolean!\n  detail: String!\n}\n\ntype ApprovalRequestEvent {\n  tool: String!\n  reason: String!\n  args: String!\n  approvalId: String\n  deferred: Boolean!\n}\n\ntype ApprovalResolvedEvent {\n  tool: String!\n  approved: Boolean!\n  answer: String!\n}\n\ntype Artifact implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  title: String!\n  filename: String!\n  kind: String!\n  mimeType: String\n  conversationId: String\n  messageId: String\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  content: String!\n  versions: [ArtifactVersion!]!\n  versionCount: Int!\n}\n\ntype ArtifactEvent {\n  artifactId: String!\n  title: String!\n  action: String!\n  kind: String!\n  preview: String\n}\n\ntype ArtifactVersion {\n  id: String!\n  artifactId: String!\n  version: Int!\n  title: String!\n  filename: String!\n  createdAt: DateTime!\n  content: String!\n}\n\ntype Automation implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String\n  inputType: String!\n  promptText: String\n  model: String\n  codeText: String\n  webhookUrl: String\n  webhookMethod: String\n  webhookHeaders: String\n  webhookBody: String\n  schedule: String\n  enabled: Boolean!\n  stateful: Boolean!\n  conversationId: String\n  notifications: String\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  nextRunAt: String\n  lastRunStatus: String\n  lastRunAt: String\n  successCount7d: Int\n  totalCount7d: Int\n}\n\ntype AutomationDoneEvent {\n  output: String\n  runId: String!\n}\n\nunion AutomationEvent = TokenEvent | AutomationDoneEvent | AutomationStoppedEvent | ErrorEvent\n\ninput AutomationInput {\n  name: String!\n  inputType: String!\n  description: String = null\n  promptText: String = null\n  model: String = null\n  codeText: String = null\n  webhookUrl: String = null\n  webhookMethod: String = null\n  webhookHeaders: String = null\n  webhookBody: String = null\n  schedule: String = null\n  enabled: Boolean! = true\n  stateful: Boolean! = false\n  notifications: String = null\n}\n\ntype AutomationRun implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  automationId: String!\n  status: String!\n  triggeredBy: String!\n  output: String\n  error: String\n  startedAt: DateTime!\n  finishedAt: DateTime\n}\n\ntype AutomationStoppedEvent {\n  output: String\n  runId: String!\n}\n\ntype BoardTask implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  title: String!\n  body: String\n  status: String!\n  priority: Int!\n  createdBy: String!\n  model: String\n  skill: String\n  blockedReason: String\n  blockedKind: String\n  failureCount: Int!\n  summary: String\n  resultMetadata: String\n  conversationId: String!\n  runId: String\n  parentIds: [String!]!\n  childIds: [String!]!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  startedAt: DateTime\n  finishedAt: DateTime\n}\n\ninput BoardTaskInput {\n  title: String!\n  body: String = null\n  priority: Int! = 0\n  model: String = null\n  skill: String = null\n  parentIds: [ID!] = null\n  start: Boolean! = true\n}\n\ninput BoardTaskUpdateInput {\n  title: String = null\n  body: String = null\n  priority: Int = null\n  model: String = null\n  skill: String = null\n  parentIds: [ID!] = null\n}\n\ntype BrowserStepEvent {\n  url: String!\n  phase: String!\n  source: String!\n}\n\ntype BudgetExceededEvent {\n  reason: String!\n  snapshot: String!\n}\n\ntype BudgetUpdateEvent {\n  inputTokens: Int!\n  outputTokens: Int!\n  totalTokens: Int!\n  llmCalls: Int!\n  toolCalls: Int!\n  snapshot: String!\n}\n\nunion ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent\n\ntype Conversation implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  title: String\n  model: String!\n  surface: String!\n  pinned: Boolean!\n  ephemeral: Boolean!\n  projectId: String\n  createdAt: DateTime!\n  project: Project\n  messageCount: Int!\n  messages(last: Int! = 10, before: String = null): MessageConnection!\n}\n\n\"\"\"Date with time (isoformat)\"\"\"\nscalar DateTime\n\ntype DiscoveredModel {\n  id: String!\n  label: String!\n  provider: String!\n  contextWindow: Int\n  description: String\n  likelyChat: Boolean!\n}\n\ninput DiscoveredModelInput {\n  id: String!\n  label: String!\n  provider: String = null\n  contextWindow: Int = null\n}\n\ntype DoneEvent {\n  message: String!\n  conversationId: String!\n}\n\ntype ErrorEvent {\n  error: String!\n}\n\n\"\"\"\nThe `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).\n\"\"\"\nscalar JSON @specifiedBy(url: \"https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf\")\n\ntype McpServer {\n  name: String!\n  config: String!\n  transport: String!\n  command: String\n  url: String\n  toolCount: Int!\n  enabled: Boolean!\n  loadMode: String!\n  tools: [String!]!\n}\n\ntype McpTool {\n  name: String!\n  server: String!\n  description: String!\n  inputSchema: String!\n}\n\ntype McpToolResult {\n  content: String!\n  isError: Boolean!\n}\n\ntype Memory {\n  content: String!\n  exists: Boolean!\n  modifiedAt: String\n}\n\ntype MemoryActivity {\n  id: String!\n  memoryId: String!\n  conversationId: String\n  kind: String!\n  score: Float\n  query: String\n  source: String!\n  accessedAt: String!\n}\n\ntype MemoryItem {\n  id: String!\n  kind: String!\n  text: String!\n  updatedAt: String!\n  lastUsedAt: String\n  useCount: Int!\n  activities(limit: Int! = 20): [MemoryActivity!]!\n}\n\ntype Message implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  role: String!\n  content: String!\n  model: String\n  status: String!\n  inputTokens: Int\n  outputTokens: Int\n  ttftMs: Float\n  llmMs: Float\n  prefillTps: Float\n  evalTps: Float\n  durationMs: Float\n  createdAt: DateTime!\n  steps: [Step!]!\n}\n\ntype MessageConnection {\n  edges: [MessageEdge!]!\n  pageInfo: PageInfo!\n}\n\ntype MessageEdge {\n  node: Message!\n  cursor: String!\n}\n\ntype ModelCatalog {\n  default: String!\n  available: [ModelSpec!]!\n  providers: [String!]!\n  discoverableProviders: [String!]!\n  endpoints: [ModelEndpoint!]!\n}\n\ntype ModelEndpoint {\n  name: String!\n  baseUrl: String!\n  hasKey: Boolean!\n}\n\ntype ModelSpec {\n  id: String!\n  label: String!\n  provider: String!\n  builtin: Boolean!\n  contextWindow: Int\n}\n\ntype ModelSyncReport {\n  provider: String!\n  offered: Int!\n  skipped: String\n  probed: Boolean!\n  missing: [String!]!\n  unreachable: [UnreachableModel!]!\n  windows: [WindowFinding!]!\n  newModels: [DiscoveredModel!]!\n  clean: Boolean!\n}\n\ntype Mutation {\n  updateMemory(content: String!): Memory!\n  deleteAgentMemory: Memory!\n  consolidateMemory(model: String = null): String!\n  addMemory(text: String!, kind: String! = \"fact\"): MemoryItem!\n  updateMemoryItem(id: String!, text: String!, kind: String = null): MemoryItem!\n  deleteMemory(id: String!): Boolean!\n  startTask(input: StartTaskInput!): StartTaskPayload!\n  stopTask(taskId: String!): Boolean!\n  queueMessage(taskId: String!, query: String!): QueueMessagePayload!\n  unqueueMessage(taskId: String!, messageId: String!): Boolean!\n  updateConversation(id: ID!, title: String = null, model: String = null, pinned: Boolean = null): Conversation!\n  deleteConversation(id: ID!): Boolean!\n  discardConversation(id: ID!): Boolean!\n  updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!\n  restoreArtifactVersion(id: ID!, version: Int!): Artifact!\n  deleteArtifact(id: ID!): Boolean!\n  createAutomation(input: AutomationInput!): Automation!\n  updateAutomation(id: ID!, input: AutomationInput!): Automation!\n  deleteAutomation(id: ID!): Boolean!\n  triggerAutomation(id: ID!): String!\n  stopAutomationRun(runId: String!): Boolean!\n  createBoardTask(input: BoardTaskInput!): BoardTask!\n  updateBoardTask(id: ID!, input: BoardTaskUpdateInput!): BoardTask!\n  setBoardTaskStatus(id: ID!, status: String!): BoardTask!\n  decomposeBoardTask(id: ID!): [BoardTask!]!\n  answerBoardTask(id: ID!, answer: String!): BoardTask!\n  deleteBoardTask(id: ID!): Boolean!\n  stopBoardTask(id: ID!): Boolean!\n  createWorkflow(input: WorkflowCreateInput!): Workflow!\n  updateWorkflow(id: ID!, input: WorkflowUpdateInput!): Workflow!\n  deleteWorkflow(id: ID!): Boolean!\n  runWorkflow(id: ID!, inputs: JSON = null): String!\n  stopWorkflowRun(runId: String!): Boolean!\n  resumeWorkflowRun(runId: String!, answer: String!): Boolean!\n  resolveWorkflowApproval(runId: String!, approved: Boolean!, answer: String = null): Boolean!\n  createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!\n  updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!\n  deleteNotificationChannel(id: ID!): Boolean!\n  createProject(input: ProjectCreateInput!): Project!\n  updateProject(id: ID!, input: ProjectUpdateInput!): Project!\n  consolidateProjectMemory(id: ID!, model: String = null): String!\n  deleteProject(id: ID!): Boolean!\n  setConversationProject(conversationId: ID!, projectId: ID = null): Conversation!\n  createSkill(input: SkillCreateInput!): Skill!\n  updateSkill(id: ID!, input: SkillUpdateInput!): Skill!\n  deleteSkill(id: ID!): Boolean!\n  stopRunningTask(taskId: String!): StopRunningTaskPayload!\n  addMcpServer(name: String!, configJson: String!): McpServer!\n  updateMcpServer(name: String!, configJson: String!): McpServer!\n  removeMcpServer(name: String!): Boolean!\n  reloadMcpServers: [McpServer!]!\n  setMcpServerLoadMode(name: String!, mode: String!): McpServer!\n  setMcpDefaultLoadMode(mode: String!): String!\n  callMcpTool(server: String!, tool: String!, argsJson: String! = \"{}\", timeoutSeconds: Float! = 120): McpToolResult!\n  addModel(id: String!, label: String!, provider: String = null): ModelCatalog!\n  updateModel(id: String!, label: String!, provider: String = null): ModelCatalog!\n  addDiscoveredModels(models: [DiscoveredModelInput!]!): ModelCatalog!\n  removeModel(id: String!): ModelCatalog!\n  setDefaultModel(id: String!): ModelCatalog!\n  addEndpoint(name: String!, baseUrl: String!, apiKey: String = null): ModelCatalog!\n  updateEndpoint(name: String!, baseUrl: String!, apiKey: String = null, clearKey: Boolean! = false): ModelCatalog!\n  removeEndpoint(name: String!): ModelCatalog!\n  resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!\n  setToolPolicy(key: String!, enabled: Boolean = null, requiresApproval: Boolean = null): [AgentTool!]!\n  requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = \"{}\", conversationId: String = null): ToolApprovalRequest!\n  browserActivity(url: String!, phase: String! = \"start\", conversationId: String = null): Boolean!\n  setSetting(key: String!, value: String!, allowManaged: Boolean! = false): SettingWriteResult!\n  deleteSetting(key: String!, allowManaged: Boolean! = false): SettingWriteResult!\n}\n\n\"\"\"An object with a Globally Unique ID\"\"\"\ninterface Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n}\n\ntype NotificationChannel implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  type: String!\n  target: String!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n}\n\ninput NotificationChannelCreateInput {\n  name: String!\n  type: String!\n  target: String!\n}\n\ninput NotificationChannelUpdateInput {\n  name: String = null\n  type: String = null\n  target: String = null\n}\n\n\"\"\"Information to aid in pagination.\"\"\"\ntype PageInfo {\n  \"\"\"When paginating forwards, are there more items?\"\"\"\n  hasNextPage: Boolean!\n\n  \"\"\"When paginating backwards, are there more items?\"\"\"\n  hasPreviousPage: Boolean!\n\n  \"\"\"When paginating backwards, the cursor to continue.\"\"\"\n  startCursor: String\n\n  \"\"\"When paginating forwards, the cursor to continue.\"\"\"\n  endCursor: String\n}\n\ntype PendingApproval {\n  id: String!\n  source: String!\n  kind: String!\n  question: String!\n  label: String!\n  tool: String\n  argsJson: String\n  requestedAt: DateTime!\n  deferred: Boolean!\n  parentId: String\n  boardTaskId: String\n}\n\ntype PerfUpdateEvent {\n  ttftMs: Float\n  llmMs: Float\n  prefillTps: Float\n  evalTps: Float\n  llmCalls: Int!\n  snapshot: String!\n}\n\ntype Project implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String\n  instructions: String!\n  memory: String!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  conversationCount: Int!\n  conversations: [Conversation!]!\n}\n\ninput ProjectCreateInput {\n  name: String!\n  description: String = null\n  instructions: String! = \"\"\n}\n\ninput ProjectUpdateInput {\n  name: String = null\n  description: String = null\n  instructions: String = null\n  memory: String = null\n}\n\ntype Query {\n  models: ModelCatalog!\n  modelSync(provider: String = null, probe: Boolean! = false): [ModelSyncReport!]!\n  agentMemory: Memory!\n  memories(kind: String = null): [MemoryItem!]!\n  memoryActivities(memoryId: String!, limit: Int! = 50): [MemoryActivity!]!\n  memoryUsage: [MemoryItem!]!\n  node(\n    \"\"\"The ID of the object.\"\"\"\n    id: ID!\n  ): Node!\n  conversations(surface: String = \"web\"): [Conversation!]!\n  conversation(id: ID!): Conversation\n  todos(conversationId: String!): [TodoItem!]!\n  artifacts(conversationId: String = null): [Artifact!]!\n  artifact(id: ID!): Artifact\n  artifactVersions(artifactId: String!): [ArtifactVersion!]!\n  automations: [Automation!]!\n  automation(id: ID!): Automation\n  automationRuns(automationId: ID!): [AutomationRun!]!\n  boardTasks(includeArchived: Boolean! = false): [BoardTask!]!\n  boardTask(id: ID!): BoardTask\n  workflows: [Workflow!]!\n  workflow(id: ID!): Workflow\n  workflowRuns(workflowId: ID!): [WorkflowRun!]!\n  workflowRun(id: ID!): WorkflowRun\n  notificationChannels: [NotificationChannel!]!\n  projects: [Project!]!\n  project(id: ID!): Project\n  skills: [Skill!]!\n  runningTasks: [RunningTask!]!\n  mcpServers: [McpServer!]!\n  mcpTools(server: String = null): [McpTool!]!\n  pendingApprovals: [PendingApproval!]!\n  tools: [AgentTool!]!\n  browserAvailable: Boolean!\n  settings: [Setting!]!\n  setting(key: String!): Setting!\n}\n\ntype QueueMessagePayload {\n  messageId: String!\n  position: Int!\n}\n\ntype QueuedConsumedEvent {\n  messageIds: [String!]!\n}\n\ntype QueuedMessageEvent {\n  messageId: String!\n  text: String!\n  position: Int!\n}\n\ntype QueuedWithdrawnEvent {\n  messageId: String!\n}\n\ntype ResolveApprovalPayload {\n  id: String!\n  status: String!\n  result: String\n}\n\ntype RunningTask {\n  id: String!\n  kind: String!\n  label: String!\n  parentId: String\n  startedAt: DateTime!\n  hasInterrupt: Boolean!\n  cancelled: Boolean!\n  done: Boolean!\n  inputTokens: Int!\n  outputTokens: Int!\n  totalTokens: Int!\n  llmCalls: Int!\n  toolCalls: Int!\n  budgetExceeded: Boolean!\n  budgetReason: String\n}\n\ntype Setting {\n  id: ID!\n  key: String!\n  value: String!\n  updatedAt: DateTime\n  isSet: Boolean!\n  label: String!\n  description: String!\n  managedBy: String!\n  kind: String!\n  choices: [String!]!\n  placeholder: String!\n  restartRequired: Boolean!\n  known: Boolean!\n}\n\ntype SettingWriteResult {\n  setting: Setting!\n  settings: [Setting!]!\n  note: String!\n}\n\ntype Skill implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String!\n  body: String!\n  enabled: Boolean!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n}\n\ninput SkillCreateInput {\n  name: String!\n  description: String!\n  body: String!\n  enabled: Boolean! = true\n}\n\ninput SkillUpdateInput {\n  name: String = null\n  description: String = null\n  body: String = null\n  enabled: Boolean = null\n}\n\ninput StartTaskInput {\n  query: String!\n  model: String = null\n  conversationId: String = null\n  projectId: String = null\n  ephemeral: Boolean! = false\n}\n\ntype StartTaskPayload {\n  taskId: String!\n  conversationId: String!\n  queued: Boolean!\n  queuedMessageId: String\n}\n\ntype Step {\n  id: String!\n  node: String!\n  source: String!\n  subagent: String\n  data: String\n  seq: Int!\n  createdAt: DateTime!\n}\n\ntype StepEvent {\n  node: String!\n  source: String!\n  subagent: String\n  data: String!\n}\n\ntype StopRunningTaskPayload {\n  ok: Boolean!\n  taskId: String!\n  kind: String!\n}\n\ntype StoppedEvent {\n  message: String!\n  conversationId: String!\n}\n\ntype Subscription {\n  taskEvents(taskId: String!): ChatEvent!\n  automationRunEvents(runId: String!): AutomationEvent!\n  boardTaskEvents(runId: String!): AutomationEvent!\n  workflowRunEvents(runId: String!): WorkflowEvent!\n}\n\ntype ThinkingTokenEvent {\n  text: String!\n  source: String!\n}\n\ntype TodoItem {\n  text: String!\n  status: String!\n}\n\ntype TodosUpdatedEvent {\n  todos: [TodoItem!]!\n  source: String!\n}\n\ntype TokenEvent {\n  text: String!\n  source: String!\n}\n\ntype ToolApprovalRequest {\n  id: String!\n  status: String!\n}\n\ntype UnreachableModel {\n  id: String!\n  reason: String!\n}\n\ntype WindowFinding {\n  id: String!\n  label: String!\n  provider: String!\n  catalogWindow: Int\n  providerWindow: Int!\n  builtin: Boolean!\n}\n\ntype WorkerDoneEvent {\n  idx: Int!\n  role: String!\n  task: String!\n  status: String!\n  result: String!\n}\n\ntype WorkerStartEvent {\n  idx: Int!\n  role: String!\n  task: String!\n}\n\ntype WorkerStepEvent {\n  idx: Int!\n  role: String!\n  node: String!\n  data: String!\n}\n\ntype WorkerTokenEvent {\n  idx: Int!\n  text: String!\n}\n\ntype Workflow implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String\n  definition: String!\n  notifications: String\n  createdAt: DateTime!\n  updatedAt: DateTime!\n}\n\ntype WorkflowApprovalRequestEvent {\n  tool: String!\n  reason: String!\n  args: String!\n  nodeId: String!\n}\n\ntype WorkflowApprovalResolvedEvent {\n  tool: String!\n  approved: Boolean!\n  answer: String!\n  nodeId: String!\n}\n\ntype WorkflowBudgetExceededEvent {\n  reason: String!\n  snapshot: String\n}\n\ntype WorkflowBudgetUpdateEvent {\n  inputTokens: Int!\n  outputTokens: Int!\n  totalTokens: Int!\n  llmCalls: Int!\n  toolCalls: Int!\n  snapshot: String\n}\n\ninput WorkflowCreateInput {\n  name: String!\n  description: String = null\n  definition: String! = \"{}\"\n  notifications: String = null\n}\n\ntype WorkflowDoneEvent {\n  outputs: JSON!\n  runId: String!\n}\n\ntype WorkflowErrorEvent {\n  error: String!\n  runId: String!\n}\n\nunion WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowApprovalRequestEvent | WorkflowApprovalResolvedEvent | WorkflowInterruptEvent | WorkflowInterruptResolvedEvent | WorkflowBudgetExceededEvent | WorkflowBudgetUpdateEvent | WorkflowNodeRetryEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent\n\ntype WorkflowInterruptEvent {\n  interruptId: String!\n  question: String!\n}\n\ntype WorkflowInterruptResolvedEvent {\n  interruptId: String!\n}\n\ntype WorkflowMapItemDoneEvent {\n  nodeId: String!\n  index: Int!\n  result: JSON!\n}\n\ntype WorkflowMapStartEvent {\n  nodeId: String!\n  total: Int!\n}\n\ntype WorkflowNodeConditionEvent {\n  nodeId: String!\n  verdict: String!\n}\n\ntype WorkflowNodeDoneEvent {\n  nodeId: String!\n  output: JSON!\n}\n\ntype WorkflowNodeErrorEvent {\n  nodeId: String!\n  error: String!\n}\n\ntype WorkflowNodeRetryEvent {\n  nodeId: String!\n  attempt: Int!\n  maxRetries: Int!\n  error: String!\n}\n\ntype WorkflowNodeStartEvent {\n  nodeId: String!\n  nodeType: String!\n  label: String!\n}\n\ntype WorkflowNodeTokenEvent {\n  nodeId: String!\n  text: String!\n}\n\ntype WorkflowRun implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  workflowId: String!\n  status: String!\n  inputs: String\n  outputs: String\n  nodeResults: String\n  error: String\n  startedAt: DateTime!\n  finishedAt: DateTime\n}\n\ntype WorkflowStoppedEvent {\n  runId: String!\n}\n\ntype WorkflowToolEvent {\n  parentRunId: String!\n  childEvent: String!\n  data: String!\n}\n\ninput WorkflowUpdateInput {\n  name: String = null\n  description: String = null\n  definition: String = null\n  notifications: String = null\n}"
+  "type AgentTool {\n  id: ID!\n  key: String!\n  kind: String!\n  name: String!\n  description: String!\n  group: String!\n  enabled: Boolean!\n  requiresApproval: Boolean!\n  inPrompt: Boolean!\n  available: Boolean!\n  detail: String!\n}\n\ntype ApprovalRequestEvent {\n  tool: String!\n  reason: String!\n  args: String!\n  approvalId: String\n  deferred: Boolean!\n}\n\ntype ApprovalResolvedEvent {\n  tool: String!\n  approved: Boolean!\n  answer: String!\n}\n\ntype Artifact implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  title: String!\n  filename: String!\n  kind: String!\n  mimeType: String\n  conversationId: String\n  messageId: String\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  content: String!\n  versions: [ArtifactVersion!]!\n  versionCount: Int!\n}\n\ntype ArtifactEvent {\n  artifactId: String!\n  title: String!\n  action: String!\n  kind: String!\n  preview: String\n}\n\ntype ArtifactVersion {\n  id: String!\n  artifactId: String!\n  version: Int!\n  title: String!\n  filename: String!\n  createdAt: DateTime!\n  content: String!\n}\n\ntype Automation implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String\n  inputType: String!\n  promptText: String\n  model: String\n  codeText: String\n  webhookUrl: String\n  webhookMethod: String\n  webhookHeaders: String\n  webhookBody: String\n  schedule: String\n  enabled: Boolean!\n  stateful: Boolean!\n  conversationId: String\n  notifications: String\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  nextRunAt: String\n  lastRunStatus: String\n  lastRunAt: String\n  successCount7d: Int\n  totalCount7d: Int\n}\n\ntype AutomationDoneEvent {\n  output: String\n  runId: String!\n}\n\nunion AutomationEvent = TokenEvent | AutomationDoneEvent | AutomationStoppedEvent | ErrorEvent\n\ninput AutomationInput {\n  name: String!\n  inputType: String!\n  description: String = null\n  promptText: String = null\n  model: String = null\n  codeText: String = null\n  webhookUrl: String = null\n  webhookMethod: String = null\n  webhookHeaders: String = null\n  webhookBody: String = null\n  schedule: String = null\n  enabled: Boolean! = true\n  stateful: Boolean! = false\n  notifications: String = null\n}\n\ntype AutomationRun implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  automationId: String!\n  status: String!\n  triggeredBy: String!\n  output: String\n  error: String\n  startedAt: DateTime!\n  finishedAt: DateTime\n}\n\ntype AutomationStoppedEvent {\n  output: String\n  runId: String!\n}\n\ntype BoardTask implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  title: String!\n  body: String\n  status: String!\n  priority: Int!\n  createdBy: String!\n  model: String\n  skill: String\n  blockedReason: String\n  blockedKind: String\n  failureCount: Int!\n  summary: String\n  resultMetadata: String\n  conversationId: String!\n  runId: String\n  parentIds: [String!]!\n  childIds: [String!]!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  startedAt: DateTime\n  finishedAt: DateTime\n}\n\ninput BoardTaskInput {\n  title: String!\n  body: String = null\n  priority: Int! = 0\n  model: String = null\n  skill: String = null\n  parentIds: [ID!] = null\n  start: Boolean! = true\n}\n\ninput BoardTaskUpdateInput {\n  title: String = null\n  body: String = null\n  priority: Int = null\n  model: String = null\n  skill: String = null\n  parentIds: [ID!] = null\n}\n\ntype BrowserStepEvent {\n  url: String!\n  phase: String!\n  source: String!\n}\n\ntype BudgetExceededEvent {\n  reason: String!\n  snapshot: String!\n}\n\ntype BudgetUpdateEvent {\n  inputTokens: Int!\n  outputTokens: Int!\n  totalTokens: Int!\n  llmCalls: Int!\n  toolCalls: Int!\n  snapshot: String!\n}\n\nunion ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent\n\ntype Conversation implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  title: String\n  model: String!\n  surface: String!\n  pinned: Boolean!\n  ephemeral: Boolean!\n  projectId: String\n  createdAt: DateTime!\n  project: Project\n  messageCount: Int!\n  messages(last: Int! = 10, before: String = null): MessageConnection!\n}\n\n\"\"\"Date with time (isoformat)\"\"\"\nscalar DateTime\n\ntype DiscoveredModel {\n  id: String!\n  label: String!\n  provider: String!\n  contextWindow: Int\n  description: String\n  likelyChat: Boolean!\n}\n\ninput DiscoveredModelInput {\n  id: String!\n  label: String!\n  provider: String = null\n  contextWindow: Int = null\n}\n\ntype DoneEvent {\n  message: String!\n  conversationId: String!\n}\n\ntype ErrorEvent {\n  error: String!\n}\n\n\"\"\"\nThe `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).\n\"\"\"\nscalar JSON @specifiedBy(url: \"https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf\")\n\ntype McpServer {\n  name: String!\n  config: String!\n  transport: String!\n  command: String\n  url: String\n  toolCount: Int!\n  enabled: Boolean!\n  loadMode: String!\n  tools: [String!]!\n}\n\ntype McpTool {\n  name: String!\n  server: String!\n  description: String!\n  inputSchema: String!\n}\n\ntype McpToolResult {\n  content: String!\n  isError: Boolean!\n}\n\ntype Memory {\n  content: String!\n  exists: Boolean!\n  modifiedAt: String\n}\n\ntype MemoryActivity {\n  id: String!\n  memoryId: String!\n  conversationId: String\n  kind: String!\n  score: Float\n  query: String\n  source: String!\n  accessedAt: String!\n}\n\ntype MemoryItem {\n  id: String!\n  kind: String!\n  text: String!\n  updatedAt: String!\n  lastUsedAt: String\n  useCount: Int!\n  activities(limit: Int! = 20): [MemoryActivity!]!\n}\n\ntype Message implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  role: String!\n  content: String!\n  model: String\n  status: String!\n  inputTokens: Int\n  outputTokens: Int\n  ttftMs: Float\n  llmMs: Float\n  prefillTps: Float\n  evalTps: Float\n  durationMs: Float\n  createdAt: DateTime!\n  steps: [Step!]!\n}\n\ntype MessageConnection {\n  edges: [MessageEdge!]!\n  pageInfo: PageInfo!\n}\n\ntype MessageEdge {\n  node: Message!\n  cursor: String!\n}\n\ntype ModelCatalog {\n  default: String!\n  available: [ModelSpec!]!\n  providers: [String!]!\n  discoverableProviders: [String!]!\n  endpoints: [ModelEndpoint!]!\n}\n\ntype ModelEndpoint {\n  name: String!\n  baseUrl: String!\n  hasKey: Boolean!\n}\n\ntype ModelSpec {\n  id: String!\n  label: String!\n  provider: String!\n  builtin: Boolean!\n  contextWindow: Int\n}\n\ntype ModelSyncReport {\n  provider: String!\n  offered: Int!\n  skipped: String\n  probed: Boolean!\n  missing: [String!]!\n  unreachable: [UnreachableModel!]!\n  windows: [WindowFinding!]!\n  newModels: [DiscoveredModel!]!\n  clean: Boolean!\n}\n\ntype Mutation {\n  updateMemory(content: String!): Memory!\n  deleteAgentMemory: Memory!\n  consolidateMemory(model: String = null): String!\n  addMemory(text: String!, kind: String! = \"fact\"): MemoryItem!\n  updateMemoryItem(id: String!, text: String!, kind: String = null): MemoryItem!\n  deleteMemory(id: String!): Boolean!\n  startTask(input: StartTaskInput!): StartTaskPayload!\n  stopTask(taskId: String!): Boolean!\n  queueMessage(taskId: String!, query: String!): QueueMessagePayload!\n  unqueueMessage(taskId: String!, messageId: String!): Boolean!\n  updateConversation(id: ID!, title: String = null, model: String = null, pinned: Boolean = null): Conversation!\n  deleteConversation(id: ID!): Boolean!\n  discardConversation(id: ID!): Boolean!\n  updateArtifact(id: ID!, title: String = null, content: String = null): Artifact!\n  restoreArtifactVersion(id: ID!, version: Int!): Artifact!\n  deleteArtifact(id: ID!): Boolean!\n  createAutomation(input: AutomationInput!): Automation!\n  updateAutomation(id: ID!, input: AutomationInput!): Automation!\n  deleteAutomation(id: ID!): Boolean!\n  triggerAutomation(id: ID!): String!\n  stopAutomationRun(runId: String!): Boolean!\n  createBoardTask(input: BoardTaskInput!): BoardTask!\n  updateBoardTask(id: ID!, input: BoardTaskUpdateInput!): BoardTask!\n  setBoardTaskStatus(id: ID!, status: String!): BoardTask!\n  decomposeBoardTask(id: ID!): [BoardTask!]!\n  answerBoardTask(id: ID!, answer: String!): BoardTask!\n  deleteBoardTask(id: ID!): Boolean!\n  stopBoardTask(id: ID!): Boolean!\n  createWorkflow(input: WorkflowCreateInput!): Workflow!\n  updateWorkflow(id: ID!, input: WorkflowUpdateInput!): Workflow!\n  deleteWorkflow(id: ID!): Boolean!\n  runWorkflow(id: ID!, inputs: JSON = null): String!\n  stopWorkflowRun(runId: String!): Boolean!\n  resumeWorkflowRun(runId: String!, answer: String!): Boolean!\n  resolveWorkflowApproval(runId: String!, approved: Boolean!, answer: String = null): Boolean!\n  createNotificationChannel(input: NotificationChannelCreateInput!): NotificationChannel!\n  updateNotificationChannel(id: ID!, input: NotificationChannelUpdateInput!): NotificationChannel!\n  deleteNotificationChannel(id: ID!): Boolean!\n  createProject(input: ProjectCreateInput!): Project!\n  updateProject(id: ID!, input: ProjectUpdateInput!): Project!\n  consolidateProjectMemory(id: ID!, model: String = null): String!\n  deleteProject(id: ID!): Boolean!\n  setConversationProject(conversationId: ID!, projectId: ID = null): Conversation!\n  createSkill(input: SkillCreateInput!): Skill!\n  updateSkill(id: ID!, input: SkillUpdateInput!): Skill!\n  deleteSkill(id: ID!): Boolean!\n  stopRunningTask(taskId: String!): StopRunningTaskPayload!\n  addMcpServer(name: String!, configJson: String!): McpServer!\n  updateMcpServer(name: String!, configJson: String!): McpServer!\n  removeMcpServer(name: String!): Boolean!\n  reloadMcpServers: [McpServer!]!\n  setMcpServerLoadMode(name: String!, mode: String!): McpServer!\n  setMcpDefaultLoadMode(mode: String!): String!\n  callMcpTool(server: String!, tool: String!, argsJson: String! = \"{}\", timeoutSeconds: Float! = 120): McpToolResult!\n  addModel(id: String!, label: String!, provider: String = null): ModelCatalog!\n  updateModel(id: String!, label: String!, provider: String = null): ModelCatalog!\n  addDiscoveredModels(models: [DiscoveredModelInput!]!): ModelCatalog!\n  removeModel(id: String!): ModelCatalog!\n  setDefaultModel(id: String!): ModelCatalog!\n  addEndpoint(name: String!, baseUrl: String!, apiKey: String = null): ModelCatalog!\n  updateEndpoint(name: String!, baseUrl: String!, apiKey: String = null, clearKey: Boolean! = false): ModelCatalog!\n  removeEndpoint(name: String!): ModelCatalog!\n  resolveApproval(id: String!, answer: String!): ResolveApprovalPayload!\n  setToolPolicy(key: String!, enabled: Boolean = null, requiresApproval: Boolean = null): [AgentTool!]!\n  requestToolApproval(toolKey: String!, tool: String!, argsJson: String! = \"{}\", conversationId: String = null): ToolApprovalRequest!\n  browserActivity(url: String!, phase: String! = \"start\", conversationId: String = null): Boolean!\n  setSetting(key: String!, value: String!, allowManaged: Boolean! = false): SettingWriteResult!\n  deleteSetting(key: String!, allowManaged: Boolean! = false): SettingWriteResult!\n}\n\n\"\"\"An object with a Globally Unique ID\"\"\"\ninterface Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n}\n\ntype NotificationChannel implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  type: String!\n  target: String!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n}\n\ninput NotificationChannelCreateInput {\n  name: String!\n  type: String!\n  target: String!\n}\n\ninput NotificationChannelUpdateInput {\n  name: String = null\n  type: String = null\n  target: String = null\n}\n\n\"\"\"Information to aid in pagination.\"\"\"\ntype PageInfo {\n  \"\"\"When paginating forwards, are there more items?\"\"\"\n  hasNextPage: Boolean!\n\n  \"\"\"When paginating backwards, are there more items?\"\"\"\n  hasPreviousPage: Boolean!\n\n  \"\"\"When paginating backwards, the cursor to continue.\"\"\"\n  startCursor: String\n\n  \"\"\"When paginating forwards, the cursor to continue.\"\"\"\n  endCursor: String\n}\n\ntype PendingApproval {\n  id: String!\n  source: String!\n  kind: String!\n  question: String!\n  label: String!\n  tool: String\n  argsJson: String\n  requestedAt: DateTime!\n  deferred: Boolean!\n  parentId: String\n  boardTaskId: String\n}\n\ntype PerfUpdateEvent {\n  ttftMs: Float\n  llmMs: Float\n  prefillTps: Float\n  evalTps: Float\n  llmCalls: Int!\n  snapshot: String!\n}\n\ntype Project implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String\n  instructions: String!\n  memory: String!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n  conversationCount: Int!\n  conversations: [Conversation!]!\n}\n\ninput ProjectCreateInput {\n  name: String!\n  description: String = null\n  instructions: String! = \"\"\n}\n\ninput ProjectUpdateInput {\n  name: String = null\n  description: String = null\n  instructions: String = null\n  memory: String = null\n}\n\ntype Query {\n  models: ModelCatalog!\n  modelSync(provider: String = null, probe: Boolean! = false): [ModelSyncReport!]!\n  agentMemory: Memory!\n  memories(kind: String = null, archived: Boolean! = false): [MemoryItem!]!\n  memoryActivities(memoryId: String!, limit: Int! = 50): [MemoryActivity!]!\n  memoryUsage: [MemoryItem!]!\n  node(\n    \"\"\"The ID of the object.\"\"\"\n    id: ID!\n  ): Node!\n  conversations(surface: String = \"web\"): [Conversation!]!\n  conversation(id: ID!): Conversation\n  todos(conversationId: String!): [TodoItem!]!\n  artifacts(conversationId: String = null): [Artifact!]!\n  artifact(id: ID!): Artifact\n  artifactVersions(artifactId: String!): [ArtifactVersion!]!\n  automations: [Automation!]!\n  automation(id: ID!): Automation\n  automationRuns(automationId: ID!): [AutomationRun!]!\n  boardTasks(includeArchived: Boolean! = false): [BoardTask!]!\n  boardTask(id: ID!): BoardTask\n  workflows: [Workflow!]!\n  workflow(id: ID!): Workflow\n  workflowRuns(workflowId: ID!): [WorkflowRun!]!\n  workflowRun(id: ID!): WorkflowRun\n  notificationChannels: [NotificationChannel!]!\n  projects: [Project!]!\n  project(id: ID!): Project\n  skills: [Skill!]!\n  runningTasks: [RunningTask!]!\n  mcpServers: [McpServer!]!\n  mcpTools(server: String = null): [McpTool!]!\n  pendingApprovals: [PendingApproval!]!\n  tools: [AgentTool!]!\n  browserAvailable: Boolean!\n  settings: [Setting!]!\n  setting(key: String!): Setting!\n}\n\ntype QueueMessagePayload {\n  messageId: String!\n  position: Int!\n}\n\ntype QueuedConsumedEvent {\n  messageIds: [String!]!\n}\n\ntype QueuedMessageEvent {\n  messageId: String!\n  text: String!\n  position: Int!\n}\n\ntype QueuedWithdrawnEvent {\n  messageId: String!\n}\n\ntype ResolveApprovalPayload {\n  id: String!\n  status: String!\n  result: String\n}\n\ntype RunningTask {\n  id: String!\n  kind: String!\n  label: String!\n  parentId: String\n  startedAt: DateTime!\n  hasInterrupt: Boolean!\n  cancelled: Boolean!\n  done: Boolean!\n  inputTokens: Int!\n  outputTokens: Int!\n  totalTokens: Int!\n  llmCalls: Int!\n  toolCalls: Int!\n  budgetExceeded: Boolean!\n  budgetReason: String\n}\n\ntype Setting {\n  id: ID!\n  key: String!\n  value: String!\n  updatedAt: DateTime\n  isSet: Boolean!\n  label: String!\n  description: String!\n  managedBy: String!\n  kind: String!\n  choices: [String!]!\n  placeholder: String!\n  restartRequired: Boolean!\n  known: Boolean!\n}\n\ntype SettingWriteResult {\n  setting: Setting!\n  settings: [Setting!]!\n  note: String!\n}\n\ntype Skill implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String!\n  body: String!\n  enabled: Boolean!\n  createdAt: DateTime!\n  updatedAt: DateTime!\n}\n\ninput SkillCreateInput {\n  name: String!\n  description: String!\n  body: String!\n  enabled: Boolean! = true\n}\n\ninput SkillUpdateInput {\n  name: String = null\n  description: String = null\n  body: String = null\n  enabled: Boolean = null\n}\n\ninput StartTaskInput {\n  query: String!\n  model: String = null\n  conversationId: String = null\n  projectId: String = null\n  ephemeral: Boolean! = false\n}\n\ntype StartTaskPayload {\n  taskId: String!\n  conversationId: String!\n  queued: Boolean!\n  queuedMessageId: String\n}\n\ntype Step {\n  id: String!\n  node: String!\n  source: String!\n  subagent: String\n  data: String\n  seq: Int!\n  createdAt: DateTime!\n}\n\ntype StepEvent {\n  node: String!\n  source: String!\n  subagent: String\n  data: String!\n}\n\ntype StopRunningTaskPayload {\n  ok: Boolean!\n  taskId: String!\n  kind: String!\n}\n\ntype StoppedEvent {\n  message: String!\n  conversationId: String!\n}\n\ntype Subscription {\n  taskEvents(taskId: String!): ChatEvent!\n  automationRunEvents(runId: String!): AutomationEvent!\n  boardTaskEvents(runId: String!): AutomationEvent!\n  workflowRunEvents(runId: String!): WorkflowEvent!\n}\n\ntype ThinkingTokenEvent {\n  text: String!\n  source: String!\n}\n\ntype TodoItem {\n  text: String!\n  status: String!\n}\n\ntype TodosUpdatedEvent {\n  todos: [TodoItem!]!\n  source: String!\n}\n\ntype TokenEvent {\n  text: String!\n  source: String!\n}\n\ntype ToolApprovalRequest {\n  id: String!\n  status: String!\n}\n\ntype UnreachableModel {\n  id: String!\n  reason: String!\n}\n\ntype WindowFinding {\n  id: String!\n  label: String!\n  provider: String!\n  catalogWindow: Int\n  providerWindow: Int!\n  builtin: Boolean!\n}\n\ntype WorkerDoneEvent {\n  idx: Int!\n  role: String!\n  task: String!\n  status: String!\n  result: String!\n}\n\ntype WorkerStartEvent {\n  idx: Int!\n  role: String!\n  task: String!\n}\n\ntype WorkerStepEvent {\n  idx: Int!\n  role: String!\n  node: String!\n  data: String!\n}\n\ntype WorkerTokenEvent {\n  idx: Int!\n  text: String!\n}\n\ntype Workflow implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  name: String!\n  description: String\n  definition: String!\n  notifications: String\n  createdAt: DateTime!\n  updatedAt: DateTime!\n}\n\ntype WorkflowApprovalRequestEvent {\n  tool: String!\n  reason: String!\n  args: String!\n  nodeId: String!\n}\n\ntype WorkflowApprovalResolvedEvent {\n  tool: String!\n  approved: Boolean!\n  answer: String!\n  nodeId: String!\n}\n\ntype WorkflowBudgetExceededEvent {\n  reason: String!\n  snapshot: String\n}\n\ntype WorkflowBudgetUpdateEvent {\n  inputTokens: Int!\n  outputTokens: Int!\n  totalTokens: Int!\n  llmCalls: Int!\n  toolCalls: Int!\n  snapshot: String\n}\n\ninput WorkflowCreateInput {\n  name: String!\n  description: String = null\n  definition: String! = \"{}\"\n  notifications: String = null\n}\n\ntype WorkflowDoneEvent {\n  outputs: JSON!\n  runId: String!\n}\n\ntype WorkflowErrorEvent {\n  error: String!\n  runId: String!\n}\n\nunion WorkflowEvent = WorkflowNodeStartEvent | WorkflowNodeTokenEvent | WorkflowNodeConditionEvent | WorkflowNodeDoneEvent | WorkflowNodeErrorEvent | WorkflowMapStartEvent | WorkflowMapItemDoneEvent | WorkflowApprovalRequestEvent | WorkflowApprovalResolvedEvent | WorkflowInterruptEvent | WorkflowInterruptResolvedEvent | WorkflowBudgetExceededEvent | WorkflowBudgetUpdateEvent | WorkflowNodeRetryEvent | WorkflowDoneEvent | WorkflowErrorEvent | WorkflowStoppedEvent\n\ntype WorkflowInterruptEvent {\n  interruptId: String!\n  question: String!\n}\n\ntype WorkflowInterruptResolvedEvent {\n  interruptId: String!\n}\n\ntype WorkflowMapItemDoneEvent {\n  nodeId: String!\n  index: Int!\n  result: JSON!\n}\n\ntype WorkflowMapStartEvent {\n  nodeId: String!\n  total: Int!\n}\n\ntype WorkflowNodeConditionEvent {\n  nodeId: String!\n  verdict: String!\n}\n\ntype WorkflowNodeDoneEvent {\n  nodeId: String!\n  output: JSON!\n}\n\ntype WorkflowNodeErrorEvent {\n  nodeId: String!\n  error: String!\n}\n\ntype WorkflowNodeRetryEvent {\n  nodeId: String!\n  attempt: Int!\n  maxRetries: Int!\n  error: String!\n}\n\ntype WorkflowNodeStartEvent {\n  nodeId: String!\n  nodeType: String!\n  label: String!\n}\n\ntype WorkflowNodeTokenEvent {\n  nodeId: String!\n  text: String!\n}\n\ntype WorkflowRun implements Node {\n  \"\"\"The Globally Unique ID of this object\"\"\"\n  id: ID!\n  workflowId: String!\n  status: String!\n  inputs: String\n  outputs: String\n  nodeResults: String\n  error: String\n  startedAt: DateTime!\n  finishedAt: DateTime\n}\n\ntype WorkflowStoppedEvent {\n  runId: String!\n}\n\ntype WorkflowToolEvent {\n  parentRunId: String!\n  childEvent: String!\n  data: String!\n}\n\ninput WorkflowUpdateInput {\n  name: String = null\n  description: String = null\n  definition: String = null\n  notifications: String = null\n}"
  ],
  "test_tool_inventory_and_policy": [
   {
@@ -136746,6 +137396,19 @@
         "key": "sdk:forget_memory",
         "kind": "sdk",
         "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Bring back a memory archived for going unused, so it is recalled again.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:restore_memory",
+        "inPrompt": false,
+        "key": "sdk:restore_memory",
+        "kind": "sdk",
+        "name": "jarvis.restore_memory",
         "requiresApproval": false
        },
        {
@@ -137251,7 +137914,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -137262,7 +137927,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -138018,6 +138685,19 @@
         "key": "sdk:forget_memory",
         "kind": "sdk",
         "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Bring back a memory archived for going unused, so it is recalled again.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:restore_memory",
+        "inPrompt": false,
+        "key": "sdk:restore_memory",
+        "kind": "sdk",
+        "name": "jarvis.restore_memory",
         "requiresApproval": false
        },
        {
@@ -138523,7 +139203,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -138534,7 +139216,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -139290,6 +139974,19 @@
         "key": "sdk:forget_memory",
         "kind": "sdk",
         "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Bring back a memory archived for going unused, so it is recalled again.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:restore_memory",
+        "inPrompt": false,
+        "key": "sdk:restore_memory",
+        "kind": "sdk",
+        "name": "jarvis.restore_memory",
         "requiresApproval": false
        },
        {
@@ -139795,7 +140492,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -139806,7 +140505,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -140562,6 +141263,19 @@
         "key": "sdk:forget_memory",
         "kind": "sdk",
         "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Bring back a memory archived for going unused, so it is recalled again.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:restore_memory",
+        "inPrompt": false,
+        "key": "sdk:restore_memory",
+        "kind": "sdk",
+        "name": "jarvis.restore_memory",
         "requiresApproval": false
        },
        {
@@ -141067,7 +141781,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -141078,7 +141794,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -141834,6 +142552,19 @@
         "key": "sdk:forget_memory",
         "kind": "sdk",
         "name": "jarvis.forget_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Bring back a memory archived for going unused, so it is recalled again.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:restore_memory",
+        "inPrompt": false,
+        "key": "sdk:restore_memory",
+        "kind": "sdk",
+        "name": "jarvis.restore_memory",
         "requiresApproval": false
        },
        {
@@ -142339,7 +143070,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -142350,7 +143083,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -143110,6 +143845,19 @@
        },
        {
         "available": true,
+        "description": "Bring back a memory archived for going unused, so it is recalled again.",
+        "detail": "",
+        "enabled": true,
+        "group": "memory",
+        "id": "sdk:restore_memory",
+        "inPrompt": false,
+        "key": "sdk:restore_memory",
+        "kind": "sdk",
+        "name": "jarvis.restore_memory",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Read or update the shared memory of this conversation's project.",
         "detail": "",
         "enabled": true,
@@ -143611,7 +144359,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -143622,7 +144372,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -144355,7 +145107,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -144366,7 +145120,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -145099,7 +145855,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -145110,7 +145868,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -145842,7 +146602,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -145853,7 +146615,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -146592,7 +147356,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -146603,7 +147369,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -147351,7 +148119,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -147362,7 +148132,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -148110,7 +148882,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -148121,7 +148895,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -148867,7 +149643,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -148878,7 +149656,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -149624,7 +150404,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -149635,7 +150417,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -150375,7 +151159,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -150386,7 +151172,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
@@ -151100,7 +151888,9 @@
        "updated_at": "2026-07-01 00:00:00.000000",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       },
       {
        "created_at": "<now>",
@@ -151111,7 +151901,9 @@
        "updated_at": "2026-07-02 00:00:00.000120",
        "source": null,
        "conversation_id": null,
-       "last_confirmed_at": null
+       "last_confirmed_at": null,
+       "last_retrieved_at": null,
+       "archived_at": null
       }
      ],
      "memory_activities": [
