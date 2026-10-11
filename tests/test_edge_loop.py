@@ -283,6 +283,8 @@ async def twins(request, database: Path, work_dir: Path, tmp_path_factory, fake:
         src.backup(dst)
     env = {"JARVIS_RUN_JOBS": "1", "OLLAMA_HOST": fake.url, "JARVIS_BROWSER_CDP_URL": dead,
            "JARVIS_BOARD_DISPATCH_EVERY": "1",
+           # Python's planning: the directive when the request reads multi-step.
+           "JARVIS_PLANNING_MODE": "auto",
            "HOME": str(edge_dir), "JARVIS_APP_DIR": str(REPO), **extra}
     global _twins
     async with _run_edge(edge_binary, edge_dir, edge_dir / "database.db", env) as client:

@@ -2,8 +2,8 @@
 //! `model_request_node`'s context assembly in `core/agents.py`: the system
 //! prompt, the cacheable segments (memory how-to and core memory, the skill
 //! catalog, the on-demand MCP servers, the live browser, the project), and
-//! the volatile tail (project memory, then the todo list or the planning
-//! directive).
+//! the volatile tail (project memory, then the todo list or, when
+//! `JARVIS_PLANNING_MODE` asks for it, the planning directive).
 //!
 //! What is retrieved for the request — relevant memories, a ranked skill
 //! shortlist, earlier episodes, the lazy MCP servers, the browser — is
@@ -353,13 +353,18 @@ const KEYWORDS: &[&str] = &[
     "migrate", "investigate", "plan", "design", "deploy", "test", "fix", "audit", "review",
 ];
 
-/// `build_planning_directive`, under `JARVIS_PLANNING_MODE`.
+/// `build_planning_directive`, under `JARVIS_PLANNING_MODE`: `always`, or
+/// `auto` — when `should_auto_plan` reads the request as multi-step. Unset
+/// (or anything else), no directive: current models plan from the system
+/// prompt's guidance, and a keyword match ("fix" and "test" in one line)
+/// forcing a todo list first did more harm than good. The modes are for a
+/// small local model that needs the push.
 fn planning_directive(query: &str) -> Option<String> {
     let mode = std::env::var("JARVIS_PLANNING_MODE").unwrap_or_default().trim().to_lowercase();
     let plan = match mode.as_str() {
-        "off" | "disabled" | "0" | "false" | "no" => false,
         "always" => true,
-        _ => should_auto_plan(query),
+        "auto" => should_auto_plan(query),
+        _ => false,
     };
     plan.then(|| PLANNING.to_string())
 }
