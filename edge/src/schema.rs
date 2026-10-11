@@ -165,6 +165,21 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
     if !columns(tx, "artifacts").await?.contains("mime_type") {
         exec(tx, "ALTER TABLE artifacts ADD COLUMN mime_type VARCHAR").await?;
     }
+    // A memory's provenance — the edge's own, not Python's: how it was made
+    // (`remember`, `sweep`, `manual`), the conversation it came from, and
+    // when it was last stated (made, restated or corrected). Older items
+    // were last stated when last updated.
+    let mem = columns(tx, "memories").await?;
+    if !mem.contains("source") {
+        exec(tx, "ALTER TABLE memories ADD COLUMN source VARCHAR").await?;
+    }
+    if !mem.contains("conversation_id") {
+        exec(tx, "ALTER TABLE memories ADD COLUMN conversation_id VARCHAR").await?;
+    }
+    if !mem.contains("last_confirmed_at") {
+        exec(tx, "ALTER TABLE memories ADD COLUMN last_confirmed_at DATETIME").await?;
+        exec(tx, "UPDATE memories SET last_confirmed_at = updated_at").await?;
+    }
     // The LangGraph store's import copied its values as BLOBs, which no
     // `kv_store` reader decodes as text.
     exec(tx, "UPDATE kv_store SET value = CAST(value AS TEXT) WHERE typeof(value) = 'blob'").await?;

@@ -111,8 +111,8 @@ Every timer the Python server ran, ported:
 |---|---|---|
 | each enabled automation | its cron schedule | enqueues an `automation` job |
 | board dispatch | every 15 s, and after a board write that readies a card | `dispatch_board_tasks` |
-| memory consolidation | `0 */6 * * *` | the sweep (`src/consolidate/`), if due |
-| project memory | every 30 min | the sweep (`src/consolidate/`), if due |
+| memory consolidation | every 30 min, first 2 min after start | the sweep (`src/consolidate/`), once the user has been quiet 15 min (or the oldest new message waited 6 h) |
+| project memory | every 30 min, first 2 min after start | the sweep (`src/consolidate/`), if due |
 | memory-activity prune | `0 4 * * *` | deletes old access-log rows |
 
 - **Cron is APScheduler's, not a library's.** `cron.rs` ports

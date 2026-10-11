@@ -2,7 +2,8 @@
 //! into memory, run here instead of in Python.
 //!
 //! - `memory` — `core/memory_consolidation.py`: the user's memory items,
-//!   added, corrected and deleted from the transcript (every 6 hours, and
+//!   added, corrected and deleted from the transcript (once the user has
+//!   gone quiet — `schedule.rs` — and
 //!   `consolidateMemory`).
 //! - `project` — `core/project_memory_consolidation.py`: each project's
 //!   shared memory, merged into or rewritten (every 30 minutes, and

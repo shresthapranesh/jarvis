@@ -22,12 +22,26 @@ pub struct MemoryItem {
     #[graphql(skip)]
     #[sqlx(rename = "updated_at")]
     pub updated: DateTime,
+    /// How it was made: `remember`, `sweep`, `seed` or `manual`. None for
+    /// items from before this was kept.
+    pub source: Option<String>,
+    /// The conversation it was learned in, when known — which may since have
+    /// been deleted.
+    pub conversation_id: Option<String>,
+    #[graphql(skip)]
+    #[sqlx(rename = "last_confirmed_at")]
+    pub confirmed: Option<DateTime>,
 }
 
 #[ComplexObject]
 impl MemoryItem {
     async fn updated_at(&self) -> String {
         self.updated.0.clone()
+    }
+
+    /// When it was last stated — made, restated or corrected.
+    async fn last_confirmed_at(&self) -> Option<String> {
+        self.confirmed.as_ref().map(|at| at.0.clone())
     }
 
     /// When this memory was last surfaced.
@@ -92,12 +106,17 @@ impl MemoryActivity {
 
 impl MemoryItem {
     async fn by_id(pool: &SqlitePool, id: &str) -> Result<Option<Self>> {
-        Ok(sqlx::query_as("SELECT id, kind, text, updated_at FROM memories WHERE id = ?").bind(id).fetch_optional(pool).await?)
+        Ok(sqlx::query_as(
+            "SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at FROM memories WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?)
     }
 }
 
 async fn list_memories(pool: &SqlitePool, kind: Option<&str>) -> Result<Vec<MemoryItem>> {
-    let mut sql = String::from("SELECT id, kind, text, updated_at FROM memories");
+    let mut sql = String::from("SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at FROM memories");
     if kind.is_some() {
         sql.push_str(" WHERE kind = ?");
     }
@@ -286,14 +305,15 @@ impl MemoryMutation {
         }
         let kind = if kind == "core" || kind == "fact" { kind.as_str() } else { "fact" };
         let pool: &SqlitePool = ctx.data()?;
-        let id = crate::agent::retrieve::upsert_memory(pool, &ctx.data::<EdgeData>()?.http, text, kind)
+        let origin = crate::agent::retrieve::Origin { source: "manual", conversation_id: None };
+        let id = crate::agent::retrieve::upsert_memory(pool, &ctx.data::<EdgeData>()?.http, text, kind, origin)
             .await
             .map_err(|e| format!("embedding failed: {e}"))?;
         MemoryItem::by_id(pool, &id).await?.ok_or_else(|| "memory vanished".into())
     }
 
     // Re-embedded before the row is looked up, as Python does; a kind other
-    // than core/fact leaves the kind alone.
+    // than core/fact leaves the kind alone. A correction confirms the item.
     async fn update_memory_item(&self, ctx: &Context<'_>, id: String, text: String, kind: Option<String>) -> Result<MemoryItem> {
         let text = text.trim();
         if text.is_empty() {
@@ -304,13 +324,16 @@ impl MemoryMutation {
             .await
             .map_err(|e| format!("embedding failed: {e}"))?;
         let kind = kind.filter(|k| k == "core" || k == "fact");
+        let now = now_stored();
         let updated = sqlx::query(
-            "UPDATE memories SET text = ?, kind = COALESCE(?, kind), embedding = ?, updated_at = ? WHERE id = ?",
+            "UPDATE memories SET text = ?, kind = COALESCE(?, kind), embedding = ?, updated_at = ?, last_confirmed_at = ? \
+             WHERE id = ?",
         )
         .bind(text)
         .bind(&kind)
         .bind(&blob)
-        .bind(now_stored())
+        .bind(&now)
+        .bind(&now)
         .bind(&id)
         .execute(pool)
         .await?;

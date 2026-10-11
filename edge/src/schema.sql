@@ -152,6 +152,9 @@ CREATE TABLE memories (
 	embedding BLOB, 
 	created_at DATETIME NOT NULL, 
 	updated_at DATETIME NOT NULL, 
+	source VARCHAR, 
+	conversation_id VARCHAR, 
+	last_confirmed_at DATETIME, 
 	PRIMARY KEY (id)
 );
 

@@ -359,7 +359,21 @@ type MemoryItem {
 	id: String!
 	kind: String!
 	text: String!
+	"""
+	How it was made: `remember`, `sweep`, `seed` or `manual`. None for
+	items from before this was kept.
+	"""
+	source: String
+	"""
+	The conversation it was learned in, when known — which may since have
+	been deleted.
+	"""
+	conversationId: String
 	updatedAt: String!
+	"""
+	When it was last stated — made, restated or corrected.
+	"""
+	lastConfirmedAt: String
 	"""
 	When this memory was last surfaced.
 	"""

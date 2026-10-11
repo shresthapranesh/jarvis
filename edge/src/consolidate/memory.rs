@@ -26,7 +26,10 @@ const META_KEY: &str = "state";
 /// One call reads at most this much transcript.
 const BATCH_CHARS: usize = 16_384;
 const MAX_BATCHES_PER_RUN: usize = 6;
-const MSG_CAP: usize = 500;
+/// The user's own words are what memory is made of, so they get more room;
+/// the assistant's replies are only context for them.
+const USER_MSG_CAP: usize = 1_500;
+const ASSISTANT_MSG_CAP: usize = 500;
 const FETCH_LIMIT: i64 = 200;
 
 /// `_run_lock`: the timer and the mutation read the same watermark, so one
@@ -39,10 +42,16 @@ conversations, so an AI assistant can remember them across sessions.
 You are given existing memory items with IDs. You must decide which to ADD, UPDATE, or DELETE
 based on the recent transcript.
 
+What is worth remembering: facts about the user and their world — who they are, their work,
+projects, plans, people, preferences, and how they want the assistant to treat them. Take these
+from what the USER says. ASSISTANT lines are context for understanding the user, not a source:
+never store what the assistant said, found or did, and never store anything about how the
+assistant, its tools or this app work.
+
 Output ONLY a JSON array. Each element is an operation:
   {"op": "add", "text": "<one atomic self-contained fact>", "kind": "core" | "fact"}
   {"op": "update", "id": "<existing_id>", "text": "<corrected version>", "kind": "core" | "fact"}
-  {"op": "delete", "id": "<existing_id>", "reason": "<why — contradicted|temporary_expired|user_requested|outdated>"}
+  {"op": "delete", "id": "<existing_id>", "reason": "<why — contradicted|temporary_expired|user_requested|outdated|duplicate>"}
 
 - "core": durable identity and strong preferences that should ALWAYS be in mind —
   who the user is, their role/expertise, hard preferences, how they want the assistant to behave.
@@ -61,7 +70,9 @@ Rules for DELETE:
 - Delete when: contradicted by newer info, is temporary and no longer relevant, user explicitly asked to forget,
   or clearly outdated (e.g., job changed, moved, preference reversed).
 - Be conservative: only delete when transcript explicitly contradicts or user requested. Don't mass-delete.
-- Include reason: contradicted | temporary_expired | user_requested | outdated
+- Duplicates: if two existing items say the same thing, UPDATE one to the combined fact and DELETE the
+  other with reason duplicate. Related but different facts are not duplicates — keep both.
+- Include reason: contradicted | temporary_expired | user_requested | outdated | duplicate
 
 If nothing to do, emit [].
 Output ONLY the JSON array — no prose, no markdown fences.
@@ -167,7 +178,7 @@ fn transcript_block(messages: &[Msg]) -> (String, Option<chrono::NaiveDateTime>,
             m.created_at.format("%Y-%m-%d %H:%M"),
             m.title,
             m.role.to_uppercase(),
-            pystr::prefix(m.content.as_deref().unwrap_or(""), MSG_CAP)
+            pystr::prefix(m.content.as_deref().unwrap_or(""), if m.role == "user" { USER_MSG_CAP } else { ASSISTANT_MSG_CAP })
         );
         let n = pystr::len(&line);
         if total + n > BATCH_CHARS && !lines.is_empty() {
@@ -182,6 +193,7 @@ fn transcript_block(messages: &[Msg]) -> (String, Option<chrono::NaiveDateTime>,
 }
 
 struct Msg {
+    conversation_id: String,
     role: String,
     content: Option<String>,
     created_at: chrono::NaiveDateTime,
@@ -193,7 +205,7 @@ struct Msg {
 /// first, never from an incognito conversation.
 async fn messages_since(pool: &SqlitePool, since: Option<&str>) -> Result<Vec<Msg>, String> {
     let sql = format!(
-        "SELECT m.role, m.content, m.created_at, m.status, c.title FROM messages m \
+        "SELECT m.conversation_id, m.role, m.content, m.created_at, m.status, c.title FROM messages m \
          JOIN conversations c ON m.conversation_id = c.id \
          WHERE m.role IN ('user', 'assistant') AND c.ephemeral = 0{} ORDER BY m.created_at ASC LIMIT ?",
         if since.is_some() { " AND m.created_at > ?" } else { "" }
@@ -207,6 +219,7 @@ async fn messages_since(pool: &SqlitePool, since: Option<&str>) -> Result<Vec<Ms
         .map(|r| {
             let title: Option<String> = r.get("title");
             Ok(Msg {
+                conversation_id: r.get("conversation_id"),
                 role: r.get("role"),
                 content: r.get("content"),
                 created_at: stored(r.get("created_at"))?,
@@ -282,6 +295,10 @@ async fn consolidate_items(pool: &SqlitePool, http: &reqwest::Client, model: Opt
         let messages = messages_since(pool, watermark.as_deref()).await?;
         let existing = list_memories(pool).await?;
         let (transcript, through, n) = transcript_block(&messages);
+        // What the batch learns is credited to its conversation when it read
+        // only one — the usual case, the sweep running once a chat goes quiet.
+        let conversations: HashSet<&str> = messages[..n].iter().map(|m| m.conversation_id.as_str()).collect();
+        let conversation = if conversations.len() == 1 { conversations.into_iter().next() } else { None };
         let Some(through) = through else { break };
         if batches == MAX_BATCHES_PER_RUN {
             backlog = true;
@@ -300,7 +317,8 @@ async fn consolidate_items(pool: &SqlitePool, http: &reqwest::Client, model: Opt
         )
         .await?;
         let mut ids: HashSet<String> = existing.into_iter().map(|(id, _, _)| id).collect();
-        let (a, u, d) = apply_ops(pool, http, coerce_items(&reply), &mut ids, max_delete - deleted).await?;
+        let origin = || crate::agent::retrieve::Origin { source: "sweep", conversation_id: conversation };
+        let (a, u, d) = apply_ops(pool, http, coerce_items(&reply), &mut ids, max_delete - deleted, origin).await?;
         (added, updated, deleted) = (added + a, updated + u, deleted + d);
         // Saved per batch: a later failure keeps this one's progress.
         save_watermark(pool, through).await?;
@@ -365,7 +383,8 @@ async fn seed_from_blob(pool: &SqlitePool, http: &reqwest::Client, model: &str) 
             Op::Add { text, kind } | Op::Update { text, kind, .. } => (text, kind),
             Op::Delete { .. } => continue,
         };
-        crate::agent::retrieve::upsert_memory(pool, http, &text, kind).await?;
+        let origin = crate::agent::retrieve::Origin { source: "seed", conversation_id: None };
+        crate::agent::retrieve::upsert_memory(pool, http, &text, kind, origin).await?;
         written += 1;
     }
     tracing::info!("memory: seeded {written} items from the legacy AGENTS.md blobs");
@@ -373,13 +392,15 @@ async fn seed_from_blob(pool: &SqlitePool, http: &reqwest::Client, model: &str) 
 }
 
 /// `_apply_ops`: one batch's operations — (added, updated, deleted).
-/// `max_delete` is what's left of the pass's deletion budget.
-async fn apply_ops(
+/// `max_delete` is what's left of the pass's deletion budget; `origin` is
+/// what an added item is credited to.
+async fn apply_ops<'a>(
     pool: &SqlitePool,
     http: &reqwest::Client,
     mut ops: Vec<Op>,
     existing: &mut HashSet<String>,
     max_delete: i64,
+    origin: impl Fn() -> crate::agent::retrieve::Origin<'a>,
 ) -> Result<(i64, i64, i64), String> {
     // A hallucinated mass delete is cut to the budget, first ones kept.
     let deletes = ops.iter().filter(|o| matches!(o, Op::Delete { .. })).count() as i64;
@@ -419,7 +440,7 @@ async fn apply_ops(
                 }
             }
             Op::Update { text, kind, .. } | Op::Add { text, kind } => {
-                crate::agent::retrieve::upsert_memory(pool, http, &text, kind).await?;
+                crate::agent::retrieve::upsert_memory(pool, http, &text, kind, origin()).await?;
                 added += 1;
             }
         }
@@ -427,22 +448,26 @@ async fn apply_ops(
     Ok((added, updated, deleted))
 }
 
-/// `update_memory_with_embedding`: new text, kind and embedding. An
-/// embedder failure fails the pass; a failed write only this item.
+/// `update_memory_with_embedding`: new text, kind and embedding, confirmed
+/// now. An embedder failure fails the pass; a failed write only this item.
 async fn update_memory(pool: &SqlitePool, http: &reqwest::Client, id: &str, text: &str, kind: &str) -> Result<bool, String> {
     let text = pystr::strip(text);
     if text.is_empty() {
         return Ok(false);
     }
     let blob = crate::agent::embed::for_storage(pool, http, text).await?;
-    let done = sqlx::query("UPDATE memories SET text = ?, kind = ?, embedding = ?, updated_at = ? WHERE id = ?")
-        .bind(text)
-        .bind(kind)
-        .bind(&blob)
-        .bind(crate::gql::codec::now_stored())
-        .bind(id)
-        .execute(pool)
-        .await;
+    let now = crate::gql::codec::now_stored();
+    let done = sqlx::query(
+        "UPDATE memories SET text = ?, kind = ?, embedding = ?, updated_at = ?, last_confirmed_at = ? WHERE id = ?",
+    )
+    .bind(text)
+    .bind(kind)
+    .bind(&blob)
+    .bind(&now)
+    .bind(&now)
+    .bind(id)
+    .execute(pool)
+    .await;
     Ok(match done {
         Ok(r) => r.rows_affected() > 0,
         Err(e) => {

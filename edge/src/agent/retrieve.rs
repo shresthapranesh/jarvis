@@ -126,12 +126,14 @@ pub(super) async fn lexical(pool: &SqlitePool, sql: &str, binds: &[&str]) -> Vec
 // ── memory ──────────────────────────────────────────────────────────────────
 
 /// `search_memory(query, k)`: the `fact` items that clear the cutoff, as
-/// `(id, text)`. May be fewer than `k`, or none. Logs the access.
+/// `(id, text)`. May be fewer than `k`, or none. Logs the access, against
+/// `conversation_id` when it was for one.
 pub async fn search_memory(
     pool: &SqlitePool,
     http: &reqwest::Client,
     query: &str,
     k: usize,
+    conversation_id: Option<&str>,
 ) -> Result<Vec<(String, String)>, String> {
     if super::prompt::trivial(query) {
         return Ok(vec![]);
@@ -169,21 +171,24 @@ pub async fn search_memory(
     let texts: HashMap<String, String> = rows.iter().map(|r| (r.get("id"), r.get("text"))).collect();
     let scores: HashMap<&str, f64> = dense.iter().map(|(i, s)| (i.as_str(), *s)).collect();
     let hits: Vec<(String, String)> = keep.into_iter().filter_map(|id| Some((texts.get(&id)?.clone(), id))).map(|(t, id)| (id, t)).collect();
-    touch(pool, &hits.iter().map(|(id, _)| (id.as_str(), scores.get(id.as_str()).copied().unwrap_or(0.0))).collect::<Vec<_>>(), query).await;
+    let scored: Vec<(&str, f64)> = hits.iter().map(|(id, _)| (id.as_str(), scores.get(id.as_str()).copied().unwrap_or(0.0))).collect();
+    touch(pool, &scored, query, conversation_id).await;
     Ok(hits)
 }
 
 /// `touch_memories`: the access log, best-effort. The score is rounded as
-/// `search_memory` reports it.
-async fn touch(pool: &SqlitePool, hits: &[(&str, f64)], query: &str) {
+/// `search_memory` reports it. A thread that isn't a conversation (a
+/// workflow agent's) logs none.
+async fn touch(pool: &SqlitePool, hits: &[(&str, f64)], query: &str, conversation_id: Option<&str>) {
     let query: String = query.chars().take(500).collect();
     for (id, score) in hits {
         let r = sqlx::query(
             "INSERT INTO memory_activities (id, memory_id, conversation_id, kind, score, query, source, accessed_at) \
-             VALUES (?, ?, NULL, 'fact', ?, ?, 'retrieval', ?)",
+             VALUES (?, ?, (SELECT id FROM conversations WHERE id = ?), 'fact', ?, ?, 'retrieval', ?)",
         )
         .bind(new_id())
         .bind(id)
+        .bind(conversation_id)
         .bind((score * 10_000.0).round() / 10_000.0)
         .bind(&query)
         .bind(now_stored())
@@ -196,12 +201,34 @@ async fn touch(pool: &SqlitePool, hits: &[(&str, f64)], query: &str) {
     }
 }
 
-/// `_DEDUP_THRESHOLD`: a new memory this close to one of its kind replaces it.
-const DEDUP: f64 = 0.88;
+/// A new memory this close to one of its kind restates it, and replaces it.
+/// High on purpose: two related but different facts ("applied to X for
+/// role A" / "… to Y for role B") easily score 0.9, and a replace there loses
+/// one. Below it both are kept; the consolidation sweep, which sees every
+/// item, merges real duplicates. (Python's `_DEDUP_THRESHOLD` was 0.88.)
+fn merge_cosine() -> f64 {
+    env_float("JARVIS_MEMORY_MERGE_COSINE", 0.95)
+}
 
-/// `upsert_memory`: embed `text` in document space, then merge it into a
-/// near-duplicate of the same kind or insert it. The id it landed on.
-pub async fn upsert_memory(pool: &SqlitePool, http: &reqwest::Client, text: &str, kind: &str) -> Result<String, String> {
+/// Where a memory came from: `source` is `remember` (the agent's tool),
+/// `sweep` (consolidation), `seed` (the legacy blob's import) or `manual`
+/// (the API); `conversation_id` the conversation it was learned in, if one
+/// (a thread that isn't a conversation is stored as none).
+pub struct Origin<'a> {
+    pub source: &'a str,
+    pub conversation_id: Option<&'a str>,
+}
+
+/// `upsert_memory`: embed `text` in document space, then replace a
+/// restatement of it of the same kind, or insert it. The id it landed on.
+/// A restatement keeps the item's origin and counts as confirming it.
+pub async fn upsert_memory(
+    pool: &SqlitePool,
+    http: &reqwest::Client,
+    text: &str,
+    kind: &str,
+    origin: Origin<'_>,
+) -> Result<String, String> {
     let text = text.trim();
     let blob = embed::for_storage(pool, http, text).await?;
     let vec = embed::from_blob(&blob);
@@ -213,10 +240,11 @@ pub async fn upsert_memory(pool: &SqlitePool, http: &reqwest::Client, text: &str
     let items: Vec<(String, Option<Vec<u8>>)> = rows.iter().map(|r| (r.get("id"), r.get("embedding"))).collect();
     let now = now_stored();
     match cosine_ranking(&vec, &items).first() {
-        Some((id, score)) if *score >= DEDUP => {
-            sqlx::query("UPDATE memories SET text = ?, embedding = ?, updated_at = ? WHERE id = ?")
+        Some((id, score)) if *score >= merge_cosine() => {
+            sqlx::query("UPDATE memories SET text = ?, embedding = ?, updated_at = ?, last_confirmed_at = ? WHERE id = ?")
                 .bind(text)
                 .bind(&blob)
+                .bind(&now)
                 .bind(&now)
                 .bind(id)
                 .execute(pool)
@@ -227,16 +255,22 @@ pub async fn upsert_memory(pool: &SqlitePool, http: &reqwest::Client, text: &str
         }
         _ => {
             let id = new_id();
-            sqlx::query("INSERT INTO memories (id, kind, text, embedding, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-                .bind(&id)
-                .bind(kind)
-                .bind(text)
-                .bind(&blob)
-                .bind(&now)
-                .bind(&now)
-                .execute(pool)
-                .await
-                .map_err(|e| e.to_string())?;
+            sqlx::query(
+                "INSERT INTO memories (id, kind, text, embedding, created_at, updated_at, source, conversation_id, \
+                 last_confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT id FROM conversations WHERE id = ?), ?)",
+            )
+            .bind(&id)
+            .bind(kind)
+            .bind(text)
+            .bind(&blob)
+            .bind(&now)
+            .bind(&now)
+            .bind(origin.source)
+            .bind(origin.conversation_id)
+            .bind(&now)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(id)
         }
     }

@@ -703,6 +703,9 @@ async def test_memories_retrieved_for_the_request(twins):
     activities = _rows(twins.edge_db, "SELECT memory_id, source FROM memory_activities")
     assert activities == _rows(twins.python_db, "SELECT memory_id, source FROM memory_activities")
     assert ("m0", "retrieval") in activities
+    # The edge's own: each retrieval is logged against the conversation it was for.
+    assert _rows(twins.edge_db, "SELECT DISTINCT a.conversation_id IS NOT NULL AND c.id IS NOT NULL "
+                                "FROM memory_activities a LEFT JOIN conversations c ON c.id = a.conversation_id") == [(1,)]
 
 
 async def test_a_greeting_retrieves_nothing(twins):
@@ -721,6 +724,11 @@ async def test_remember(twins):
     assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
     # The colour fact merged into the one already there.
     assert len(_rows(twins.edge_db, "SELECT 1 FROM memories WHERE text LIKE '%colour%'")) == 1
+    # The edge's own provenance: the new fact is the tool's, from this
+    # conversation; the restated one keeps its origin and is confirmed now.
+    provenance = ("SELECT m.id, m.source, c.id IS NOT NULL, m.last_confirmed_at IS NOT NULL FROM memories m "
+                  "LEFT JOIN conversations c ON c.id = m.conversation_id WHERE m.text LIKE '%tea%' OR m.id = 'm0'")
+    assert {r[0] == "m0": r[1:] for r in _rows(twins.edge_db, provenance)} == {True: (None, 0, 1), False: ("remember", 1, 1)}
 
 
 async def test_a_large_skill_catalog_is_ranked(twins):
@@ -1558,7 +1566,7 @@ def _kv(db: Path, namespace: str, key: str) -> dict:
 
 
 async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
-    """`consolidateMemory` and the 6-hourly sweep: the transcript batched
+    """`consolidateMemory` and the timer's sweep: the transcript batched
     oldest first (incognito left out, stopping before a reply still being
     written), every operation the model can ask for — row for row with
     Python, embeddings included, and the same watermark."""
@@ -1606,7 +1614,7 @@ async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
     _sql(twins, "UPDATE messages SET status = 'done' WHERE conversation_id = 'c-mem'")
     _talk(twins, "c-mem2", [("user", "Forget the lunch thing", "2026-01-02 09:00:00")])
     twins.fake.script = [Reply(json.dumps([{"op": "delete", "id": "m2", "reason": "user_requested"}]))] * 2
-    python = await _python_step(twins)  # the 6-hourly sweep, on the default model
+    python = await _python_step(twins)  # the timer's sweep, on the default model
     assert _edge_sweep(twins, edge_binary, "memory_consolidation") == {"result": python}
     assert python == "consolidated 2 messages in 1 batch(es) → +0 ~0 -1 (+0 seeded)"
     assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)

@@ -57,7 +57,7 @@ pub async fn retrieved(
     conversation_id: &str,
     mcp: &crate::mcp::Snapshot,
 ) -> Result<Vec<Segment>, Unbuilt> {
-    let mut parts = memory(pool, http, query).await?;
+    let mut parts = memory(pool, http, query, conversation_id).await?;
     parts.extend(skills(pool, http, query).await?);
     if let Some(text) = super::retrieve::earlier_episodes(pool, http, conversation_id, query).await {
         parts.push(seg("earlier_in_conversation", text, false));
@@ -130,7 +130,7 @@ const CORE_MAX_CHARS: usize = 2000;
 
 /// `_memory_volatile_parts`, with an embedder configured — which Python
 /// always has (Gemini with a key, else Ollama's).
-async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Result<Vec<Segment>, Unbuilt> {
+async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str, conversation_id: &str) -> Result<Vec<Segment>, Unbuilt> {
     let mut parts = vec![seg("memory_howto", MEMORY_HOWTO, true)];
     let core: Vec<(String, String)> = db(sqlx::query_as(
         "SELECT id, text FROM memories WHERE kind = 'core' ORDER BY updated_at DESC",
@@ -142,7 +142,7 @@ async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str) -> Resul
         parts.push(seg("core_memory", format!("## Agent Memory\n\n{text}"), true));
     }
     if !query.is_empty() && !trivial(query) {
-        match super::retrieve::search_memory(pool, http, query, 6).await {
+        match super::retrieve::search_memory(pool, http, query, 6, Some(conversation_id)).await {
             Ok(hits) if !hits.is_empty() => {
                 // Re-ranked per query: out of the cached prefix.
                 parts.push(seg("relevant_memories", super::retrieve::relevant_memories(&hits), false));

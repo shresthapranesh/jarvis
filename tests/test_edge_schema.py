@@ -120,6 +120,7 @@ _ADDED = {
     "workflows": ["notifications"],
     "board_tasks": ["blocked_kind", "pending_answer"],
     "artifacts": ["mime_type"],
+    "memories": ["source", "conversation_id", "last_confirmed_at"],
 }
 
 

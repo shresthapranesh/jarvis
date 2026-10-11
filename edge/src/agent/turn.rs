@@ -280,7 +280,7 @@ impl<'a> Turn<'a> {
 
         let retrieved = match &self.retrieved {
             Some((id, parts)) if *id == message_id => Ok(parts.clone()),
-            _ => prompt::retrieved(self.pool(), &self.agent.http, &query, &self.thread_id, mcp).await,
+            _ => prompt::retrieved(self.pool(), &self.agent.http, &retrieval_query(&history), &self.thread_id, mcp).await,
         };
         let context = match retrieved {
             Ok(parts) => {
@@ -502,8 +502,11 @@ impl<'a> Turn<'a> {
             }
             Step::Run(Native::Remember { text, kind }) => {
                 let (pool, http, ephemeral) = (self.agent.pool.clone(), self.agent.http.clone(), self.ephemeral);
-                let (text, kind) = (text.clone(), kind.clone());
-                tokio::spawn(async move { Ok((Content::Text(remember(&pool, &http, ephemeral, &text, &kind).await), "success", None)) })
+                let (conversation, text, kind) = (self.thread_id.clone(), text.clone(), kind.clone());
+                tokio::spawn(async move {
+                    let answer = remember(&pool, &http, ephemeral, &conversation, &text, &kind).await;
+                    Ok((Content::Text(answer), "success", None))
+                })
             }
             _ => return None,
         };
@@ -922,9 +925,16 @@ impl Drop for Beside {
     }
 }
 
-/// `remember`: a durable fact, merged into a near-duplicate. Its answer
+/// `remember`: a durable fact, replacing a restatement of it. Its answer
 /// is the model's, failures included.
-async fn remember(pool: &SqlitePool, http: &reqwest::Client, ephemeral: bool, text: &str, kind: &str) -> String {
+async fn remember(
+    pool: &SqlitePool,
+    http: &reqwest::Client,
+    ephemeral: bool,
+    conversation_id: &str,
+    text: &str,
+    kind: &str,
+) -> String {
     if text.trim().is_empty() {
         return "Nothing to remember (empty text).".into();
     }
@@ -932,7 +942,8 @@ async fn remember(pool: &SqlitePool, http: &reqwest::Client, ephemeral: bool, te
         return "Skipped: this is an incognito chat, nothing is saved to long-term memory.".into();
     }
     let kind = if kind == "core" || kind == "fact" { kind } else { "fact" };
-    match super::retrieve::upsert_memory(pool, http, text, kind).await {
+    let origin = super::retrieve::Origin { source: "remember", conversation_id: Some(conversation_id) };
+    match super::retrieve::upsert_memory(pool, http, text, kind, origin).await {
         Ok(_) => format!("Remembered ({kind})."),
         Err(e) => {
             tracing::warn!("remember failed: {e}");
@@ -960,7 +971,10 @@ fn parse_stamp(stored: &str) -> chrono::DateTime<chrono::Utc> {
 
 /// `_latest_user_text`: the newest user message's text, stripped.
 fn latest_user_text(history: &[Message]) -> String {
-    let Some(m) = history.iter().rev().find(|m| m.role == Role::User) else { return String::new() };
+    history.iter().rev().find(|m| m.role == Role::User).map(user_text).unwrap_or_default()
+}
+
+fn user_text(m: &Message) -> String {
     let text = match &m.content {
         Content::Text(s) => s.clone(),
         Content::Parts(parts) => parts
@@ -973,6 +987,47 @@ fn latest_user_text(history: &[Message]) -> String {
             .collect(),
     };
     text.trim().to_string()
+}
+
+/// How much of the previous user message a follow-up's retrieval borrows.
+const FOLLOW_UP_CONTEXT_CHARS: usize = 500;
+
+/// What memory, skills and episodes are retrieved for: the newest user
+/// message — and, when it is a follow-up that leans on what came before
+/// ("do the same for the other one"), the user message before it too.
+/// The newest comes first: the lexical arm keeps the first terms.
+fn retrieval_query(history: &[Message]) -> String {
+    let current = latest_user_text(history);
+    if prompt::trivial(&current) || !leans_on_context(&current) {
+        return current;
+    }
+    let previous = history
+        .iter()
+        .rev()
+        .filter(|m| m.role == Role::User)
+        .skip(1)
+        .map(user_text)
+        .find(|t| !t.is_empty());
+    match previous {
+        Some(prev) => format!("{current}\n{}", crate::pystr::prefix(&prev, FOLLOW_UP_CONTEXT_CHARS)),
+        None => current,
+    }
+}
+
+/// A message too short to stand on its own, or a short one that points back
+/// ("it", "that one", "the same", "again"). Not "this" or "there": "this
+/// week", "over there" stand on their own.
+fn leans_on_context(text: &str) -> bool {
+    const POINTERS: &[&str] = &[
+        "it", "its", "that", "those", "these", "them", "they", "same", "other", "another", "again", "above", "previous",
+        "earlier",
+    ];
+    let words: Vec<String> = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    words.len() <= 6 || (words.len() <= 12 && words.iter().any(|w| POINTERS.contains(&w.as_str())))
 }
 
 /// `honors_cache_control` with the default providers (`anthropic`, `bedrock`,
@@ -1104,6 +1159,32 @@ pub(super) fn tools_step_data(results: &[Message]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_follow_up_retrieves_with_the_message_before_it() {
+        let say = |role: &str, text: &str| -> Message {
+            serde_json::from_value(json!({"v": 1, "role": role, "content": text})).unwrap()
+        };
+        let history = vec![
+            say("user", "Compare the Waymo and Anthropic job descriptions"),
+            say("assistant", "Here is the comparison."),
+            say("user", "do the same for the other one"),
+        ];
+        assert_eq!(
+            retrieval_query(&history),
+            "do the same for the other one\nCompare the Waymo and Anthropic job descriptions"
+        );
+        // A message that stands on its own is its own query.
+        let alone = "What changed in the rust edge's memory consolidation sweep this week and why did we move off the cron";
+        let mut standalone = history.clone();
+        standalone.push(say("user", alone));
+        assert_eq!(retrieval_query(&standalone), alone);
+        // Greetings retrieve nothing either way; a first message has nothing before it.
+        assert_eq!(retrieval_query(&[history[0].clone(), say("user", "thanks")]), "thanks");
+        assert_eq!(retrieval_query(&[say("user", "and that one?")]), "and that one?");
+        assert!(leans_on_context("what about it, in two sentences"));
+        assert!(!leans_on_context("summarize the quarterly revenue numbers for the three largest cloud providers"));
+    }
 
     #[test]
     fn user_message_id_is_python_uuid5() {
