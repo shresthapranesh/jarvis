@@ -319,15 +319,6 @@ type McpToolResult {
 	isError: Boolean!
 }
 
-"""
-The agent's free-text memory blob.
-"""
-type Memory {
-	content: String!
-	exists: Boolean!
-	modifiedAt: String
-}
-
 type MemoryActivity {
 	id: String!
 	memoryId: String!
@@ -572,9 +563,7 @@ type Mutation {
 	browserActivity(url: String!, phase: String! = "start", conversationId: String): Boolean!
 	addMemory(text: String!, kind: String! = "fact"): MemoryItem!
 	updateMemoryItem(id: String!, text: String!, kind: String): MemoryItem!
-	updateMemory(content: String!): Memory!
 	consolidateMemory(model: String): String!
-	deleteAgentMemory: Memory!
 	restoreMemory(id: String!): MemoryItem!
 	deleteMemory(id: String!): Boolean!
 	stopRunningTask(taskId: String!): StopRunningTaskPayload!
@@ -757,18 +746,14 @@ type Query {
 	"""
 	setting(key: String!): Setting!
 	"""
-	Discrete memory items (empty on keyless setups, which use the blob):
-	the live ones, or with `archived` those archived for going unused.
+	Discrete memory items: the live ones, or with `archived` those
+	archived for going unused.
 	"""
 	memories(kind: String, archived: Boolean! = false): [MemoryItem!]!
 	"""
 	Audit log for when a specific memory was surfaced.
 	"""
 	memoryActivities(memoryId: String!, limit: Int! = 50): [MemoryActivity!]!
-	"""
-	The legacy free-text blob (keyless fallback / pre-migration backup).
-	"""
-	agentMemory: Memory!
 	"""
 	Every memory, for the usage overview — same rows as `memories`.
 	"""

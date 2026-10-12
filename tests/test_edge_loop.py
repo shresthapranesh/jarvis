@@ -1601,7 +1601,7 @@ async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
     python = await _python_gql(q, {"m": MODEL})
     edge = await _edge_gql(twins, q, {"m": MODEL})
     assert edge == python
-    assert python["data"]["consolidateMemory"] == "consolidated 40 messages in 2 batch(es) → +4 ~1 -1 (+0 seeded)"
+    assert python["data"]["consolidateMemory"] == "consolidated 40 messages in 2 batch(es) → +4 ~1 -1"
     assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
     py_asked, edge_asked = _asked(twins)
     assert edge_asked == py_asked and len(py_asked) == 2
@@ -1622,7 +1622,7 @@ async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
     twins.fake.script = [Reply(json.dumps([{"op": "delete", "id": "m2", "reason": "user_requested"}]))] * 2
     python = await _python_step(twins)  # the timer's sweep, on the default model
     assert _edge_sweep(twins, edge_binary, "memory_consolidation") == {"result": python}
-    assert python == "consolidated 2 messages in 1 batch(es) → +0 ~0 -1 (+0 seeded)"
+    assert python == "consolidated 2 messages in 1 batch(es) → +0 ~0 -1"
     assert _rows(twins.edge_db, memories) == _rows(twins.python_db, memories)
     assert _asked(twins)[0] == _asked(twins)[1]
     assert _edge_sweep(twins, edge_binary, "nope") == {"error": "unknown maintenance task 'nope'"}

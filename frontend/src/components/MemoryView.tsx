@@ -2,26 +2,20 @@ import * as stylex from '@stylexjs/stylex';
 import {useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
-import type {AgentMemoryQuery as TAgentMemoryQuery} from '../__generated__/AgentMemoryQuery.graphql';
 import type {MemoriesQuery as TMemoriesQuery} from '../__generated__/MemoriesQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import type {MemoryItem, MemoryKind} from '../lib/types';
 import {commitAddMemory} from '../relay/AddMemoryMutation';
-import {agentMemoryQuery, refreshAgentMemory} from '../relay/AgentMemoryQuery';
 import {commitConsolidateMemory} from '../relay/ConsolidateMemoryMutation';
-import {commitDeleteAgentMemory} from '../relay/DeleteAgentMemoryMutation';
 import {commitDeleteMemory} from '../relay/DeleteMemoryMutation';
 import {memoriesQuery, refreshMemories} from '../relay/MemoriesQuery';
 import {commitUpdateMemoryItem} from '../relay/UpdateMemoryItemMutation';
-import {commitUpdateMemory} from '../relay/UpdateMemoryMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
-import {Markdown} from './Markdown';
 import {item, kindDotStyle, kindDot, memory, seg} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, codeField, field, iconBtn, page, prose} from './ui';
-import {type} from '../theme/tokens.stylex';
+import {btn, field, iconBtn, page} from './ui';
 
 const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
   fact: {label: 'Fact', hint: 'surfaced by relevance each turn'},
@@ -36,11 +30,6 @@ export function MemoryView() {
   const fetchKey = useQueryRetry();
   const memoryData = useLazyLoadQuery<TMemoriesQuery>(
     memoriesQuery,
-    {},
-    {fetchPolicy: 'store-and-network', fetchKey},
-  );
-  const blobData = useLazyLoadQuery<TAgentMemoryQuery>(
-    agentMemoryQuery,
     {},
     {fetchPolicy: 'store-and-network', fetchKey},
   );
@@ -93,11 +82,11 @@ export function MemoryView() {
   });
 
   // The exception: consolidation rewrites the whole set server-side, so there is
-  // no delta to apply — re-read both queries into the store.
+  // no delta to apply — re-read the list into the store.
   const consolidateAction = useAsyncAction(
     async () => {
       await commitConsolidateMemory();
-      await Promise.all([refreshMemories(), refreshAgentMemory()]);
+      await refreshMemories();
     },
     {
       onSuccess: () => setActionError(null),
@@ -113,8 +102,6 @@ export function MemoryView() {
   }));
   const core = all.filter((m) => m.kind === 'core');
   const facts = all.filter((m) => m.kind === 'fact');
-  const blob = blobData.agentMemory;
-  const showBlobFallback = all.length === 0 && blob.exists && blob.content.trim().length > 0;
 
   function submitEditor() {
     if (!editor) return;
@@ -197,9 +184,7 @@ export function MemoryView() {
 
       {actionError && !editorOpen && <div {...stylex.props(page.error)}>{actionError}</div>}
 
-      {showBlobFallback ? (
-        <LegacyBlob blob={blob} primary />
-      ) : all.length === 0 ? (
+      {all.length === 0 ? (
         <div {...stylex.props(page.empty)}>
           <p>No memories yet.</p>
           <p>
@@ -216,12 +201,6 @@ export function MemoryView() {
           {renderSection('Facts', 'fact', facts)}
         </>
       )}
-
-      {/* The blob is still the whole of memory on a keyless setup, and the only
-          copy of anything consolidation hasn't split yet — so it needs the same
-          view / replace / clear the `memory` CLI subcommands give it, not just a
-          read-only fallback when the discrete list happens to be empty. */}
-      {!showBlobFallback && blob.exists && <LegacyBlob blob={blob} />}
 
       <FormModal
         open={editorOpen}
@@ -298,149 +277,7 @@ export function MemoryView() {
   );
 }
 
-function LegacyBlob({
-  blob,
-  primary = false,
-}: {
-  blob: TAgentMemoryQuery['response']['agentMemory'];
-  primary?: boolean;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(blob.content);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
-
-  async function save() {
-    setBusy(true);
-    setError(null);
-    try {
-      await commitUpdateMemory(draft);
-      await refreshAgentMemory();
-      setEditing(false);
-    } catch (e) {
-      setError((e as Error).message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function clear() {
-    setBusy(true);
-    setError(null);
-    try {
-      await commitDeleteAgentMemory();
-      await refreshAgentMemory();
-      setDraft('');
-      setEditing(false);
-    } catch (e) {
-      setError((e as Error).message || String(e));
-    } finally {
-      setBusy(false);
-      setConfirmClear(false);
-    }
-  }
-
-  return (
-    <div {...stylex.props(page.section)}>
-      <h2 {...stylex.props(page.sectionTitle)}>
-        Legacy AGENTS.md
-        <span {...stylex.props(page.sectionHint)}>{blob.content.length} chars</span>
-      </h2>
-      <p {...stylex.props(page.subtitle)}>
-        {primary ? (
-          <>
-            No discrete items yet (no embedding model configured), so this blob <em>is</em> the
-            agent&apos;s memory. It will be split into items on the next consolidation once
-            embeddings are available.
-          </>
-        ) : (
-          <>
-            The free-text blob — the keyless fallback, and whatever predates the split into
-            discrete items. Same entry as <code>jarvis-edge memory show/set/reset</code>.
-          </>
-        )}
-      </p>
-
-      {error && <div {...stylex.props(page.error)}>{error}</div>}
-
-      {editing ? (
-        <>
-          <textarea
-            {...stylex.props(codeField.input, codeField.multiline)}
-            rows={16}
-            value={draft}
-            disabled={busy}
-            spellCheck={false}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-          <div {...stylex.props(codeField.actions)}>
-            <button
-              {...stylex.props(btn.base, btn.primary)}
-              disabled={busy || !draft.trim()}
-              title={
-                draft.trim()
-                  ? ''
-                  : 'Use Clear to remove the entry — an empty blob is not the same as no blob.'
-              }
-              onClick={() => void save()}
-            >
-              Save
-            </button>
-            <button
-              {...stylex.props(btn.base)}
-              disabled={busy}
-              onClick={() => {
-                setDraft(blob.content);
-                setEditing(false);
-                setError(null);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div {...stylex.props(prose.vars, styles.blobBody)} data-md>
-            <Markdown text={blob.content} />
-          </div>
-          <div {...stylex.props(codeField.actions)}>
-            <button
-              {...stylex.props(btn.base)}
-              onClick={() => {
-                setDraft(blob.content);
-                setEditing(true);
-              }}
-            >
-              <EditIcon size={14} /> Edit
-            </button>
-            <button
-              {...stylex.props(btn.base)}
-              disabled={!blob.exists}
-              onClick={() => setConfirmClear(true)}
-            >
-              <TrashIcon size={14} /> Clear
-            </button>
-          </div>
-        </>
-      )}
-
-      <ConfirmDialog
-        open={confirmClear}
-        title="Clear AGENTS.md memory"
-        message="Deletes the blob entry outright. The agent falls back to its system prompt alone. Discrete memory items are untouched."
-        confirmLabel="Clear"
-        danger
-        onConfirm={() => void clear()}
-        onCancel={() => setConfirmClear(false)}
-      />
-    </div>
-  );
-}
-
 const styles = stylex.create({
   /** The empty state's call to action sits a little clear of the prose. */
   emptyBtn: {marginBlockStart: 8},
-  blobBody: {fontSize: type.tBody, lineHeight: 1.55},
 });

@@ -234,8 +234,8 @@ fn merge_cosine() -> f64 {
 }
 
 /// Where a memory came from: `source` is `remember` (the agent's tool),
-/// `sweep` (consolidation), `seed` (the legacy blob's import) or `manual`
-/// (the API); `conversation_id` the conversation it was learned in, if one
+/// `sweep` (consolidation) or `manual` (the API) — older rows can say
+/// `seed`; `conversation_id` the conversation it was learned in, if one
 /// (a thread that isn't a conversation is stored as none).
 pub struct Origin<'a> {
     pub source: &'a str,

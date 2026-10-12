@@ -1,5 +1,5 @@
 //! The command line — a port of `main.py` (change both): `run`, `start`,
-//! `config *`, `model *`, `memory *`; `mcp *` is the edge's own. No subcommand serves, as the edge
+//! `config *`, `model *`; `mcp *` is the edge's own. No subcommand serves, as the edge
 //! always has.
 //!
 //! The commands read and write the database through the server's own code
@@ -10,7 +10,6 @@
 
 mod config;
 mod mcp;
-mod memory;
 mod model;
 mod run;
 
@@ -64,9 +63,6 @@ pub enum Command {
     /// Manage models.
     #[command(subcommand)]
     Model(model::Cmd),
-    /// Manage agent memory (AGENTS.md in the key-value store).
-    #[command(subcommand)]
-    Memory(memory::Cmd),
     /// Manage MCP servers.
     #[command(subcommand)]
     Mcp(mcp::Cmd),
@@ -144,7 +140,6 @@ async fn dispatch(command: Command) -> Done {
         Command::Run { query, model, no_save, .. } => run::run(&config, &pool, query, model, no_save).await,
         Command::Config(cmd) => config::run(&pool, cmd).await,
         Command::Model(cmd) => model::run(&pool, cmd).await,
-        Command::Memory(cmd) => memory::run(&pool, &config.checkpoints_db, cmd).await,
         Command::Mcp(cmd) => mcp::run(&config, &pool, cmd).await,
         Command::Start { .. } => unreachable!("start serves"),
     }

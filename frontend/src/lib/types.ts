@@ -365,12 +365,6 @@ export interface ArtifactCard {
 
 // ── Memory ────────────────────────────────────────────────────────────────────
 
-export interface Memory {
-  content: string;
-  exists: boolean;
-  modified_at: string | null;
-}
-
 export type MemoryKind = 'core' | 'fact';
 
 export interface MemoryItem {

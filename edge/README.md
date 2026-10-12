@@ -139,9 +139,7 @@ Every timer the Python server ran, ported:
   `database.db`. Where unsure (an unreadable watermark, a
   failed read) the answer is yes, and the sweep decides.
   `tests/test_edge_serving.py` holds every gate to the recorded verdict of
-  the Python sweep it guards, through `jarvis-edge --maintenance-due`. One thing waits longer: the
-  first-run seeding of discrete memory from the old blob now happens with the
-  first pass that has a message to read.
+  the Python sweep it guards, through `jarvis-edge --maintenance-due`.
 
 ## The bots (`src/bots/`)
 
@@ -487,7 +485,7 @@ to it when adding a provider.
 
 A port of `main.py`: `run "<query>" [--model] [--no-save]
 [--debug]`, `config set|get|list|delete`, `model list|add|remove|set-default|sync`,
-`memory show|set|reset`, `start`, and a global `--work-dir`. Arguments are
+`start`, and a global `--work-dir`. Arguments are
 clap's; the test hooks (`--print-schema`, `--cron-next`, `--llm-call`, …) keep
 their raw flags and skip it.
 
@@ -495,25 +493,21 @@ their raw flags and skip it.
   `db/ops.py` does (no validation; a running server reads the row when it next
   needs it). `model` goes through `catalog.rs` and `gql/models.rs`'s
   custom-model helpers; `model sync` through `discovery.rs`, every listing and
-  probe gathered before anything prints. `memory` reads and writes the
-  `AGENTS.md` row as `KvStore` does — `set` stores `{"content": …}` only, and
-  `updated_at` moves only when the value changes. `run` is the chat agent in
+  probe gathered before anything prints. `run` is the chat agent in
   memory (`agent::workflow::run_once`, the workflow agent node's loop, last
   reply returned): no conversation, its own kernel, shut down after; the
   prompt is read from `JARVIS_APP_DIR`.
 - **Failures say why** where Python would have answered something: a
-  `models.custom` row that won't load, an `AGENTS.md` row or file that isn't
-  text; `run` on a model it can't call fails the call. Every command first
+  `models.custom` row that won't load; `run` on a model it can't call fails the call. Every command first
   creates or migrates the database (`schema.rs`), as `main.py`'s `init_db`
-  does, and `memory *` copies the LangGraph store over first, once, as
-  `main.py` does.
+  does.
 - **Output.** The same words as `main.py`, plain: tables are aligned columns,
   a panel is its title and text, `run` prints the reply's Markdown as is.
-  Colour only on a terminal without `NO_COLOR`. `memory reset` asks
-  `[y/N]` as `typer.confirm` does.
+  Colour only on a terminal without `NO_COLOR`.
 - **Departures.** Rich wraps at the console width and swallows `[text]` it reads as
   markup; the edge does neither. Not ported: `reports`/`view` (nothing writes
-  `reports/` any more). `download-voice` and `maintenance *` are gone from
+  `reports/` any more), and `memory show|set|reset` was removed with the
+  free-text `AGENTS.md` memory it edited. `download-voice` and `maintenance *` are gone from
   both: voice was removed, and the maintenance commands converted
   `checkpoints.db`.
 - Compared with `main.py`'s recorded output, exit codes and rows in

@@ -5,12 +5,6 @@
     0,
     "Not set: x"
    ]
-  },
-  {
-   "$tuple": [
-    0,
-    "No memory entry stored. The agent will use only the hardcoded system prompt."
-   ]
   }
  ],
  "test_config": [
@@ -104,95 +98,6 @@
     ]
    }
   ]
- ],
- "test_memory": [
-  {
-   "$tuple": [
-    0,
-    "                       Config Settings\n┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━┓\n┃ Key                            ┃ Value ┃ Updated          ┃\n┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━┩\n│ migration.artifact_message_ids │ 1     │ 2026-10-08 17:14 │\n└────────────────────────────────┴───────┴──────────────────┘"
-   ]
-  },
-  {
-   "$tuple": [
-    0,
-    "No memory entry stored. The agent will use only the hardcoded system prompt."
-   ]
-  },
-  [
-   {
-    "$tuple": [
-     "jarvis.migrations",
-     "langgraph_store"
-    ]
-   }
-  ],
-  {
-   "$tuple": [
-    0,
-    "✓ Wrote 32 chars from <tmp>/agents.md to memory"
-   ]
-  },
-  {
-   "$tuple": [
-    0,
-    "✓ Wrote 32 chars from <tmp>/agents.md to memory"
-   ]
-  },
-  [
-   {
-    "$tuple": [
-     "memory",
-     "AGENTS.md",
-     "{\"content\": \"# Notes\\nPrefers metric — café ✓\\n\"}"
-    ]
-   }
-  ],
-  {
-   "$tuple": [
-    0,
-    "Updated: 2026-10-08 17:14:49.545121 (32 chars)\n\n╭───────────────────────────────────────────────────────────────────────────────────────────── AGENTS.md ──────────────────────────────────────────────────────────────────────────────────────────────╮\n│                                                                                                Notes                                                                                                 │\n│                                                                                                                                                                                                      │\n│ Prefers metric — café ✓                                                                                                                                                                              │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯"
-   ]
-  },
-  {
-   "$tuple": [
-    1,
-    "Delete the agent memory? [y/N]: Aborted."
-   ]
-  },
-  [
-   {
-    "$tuple": [
-     "memory",
-     "AGENTS.md",
-     "{\"content\": \"# Notes\\nPrefers metric — café ✓\\n\"}"
-    ]
-   }
-  ],
-  {
-   "$tuple": [
-    0,
-    "✓ Deleted the memory entry"
-   ]
-  },
-  {
-   "$tuple": [
-    0,
-    "No memory entry to delete."
-   ]
-  },
-  {
-   "$tuple": [
-    1,
-    "Refusing to set an empty memory entry. Use 'memory reset' instead."
-   ]
-  },
-  {
-   "$tuple": [
-    1,
-    "File not found: <tmp>/missing.md"
-   ]
-  },
-  []
  ],
  "test_model_sync": [
   {
@@ -783,12 +688,6 @@
    "$tuple": [
     0,
     "                       Config Settings\n┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━┓\n┃ Key                            ┃ Value ┃ Updated          ┃\n┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━┩\n│ migration.artifact_message_ids │ 1     │ 2026-10-08 17:14 │\n└────────────────────────────────┴───────┴──────────────────┘"
-   ]
-  },
-  {
-   "$tuple": [
-    1,
-    ""
    ]
   },
   {

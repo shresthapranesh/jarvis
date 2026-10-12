@@ -33,7 +33,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # Every frontend query whose root fields the edge implements must be listed
 # here, so porting a field can't silently route an operation nobody diffed.
 PARITY_OPERATIONS = {
-    "AgentMemoryQuery",
     "ConversationListQuery",
     "ConversationPageQuery",
     "ConversationPageRefetchQuery",
@@ -780,31 +779,6 @@ async def test_a_consolidation_of_an_unknown_project_is_refused(edge, seeded):
     q = "mutation($id: ID!) { consolidateProjectMemory(id: $id) }"
     refused = await _edge(edge, q, {"id": _gid("Project", "nope")})
     assert refused.json()["errors"][0]["message"] == "project not found"
-
-
-async def test_agent_memory_blob(twin):
-    """The free-text `AGENTS.md` blob in `kv_store`: read (a list content
-    joined), the pre-fix `/AGENTS.md` key copied over on first touch, replaced
-    keeping its `created_at`, deleted — after which the legacy copy comes back,
-    as in Python."""
-    fields = "content exists modifiedAt"
-    read = _relay_text("AgentMemoryQuery")
-    update = f"mutation($c: String!) {{ updateMemory(content: $c) {{ {fields} }} }}"
-    delete = f"mutation {{ deleteAgentMemory {{ {fields} }} }}"
-    await twin.run(read)
-    await twin.run(update, {"c": "first"})  # no blob: created now
-    await twin.run(delete)
-    legacy = json.dumps({"content": ["- likes tea", "- café"], "created_at": "2025-01-01T00:00:00+00:00",
-                         "modified_at": "2025-02-01T00:00:00+00:00"})
-    _sql_edge(twin, "INSERT INTO kv_store (namespace, key, value, created_at, updated_at) "
-                    "VALUES ('memory', '/AGENTS.md', ?, '2025-01-01 00:00:00', '2025-01-01 00:00:00')", legacy)
-    await twin.run(read)
-    await twin.run(update, {"c": "- likes tea\n- naïve ✓"})
-    await twin.run(read)
-    await twin.run(delete)
-    await twin.run(read)  # the legacy copy, again
-    await twin.run(update, {"c": ""})
-    await twin.run(read)
 
 
 async def test_setting_reads_and_writes(twin, monkeypatch):
