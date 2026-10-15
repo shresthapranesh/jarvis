@@ -38,7 +38,7 @@ import {
   parentDotStyle,
   parents,
 } from './TaskBoard.styles';
-import {btn, field, iconBtn, page, Switch} from './ui';
+import {btn, field, iconBtn, page, PageHeader, Switch} from './ui';
 
 const COLUMNS: Array<{key: BoardTaskStatus; label: string}> = [
   {key: 'todo', label: 'Todo'},
@@ -144,6 +144,8 @@ export function TaskBoard() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<BoardTask | null>(null);
+  // The one column a phone shows; wider screens show them all and ignore it.
+  const [phoneCol, setPhoneCol] = useState<BoardTaskStatus>('todo');
 
   function closeEditor() {
     setEditor(null);
@@ -401,36 +403,64 @@ export function TaskBoard() {
 
   return (
     <div {...stylex.props(board.page)}>
-      <header {...stylex.props(page.header)}>
-        <div {...stylex.props(page.headerMain)}>
-          <h1 {...stylex.props(page.title)}>Board</h1>
-          <p {...stylex.props(page.subtitle)}>
-            Durable background tasks the agent works through on its own. Cards in{' '}
-            <strong>ready</strong> are picked up automatically; dependent tasks wait until their
-            parents finish and receive their summaries as context. The agent can queue work here too
-            via <code>create_task(…)</code>.
-          </p>
-        </div>
-        <div {...stylex.props(page.headerActions)}>
+      <PageHeader
+        title="Board"
+        subtitle="Background tasks the agent works through on its own."
+        details={
+          <>
+            Cards in <strong>Ready</strong> are picked up automatically. A task that depends on
+            others waits until they finish, then gets their summaries as context. The agent can add
+            tasks here too.
+          </>
+        }
+        actions={
           <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> New task
           </button>
-        </div>
-      </header>
+        }
+      />
 
       {actionError && !editor && <div {...stylex.props(page.error)}>{actionError}</div>}
 
+      {
+        <div {...stylex.props(board.tabs)} role="tablist" aria-label="Board columns">
+          {COLUMNS.map((col) => (
+            <button
+              key={col.key}
+              type="button"
+              role="tab"
+              aria-selected={phoneCol === col.key}
+              {...stylex.props(board.tab, phoneCol === col.key && board.tabActive)}
+              onClick={() => setPhoneCol(col.key)}
+            >
+              {col.label}
+              <span {...stylex.props(board.tabCount)}>
+                {all.filter((t) => t.status === col.key).length}
+              </span>
+            </button>
+          ))}
+        </div>
+      }
       {
         <div {...stylex.props(board.columns)}>
           {COLUMNS.map((col) => {
             const cards = all.filter((t) => t.status === col.key);
             return (
-              <section key={col.key} {...stylex.props(board.col)}>
+              <section
+                key={col.key}
+                {...stylex.props(board.col, phoneCol !== col.key && board.colOffPhone)}
+              >
                 <header {...stylex.props(board.colHead)}>
                   <span {...stylex.props(colTitleStyle(col.key))}>{col.label}</span>
                   <span {...stylex.props(board.colCount)}>{cards.length}</span>
                 </header>
-                <ul {...stylex.props(board.cards)}>{cards.map(renderCard)}</ul>
+                <ul {...stylex.props(board.cards)}>
+                  {cards.length > 0 ? (
+                    cards.map(renderCard)
+                  ) : (
+                    <li {...stylex.props(board.emptyCol)}>No tasks</li>
+                  )}
+                </ul>
               </section>
             );
           })}

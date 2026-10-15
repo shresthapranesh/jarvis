@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 
-import {kindBadge, kindBadgeStyle, page} from '../components/ui';
+import {kindBadge, kindBadgeStyle, page, PageHeader} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {
   refreshRunningTasks,
@@ -46,14 +46,11 @@ function TasksPage() {
   }
 
   return (
-    <div {...stylex.props(page.scroll, styles.page)}>
-      <header {...stylex.props(styles.header)}>
-        <h1 {...stylex.props(page.title)}>Tasks</h1>
-        <p {...stylex.props(page.subtitle, styles.subtitle)}>
-          Currently running across chat, automations, and workflows. Tasks disappear when they
-          finish or stop.
-        </p>
-      </header>
+    <div {...stylex.props(page.scroll)}>
+      <PageHeader
+        title="Tasks"
+        subtitle="Everything running right now, across chats, automations and workflows."
+      />
 
       {!loaded ? (
         <div {...stylex.props(page.empty)}>Loading…</div>
@@ -138,10 +135,6 @@ function TasksPage() {
 }
 
 const styles = stylex.create({
-  // The header carries its own bottom margin, so the flex gap is off.
-  page: {gap: 0},
-  header: {marginBlockEnd: 24},
-  subtitle: {maxWidth: 540},
   list: {gap: 8},
 
   row: {

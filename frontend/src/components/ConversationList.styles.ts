@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {channels, colors, radii, space, type} from '../theme/tokens.stylex';
+import {bp, channels, colors, radii, space, type} from '../theme/tokens.stylex';
 
 /* ── Styles for ConversationList.tsx ───────────────────────────────────
    The sidebar list: its header, the bucketed sections, one row per
@@ -107,6 +107,15 @@ export const row = stylex.create({
       'background 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
     '--conv-title-color': {default: colors.textDim, ':hover': colors.text},
     '--conv-menu-opacity': {default: '0', ':hover': '1'},
+    // The menu button takes no width until the row is hovered or focused, so
+    // a row at rest gives the whole line to its title. A touch screen has no
+    // hover to reveal it, so there it keeps its width.
+    '--conv-menu-w': {
+      default: '0px',
+      ':hover': '22px',
+      ':focus-within': '22px',
+      [bp.coarse]: '22px',
+    },
     '--conv-time-max-w': {default: '0', ':hover': '5rem', ':focus-within': '5rem'},
     '--conv-time-ml': {default: '0', ':hover': space.s2, ':focus-within': space.s2},
     '--conv-time-opacity': {default: '0', ':hover': '1', ':focus-within': '1'},
@@ -119,11 +128,12 @@ export const row = stylex.create({
     borderInlineStartColor: colors.accent,
     '--conv-title-color': colors.text,
     '--conv-menu-opacity': '1',
+    '--conv-menu-w': '22px',
   },
   // The row publishes its hover/active state as custom properties, because
   // three of its children are styled by it and no selector on a child can see
   // its parent's `:hover`.
-  menuOpen: {'--conv-menu-opacity': '1'},
+  menuOpen: {'--conv-menu-opacity': '1', '--conv-menu-w': '22px'},
   link: {
     flex: 1,
     minWidth: 0,
@@ -176,21 +186,23 @@ export const row = stylex.create({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 22,
+    width: 'var(--conv-menu-w)',
     height: 22,
     flexShrink: 0,
+    overflow: 'hidden',
     backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: {default: 'transparent', ':hover': colors.accentDim},
+    // No border at rest: at zero width it would still be 2px of the row.
+    borderWidth: 0,
+    boxShadow: {default: null, ':hover': `inset 0 0 0 1px ${colors.accentDim}`},
     borderRadius: 2,
     color: {default: colors.textDim, ':hover': colors.accent},
     cursor: 'pointer',
     padding: 0,
     opacity: 'var(--conv-menu-opacity)',
-    transition: 'opacity 0.15s, color 0.15s, border-color 0.15s',
+    transition:
+      'width 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.15s, color 0.15s, box-shadow 0.15s',
   },
-  menuBtnOpen: {color: colors.accent, borderColor: colors.accentDim},
+  menuBtnOpen: {color: colors.accent, boxShadow: `inset 0 0 0 1px ${colors.accentDim}`},
 });
 
 /** The pin / rename / delete popover, portalled to the body. */

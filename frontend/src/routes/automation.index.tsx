@@ -24,7 +24,7 @@ import {
   XIcon,
 } from '../components/icons';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
-import {field, page} from '../components/ui';
+import {btn, field, OverflowMenu, overflowSplit, page, PageHeader} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
 import {formatNextRun, formatRelativeTime} from '../lib/api';
@@ -45,10 +45,8 @@ import {
   confirmWarn,
   empty,
   filters,
-  header,
   kpi,
   list,
-  newBtn,
   rail as railStyles,
   statusDot,
   typeIcon,
@@ -117,7 +115,7 @@ function AutomationCard({auto, onOpen, onEdit, onDelete, onTrigger, onToggle}: C
     >
       <div {...stylex.props(railStyles.base, railStyles[rail])} aria-hidden="true" />
 
-      <div {...stylex.props(typeIcon.base, typeIcon[auto.input_type])}>
+      <div {...stylex.props(typeIcon.base, typeIcon[auto.input_type], card.icon)}>
         <TypeIcon type={auto.input_type} size={16} />
       </div>
 
@@ -184,16 +182,32 @@ function AutomationCard({auto, onOpen, onEdit, onDelete, onTrigger, onToggle}: C
         >
           <PlayIcon size={13} />
         </button>
-        <button {...stylex.props(card.action)} title="Edit" onClick={() => onEdit(auto)}>
+        <button
+          {...stylex.props(card.action, overflowSplit.wideOnly)}
+          title="Edit"
+          onClick={() => onEdit(auto)}
+        >
           <EditIcon size={14} />
         </button>
         <button
-          {...stylex.props(card.action, card.actionDanger)}
+          {...stylex.props(card.action, card.actionDanger, overflowSplit.wideOnly)}
           title="Delete"
           onClick={() => onDelete(auto)}
         >
           <TrashIcon size={14} />
         </button>
+        <OverflowMenu
+          style={overflowSplit.narrowOnly}
+          items={[
+            {label: 'Edit', icon: <EditIcon size={14} />, onSelect: () => onEdit(auto)},
+            {
+              label: 'Delete',
+              icon: <TrashIcon size={14} />,
+              onSelect: () => onDelete(auto),
+              danger: true,
+            },
+          ]}
+        />
       </div>
     </div>
   );
@@ -306,17 +320,16 @@ function AutomationPage() {
 
   return (
     <div {...stylex.props(page.root)}>
-      <header {...stylex.props(header.root)}>
-        <div {...stylex.props(header.titleRow)}>
-          <div {...stylex.props(header.titleBlock)}>
-            <h1 {...stylex.props(header.title)}>Automations</h1>
-            <span {...stylex.props(header.subtitle)}>Scheduled and on-demand jobs.</span>
-          </div>
-          <button {...stylex.props(newBtn.base)} onClick={openCreate}>
-            <PlusIcon size={13} />
-            <span>New automation</span>
-          </button>
-        </div>
+      <div {...stylex.props(page.bar)}>
+        <PageHeader
+          title="Automations"
+          subtitle="Prompts, scripts and webhooks that run on a schedule or when you start them."
+          actions={
+            <button {...stylex.props(btn.base, btn.primary)} onClick={openCreate}>
+              <PlusIcon size={14} /> New automation
+            </button>
+          }
+        />
 
         <div {...stylex.props(kpi.grid)}>
           <div {...stylex.props(kpi.chip)}>
@@ -390,7 +403,7 @@ function AutomationPage() {
             </div>
           </div>
         )}
-      </header>
+      </div>
 
       <div {...stylex.props(list.container)}>
         {automations.length === 0 && (
@@ -403,8 +416,8 @@ function AutomationPage() {
               Schedule prompts, run scripts on a cron, or trigger webhooks. Anything you'd want to
               fire automatically — set it up here.
             </p>
-            <button {...stylex.props(newBtn.base)} onClick={openCreate}>
-              <PlusIcon size={13} />
+            <button {...stylex.props(btn.base, btn.primary)} onClick={openCreate}>
+              <PlusIcon size={14} />
               <span>Create your first automation</span>
             </button>
           </div>

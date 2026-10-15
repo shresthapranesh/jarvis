@@ -14,7 +14,7 @@ import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
 import {item, skill as skillStyles} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, field, iconBtn, page, Switch} from './ui';
+import {btn, field, iconBtn, OverflowMenu, overflowSplit, page, PageHeader, Switch} from './ui';
 
 interface Draft {
   name: string;
@@ -126,16 +126,32 @@ export function SkillsView() {
               onChange={(next) => void updateAction.run(s.id, {enabled: next})}
               title={s.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}
             />
-            <button {...stylex.props(iconBtn.base)} title="Edit skill" onClick={() => openEdit(s)}>
+            <button
+              {...stylex.props(iconBtn.base, overflowSplit.wideOnly)}
+              title="Edit skill"
+              onClick={() => openEdit(s)}
+            >
               <EditIcon size={14} />
             </button>
             <button
-              {...stylex.props(iconBtn.base, iconBtn.danger)}
+              {...stylex.props(iconBtn.base, iconBtn.danger, overflowSplit.wideOnly)}
               title="Delete skill"
               onClick={() => setDeleteTarget(s)}
             >
               <TrashIcon size={14} />
             </button>
+            <OverflowMenu
+              style={overflowSplit.narrowOnly}
+              items={[
+                {label: 'Edit', icon: <EditIcon size={14} />, onSelect: () => openEdit(s)},
+                {
+                  label: 'Delete',
+                  icon: <TrashIcon size={14} />,
+                  onSelect: () => setDeleteTarget(s),
+                  danger: true,
+                },
+              ]}
+            />
           </div>
         </div>
         <p {...stylex.props(skillStyles.desc)}>{s.description}</p>
@@ -152,22 +168,22 @@ export function SkillsView() {
 
   return (
     <div {...stylex.props(page.scroll)}>
-      <header {...stylex.props(page.header)}>
-        <div {...stylex.props(page.headerMain)}>
-          <h1 {...stylex.props(page.title)}>Skills</h1>
-          <p {...stylex.props(page.subtitle)}>
-            Reusable, named capabilities the agent can invoke. The <strong>description</strong> is
-            the routing key — matched against what you ask to decide when a skill is relevant —
-            while the <strong>body</strong> holds the full procedure, loaded only when the skill is
-            actually used. The agent can also author its own via <code>create_skill(…)</code>.
-          </p>
-        </div>
-        <div {...stylex.props(page.headerActions)}>
+      <PageHeader
+        title="Skills"
+        subtitle="Reusable instructions the agent follows when a request calls for them."
+        details={
+          <>
+            The <strong>description</strong> decides when a skill is relevant: it is matched against
+            what you ask. The <strong>body</strong> holds the full procedure and is loaded only when
+            the skill is used. The agent can write its own skills too.
+          </>
+        }
+        actions={
           <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
             <PlusIcon size={14} /> New skill
           </button>
-        </div>
-      </header>
+        }
+      />
 
       {actionError && !editorOpen && <div {...stylex.props(page.error)}>{actionError}</div>}
 

@@ -31,6 +31,8 @@ interface Props {
    */
   hasSpine?: boolean;
   spineCollapsed?: boolean;
+  /** The steps panel is open; on a wide screen the thread makes room for it. */
+  panelOpen?: boolean;
   /** Artifacts keyed by the assistant message that produced them. */
   artifactsByMessage?: Map<string, ArtifactCard[]>;
   /** Artifacts the in-flight run has produced so far. */
@@ -64,6 +66,7 @@ export function MessageThread({
   onShowSteps,
   hasSpine,
   spineCollapsed,
+  panelOpen,
   artifactsByMessage,
   streamingArtifacts,
   browsing,
@@ -82,6 +85,7 @@ export function MessageThread({
         styles.scroller,
         hasSpine && styles.scrollerWithSpine,
         hasSpine && spineCollapsed && styles.scrollerWithSpineCollapsed,
+        panelOpen && styles.scrollerWithPanel,
       )}
     >
       {topRef && <div ref={topRef} {...stylex.props(styles.topSentinel)} />}
@@ -167,6 +171,17 @@ const styles = stylex.create({
   scrollerWithSpineCollapsed: {
     paddingInlineEnd: {
       default: `calc(${layout.spineCollapsedW} + ${space.s5})`,
+      '@media (max-width: 1100px)': space.s5,
+    },
+  },
+  /**
+   * The steps panel sits over the spine, so on a wide screen the thread
+   * reserves the panel's width instead and recentres beside it. Below 1100px
+   * there is no room to share, and the panel floats over the thread.
+   */
+  scrollerWithPanel: {
+    paddingInlineEnd: {
+      default: `calc(${layout.rightW} + ${space.s5})`,
       '@media (max-width: 1100px)': space.s5,
     },
   },

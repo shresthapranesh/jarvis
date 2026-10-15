@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useState} from 'react';
 
-import {kindBadge, kindBadgeStyle, page} from '../components/ui';
+import {kindBadge, kindBadgeStyle, page, PageHeader} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {
   refreshPendingApprovals,
@@ -165,14 +165,18 @@ function ApprovalsPage() {
   }, {});
 
   return (
-    <div {...stylex.props(page.scroll, styles.page)}>
-      <header {...stylex.props(styles.header)}>
-        <h1 {...stylex.props(page.title)}>Approvals</h1>
-        <p {...stylex.props(page.subtitle, styles.subtitle)}>
-          Everything waiting on a human answer. Requests are durable and survive a restart — but a
-          suspended run may not: workflow pauses are marked expired at startup and drop off this
-          list, while “runs on approval” items block nothing and wait indefinitely.
-        </p>
+    <div {...stylex.props(page.scroll)}>
+      <PageHeader
+        title="Approvals"
+        subtitle="Requests waiting for your answer before the agent goes on."
+        details={
+          <>
+            Requests survive a restart, but a paused workflow does not: it is marked expired when
+            the server starts and drops off this list. Items marked “runs on approval” block nothing
+            and wait until you answer.
+          </>
+        }
+      >
         {approvals.length > 0 && (
           <div {...stylex.props(countStyles.row)}>
             <span {...stylex.props(countStyles.total)}>{approvals.length} pending</span>
@@ -183,7 +187,7 @@ function ApprovalsPage() {
             ))}
           </div>
         )}
-      </header>
+      </PageHeader>
 
       {!loaded ? (
         <div {...stylex.props(page.empty)}>Loading…</div>
@@ -199,10 +203,3 @@ function ApprovalsPage() {
     </div>
   );
 }
-
-const styles = stylex.create({
-  /** The header carries its own bottom margin, so the flex gap is off. */
-  page: {gap: 0},
-  header: {marginBlockEnd: 24},
-  subtitle: {maxWidth: 540},
-});

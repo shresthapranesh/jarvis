@@ -21,23 +21,22 @@ export const board = stylex.create({
   },
   columns: {
     display: 'flex',
-    gap: 12,
-    alignItems: 'flex-start',
+    gap: 10,
+    // Every column runs the full height, so an empty one still reads as a
+    // place a card can be rather than shrinking to its header.
+    alignItems: 'stretch',
     flex: 1,
     minHeight: 0,
     overflowX: 'auto',
     paddingBlockEnd: 8,
-    // The row already scrolls; snapping just stops it resting mid-column.
-    scrollSnapType: {default: null, '@media (max-width: 768px)': 'x mandatory'},
   },
   col: {
-    // Flex-basis over min-width on a phone, so one column fills the screen
-    // with a peek of the next — the peek is what says there is more.
-    flexGrow: {default: 1, '@media (max-width: 768px)': 0},
-    flexShrink: {default: 1, '@media (max-width: 768px)': 0},
-    flexBasis: {default: 0, '@media (max-width: 768px)': '82%'},
-    minWidth: {default: 210, '@media (max-width: 768px)': null},
-    scrollSnapAlign: {default: null, '@media (max-width: 768px)': 'start'},
+    // Five columns at 160px fit beside the default rail at 1200px. On a phone
+    // only the column picked in the tab bar shows, at full width.
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: {default: 0, '@media (max-width: 768px)': '100%'},
+    minWidth: {default: 160, '@media (max-width: 768px)': null},
     maxHeight: '100%',
     display: 'flex',
     flexDirection: 'column',
@@ -49,7 +48,8 @@ export const board = stylex.create({
     padding: 10,
   },
   colHead: {
-    display: 'flex',
+    // On a phone the tab bar already names the column.
+    display: {default: 'flex', '@media (max-width: 768px)': 'none'},
     justifyContent: 'space-between',
     alignItems: 'baseline',
     fontFamily: type.mono,
@@ -69,6 +69,8 @@ export const board = stylex.create({
   colTitleDone: {color: colors.ok},
   colCount: {fontSize: type.tMicro, color: colors.textFaint},
 
+  /** Every column but the picked one, on a phone. */
+  colOffPhone: {display: {default: 'flex', '@media (max-width: 768px)': 'none'}},
   cards: {
     listStyle: 'none',
     margin: 0,
@@ -77,8 +79,51 @@ export const board = stylex.create({
     flexDirection: 'column',
     gap: 8,
     overflowY: 'auto',
+    flex: 1,
     minHeight: 24,
   },
+  emptyCol: {
+    paddingBlock: 18,
+    textAlign: 'center',
+    fontSize: type.tSmall,
+    color: colors.textFaint,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    borderRadius: 3,
+  },
+
+  /** The column picker that replaces side-scrolling on a phone. */
+  tabs: {
+    display: {default: 'none', '@media (max-width: 768px)': 'flex'},
+    gap: 2,
+    overflowX: 'auto',
+    flexShrink: 0,
+    padding: 3,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.border,
+    borderRadius: 3,
+  },
+  tab: {
+    flex: '1 1 auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    minHeight: 34,
+    paddingInline: 6,
+    backgroundColor: 'transparent',
+    borderStyle: 'none',
+    borderRadius: 2,
+    color: colors.textDim,
+    fontFamily: 'inherit',
+    fontSize: type.tSmall,
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+  },
+  tabActive: {backgroundColor: colors.surface3, color: colors.text, fontWeight: 500},
+  tabCount: {fontSize: type.tMicro, color: colors.textFaint},
 });
 
 export const card = stylex.create({

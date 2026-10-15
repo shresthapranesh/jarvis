@@ -55,4 +55,12 @@ export const conv = stylex.create({
       '@media (max-width: 860px)': 12,
     },
   },
+  /** The steps panel's width on a wide screen — see `scrollerWithPanel` in MessageThread. */
+  footerWithPanel: {
+    paddingInlineEnd: {
+      default: `calc(${layout.rightW} + ${space.s5})`,
+      '@media (max-width: 1100px)': space.s5,
+      '@media (max-width: 860px)': 12,
+    },
+  },
 });

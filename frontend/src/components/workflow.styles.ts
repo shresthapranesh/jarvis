@@ -17,25 +17,12 @@ import {channels, colors, css, layout, type} from '../theme/tokens.stylex';
 /** The `/workflow` index: a header, an optional create form, and rows. */
 export const list = stylex.create({
   page: {display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto'},
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBlockStart: 18,
-    paddingBlockEnd: 14,
-    paddingInline: 24,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
-    flexShrink: 0,
-  },
-  title: {fontSize: type.tBody, fontWeight: 600, color: colors.text, margin: 0},
   createForm: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
     paddingBlock: 12,
-    paddingInline: 24,
+    paddingInline: layout.pageGutter,
     borderBlockEndWidth: 1,
     borderBlockEndStyle: 'solid',
     borderBlockEndColor: colors.border,
@@ -45,7 +32,7 @@ export const list = stylex.create({
   createInput: {flex: 1},
   empty: {
     paddingBlock: 40,
-    paddingInline: 24,
+    paddingInline: layout.pageGutter,
     color: colors.textDim,
     fontSize: type.tUi,
     textAlign: 'center',
@@ -57,7 +44,7 @@ export const list = stylex.create({
     justifyContent: 'space-between',
     gap: 12,
     paddingBlock: 14,
-    paddingInline: 24,
+    paddingInline: layout.pageGutter,
     borderBlockEndWidth: 1,
     borderBlockEndStyle: 'solid',
     borderBlockEndColor: colors.border,
@@ -79,29 +66,6 @@ export const list = stylex.create({
   rowActions: {display: 'flex', gap: 6, flexShrink: 0},
 });
 
-/** The gradient "+ New" / "Create" button the list header uses. */
-export const newBtn = stylex.create({
-  base: {
-    backgroundImage: `linear-gradient(135deg, ${colors.accentStrong}, ${colors.accent})`,
-    borderStyle: 'none',
-    borderRadius: 3,
-    color: colors.accentContrast,
-    fontSize: type.tUi,
-    fontFamily: 'inherit',
-    paddingBlock: 6,
-    paddingInline: 14,
-    cursor: {default: 'pointer', ':disabled': 'not-allowed'},
-    opacity: {default: 1, ':disabled': 0.5},
-    boxShadow: {
-      default: `0 2px 10px rgba(${channels.accent}, 0.3)`,
-      ':hover': `0 4px 16px rgba(${channels.accent}, 0.45)`,
-    },
-    transform: {default: null, ':hover': 'translateY(-1px)'},
-    transition: 'box-shadow 0.2s, transform 0.15s',
-  },
-});
-
-/** The two buttons that sit in the canvas toolbar and the top bar. */
 export const wfBtn = stylex.create({
   save: {
     backgroundColor: colors.surface2,

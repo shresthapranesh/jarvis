@@ -11,7 +11,7 @@ import {decodeGlobalId} from '../relay/globalId';
 import {ArtifactDetail} from './ArtifactPanel';
 import {detail} from './ArtifactPanel.styles';
 import {browser} from './ArtifactsBrowser.styles';
-import {closeBtn} from './ui';
+import {closeBtn, page, PageHeader} from './ui';
 
 const fileIcon = (
   <svg
@@ -142,12 +142,12 @@ export function ArtifactsBrowser() {
   return (
     <div ref={pageRef} {...stylex.props(browser.page)}>
       <div {...stylex.props(browser.tablePane)}>
-        <header {...stylex.props(browser.header)}>
-          <h1 {...stylex.props(browser.title)}>Artifacts</h1>
-          <span {...stylex.props(browser.count)}>
-            {rows.length} {rows.length === 1 ? 'artifact' : 'artifacts'}
-          </span>
-        </header>
+        <div {...stylex.props(page.bar)}>
+          <PageHeader
+            title="Artifacts"
+            subtitle={`Documents, code and files the agent has made · ${rows.length} ${rows.length === 1 ? 'artifact' : 'artifacts'}`}
+          />
+        </div>
 
         {rows.length === 0 ? (
           <div {...stylex.props(browser.empty)}>No artifacts yet.</div>

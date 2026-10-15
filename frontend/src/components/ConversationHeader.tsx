@@ -16,6 +16,8 @@ interface Props {
   runState: RunState;
   /** Mirrors the footer: how much of the right edge the run spine takes. */
   spine: 'none' | 'open' | 'collapsed';
+  /** The steps panel is open: the bar makes room for it, as the thread does. */
+  panelOpen?: boolean;
   /** Saves a new title. Without it the title is plain text. */
   onRename?: (title: string) => Promise<void>;
 }
@@ -40,7 +42,15 @@ function startedOn(iso: string): string {
  * with the prose under it rather than with the page edge. The model is left
  * out on purpose: the composer's picker shows it, and is always on screen.
  */
-export function ConversationHeader({title, project, createdAt, runState, spine, onRename}: Props) {
+export function ConversationHeader({
+  title,
+  project,
+  createdAt,
+  runState,
+  spine,
+  panelOpen,
+  onRename,
+}: Props) {
   const started = startedOn(createdAt);
   return (
     <header
@@ -48,6 +58,7 @@ export function ConversationHeader({title, project, createdAt, runState, spine, 
         styles.bar,
         spine === 'open' && styles.withSpine,
         spine === 'collapsed' && styles.withSpineCollapsed,
+        panelOpen && styles.withPanel,
       )}
     >
       <div {...stylex.props(styles.column)}>
@@ -196,6 +207,13 @@ const styles = stylex.create({
   withSpineCollapsed: {
     paddingInlineEnd: {
       default: `calc(${layout.spineCollapsedW} + ${space.s5})`,
+      '@media (max-width: 1100px)': space.s5,
+      '@media (max-width: 768px)': 14,
+    },
+  },
+  withPanel: {
+    paddingInlineEnd: {
+      default: `calc(${layout.rightW} + ${space.s5})`,
       '@media (max-width: 1100px)': space.s5,
       '@media (max-width: 768px)': 14,
     },

@@ -563,6 +563,7 @@ function ConversationPage() {
         createdAt={data.createdAt}
         runState={pendingInterrupt ? 'waiting' : isActive ? 'running' : null}
         spine={!showSpine ? 'none' : isActive ? 'open' : 'collapsed'}
+        panelOpen={panelOpen}
         onRename={handleRename}
       />
       {isEphemeral && (
@@ -610,6 +611,7 @@ function ConversationPage() {
         openArtifactId={artifactPanelOpen ? selectedArtifactId : null}
         hasSpine={showSpine}
         spineCollapsed={!isActive}
+        panelOpen={panelOpen}
         queuedMessages={queuedMessages}
         onUnqueue={canQueue ? handleUnqueue : undefined}
         settledStreamId={lastStreamedRef.current}
@@ -651,6 +653,7 @@ function ConversationPage() {
           conv.footer,
           showSpine && conv.footerWithSpine,
           showSpine && !isActive && conv.footerWithSpineCollapsed,
+          panelOpen && conv.footerWithPanel,
         )}
       >
         <DeferredApprovals conversationId={id} />

@@ -15,7 +15,7 @@ import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
 import {item, kindDotStyle, kindDot, memory, seg} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, field, iconBtn, page} from './ui';
+import {btn, field, iconBtn, page, PageHeader} from './ui';
 
 const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
   fact: {label: 'Fact', hint: 'surfaced by relevance each turn'},
@@ -156,31 +156,32 @@ export function MemoryView() {
 
   return (
     <div {...stylex.props(page.scroll)}>
-      <header {...stylex.props(page.header)}>
-        <div {...stylex.props(page.headerMain)}>
-          <h1 {...stylex.props(page.title)}>Memory</h1>
-          <p {...stylex.props(page.subtitle)}>
-            The agent's long-term memory — discrete items embedded for retrieval.{' '}
-            <strong>Core</strong> items are injected into every system prompt; <strong>fact</strong>{' '}
-            items are surfaced by relevance each turn. The agent can also write them via{' '}
-            <code>remember(…)</code>, or the scheduled consolidation job extracts them from recent
-            conversations.
-          </p>
-        </div>
-        <div {...stylex.props(page.headerActions)}>
-          <button
-            {...stylex.props(btn.base)}
-            onClick={() => void consolidateAction.run()}
-            disabled={consolidateAction.pending}
-            title="Run the LLM that extracts new memory items from recent conversations"
-          >
-            {consolidateAction.pending ? 'Consolidating…' : 'Consolidate'}
-          </button>
-          <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
-            <PlusIcon size={14} /> Add memory
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        title="Memory"
+        subtitle="What the agent remembers about you across conversations."
+        details={
+          <>
+            <strong>Core</strong> items go into every conversation. <strong>Facts</strong> are
+            brought in when they are relevant to what you ask. The agent saves new items as it
+            learns, and <strong>Consolidate</strong> pulls more out of recent conversations.
+          </>
+        }
+        actions={
+          <>
+            <button
+              {...stylex.props(btn.base)}
+              onClick={() => void consolidateAction.run()}
+              disabled={consolidateAction.pending}
+              title="Run the LLM that extracts new memory items from recent conversations"
+            >
+              {consolidateAction.pending ? 'Consolidating…' : 'Consolidate'}
+            </button>
+            <button {...stylex.props(btn.base, btn.primary)} onClick={openAdd}>
+              <PlusIcon size={14} /> Add memory
+            </button>
+          </>
+        }
+      />
 
       {actionError && !editorOpen && <div {...stylex.props(page.error)}>{actionError}</div>}
 

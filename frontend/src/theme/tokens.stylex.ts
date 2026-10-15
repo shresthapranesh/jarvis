@@ -183,6 +183,11 @@ export const layout = stylex.defineVars({
   // thread, header and composer reserve for it, which is the only reason it
   // is a token.
   spineCollapsedW: '36px',
+  // Every page's title and content start this far from the rail and the top,
+  // whether the page scrolls as a document or pins a toolbar header. Phones
+  // override both with literals in their own media conditions.
+  pageGutter: '40px',
+  pageTop: '32px',
   // Kept as a token so the ~20 sites that still declare `backdropFilter` need
   // no edit: they now compile to a no-op. Panels are opaque stock instead.
   blur: 'none',

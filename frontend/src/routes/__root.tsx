@@ -138,8 +138,12 @@ function RootLayout() {
   }, [pathname]);
 
   const [navWidth, setNavWidth] = useState(() => {
-    const saved = Number(localStorage.getItem('nav-width'));
-    return Number.isFinite(saved) ? Math.min(NAV_MAX_W, Math.max(NAV_MIN_W, saved)) : NAV_DEFAULT_W;
+    // `Number(null)` is 0, which the clamp would turn into the minimum width,
+    // so nothing saved has to mean the default rather than a saved 0.
+    const saved = Number(localStorage.getItem('nav-width') ?? NaN);
+    return Number.isFinite(saved) && saved > 0
+      ? Math.min(NAV_MAX_W, Math.max(NAV_MIN_W, saved))
+      : NAV_DEFAULT_W;
   });
   const [navResizing, setNavResizing] = useState(false);
   const navWidthRef = useRef(navWidth);

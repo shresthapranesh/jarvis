@@ -16,7 +16,7 @@ import {FolderIcon, PlusIcon, TrashIcon} from './icons';
 import {item, skill} from './memory.styles';
 import {projects} from './project.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, field, iconBtn, page} from './ui';
+import {btn, field, iconBtn, page, PageHeader} from './ui';
 
 interface Draft {
   name: string;
@@ -80,21 +80,22 @@ export function ProjectsView() {
 
   return (
     <div {...stylex.props(page.scroll)}>
-      <header {...stylex.props(page.header)}>
-        <div {...stylex.props(page.headerMain)}>
-          <h1>Projects</h1>
-          <p {...stylex.props(page.subtitle)}>
-            Group related conversations under shared <strong>instructions</strong> and a shared{' '}
-            <strong>project memory</strong> the agent maintains itself — everything it learns in one
-            conversation is available to all the others.
-          </p>
-        </div>
-        <div {...stylex.props(page.headerActions)}>
+      <PageHeader
+        title="Projects"
+        subtitle="Group conversations that share instructions and memory."
+        details={
+          <>
+            Every conversation in a project follows its <strong>instructions</strong>. The agent
+            keeps a <strong>project memory</strong> as it works, so what it learns in one
+            conversation is available in the others.
+          </>
+        }
+        actions={
           <button {...stylex.props(btn.base, btn.primary)} onClick={openCreate}>
             <PlusIcon size={14} /> New project
           </button>
-        </div>
-      </header>
+        }
+      />
 
       {actionError && <div {...stylex.props(page.error)}>{actionError}</div>}
 

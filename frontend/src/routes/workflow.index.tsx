@@ -4,8 +4,10 @@ import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {WorkflowListQuery as TWorkflowListQuery} from '../__generated__/WorkflowListQuery.graphql';
+import {PlusIcon} from '../components/icons';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
-import {config, list, modal, newBtn, wfBtn} from '../components/workflow.styles';
+import {btn, page, PageHeader} from '../components/ui';
+import {config, list, modal, wfBtn} from '../components/workflow.styles';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {formatRelativeTime} from '../lib/api';
 import {commitCreateWorkflow} from '../relay/CreateWorkflowMutation';
@@ -69,11 +71,25 @@ function WorkflowListPage() {
 
   return (
     <div {...stylex.props(list.page)}>
-      <div {...stylex.props(list.header)}>
-        <h2 {...stylex.props(list.title)}>Workflows</h2>
-        <button {...stylex.props(newBtn.base)} onClick={() => setShowCreate((v) => !v)}>
-          {showCreate ? 'Cancel' : '+ New'}
-        </button>
+      <div {...stylex.props(page.bar)}>
+        <PageHeader
+          title="Workflows"
+          subtitle="Step-by-step graphs of agents, tools and approvals that you can run again."
+          actions={
+            <button
+              {...stylex.props(btn.base, !showCreate && btn.primary)}
+              onClick={() => setShowCreate((v) => !v)}
+            >
+              {showCreate ? (
+                'Cancel'
+              ) : (
+                <>
+                  <PlusIcon size={14} /> New workflow
+                </>
+              )}
+            </button>
+          }
+        />
       </div>
 
       {showCreate && (
@@ -93,7 +109,7 @@ function WorkflowListPage() {
           />
           <button
             type="submit"
-            {...stylex.props(newBtn.base)}
+            {...stylex.props(btn.base, btn.primary)}
             disabled={createAction.pending || !newName.trim()}
           >
             {createAction.pending ? 'Creating…' : 'Create'}
@@ -102,7 +118,7 @@ function WorkflowListPage() {
       )}
 
       {workflows.length === 0 && (
-        <div {...stylex.props(list.empty)}>No workflows yet. Create one above.</div>
+        <div {...stylex.props(list.empty)}>No workflows yet. Use New workflow to make one.</div>
       )}
 
       {workflows.map((wf) => (

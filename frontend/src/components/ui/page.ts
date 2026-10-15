@@ -3,7 +3,7 @@
    ════════════════════════════════════════════════════════════════════ */
 import * as stylex from '@stylexjs/stylex';
 
-import {channels, colors, type} from '../../theme/tokens.stylex';
+import {channels, colors, layout, type} from '../../theme/tokens.stylex';
 
 /**
  * Page scaffolding. `page.root` is the flex column every route mounts as;
@@ -16,9 +16,9 @@ export const page = stylex.create({
     // 40px of a 390px screen is a tenth of the content, so the gutter closes
     // up on a phone. This used to be a separate `.memory-page, .tasks-page,
     // .artifacts-loading` rule 1,900 lines further down the stylesheet.
-    paddingBlockStart: {default: 32, '@media (max-width: 768px)': 20},
+    paddingBlockStart: {default: layout.pageTop, '@media (max-width: 768px)': 20},
     paddingBlockEnd: 32,
-    paddingInline: {default: 40, '@media (max-width: 768px)': 16},
+    paddingInline: {default: layout.pageGutter, '@media (max-width: 768px)': 16},
     overflowY: 'auto',
     height: '100%',
     display: 'flex',
@@ -43,7 +43,30 @@ export const page = stylex.create({
     flexShrink: 0,
     paddingBlockStart: 4,
   },
-  title: {fontSize: type.tPage, fontWeight: 600, marginBlock: '0 4px', color: colors.text},
+  title: {
+    fontSize: type.tPage,
+    fontWeight: 600,
+    lineHeight: 1.3,
+    marginBlock: '0 4px',
+    color: colors.text,
+  },
+  /**
+   * The header of a page that pins its title above a scrolling body (a table,
+   * a log tail, a list with filters) instead of scrolling as one document. Same
+   * gutter and title position as `scroll`, closed off by a rule.
+   */
+  bar: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 14,
+    flexShrink: 0,
+    paddingBlockStart: {default: layout.pageTop, '@media (max-width: 768px)': 20},
+    paddingBlockEnd: 16,
+    paddingInline: {default: layout.pageGutter, '@media (max-width: 768px)': 16},
+    borderBlockEndWidth: 1,
+    borderBlockEndStyle: 'solid',
+    borderBlockEndColor: colors.border,
+  },
   subtitle: {
     fontSize: type.tBody,
     color: colors.textDim,

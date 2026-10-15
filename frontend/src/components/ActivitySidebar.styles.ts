@@ -28,7 +28,13 @@ export const panel = stylex.create({
     borderInlineStartWidth: {default: 1, '@media (max-width: 860px)': 0},
     borderInlineStartStyle: 'solid',
     borderInlineStartColor: colors.glassBorder,
-    boxShadow: `-4px 0 22px rgba(${channels.shadow}, 0.32), inset 1px 0 0 rgba(${channels.tint}, 0.04)`,
+    // Above 1100px the thread makes room for the panel, so it is a docked
+    // column and its rule is the whole edge; below, it floats over the thread
+    // and the shadow is what lifts it off.
+    boxShadow: {
+      default: 'none',
+      '@media (max-width: 1100px)': `-4px 0 22px rgba(${channels.shadow}, 0.32)`,
+    },
     display: 'flex',
     flexDirection: 'column',
     zIndex: 50,

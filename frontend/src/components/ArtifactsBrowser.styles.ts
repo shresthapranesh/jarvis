@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {colors, type} from '../theme/tokens.stylex';
+import {colors, layout, type} from '../theme/tokens.stylex';
 
 /* ── Styles for ArtifactsBrowser.tsx ───────────────────────────────────
    A sortable table of every artifact, with a resizable detail pane that
@@ -10,21 +10,12 @@ export const browser = stylex.create({
   page: {display: 'flex', height: '100%', overflow: 'hidden'},
   tablePane: {flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden'},
 
-  header: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: 12,
-    paddingBlockStart: 24,
-    paddingBlockEnd: 16,
-    paddingInline: 32,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
-    flexShrink: 0,
+  empty: {
+    paddingBlock: 40,
+    paddingInline: layout.pageGutter,
+    color: colors.textDim,
+    fontSize: type.tBody,
   },
-  title: {fontSize: type.tPage, fontWeight: 600, margin: 0, color: colors.text},
-  count: {fontSize: type.tUi, color: colors.textDim},
-  empty: {paddingBlock: 40, paddingInline: 32, color: colors.textDim, fontSize: type.tBody},
   loading: {
     paddingBlockStart: {default: 32, '@media (max-width: 768px)': 24},
     paddingBlockEnd: 32,
@@ -55,7 +46,7 @@ export const browser = stylex.create({
     borderBlockEndStyle: 'solid',
     borderBlockEndColor: colors.border,
   },
-  thFirst: {paddingInlineStart: 32},
+  thFirst: {paddingInlineStart: layout.pageGutter},
 
   row: {
     cursor: 'pointer',
@@ -81,7 +72,7 @@ export const browser = stylex.create({
     display: {default: null, '@media (max-width: 768px)': 'block'},
   },
   tdFirst: {
-    paddingInlineStart: {default: 32, '@media (max-width: 768px)': 0},
+    paddingInlineStart: {default: layout.pageGutter, '@media (max-width: 768px)': 0},
     flexGrow: {default: null, '@media (max-width: 768px)': 1},
     flexShrink: {default: null, '@media (max-width: 768px)': 1},
     flexBasis: {default: null, '@media (max-width: 768px)': '100%'},

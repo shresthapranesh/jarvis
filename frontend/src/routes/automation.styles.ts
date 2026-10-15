@@ -9,62 +9,6 @@ import {channels, colors, css, layout, type} from '../theme/tokens.stylex';
    icon, name/badges, run times, actions — and most of the variants below
    are the four input types and the five run statuses it renders. */
 
-/** Page header: title row, KPI chips, and the filter bar. */
-export const header = stylex.create({
-  root: {
-    paddingBlock: {default: '22px 14px', '@media (max-width: 860px)': '16px 12px'},
-    paddingInline: {default: 28, '@media (max-width: 860px)': 16},
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
-    flexShrink: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 14,
-  },
-  titleRow: {
-    display: 'flex',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 16,
-    flexWrap: 'wrap',
-  },
-  titleBlock: {display: 'flex', flexDirection: 'column', gap: 3},
-  title: {
-    margin: 0,
-    fontSize: type.tPage,
-    fontWeight: 600,
-    letterSpacing: '-0.01em',
-    color: colors.text,
-  },
-  subtitle: {fontSize: type.tSmall, color: colors.textDim},
-});
-
-/** The primary "New automation" button, used in the header and the empty state. */
-export const newBtn = stylex.create({
-  base: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    backgroundImage: `linear-gradient(135deg, ${colors.accentStrong}, ${colors.accent})`,
-    borderStyle: 'none',
-    borderRadius: 3,
-    color: colors.accentContrast,
-    fontSize: type.tUi,
-    fontFamily: 'inherit',
-    fontWeight: 500,
-    paddingBlock: 8,
-    paddingInline: 14,
-    cursor: 'pointer',
-    boxShadow: {
-      default: `0 2px 10px rgba(${channels.accent}, 0.3)`,
-      ':hover': `0 4px 18px rgba(${channels.accent}, 0.5)`,
-    },
-    transform: {default: null, ':hover': 'translateY(-1px)'},
-    transition: 'box-shadow 0.2s, transform 0.15s',
-  },
-});
-
 export const kpi = stylex.create({
   grid: {
     display: 'grid',
@@ -208,7 +152,7 @@ export const list = stylex.create({
     flex: 1,
     overflowY: 'auto',
     paddingBlock: {default: '18px 60px', '@media (max-width: 860px)': '12px 60px'},
-    paddingInline: {default: 28, '@media (max-width: 860px)': 16},
+    paddingInline: {default: layout.pageGutter, '@media (max-width: 768px)': 16},
     display: 'flex',
     flexDirection: 'column',
     gap: 22,
@@ -255,11 +199,12 @@ export const card = stylex.create({
     display: 'grid',
     gridTemplateColumns: {
       default: '4px 36px minmax(0, 1fr) auto auto',
-      // The meta column is the first thing worth dropping on a narrow screen.
-      '@media (max-width: 600px)': '4px 36px minmax(0, 1fr) auto',
+      // The meta column is the first thing worth dropping on a narrow screen,
+      // then the type icon — the type chip under the name still says it.
+      '@media (max-width: 600px)': '4px minmax(0, 1fr) auto',
     },
     alignItems: 'center',
-    gap: 14,
+    gap: {default: 14, '@media (max-width: 600px)': 10},
     paddingBlock: 14,
     paddingInlineStart: 0,
     paddingInlineEnd: 16,
@@ -283,6 +228,8 @@ export const card = stylex.create({
     '--auto-actions-opacity': {default: '0.55', ':hover': '1', ':focus-within': '1'},
   },
   off: {opacity: 0.65},
+  /** The card's type icon, which gives up its column on a phone. */
+  icon: {display: {default: null, '@media (max-width: 600px)': 'none'}},
 
   main: {display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0},
   titlebar: {display: 'flex', alignItems: 'center', gap: 8, minWidth: 0},

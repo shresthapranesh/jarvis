@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {channels, colors, space, type} from '../theme/tokens.stylex';
+import {channels, colors, layout, space, type} from '../theme/tokens.stylex';
 
 /* ── Styles for routes/logs.tsx ────────────────────────────────────────
    A live tail of the server log: a filter toolbar, then a monospace grid
@@ -11,13 +11,15 @@ export const logs = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    paddingBlock: 16,
-    paddingInline: {default: 18, '@media (max-width: 768px)': space.s3},
+    paddingBlockStart: {default: layout.pageTop, '@media (max-width: 768px)': 20},
+    paddingBlockEnd: 16,
+    paddingInline: {default: layout.pageGutter, '@media (max-width: 768px)': space.s3},
     gap: 12,
   },
   header: {display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0},
   titleRow: {display: 'flex', alignItems: 'baseline', gap: 14},
-  title: {margin: 0, fontSize: type.tTitle, fontWeight: 600},
+  // Matches `page.title`, so Logs reads as the same kind of page as the rest.
+  title: {margin: 0, fontSize: type.tPage, fontWeight: 600, lineHeight: 1.3},
   status: {fontSize: type.tSmall, color: colors.textDim},
   statusOk: {color: colors.ok},
   statusErr: {color: colors.errorText},
