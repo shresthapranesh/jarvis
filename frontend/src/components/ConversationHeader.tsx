@@ -1,9 +1,10 @@
 import * as stylex from '@stylexjs/stylex';
 import {Link} from '@tanstack/react-router';
+import {useEffect, useRef, useState} from 'react';
 
 import {decodeGlobalId} from '../relay/globalId';
 import {kf} from '../theme/keyframes.stylex';
-import {colors, layout, space, type} from '../theme/tokens.stylex';
+import {colors, layout, radii, space, type} from '../theme/tokens.stylex';
 import {FolderIcon} from './icons';
 
 export type RunState = 'running' | 'waiting' | null;
@@ -15,6 +16,8 @@ interface Props {
   runState: RunState;
   /** Mirrors the footer: how much of the right edge the run spine takes. */
   spine: 'none' | 'open' | 'collapsed';
+  /** Saves a new title. Without it the title is plain text. */
+  onRename?: (title: string) => Promise<void>;
 }
 
 /** "Aug 14", or "Aug 14, 2025" once it is not this year. */
@@ -37,7 +40,7 @@ function startedOn(iso: string): string {
  * with the prose under it rather than with the page edge. The model is left
  * out on purpose: the composer's picker shows it, and is always on screen.
  */
-export function ConversationHeader({title, project, createdAt, runState, spine}: Props) {
+export function ConversationHeader({title, project, createdAt, runState, spine, onRename}: Props) {
   const started = startedOn(createdAt);
   return (
     <header
@@ -64,9 +67,16 @@ export function ConversationHeader({title, project, createdAt, runState, spine}:
             </span>
           </>
         )}
-        <h1 {...stylex.props(styles.title, !title && styles.titleEmpty)} title={title ?? undefined}>
-          {title ?? 'New conversation'}
-        </h1>
+        {onRename ? (
+          <EditableTitle title={title} onRename={onRename} />
+        ) : (
+          <h1
+            {...stylex.props(styles.title, !title && styles.titleEmpty)}
+            title={title ?? undefined}
+          >
+            {title ?? 'New conversation'}
+          </h1>
+        )}
         <span {...stylex.props(styles.meta)}>
           {runState === 'running' ? (
             <span {...stylex.props(styles.state, styles.stateLive)}>
@@ -88,6 +98,76 @@ export function ConversationHeader({title, project, createdAt, runState, spine}:
         </span>
       </div>
     </header>
+  );
+}
+
+/**
+ * The title, renamed in place: click it, type, Enter (or click away) saves and
+ * Escape puts it back. An empty or unchanged title is not a rename.
+ */
+function EditableTitle({
+  title,
+  onRename,
+}: {
+  title: string | null;
+  onRename: (title: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  // Enter saves and then the input unmounts, which blurs it — with a handler
+  // from the same render, so state can't tell the second call to stand down.
+  const openRef = useRef(false);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  function start() {
+    openRef.current = true;
+    setDraft(title ?? '');
+    setEditing(true);
+  }
+
+  function finish(save: boolean) {
+    if (!openRef.current) return;
+    openRef.current = false;
+    setEditing(false);
+    const next = draft.trim();
+    if (save && next && next !== title) void onRename(next);
+  }
+
+  if (editing) {
+    return (
+      <h1 {...stylex.props(styles.title)}>
+        <input
+          ref={inputRef}
+          {...stylex.props(styles.titleInput)}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => finish(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') finish(true);
+            else if (e.key === 'Escape') finish(false);
+          }}
+          aria-label="Conversation title"
+          maxLength={200}
+        />
+      </h1>
+    );
+  }
+
+  return (
+    <h1 {...stylex.props(styles.title, !title && styles.titleEmpty)}>
+      <button
+        type="button"
+        {...stylex.props(styles.titleButton)}
+        onClick={start}
+        title={title ? `${title} — click to rename` : 'Click to name this conversation'}
+      >
+        {title ?? 'New conversation'}
+      </button>
+    </h1>
   );
 }
 
@@ -156,6 +236,50 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   titleEmpty: {color: colors.textDim, fontWeight: 500},
+  /**
+   * Reads as the title until pointed at. The negative inset lets the hover
+   * wash extend past the text without moving it off the column edge.
+   */
+  titleButton: {
+    display: 'block',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    marginInline: -6,
+    paddingBlock: 2,
+    paddingInline: 6,
+    borderStyle: 'none',
+    borderRadius: radii.sm,
+    backgroundColor: {default: 'transparent', ':hover': colors.surface2},
+    color: 'inherit',
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    fontWeight: 'inherit',
+    lineHeight: 'inherit',
+    textAlign: 'start',
+    cursor: 'text',
+    transition: 'background-color 0.15s ease',
+  },
+  /** The same box as the button, so swapping one for the other moves nothing. */
+  titleInput: {
+    display: 'block',
+    width: 'calc(100% + 12px)',
+    marginInline: -6,
+    paddingBlock: 1,
+    paddingInline: 5,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: colors.borderStrong,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface,
+    color: colors.text,
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    fontWeight: 'inherit',
+    lineHeight: 'inherit',
+    outline: 'none',
+  },
   meta: {
     flexShrink: 0,
     fontSize: type.tSmall,

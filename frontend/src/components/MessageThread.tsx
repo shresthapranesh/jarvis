@@ -159,7 +159,7 @@ const styles = stylex.create({
     },
   },
   /**
-   * A settled rail is 30px, so reserving 208 for it would give away the width
+   * A settled rail is 36px, so reserving 208 for it would give away the width
    * collapsing it was meant to reclaim. Applied after `scrollerWithSpine` so
    * it wins. Hovering the rail expands it *over* this padding rather than
    * pushing it — the rail is `position: fixed`, so nothing reflows.

@@ -44,7 +44,7 @@ export const conv = stylex.create({
     },
   },
   /**
-   * A settled rail is 30px wide, so the footer reserves that instead — the
+   * A settled rail is 36px wide, so the footer reserves that instead — the
    * mirror of `scrollerWithSpineCollapsed` in MessageThread, breakpoints
    * included. Applied after `footerWithSpine` so it wins.
    */

@@ -178,10 +178,11 @@ export const layout = stylex.defineVars({
   leftCollapsedW: '52px',
   rightW: '312px',
   spineW: '208px',
-  // The rail at rest: wide enough for the hairline and its 9px marks and
-  // nothing else. Read by the rail itself *and* by the padding the thread and
-  // composer reserve for it, which is the only reason it is a token.
-  spineCollapsedW: '30px',
+  // The rail at rest: room for the hairline, its 11px marks and the expand
+  // hint, and no more. Read by the rail itself *and* by the padding the
+  // thread, header and composer reserve for it, which is the only reason it
+  // is a token.
+  spineCollapsedW: '36px',
   // Kept as a token so the ~20 sites that still declare `backdropFilter` need
   // no edit: they now compile to a no-op. Panels are opaque stock instead.
   blur: 'none',

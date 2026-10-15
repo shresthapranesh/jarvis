@@ -26,6 +26,7 @@ import {useToast} from '../lib/toast';
 import type {ArtifactCard, Message, Step, TodoItem, TodoStatus} from '../lib/types';
 import {mapMessage} from '../lib/types';
 import {artifactListQuery} from '../relay/ArtifactListQuery';
+import {refreshConversationList} from '../relay/ConversationListQuery';
 import {conversationPageFragment} from '../relay/ConversationPageFragment';
 import {
   CONVERSATION_PAGE_SIZE,
@@ -39,6 +40,7 @@ import {commitStartTask} from '../relay/StartTaskMutation';
 import {commitStopTask} from '../relay/StopTaskMutation';
 import {todoListQuery} from '../relay/TodoListQuery';
 import {commitUnqueueMessage} from '../relay/UnqueueMessageMutation';
+import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {conv} from './c.$id.styles';
 
 export const Route = createFileRoute('/c/$id')({
@@ -422,6 +424,17 @@ function ConversationPage() {
     }
   }
 
+  async function handleRename(title: string) {
+    try {
+      // The mutation returns the record, so Relay updates this header in place;
+      // the sidebar list is its own query and is refetched.
+      await commitUpdateConversation(id, {title});
+      await refreshConversationList();
+    } catch (err) {
+      toast.push((err as Error).message || 'Could not rename the conversation.', 'error');
+    }
+  }
+
   async function handleStop() {
     if (runningMsg) {
       try {
@@ -550,6 +563,7 @@ function ConversationPage() {
         createdAt={data.createdAt}
         runState={pendingInterrupt ? 'waiting' : isActive ? 'running' : null}
         spine={!showSpine ? 'none' : isActive ? 'open' : 'collapsed'}
+        onRename={handleRename}
       />
       {isEphemeral && (
         <div

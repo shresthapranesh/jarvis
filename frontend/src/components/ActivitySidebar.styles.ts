@@ -123,9 +123,31 @@ export const row = stylex.create({
     fontFamily: type.mono,
     overflowX: 'auto',
     whiteSpace: 'pre-wrap',
-    wordBreak: 'break-all',
+    wordBreak: 'break-word',
     color: colors.text,
     lineHeight: 1.5,
+    margin: 0,
+    // A page-long tool output would push every later step off the panel.
+    maxHeight: 360,
+    overflowY: 'auto',
+  },
+  sections: {display: 'flex', flexDirection: 'column', gap: 10},
+  caption: {
+    fontFamily: type.mono,
+    fontSize: type.tMicro,
+    color: colors.textFaint,
+    marginBlockEnd: 4,
+  },
+  /** The model's own text, read as prose rather than as a dump. */
+  prose: {
+    margin: 0,
+    fontSize: type.tUi,
+    lineHeight: 1.55,
+    color: colors.text,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    maxHeight: 360,
+    overflowY: 'auto',
   },
   source: {
     fontSize: type.tMicro,

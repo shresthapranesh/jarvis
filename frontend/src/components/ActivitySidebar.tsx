@@ -64,6 +64,78 @@ function safeParse(raw: string | null | undefined): Record<string, unknown> {
   }
 }
 
+// ── Detail ───────────────────────────────────────────────────────────────────
+// What an expanded row shows: the step's content in the form it was written
+// in — a cell's code as code, a tool's output as text, a reply as prose —
+// rather than the JSON envelope the event carried it in. Anything without a
+// known shape still falls back to that JSON.
+
+// Code wraps like output: the panel is 312px, and a cell scrolled sideways
+// hides most of every line.
+type Section = {caption?: string; text: string; as: 'pre' | 'prose'};
+
+function asText(v: unknown): string {
+  return typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+}
+
+function stepSections(step: Step): Section[] | null {
+  let parsed: any;
+  try {
+    parsed = step.data ? JSON.parse(step.data) : null;
+  } catch {
+    return null;
+  }
+  if (step.node === 'model_request') {
+    const calls = Array.isArray(parsed?.tool_calls) ? parsed.tool_calls : [];
+    if (calls.length > 0) {
+      return calls.flatMap((call: any) => {
+        const args = (call?.args ?? call?.input ?? {}) as Record<string, unknown>;
+        const name = calls.length > 1 ? `${call?.name ?? 'call'} · ` : '';
+        const entries = Object.entries(args);
+        if (entries.length === 0) return [{caption: `${name}no arguments`, text: '', as: 'pre'}];
+        return entries.map(([key, value]) => ({
+          caption: `${name}${key}`,
+          text: asText(value),
+          as: 'pre',
+        }));
+      });
+    }
+    if (typeof parsed?.text === 'string') return [{text: parsed.text, as: 'prose'}];
+  }
+  if (step.node === 'tools') {
+    const items = Array.isArray(parsed) ? parsed : [parsed];
+    const outputs = items.filter((it: any) => it && 'output' in it);
+    if (outputs.length > 0) {
+      return outputs.map((it: any) => ({
+        caption: items.length > 1 ? `${it.tool ?? 'tool'} output` : undefined,
+        text: asText(it.output),
+        as: 'pre',
+      }));
+    }
+  }
+  return null;
+}
+
+function StepDetail({step}: {step: Step}) {
+  const sections = useMemo(() => stepSections(step), [step]);
+  if (!sections) return <pre {...stylex.props(row.pre)}>{formatStepData(step.data!)}</pre>;
+  return (
+    <div {...stylex.props(row.sections)}>
+      {sections.map((sec, i) => (
+        <div key={i}>
+          {sec.caption && <div {...stylex.props(row.caption)}>{sec.caption}</div>}
+          {sec.text &&
+            (sec.as === 'prose' ? (
+              <p {...stylex.props(row.prose)}>{sec.text}</p>
+            ) : (
+              <pre {...stylex.props(row.pre)}>{sec.text}</pre>
+            ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Grouping ─────────────────────────────────────────────────────────────────
 // Steps whose `subagent` is set ("<role>:<idx>") were produced inside a
 // spawned worker; fold each worker's steps into one collapsible group placed
@@ -178,7 +250,7 @@ function StepRow({step, nested = false}: {step: Step; nested?: boolean}) {
       </div>
       {hasData && open && (
         <div {...stylex.props(row.detail, nested && row.inset)}>
-          <pre {...stylex.props(row.pre)}>{formatStepData(step.data!)}</pre>
+          <StepDetail step={step} />
         </div>
       )}
     </div>

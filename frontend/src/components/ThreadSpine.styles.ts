@@ -12,7 +12,7 @@ import {bp, channels, colors, layout, radii, space, type} from '../theme/tokens.
    not 208px of reading width, so once the run finishes the rail drops to
    `spineCollapsedW` and shows marks only; hover or click brings the full
    column back. Collapsed and expanded are separate renders rather than one
-   clipped by `overflow`, because a 208px layout squeezed into 30px rewraps
+   clipped by `overflow`, because a 208px layout squeezed into 36px rewraps
    into something that looks broken for the length of the transition. */
 
 /** The fixed column and its header. */
@@ -42,10 +42,11 @@ export const rail = stylex.create({
     width: layout.spineCollapsedW,
     cursor: 'pointer',
     alignItems: 'center',
-    // The rail is a peripheral thing when there is nothing running; it should
-    // not compete with the thread for attention until asked.
-    opacity: {default: 0.65, ':hover': 1},
-    transition: 'width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease',
+    // Peripheral when nothing is running, but findable: it used to rest at
+    // 0.65 with 9px hollow marks, which on a wide screen read as nothing at
+    // all. Full strength at rest; the hover wash says it opens.
+    backgroundColor: {default: 'transparent', ':hover': colors.surface},
+    transition: 'width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.2s ease',
   },
   head: {
     display: 'flex',
@@ -141,11 +142,21 @@ export const mini = stylex.create({
   count: {
     flexShrink: 0,
     fontFamily: type.mono,
-    fontSize: type.tNano,
-    color: colors.textFaint,
+    fontSize: type.tMicro,
+    color: colors.textDim,
     paddingBlock: space.s3,
     textAlign: 'center',
   },
+  /** The "this opens" glyph at the head of the rail. */
+  hint: {
+    flexShrink: 0,
+    display: 'flex',
+    justifyContent: 'center',
+    paddingBlockStart: space.s4,
+    color: colors.textDim,
+  },
+  /** At rest the marks carry the whole rail, so they are drawn larger. */
+  mark: {width: 11, height: 11, borderWidth: 2},
 });
 
 /** One turn on the rail. Role is carried by the reserved signal hues. */

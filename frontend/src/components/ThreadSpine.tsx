@@ -35,7 +35,7 @@ interface Props {
 
 // The rail is a *map of the conversation*: one dot per turn, in order. Its
 // dots navigate the thread; the run's step trace lives behind "Open details".
-// Collapsed it is 30px, so only the tail of a long thread fits as marks.
+// Collapsed it is 36px, so only the tail of a long thread fits as marks.
 const MAX_MARKS = 18;
 
 type SpineKind = 'user' | 'assistant' | 'blocked' | 'error';
@@ -67,7 +67,7 @@ export function ThreadSpine({
 }: Props) {
   const trackRef = useRef<HTMLDivElement | null>(null);
 
-  // A live run always shows the full column; a settled one is a 30px trace
+  // A live run always shows the full column; a settled one is a 36px trace
   // until you point at it. Hover is state rather than a `:hover` rule because
   // the two are separate renders — see the note in ThreadSpine.styles.ts. The
   // rail is `display: none` below `bp.wide`, so there is no pointerless
@@ -133,13 +133,29 @@ export function ThreadSpine({
         aria-label={`Conversation map — ${messages.length} message${messages.length === 1 ? '' : 's'}`}
         onMouseEnter={() => setHovered(true)}
         onClick={() => setHovered(true)}
+        title="Conversation map"
       >
+        <span {...stylex.props(mini.hint)} aria-hidden="true">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </span>
         <div {...stylex.props(mini.track)}>
           {messages.slice(-MAX_MARKS).map((m) => (
             <span
               key={m.id}
               {...stylex.props(
                 nodeStyles.mark,
+                mini.mark,
                 markForKind(messageKind(m)),
                 m.id === activeId && nodeStyles.markCurrent,
               )}
