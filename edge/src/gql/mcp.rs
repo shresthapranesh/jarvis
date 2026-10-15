@@ -4,10 +4,14 @@
 //! An agent's call passes the per-tool policy (Settings → Tools), then the
 //! blanket `call_mcp_tool` action when an operator gates it
 //! (`approval::gate_action`).
+//!
+//! `startMcpLogin` / `mcpLogout` are the edge's own: OAuth sign-in from
+//! Settings → MCP (`mcp::oauth::begin`), the browser coming back to
+//! `/mcp/oauth/callback` (`rest.rs`). They are for a person, not the agent.
 
 use std::sync::Arc;
 
-use async_graphql::{Context, Object, Result, SimpleObject};
+use async_graphql::{ComplexObject, Context, Object, Result, SimpleObject};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
 
@@ -37,6 +41,7 @@ pub struct McpToolResult {
 }
 
 #[derive(SimpleObject)]
+#[graphql(complex)]
 pub struct McpServer {
     name: String,
     config: String,
@@ -78,6 +83,14 @@ impl McpServer {
     fn from_snapshot(name: &str, cfg: &Connection, s: &Snapshot) -> Self {
         let tools = s.tools_for(name).iter().map(|t| t.name.clone()).collect();
         Self::from_entry(name, cfg, tools, s.default_mode)
+    }
+}
+
+#[ComplexObject]
+impl McpServer {
+    /// Whether it has an OAuth sign-in (its tokens are never exposed).
+    async fn signed_in(&self, ctx: &Context<'_>) -> Result<bool> {
+        Ok(crate::mcp::oauth::signed_in(ctx.data::<EdgeData>()?.mcp.pool(), &self.name).await?)
     }
 }
 
@@ -228,6 +241,38 @@ impl McpMutation {
         write_setting(mcp.pool(), config::LOAD_MODES_KEY, &pyjson::dumps(&serde_json::to_value(&modes)?)).await?;
         let s = mcp.set_mode(&name, mode).await?;
         Ok(McpServer::from_snapshot(&name, &s.connections[&name], &s))
+    }
+
+    /// Where to send the browser to sign in to `name` with OAuth; it comes
+    /// back to `{origin}/mcp/oauth/callback`, which finishes the sign-in.
+    async fn start_mcp_login(&self, ctx: &Context<'_>, name: String, origin: String) -> Result<String> {
+        if ctx.data::<RequestFrom>()?.caller == Caller::Agent {
+            return Err("Signing in to an MCP server is for a person, under Settings \u{2192} MCP.".into());
+        }
+        let origin = reqwest::Url::parse(&origin)
+            .ok()
+            .filter(|u| matches!(u.scheme(), "http" | "https"))
+            .ok_or_else(|| format!("origin must be an http(s) address, not {}", pyjson::repr_str(&origin)))?
+            .origin()
+            .ascii_serialization();
+        let mcp = &ctx.data::<EdgeData>()?.mcp;
+        let servers = mcp.configured().await;
+        let cfg = servers.get(&name).ok_or_else(|| format!("MCP server {} is not configured", pyjson::repr_str(&name)))?;
+        let url = crate::mcp::oauth::sign_in_url(&name, cfg)?;
+        Ok(crate::mcp::oauth::begin(&name, &url, &format!("{origin}/mcp/oauth/callback")).await?)
+    }
+
+    /// Forget `name`'s sign-in; whether it had one.
+    async fn mcp_logout(&self, ctx: &Context<'_>, name: String) -> Result<bool> {
+        if ctx.data::<RequestFrom>()?.caller == Caller::Agent {
+            return Err("Signing out of an MCP server is for a person, under Settings \u{2192} MCP.".into());
+        }
+        let mcp = ctx.data::<EdgeData>()?.mcp.clone();
+        let was = crate::mcp::oauth::forget(mcp.pool(), &name).await?;
+        if was {
+            mcp.reload().await;
+        }
+        Ok(was)
     }
 
     /// Fallback mode for servers that don't declare one.

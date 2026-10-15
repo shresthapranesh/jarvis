@@ -27,8 +27,6 @@ use crate::mcp::oauth;
 use crate::pyjson;
 
 const TRANSPORTS: [&str; 4] = ["http", "streamable-http", "sse", "websocket"];
-/// How long a sign-in may take.
-const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Subcommand)]
 pub enum Cmd {
@@ -184,12 +182,7 @@ pub async fn run(cfg: &Config, pool: &SqlitePool, cmd: Cmd) -> Done {
         Cmd::Login { name, client_id, client_secret, callback_port, no_browser } => {
             let servers = config::merged(pool, &cfg.app_dir).await;
             let Some(c) = servers.get(&name) else { return Err(not_found(&name)) };
-            let Some(url) = c.get("url").and_then(Value::as_str).map(String::from) else {
-                return Err(error(format!("{name} runs a command; sign-in is for a server reached by URL")));
-            };
-            if transport(c) == "websocket" {
-                return Err(error("sign-in is for an HTTP server, not a websocket one"));
-            }
+            let url = oauth::sign_in_url(&name, c).map_err(error)?;
             let client = oauth::client();
             let found = oauth::discover(&client, &url).await.map_err(error)?;
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, callback_port.unwrap_or(0)))
@@ -221,9 +214,9 @@ pub async fn run(cfg: &Config, pool: &SqlitePool, cmd: Cmd) -> Done {
                 open_browser(&link);
             }
             println!("{}", dim("Waiting for the sign-in. If your browser is on another machine, paste the address it lands on here."));
-            let code = tokio::time::timeout(SIGN_IN_TIMEOUT, returned(listener, &state))
+            let code = tokio::time::timeout(oauth::SIGN_IN_TIMEOUT, returned(listener, &state))
                 .await
-                .map_err(|_| error(format!("no sign-in after {} minutes", SIGN_IN_TIMEOUT.as_secs() / 60)))??;
+                .map_err(|_| error(format!("no sign-in after {} minutes", oauth::SIGN_IN_TIMEOUT.as_secs() / 60)))??;
             let tokens = oauth::exchange(&client, &found, &reg, &code, &pkce.verifier, &redirect)
                 .await
                 .map_err(|e| error(format!("the sign-in couldn't be completed: {e}")))?;

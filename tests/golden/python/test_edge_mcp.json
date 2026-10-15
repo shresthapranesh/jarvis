@@ -413,6 +413,7 @@
         "enabled": true,
         "loadMode": "always",
         "name": "echo",
+        "signedIn": false,
         "toolCount": 3,
         "tools": [
          "echo",
@@ -428,6 +429,7 @@
         "enabled": true,
         "loadMode": "lazy",
         "name": "other",
+        "signedIn": false,
         "toolCount": 1,
         "tools": [
          "ping"
@@ -525,6 +527,7 @@
         "enabled": true,
         "loadMode": "always",
         "name": "echo",
+        "signedIn": false,
         "toolCount": 3,
         "tools": [
          "echo",
@@ -540,6 +543,7 @@
         "enabled": true,
         "loadMode": "lazy",
         "name": "other",
+        "signedIn": false,
         "toolCount": 1,
         "tools": [
          "ping"
@@ -612,6 +616,7 @@
         "enabled": true,
         "loadMode": "lazy",
         "name": "echo",
+        "signedIn": false,
         "toolCount": 3,
         "tools": [
          "echo",
@@ -627,6 +632,7 @@
         "enabled": true,
         "loadMode": "lazy",
         "name": "other",
+        "signedIn": false,
         "toolCount": 1,
         "tools": [
          "ping"
@@ -1265,6 +1271,7 @@
         "enabled": true,
         "loadMode": "lazy",
         "name": "echo",
+        "signedIn": false,
         "toolCount": 3,
         "tools": [
          "echo",
@@ -1280,6 +1287,7 @@
         "enabled": true,
         "loadMode": "always",
         "name": "other",
+        "signedIn": false,
         "toolCount": 1,
         "tools": [
          "ping"
@@ -1293,6 +1301,7 @@
         "enabled": true,
         "loadMode": "lazy",
         "name": "second",
+        "signedIn": false,
         "toolCount": 1,
         "tools": [
          "ping"
@@ -1328,6 +1337,7 @@
         "enabled": true,
         "loadMode": "lazy",
         "name": "echo",
+        "signedIn": false,
         "toolCount": 3,
         "tools": [
          "echo",
@@ -1343,6 +1353,7 @@
         "enabled": true,
         "loadMode": "always",
         "name": "other",
+        "signedIn": false,
         "toolCount": 1,
         "tools": [
          "ping"

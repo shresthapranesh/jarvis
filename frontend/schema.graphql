@@ -296,6 +296,10 @@ type McpServer {
 	enabled: Boolean!
 	loadMode: String!
 	tools: [String!]!
+	"""
+	Whether it has an OAuth sign-in (its tokens are never exposed).
+	"""
+	signedIn: Boolean!
 }
 
 """
@@ -549,6 +553,15 @@ type Mutation {
 	Bind this server's tools to the agent (`always`) or not (`lazy`).
 	"""
 	setMcpServerLoadMode(name: String!, mode: String!): McpServer!
+	"""
+	Where to send the browser to sign in to `name` with OAuth; it comes
+	back to `{origin}/mcp/oauth/callback`, which finishes the sign-in.
+	"""
+	startMcpLogin(name: String!, origin: String!): String!
+	"""
+	Forget `name`'s sign-in; whether it had one.
+	"""
+	mcpLogout(name: String!): Boolean!
 	"""
 	Fallback mode for servers that don't declare one.
 	"""

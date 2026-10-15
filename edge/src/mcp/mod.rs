@@ -10,8 +10,9 @@
 //! An `always` server's tools are bound to the agent (`agent/turn.rs`); a
 //! `lazy` one's are reached through `jarvis.mcp_call` (`callMcpTool`).
 //!
-//! A server signed in to with `jarvis-edge mcp login` (`oauth.rs`) gets its
-//! access token on every connection, renewed when it expires or is refused.
+//! A server signed in to (`oauth.rs`: `jarvis-edge mcp login`, or Settings →
+//! MCP) gets its access token on every connection, renewed when it expires
+//! or is refused.
 //! Python behind the edge has no MCP client of its own: it reads this
 //! manager's state and calls through it (`internal.rs`,
 //! `core/mcp.py:EdgeMcp`), and is told to re-read after every change.
@@ -316,7 +317,7 @@ impl Mcp {
                 op(signed).await
             }
             (Err(e), None) if e.contains("'401 Unauthorized'") => {
-                Err(format!("{e} — it needs sign-in: `jarvis-edge mcp login {server}`"))
+                Err(format!("{e} — it needs sign-in: Settings → MCP, or `jarvis-edge mcp login {server}`"))
             }
             (r, _) => r,
         }

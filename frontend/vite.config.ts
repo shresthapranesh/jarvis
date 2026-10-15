@@ -59,6 +59,8 @@ export default defineConfig({
       '/ws/browser': {target: 'ws://localhost:8000', ws: true},
       '/artifacts': 'http://localhost:8000',
       '/server-logs': 'http://localhost:8000',
+      // Where the browser comes back from an MCP sign-in.
+      '/mcp/oauth': 'http://localhost:8000',
     },
   },
   build: {

@@ -300,3 +300,54 @@ async def test_a_running_server_uses_and_renews_the_sign_in(cli, edge_binary):
             assert servers == [{"name": "g", "toolCount": 0}]
             added = cli("add", "g2", f"{base}/mcp")
             assert "Not connected" in added.out and "jarvis-edge mcp login g2" in added.out
+
+
+async def test_signing_in_from_the_ui(cli, edge_binary):
+    """Settings → MCP: `startMcpLogin` gives the link, the browser comes back
+    to the server's `/mcp/oauth/callback`, which saves the sign-in and
+    reconnects; `mcpLogout` forgets it. Neither is the agent's to do."""
+    start = 'mutation($o: String!) { startMcpLogin(name: "g", origin: $o) }'
+    servers = "{ mcpServers { name toolCount signedIn } }"
+    with _guarded() as base:
+        cli("add", "g", f"{base}/mcp")
+        env = {"HOME": cli.env["HOME"], "JARVIS_APP_DIR": str(cli.app)}
+        async with _run_edge(edge_binary, cli.work, cli.db, env) as client:
+            client.timeout = httpx.Timeout(60)
+            origin = str(client.base_url).rstrip("/")
+
+            async def gql(q: str, headers: dict | None = None, **variables) -> dict:
+                return (await client.post("/graphql", json={"query": q, "variables": variables}, headers=headers)).json()
+
+            assert (await gql(servers))["data"]["mcpServers"] == [{"name": "g", "toolCount": 0, "signedIn": False}]
+            link = (await gql(start, o=f"{origin}/settings/mcp"))["data"]["startMcpLogin"]
+            assert httpx.URL(link).params["redirect_uri"] == f"{origin}/mcp/oauth/callback"
+            back = httpx.get(link, follow_redirects=False)
+            assert back.status_code == 302, back.text
+            assert back.headers["location"].startswith(f"{origin}/mcp/oauth/callback?")
+            page = await client.get(back.headers["location"])
+            assert (page.status_code, "Signed in to g" in page.text) == (200, True), page.text
+            assert "jarvis-mcp-login" in page.text
+            assert _grant(cli, "g")["access_token"] not in page.text
+            assert (await gql(servers))["data"]["mcpServers"] == [{"name": "g", "toolCount": 1, "signedIn": True}]
+
+            # A return used twice, or one nobody started, is refused.
+            again = await client.get(back.headers["location"])
+            assert (again.status_code, "expired or was already used" in again.text) == (400, True)
+            refused = await client.get("/mcp/oauth/callback?error=access_denied&error_description=<nope>&state=x")
+            assert refused.status_code == 400 and "refused: &lt;nope&gt;" in refused.text
+
+            # The agent can do neither.
+            agent = {"X-Jarvis-Caller": "agent"}
+            assert "for a person" in (await gql(start, agent, o=origin))["errors"][0]["message"]
+            logout = 'mutation { mcpLogout(name: "g") }'
+            assert "for a person" in (await gql(logout, agent))["errors"][0]["message"]
+
+            assert (await gql(logout))["data"]["mcpLogout"] is True
+            assert _grant(cli, "g") is None
+            assert (await gql(servers))["data"]["mcpServers"] == [{"name": "g", "toolCount": 0, "signedIn": False}]
+            assert (await gql(logout))["data"]["mcpLogout"] is False
+
+            for name, origin_, message in [("g", "javascript:alert(1)", "origin must be an http(s) address"),
+                                           ("nope", origin, "not configured")]:
+                q = f'mutation($o: String!) {{ startMcpLogin(name: "{name}", origin: $o) }}'
+                assert message in (await gql(q, o=origin_))["errors"][0]["message"]

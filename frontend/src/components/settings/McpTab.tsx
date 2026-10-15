@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {McpServersQuery as TMcpServersQuery} from '../../__generated__/McpServersQuery.graphql';
@@ -87,6 +87,46 @@ export function McpTab() {
     {onError: (e) => toast.push(e.message, 'error')},
   );
 
+  // A sign-in runs in its own tab and comes back to the server, whose page
+  // reports here.
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel('jarvis-mcp-login');
+    channel.onmessage = (e: MessageEvent<{ok: boolean; server?: string; error?: string}>) => {
+      if (e.data.ok) toast.push(`Signed in to ${e.data.server}`, 'success');
+      else toast.push(e.data.error ?? 'The sign-in didn’t work', 'error');
+      void refresh();
+    };
+    return () => channel.close();
+  }, [toast, refresh]);
+
+  const signInMut = useAsyncAction(
+    async (name: string) => {
+      // Opened inside the click, before any await, so it isn't blocked as a pop-up.
+      const tab = window.open('', '_blank');
+      try {
+        const {commitStartMcpLogin} = await import('../../relay/StartMcpLoginMutation');
+        const link = await commitStartMcpLogin(name);
+        if (tab) tab.location.href = link;
+        else window.open(link, '_blank');
+      } catch (e) {
+        tab?.close();
+        throw e;
+      }
+    },
+    {onError: (e) => toast.push(e.message || String(e), 'error')},
+  );
+
+  const signOutMut = useAsyncAction(
+    async (name: string) => {
+      const {commitMcpLogout} = await import('../../relay/McpLogoutMutation');
+      await commitMcpLogout(name);
+      toast.push(`Signed out of ${name}`, 'success');
+      await refresh();
+    },
+    {onError: (e) => toast.push(e.message || String(e), 'error')},
+  );
+
   const loadModeMut = useAsyncAction(
     async ({name, mode}: {name: string; mode: 'always' | 'lazy'}) => {
       const {commitSetMcpServerLoadMode} = await import('../../relay/SetMcpServerLoadModeMutation');
@@ -143,6 +183,9 @@ export function McpTab() {
               server={s}
               loadModePending={loadModeMut.pending}
               onToggleLoadMode={(name, mode) => void loadModeMut.run({name, mode})}
+              signPending={signInMut.pending || signOutMut.pending}
+              onSignIn={(name) => void signInMut.run(name)}
+              onSignOut={(name) => void signOutMut.run(name)}
               onEdit={setEditing}
               onDelete={setDeleteTarget}
               onCopyConfig={(config) => {
@@ -196,6 +239,9 @@ function McpServerCard({
   server: s,
   loadModePending,
   onToggleLoadMode,
+  signPending,
+  onSignIn,
+  onSignOut,
   onEdit,
   onDelete,
   onCopyConfig,
@@ -203,12 +249,17 @@ function McpServerCard({
   server: any;
   loadModePending: boolean;
   onToggleLoadMode: (name: string, mode: 'always' | 'lazy') => void;
+  signPending: boolean;
+  onSignIn: (name: string) => void;
+  onSignOut: (name: string) => void;
   onEdit: (target: {name: string; config: string}) => void;
   onDelete: (name: string) => void;
   onCopyConfig: (config: string) => void;
 }) {
   const serverTools: string[] = s.tools ?? [];
   const lazy = s.loadMode === 'lazy';
+  // OAuth sign-in is for a server reached over HTTP.
+  const canSignIn = Boolean(s.url) && s.transport !== 'websocket';
 
   return (
     <li {...stylex.props(skill.card)}>
@@ -237,7 +288,22 @@ function McpServerCard({
         >
           {lazy ? 'on demand' : 'always loaded'}
         </span>
+        {s.signedIn && <span {...stylex.props(badge.base, badge.live)}>signed in</span>}
         <div {...stylex.props(skill.controls)}>
+          {canSignIn && (
+            <button
+              {...stylex.props(btn.base, btn.small)}
+              disabled={signPending}
+              title={
+                s.signedIn
+                  ? 'Forget this server’s sign-in'
+                  : 'Sign in to this server with OAuth, in a new tab'
+              }
+              onClick={() => (s.signedIn ? onSignOut(s.name) : onSignIn(s.name))}
+            >
+              {s.signedIn ? 'Sign out' : 'Sign in'}
+            </button>
+          )}
           <button
             {...stylex.props(btn.base, btn.small)}
             disabled={loadModePending}
@@ -278,7 +344,8 @@ function McpServerCard({
         )}
         {s.toolCount === 0 && (
           <p {...stylex.props(memory.sectionEmpty)}>
-            Server not loaded — tools appear after a successful connection. Try Reload after adding.
+            Server not loaded — tools appear after a successful connection. Try Reload after adding
+            {canSignIn && !s.signedIn ? ', or Sign in if it asks for one' : ''}.
           </p>
         )}
         {lazy && s.toolCount > 0 && (

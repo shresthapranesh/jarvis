@@ -1,6 +1,7 @@
 //! The REST routes: `GET /artifacts/{id}/raw` (a port of
-//! `server/routes_artifacts.py`) and the log viewer's `/server-logs` (of
-//! `routes_logs.py`, here `logs.rs`).
+//! `server/routes_artifacts.py`), the log viewer's `/server-logs` (of
+//! `routes_logs.py`, here `logs.rs`), and `/mcp/oauth/callback`, where the
+//! browser comes back from an MCP sign-in started in the UI.
 //!
 //! A download answers as Starlette's `FileResponse` did: its headers, a
 //! single byte range. `HEAD` is a 405, as FastAPI's GET routes answer it.
@@ -36,8 +37,36 @@ pub async fn serve(state: &AppState, req: Request) -> Result<Response, Request> 
     match (req.method().clone(), path.as_str()) {
         (Method::GET, "/server-logs") => Ok(crate::logs::list(req.headers())),
         (Method::GET, "/server-logs/stream") => Ok(crate::logs::stream(req.headers())),
+        (Method::GET, "/mcp/oauth/callback") => Ok(mcp_signed_in(state, req.uri().query().unwrap_or("").to_string()).await),
         _ => Err(req),
     }
+}
+
+/// The browser back from an MCP sign-in: the sign-in finished, the server
+/// reconnected, and the Settings tab told (`BroadcastChannel`, as the
+/// sign-in page may have cut this tab off from its opener).
+async fn mcp_signed_in(state: &AppState, query: String) -> Response {
+    let query: std::collections::HashMap<String, String> = reqwest::Url::parse(&format!("http://jarvis/?{query}"))
+        .map(|u| u.query_pairs().into_owned().collect())
+        .unwrap_or_default();
+    let done = crate::mcp::oauth::finish(&state.pool, &query).await;
+    if done.is_ok() {
+        state.mcp.reload().await;
+    }
+    let (status, text, message) = match &done {
+        Ok(server) => (StatusCode::OK, format!("Signed in to {server}. You can close this tab."), json!({"server": server, "ok": true})),
+        Err(e) => (StatusCode::BAD_REQUEST, format!("The sign-in didn't work: {e}"), json!({"ok": false, "error": e})),
+    };
+    let text = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    // `</` can't end the script early: JSON escapes it as `<\/`.
+    let message = message.to_string().replace("</", "<\\/");
+    let close = if done.is_ok() { "setTimeout(() => window.close(), 600);" } else { "" };
+    let body = format!(
+        "<!doctype html><meta charset=utf-8><title>Jarvis</title>\
+         <p style=\"font:16px system-ui;margin:3em\">{text}</p>\
+         <script>try {{ new BroadcastChannel('jarvis-mcp-login').postMessage({message}); }} catch {{}} {close}</script>"
+    );
+    (status, [(header::CONTENT_TYPE, "text/html; charset=utf-8")], body).into_response()
 }
 
 /// `{prefix}{id}/raw`, the id percent-decoded as Starlette decodes a path.

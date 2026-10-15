@@ -1,7 +1,9 @@
 //! OAuth sign-in for an MCP server reached by URL, as the MCP authorization
 //! spec has a client do it.
 //!
-//! `jarvis-edge mcp login` (`cli/mcp.rs`) runs the flow: the server's 401
+//! `jarvis-edge mcp login` (`cli/mcp.rs`) and Settings → MCP (`begin` /
+//! `finish`, the browser coming back to `/mcp/oauth/callback`) run the
+//! flow: the server's 401
 //! names its protected-resource metadata, that names the authorization
 //! server, whose metadata gives the endpoints; jarvis registers itself there
 //! (dynamic client registration) unless given a client id, sends the person
@@ -13,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -24,11 +26,15 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
+use super::config::Connection;
 use crate::gql::codec::now_stored;
+use crate::pyjson;
 
 /// How close to its expiry a token is refreshed rather than sent.
 const MARGIN: TimeDelta = TimeDelta::seconds(60);
 const STAMP: &str = "%Y-%m-%d %H:%M:%S%.f";
+/// How long a sign-in may take.
+pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// One refresh at a time: a server that rotates refresh tokens refuses the
 /// second use of one, and may revoke the sign-in for it.
@@ -40,6 +46,17 @@ pub fn client() -> reqwest::Client {
         .timeout(Duration::from_secs(30))
         .build()
         .expect("an HTTP client")
+}
+
+/// The URL `server` signs in at: sign-in is for a server reached over HTTP.
+pub fn sign_in_url(server: &str, cfg: &Connection) -> Result<String, String> {
+    let Some(url) = cfg.get("url").and_then(Value::as_str) else {
+        return Err(format!("{server} runs a command; sign-in is for a server reached by URL"));
+    };
+    if cfg.get("transport").map(pyjson::py_str).as_deref() == Some("websocket") {
+        return Err("sign-in is for an HTTP server, not a websocket one".into());
+    }
+    Ok(url.into())
 }
 
 fn sent(e: reqwest::Error) -> String {
@@ -410,7 +427,7 @@ pub async fn forget(pool: &SqlitePool, server: &str) -> sqlx::Result<bool> {
 }
 
 fn login_again(server: &str) -> String {
-    format!("run `jarvis-edge mcp login {server}` to sign in again")
+    format!("sign in again under Settings → MCP, or with `jarvis-edge mcp login {server}`")
 }
 
 /// The access token for `server` at `url`, if it has a sign-in: the stored
@@ -456,6 +473,77 @@ pub async fn bearer(pool: &SqlitePool, server: &str, url: &str, refused: Option<
     .await
     .map_err(|e| e.to_string())?;
     Ok(Some(tokens.access_token))
+}
+
+// ── a sign-in from the UI ───────────────────────────────────────────────────
+
+/// A sign-in `begin` started, waiting for the browser.
+struct Pending {
+    server: String,
+    url: String,
+    found: Discovered,
+    reg: Registration,
+    verifier: String,
+    redirect: String,
+    started: Instant,
+}
+
+/// The sign-ins in progress, by their `state`.
+static PENDING: LazyLock<std::sync::Mutex<HashMap<String, Pending>>> = LazyLock::new(Default::default);
+
+/// A sign-in to `server` at `url` for a browser coming back to `redirect`:
+/// where to send it. `finish` completes it.
+pub async fn begin(server: &str, url: &str, redirect: &str) -> Result<String, String> {
+    let client = client();
+    let found = discover(&client, url).await?;
+    let Some(endpoint) = &found.registration_endpoint else {
+        return Err(format!(
+            "{server}'s sign-in doesn't let apps register themselves — register one with them and sign in \
+             with `jarvis-edge mcp login {server} --client-id …`"
+        ));
+    };
+    let reg = register(&client, endpoint, redirect).await?;
+    let pkce = pkce();
+    let state = state();
+    let link = authorize_url(&found, &reg.client_id, redirect, &pkce, &state)?;
+    let mut pending = PENDING.lock().expect("pending sign-ins");
+    pending.retain(|_, p| p.started.elapsed() < SIGN_IN_TIMEOUT);
+    let p = Pending {
+        server: server.into(),
+        url: url.into(),
+        found,
+        reg,
+        verifier: pkce.verifier,
+        redirect: redirect.into(),
+        started: Instant::now(),
+    };
+    pending.insert(state, p);
+    Ok(link)
+}
+
+/// The browser back from a sign-in `begin` started, with `query`: the
+/// tokens saved, and the server they are for.
+pub async fn finish(pool: &SqlitePool, query: &HashMap<String, String>) -> Result<String, String> {
+    let pending = query
+        .get("state")
+        .and_then(|s| PENDING.lock().expect("pending sign-ins").remove(s))
+        .filter(|p| p.started.elapsed() < SIGN_IN_TIMEOUT);
+    if let Some(e) = query.get("error") {
+        let said = query.get("error_description").unwrap_or(e);
+        return Err(format!("the sign-in was refused: {said}"));
+    }
+    let p = pending.ok_or("this sign-in has expired or was already used — start it again under Settings → MCP")?;
+    let code = query.get("code").ok_or("the sign-in came back with no code")?;
+    let tokens = exchange(&client(), &p.found, &p.reg, code, &p.verifier, &p.redirect)
+        .await
+        .map_err(|e| format!("the sign-in to {} couldn't be completed: {e}", p.server))?;
+    save(pool, &p.server, &p.url, &p.found, &p.reg, &tokens).await.map_err(|e| e.to_string())?;
+    Ok(p.server)
+}
+
+/// Whether `server` has a sign-in.
+pub async fn signed_in(pool: &SqlitePool, server: &str) -> sqlx::Result<bool> {
+    Ok(sqlx::query_scalar::<_, i64>("SELECT 1 FROM mcp_oauth WHERE server = ?").bind(server).fetch_optional(pool).await?.is_some())
 }
 
 #[cfg(test)]

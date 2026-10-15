@@ -15,6 +15,7 @@ export const mcpServersQuery = graphql`
       enabled
       loadMode
       tools
+      signedIn
     }
   }
 `;
