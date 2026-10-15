@@ -5,7 +5,6 @@ import {useLazyLoadQuery} from 'react-relay';
 
 import type {ProjectsQuery as TProjectsQuery} from '../__generated__/ProjectsQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
-import {formatRelativeTime} from '../lib/api';
 import type {Project} from '../lib/types';
 import {commitCreateProject} from '../relay/CreateProjectMutation';
 import {commitDeleteProject} from '../relay/DeleteProjectMutation';
@@ -16,7 +15,7 @@ import {FolderIcon, PlusIcon, TrashIcon} from './icons';
 import {item, skill} from './memory.styles';
 import {projects} from './project.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, field, iconBtn, page, PageHeader} from './ui';
+import {btn, field, iconBtn, page, PageHeader, TimeAgo} from './ui';
 
 interface Draft {
   name: string;
@@ -135,7 +134,7 @@ export function ProjectsView() {
               {p.description && <p {...stylex.props(skill.desc)}>{p.description}</p>}
               <span {...stylex.props(item.meta)}>
                 {p.conversation_count} conversation{p.conversation_count === 1 ? '' : 's'} · updated{' '}
-                {formatRelativeTime(p.updated_at)}
+                <TimeAgo iso={p.updated_at} />
               </span>
             </li>
           ))}

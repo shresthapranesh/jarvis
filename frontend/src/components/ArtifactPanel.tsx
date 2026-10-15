@@ -13,7 +13,7 @@ import {commitRestoreArtifactVersion} from '../relay/RestoreArtifactVersionMutat
 import {commitUpdateArtifact} from '../relay/UpdateArtifactMutation';
 import {detail as detailStyles, diff, editor, panel, version} from './ArtifactPanel.styles';
 import {Markdown} from './Markdown';
-import {btn, closeBtn, prose} from './ui';
+import {btn, closeBtn, prose, TimeAgo} from './ui';
 
 const svg = (path: React.ReactNode, w = 2) => (
   <svg
@@ -147,7 +147,7 @@ export function ArtifactPanel({conversationId, selectedId, onSelect, onClose}: P
             >
               <span {...stylex.props(panel.itemTitle)}>{a.title}</span>
               <span {...stylex.props(panel.itemMeta)}>
-                {new Date(a.updatedAt).toLocaleString()}
+                <TimeAgo iso={a.updatedAt} />
               </span>
             </button>
           ))
@@ -370,7 +370,7 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
               <span {...stylex.props(version.badge)}>current</span>
               <span {...stylex.props(version.title)}>{detail.title}</span>
               <span {...stylex.props(version.meta)}>
-                {new Date((detail as any).updatedAt).toLocaleString()}
+                <TimeAgo iso={(detail as any).updatedAt} />
               </span>
               <div {...stylex.props(version.actions)}>
                 <button
@@ -407,7 +407,7 @@ export function ArtifactDetail({rawId, refreshList, onDeleted}: DetailProps) {
                   <span {...stylex.props(version.badge)}>v{v.version}</span>
                   <span {...stylex.props(version.title)}>{v.title}</span>
                   <span {...stylex.props(version.meta)}>
-                    {new Date(v.createdAt).toLocaleString()}
+                    <TimeAgo iso={v.createdAt} />
                   </span>
                   <div {...stylex.props(version.actions)}>
                     <button

@@ -3,6 +3,7 @@ import {useEffect, useRef, useState} from 'react';
 
 import {useIsMobile} from '../hooks/useIsMobile';
 import {useModels} from '../hooks/useModels';
+import {shortModelLabel} from '../lib/format';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {composer, control} from './InputBox.styles';
@@ -172,12 +173,16 @@ export function InputBox({
             value={model}
             onChange={(e) => void handleModelChange(e.target.value)}
             disabled={!catalog}
-            title={catalog ? undefined : 'Loading models…'}
+            title={
+              catalog ? catalog.available.find((m) => m.id === model)?.label : 'Loading models…'
+            }
           >
             {!catalog && <option value="">Loading…</option>}
+            {/* A closed select shows its chosen option's text, so on a phone
+                only that one is shortened; the open list keeps full labels. */}
             {catalog?.available.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.label}
+                {isMobile && m.id === model ? shortModelLabel(m.label) : m.label}
               </option>
             ))}
           </select>

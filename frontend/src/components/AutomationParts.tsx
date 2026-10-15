@@ -1,15 +1,16 @@
 import * as stylex from '@stylexjs/stylex';
 import {useEffect} from 'react';
 
+import {describeCron} from '../lib/format';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationInputType, CreateAutomationPayload} from '../lib/types';
 import {refreshAutomationList} from '../relay/AutomationListQuery';
 import {commitCreateAutomation} from '../relay/CreateAutomationMutation';
 import {commitUpdateAutomation} from '../relay/UpdateAutomationMutation';
-import {panel, statusDot} from '../routes/automation.styles';
+import {chip, panel, statusDot} from '../routes/automation.styles';
 import {pill} from './AutomationDetail.styles';
 import {AutomationForm} from './AutomationForm';
-import {BoltIcon, CodeIcon, EyeIcon, WebhookIcon, XIcon} from './icons';
+import {BoltIcon, CalendarIcon, CodeIcon, EyeIcon, WebhookIcon, XIcon} from './icons';
 import {closeBtn} from './ui';
 
 /* The pieces the automation list, detail and run pages share. */
@@ -19,6 +20,25 @@ export function TypeIcon({type, size = 14}: {type: AutomationInputType; size?: n
   if (type === 'code') return <CodeIcon size={size} />;
   if (type === 'monitor') return <EyeIcon size={size} />;
   return <WebhookIcon size={size} />;
+}
+
+/**
+ * When an automation runs, said the way a person would ("Weekdays at 7:00"),
+ * with the cron line itself on hover. A cron the describer doesn't cover is
+ * shown as written, in mono, as before.
+ */
+export function ScheduleChip({schedule}: {schedule: string | null | undefined}) {
+  if (!schedule) return <span {...stylex.props(chip.base, chip.adhoc)}>ad-hoc</span>;
+  const readable = describeCron(schedule);
+  return (
+    <span
+      {...stylex.props(chip.base, chip.schedule, readable !== null && chip.scheduleReadable)}
+      title={`cron: ${schedule}`}
+    >
+      <CalendarIcon size={11} />
+      {readable ?? schedule}
+    </span>
+  );
 }
 
 // Run status is server data, so the variant is looked up rather than indexed

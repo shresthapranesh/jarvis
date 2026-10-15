@@ -7,7 +7,7 @@ import type {AutomationListQuery as TAutomationListQuery} from '../__generated__
 import type {AutomationRunsQuery as TAutomationRunsQuery} from '../__generated__/AutomationRunsQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
-import {formatDuration, formatNextRun, formatRelativeTime} from '../lib/api';
+import {formatDuration, formatNextRun} from '../lib/api';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationRun} from '../lib/types';
 import {
@@ -27,7 +27,13 @@ import {commitTriggerAutomation} from '../relay/TriggerAutomationMutation';
 import {commitUpdateAutomation} from '../relay/UpdateAutomationMutation';
 import {card, chip, confirmWarn, typeIcon} from '../routes/automation.styles';
 import {bar, detail, runRow, toggle} from './AutomationDetail.styles';
-import {AutomationFormPanel, RunStatusPill, toggledPayload, TypeIcon} from './AutomationParts';
+import {
+  AutomationFormPanel,
+  RunStatusPill,
+  ScheduleChip,
+  toggledPayload,
+  TypeIcon,
+} from './AutomationParts';
 import {ConfirmDialog} from './ConfirmDialog';
 import {
   BoltIcon,
@@ -41,7 +47,7 @@ import {
   TrashIcon,
 } from './icons';
 import {QueryBoundary, useQueryRetry} from './QueryBoundary';
-import {btn, page} from './ui';
+import {btn, page, TimeAgo} from './ui';
 
 export default function AutomationDetailPage() {
   return (
@@ -154,17 +160,7 @@ function AutomationDetail() {
               {auto.description && <p {...stylex.props(detail.desc)}>{auto.description}</p>}
               <div {...stylex.props(detail.badges)}>
                 <span {...stylex.props(chip.base, chip[auto.input_type])}>{auto.input_type}</span>
-                {auto.schedule ? (
-                  <span
-                    {...stylex.props(chip.base, chip.schedule)}
-                    title={`cron: ${auto.schedule}`}
-                  >
-                    <CalendarIcon size={11} />
-                    {auto.schedule}
-                  </span>
-                ) : (
-                  <span {...stylex.props(chip.base, chip.adhoc)}>ad-hoc</span>
-                )}
+                <ScheduleChip schedule={auto.schedule} />
                 {auto.next_run_at && auto.enabled && (
                   <span {...stylex.props(detail.meta, detail.metaAccent)}>
                     <ClockIcon size={11} />
@@ -314,8 +310,8 @@ function RunRow({run, maxDurationMs}: {run: AutomationRun; maxDurationMs: number
           <CursorClickIcon size={12} />
         )}
       </span>
-      <span {...stylex.props(runRow.time)} title={new Date(run.started_at).toLocaleString()}>
-        {formatRelativeTime(run.started_at)}
+      <span {...stylex.props(runRow.time)}>
+        <TimeAgo iso={run.started_at} />
       </span>
       <span {...stylex.props(runRow.snippet, run.status === 'error' && runRow.snippetError)}>
         {text ? snippetFromText(text) : ''}

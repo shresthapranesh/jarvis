@@ -5,7 +5,7 @@ import {createPortal} from 'react-dom';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
-import {BUCKET_ORDER, relativeTime, timeBucket, type TimeBucket} from '../lib/format';
+import {BUCKET_ORDER, timeBucket, type TimeBucket} from '../lib/format';
 import {conversationListQuery, refreshConversationList} from '../relay/ConversationListQuery';
 import {commitDeleteConversation} from '../relay/DeleteConversationMutation';
 import {decodeGlobalId} from '../relay/globalId';
@@ -13,6 +13,7 @@ import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {list, menu as menuStyles, row} from './ConversationList.styles';
 import {useQueryRetry} from './QueryBoundary';
+import {TimeAgo} from './ui';
 
 interface MenuAnchor {
   id: string;
@@ -176,7 +177,9 @@ export function ConversationList() {
                         <span {...stylex.props(row.title, active && row.titleActive)}>
                           {conv.title ?? 'Untitled'}
                         </span>
-                        <span {...stylex.props(row.time)}>{relativeTime(conv.createdAt)}</span>
+                        <span {...stylex.props(row.time)}>
+                          <TimeAgo iso={conv.createdAt} compact />
+                        </span>
                       </Link>
                     )}
                     <button

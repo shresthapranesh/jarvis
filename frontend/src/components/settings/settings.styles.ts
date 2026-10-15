@@ -192,6 +192,10 @@ export const models = stylex.create({
   },
   card: {gap: 6},
   id: {fontFamily: type.mono, fontSize: type.tUi, overflowWrap: 'anywhere'},
+  // A model card leads with its readable label; the catalog id is the
+  // secondary, copyable line under it.
+  name: {fontFamily: type.body, minWidth: 0, flexShrink: 1},
+  idLine: {fontFamily: type.mono, fontSize: type.tSmall, overflowWrap: 'anywhere'},
   /** The single "which model is the default" control, in the filter row. */
   defaultPicker: {display: 'flex', alignItems: 'center', gap: 6, minWidth: 0},
   defaultSelect: {flexGrow: 0, flexShrink: 1, flexBasis: 260, fontFamily: type.mono},

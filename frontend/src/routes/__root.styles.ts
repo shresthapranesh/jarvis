@@ -56,7 +56,12 @@ export const rail = stylex.create({
     borderInlineEndWidth: 1,
     borderInlineEndStyle: 'solid',
     borderInlineEndColor: colors.glassBorder,
-    boxShadow: `4px 0 20px rgba(${channels.shadow}, 0.28), inset -1px 0 0 rgba(${channels.tint}, 0.04)`,
+    // Docked, the rail is separated by its hairline alone; only the phone
+    // drawer, which floats over the page, is lifted with a shadow.
+    boxShadow: {
+      default: `inset -1px 0 0 rgba(${channels.tint}, 0.04)`,
+      [bp.compact]: `4px 0 20px rgba(${channels.shadow}, 0.28)`,
+    },
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',

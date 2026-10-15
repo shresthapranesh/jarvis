@@ -11,7 +11,7 @@ import {decodeGlobalId} from '../relay/globalId';
 import {ArtifactDetail} from './ArtifactPanel';
 import {detail} from './ArtifactPanel.styles';
 import {browser} from './ArtifactsBrowser.styles';
-import {closeBtn, page, PageHeader} from './ui';
+import {closeBtn, page, PageHeader, TimeAgo} from './ui';
 
 const fileIcon = (
   <svg
@@ -150,7 +150,12 @@ export function ArtifactsBrowser() {
         </div>
 
         {rows.length === 0 ? (
-          <div {...stylex.props(browser.empty)}>No artifacts yet.</div>
+          <div {...stylex.props(page.empty, page.emptyInset)}>
+            <p>No artifacts yet.</p>
+            <p>
+              Reports, code and files the agent writes during a chat are kept here to open again.
+            </p>
+          </div>
         ) : (
           <div {...stylex.props(browser.scroll)}>
             <table {...stylex.props(browser.table)}>
@@ -193,7 +198,7 @@ export function ArtifactsBrowser() {
                         <span {...stylex.props(browser.kind)}>{r.kind}</span>
                       </td>
                       <td {...stylex.props(browser.td, browser.muted)}>
-                        {new Date(r.updatedAt).toLocaleString()}
+                        <TimeAgo iso={r.updatedAt} />
                       </td>
                     </tr>
                   );

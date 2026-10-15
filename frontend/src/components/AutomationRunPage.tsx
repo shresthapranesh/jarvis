@@ -8,7 +8,8 @@ import type {AutomationRunsQuery as TAutomationRunsQuery} from '../__generated__
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {useAutomationRunEvents} from '../hooks/useAutomationRunEvents';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
-import {formatDuration, formatRelativeTime} from '../lib/api';
+import {formatDuration} from '../lib/api';
+import {fullDateTime, parseTimestamp} from '../lib/format';
 import {useToast} from '../lib/toast';
 import type {AutomationRun} from '../lib/types';
 import {automationListQuery} from '../relay/AutomationListQuery';
@@ -25,7 +26,7 @@ import {RunStatusPill} from './AutomationParts';
 import {CalendarIcon, ChevronLeftIcon, CursorClickIcon, StopIcon} from './icons';
 import {Markdown, StreamingMarkdown} from './Markdown';
 import {QueryBoundary, useQueryRetry} from './QueryBoundary';
-import {btn, errorBubble, page, prose, stream, ThinkingDots} from './ui';
+import {btn, errorBubble, page, prose, stream, ThinkingDots, TimeAgo} from './ui';
 
 export default function AutomationRunPage() {
   return (
@@ -76,7 +77,7 @@ function AutomationRunView() {
         <div {...stylex.props(detail.titleRow)}>
           <div {...stylex.props(detail.titleBlock)}>
             <h1 {...stylex.props(detail.title)}>
-              {run ? `Run · ${new Date(run.started_at).toLocaleString()}` : 'Run'}
+              {run ? `Run · ${fullDateTime(run.started_at)}` : 'Run'}
             </h1>
             {run && <RunFacts run={run} />}
           </div>
@@ -117,7 +118,9 @@ function RunFacts({run}: {run: AutomationRun}) {
         )}
         {run.triggered_by === 'schedule' ? 'Scheduled' : 'Manual'}
       </span>
-      <span {...stylex.props(detail.meta)}>Started {formatRelativeTime(run.started_at)}</span>
+      <span {...stylex.props(detail.meta)}>
+        Started <TimeAgo iso={run.started_at} />
+      </span>
       {run.status === 'running' ? (
         <Elapsed since={run.started_at} />
       ) : (
@@ -133,7 +136,7 @@ function Elapsed({since}: {since: string}) {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  const secs = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
+  const secs = Math.max(0, Math.floor((now - parseTimestamp(since).getTime()) / 1000));
   const label = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
   return <span {...stylex.props(detail.meta, runStyles.timer)}>{label}</span>;
 }

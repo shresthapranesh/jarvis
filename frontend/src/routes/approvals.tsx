@@ -2,14 +2,13 @@ import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useState} from 'react';
 
-import {kindBadge, kindBadgeStyle, page, PageHeader} from '../components/ui';
+import {kindBadge, kindBadgeStyle, page, PageHeader, TimeAgo} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {
   refreshPendingApprovals,
   usePendingApprovals,
   usePendingApprovalsLoaded,
 } from '../hooks/usePendingApprovals';
-import {formatRelativeTime} from '../lib/api';
 import {useToast} from '../lib/toast';
 import type {ApprovalSource, PendingApproval} from '../lib/types';
 import {commitResolveApproval} from '../relay/ResolveApprovalMutation';
@@ -85,7 +84,9 @@ function ApprovalCard({approval}: {approval: PendingApproval}) {
             runs on approval
           </span>
         )}
-        <span {...stylex.props(card.age)}>{formatRelativeTime(approval.requested_at)}</span>
+        <span {...stylex.props(card.age)}>
+          <TimeAgo iso={approval.requested_at} />
+        </span>
         {canOpen && (
           <button {...stylex.props(card.open)} type="button" onClick={open}>
             Open
@@ -192,7 +193,12 @@ function ApprovalsPage() {
       {!loaded ? (
         <div {...stylex.props(page.empty)}>Loading…</div>
       ) : approvals.length === 0 ? (
-        <div {...stylex.props(page.empty)}>Nothing is waiting on you.</div>
+        <div {...stylex.props(page.empty)}>
+          <p>Nothing is waiting on you.</p>
+          <p>
+            When an agent wants to do something that needs your say-so, it pauses and asks here.
+          </p>
+        </div>
       ) : (
         <ul {...stylex.props(card.list)}>
           {approvals.map((a) => (

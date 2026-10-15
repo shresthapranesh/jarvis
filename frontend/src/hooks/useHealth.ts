@@ -9,9 +9,12 @@ import {checkHealth} from '../lib/api';
  * is never re-checked — this mirrors the `staleTime: Infinity` it replaces — but
  * an unhealthy one retries when the window regains focus, so the dot recovers
  * on its own once the server is back.
+ *
+ * `null` until the first check answers, so a page load shows a neutral dot
+ * rather than flashing "offline" before the server has had a chance to reply.
  */
-export function useHealth(): boolean {
-  const [healthy, setHealthy] = useState(false);
+export function useHealth(): boolean | null {
+  const [healthy, setHealthy] = useState<boolean | null>(null);
 
   const check = useCallback(async () => {
     try {

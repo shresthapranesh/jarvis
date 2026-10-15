@@ -415,6 +415,8 @@ export const chip = stylex.create({
     fontFamily: type.mono,
     textTransform: 'none',
   },
+  /** Once the cron is put into words it is prose, not a code literal. */
+  scheduleReadable: {fontFamily: type.body},
   adhoc: {
     backgroundColor: 'transparent',
     color: colors.textDim,

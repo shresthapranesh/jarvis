@@ -191,7 +191,12 @@ export function ModelsTab() {
               return (
                 <li key={m.id} {...stylex.props(skill.card, models.card)}>
                   <div {...stylex.props(skill.head)}>
-                    <span {...stylex.props(badge.base)}>{m.provider}</span>
+                    <span {...stylex.props(skill.name, models.name)}>{m.label || m.id}</span>
+                    {/* The provider is the id's prefix almost always; tag it only
+                      when it isn't, so the card doesn't say it twice. */}
+                    {m.provider !== m.id.split(':')[0] && (
+                      <span {...stylex.props(badge.base)}>{m.provider}</span>
+                    )}
                     {isDefault && <span {...stylex.props(badge.base, badge.live)}>default</span>}
                     {!m.builtin && <span {...stylex.props(badge.base)}>custom</span>}
                     {!m.builtin && (
@@ -213,9 +218,8 @@ export function ModelsTab() {
                       </div>
                     )}
                   </div>
-                  <span {...stylex.props(skill.name, models.id)}>{m.id}</span>
                   <p {...stylex.props(skill.desc)}>
-                    {m.label}
+                    <span {...stylex.props(models.idLine)}>{m.id}</span>
                     {m.contextWindow ? (
                       <span {...stylex.props(models.window)}>
                         {' · '}

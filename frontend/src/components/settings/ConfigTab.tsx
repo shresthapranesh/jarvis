@@ -10,7 +10,7 @@ import {settingsQuery} from '../../relay/SettingsQuery';
 import {ConfirmDialog} from '../ConfirmDialog';
 import {SearchIcon, TrashIcon} from '../icons';
 import {useQueryRetry} from '../QueryBoundary';
-import {badge, btn, codeField, field, iconBtn, page} from '../ui';
+import {badge, btn, codeField, field, iconBtn, page, TimeAgo} from '../ui';
 // `settings` and `tools` are also local variable names in these tabs.
 import {configNew, settings as sx, tools as toolStyles} from './settings.styles';
 
@@ -273,7 +273,7 @@ function SettingRow({
         )}
         {setting.updatedAt && (
           <p {...stylex.props(codeField.meta)}>
-            Updated {new Date(setting.updatedAt).toLocaleString()}
+            Updated <TimeAgo iso={setting.updatedAt} />
           </p>
         )}
       </div>

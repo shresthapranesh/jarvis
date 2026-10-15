@@ -121,14 +121,22 @@ export const actions = stylex.create({
     color: colors.text,
     backgroundColor: colors.surface2,
   },
-  /** `chipBtn` with its frame taken off, to sit in the same row as the glyphs. */
+  /**
+   * `chipBtn` with its frame taken off, to sit in the same row as the glyphs.
+   * It is the way into the work behind the reply, so unlike the glyphs it
+   * rests on a fill, in the UI size and full ink, rather than vanishing.
+   */
   steps: {
     alignSelf: 'center',
     height: 26,
+    gap: 6,
     borderColor: {default: 'transparent', ':hover': 'transparent'},
-    backgroundColor: {default: 'transparent', ':hover': colors.surface2},
-    color: {default: colors.textDim, ':hover': colors.text},
-    paddingInline: 7,
+    backgroundColor: {default: colors.surface, ':hover': colors.surface3},
+    color: {default: colors.text, ':hover': colors.text},
+    fontSize: type.tUi,
+    fontWeight: 500,
+    paddingInline: 9,
+    marginInlineStart: 4,
   },
 });
 

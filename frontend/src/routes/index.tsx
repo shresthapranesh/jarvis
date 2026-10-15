@@ -5,9 +5,9 @@ import {useLazyLoadQuery} from 'react-relay';
 
 import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
 import {InputBox} from '../components/InputBox';
-import {errorBubble, page} from '../components/ui';
+import {errorBubble, page, TimeAgo} from '../components/ui';
 import {useRunningTasks} from '../hooks/useRunningTasks';
-import {greeting, relativeTime} from '../lib/format';
+import {greeting} from '../lib/format';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {decodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
@@ -104,7 +104,9 @@ function IndexPage() {
                     <span {...stylex.props(run.mark)} aria-hidden="true" />
                     <span {...stylex.props(run.label)}>{task.label}</span>
                     <span {...stylex.props(run.time)}>{task.kind}</span>
-                    <span {...stylex.props(run.time)}>{relativeTime(task.started_at)}</span>
+                    <span {...stylex.props(run.time)}>
+                      <TimeAgo iso={task.started_at} compact />
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -127,7 +129,7 @@ function IndexPage() {
                         <span {...stylex.props(recentStyles.dot)} aria-hidden="true">
                           ·
                         </span>
-                        {relativeTime(conv.createdAt)}
+                        <TimeAgo iso={conv.createdAt} compact />
                       </span>
                     </Link>
                   </li>

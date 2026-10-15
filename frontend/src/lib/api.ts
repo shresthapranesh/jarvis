@@ -1,3 +1,4 @@
+import {parseTimestamp, shortDate} from './format';
 import type {NotificationChannelType} from './types';
 
 export async function checkHealth(): Promise<{status: string}> {
@@ -16,19 +17,22 @@ export interface NotificationChannelInput {
   target: string;
 }
 
+/** "just now" · "4m ago" · "3h ago" · "2d ago", then the date. Render it with `<TimeAgo>`. */
 export function formatRelativeTime(isoString: string): string {
-  const diff = Date.now() - new Date(isoString).getTime();
+  const diff = Date.now() - parseTimestamp(isoString).getTime();
+  if (!Number.isFinite(diff)) return '';
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  if (days < 7) return `${days}d ago`;
+  return shortDate(isoString);
 }
 
 export function formatNextRun(isoString: string): string {
-  const diff = new Date(isoString).getTime() - Date.now();
+  const diff = parseTimestamp(isoString).getTime() - Date.now();
   if (diff <= 0) return 'now';
   const secs = Math.floor(diff / 1000);
   if (secs < 60) return `in ${secs}s`;

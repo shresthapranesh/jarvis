@@ -7,7 +7,6 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {WorkflowDetailQuery as TWorkflowDetailQuery} from '../__generated__/WorkflowDetailQuery.graphql';
 import type {WorkflowRunsQuery as TWorkflowRunsQuery} from '../__generated__/WorkflowRunsQuery.graphql';
 import {useWorkflowRunEvents} from '../hooks/useWorkflowRunEvents';
-import {formatRelativeTime} from '../lib/api';
 import {parseDefinition, serializeDefinition} from '../lib/types';
 import type {NotificationConfig, Workflow, WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
 import {commitRunWorkflow} from '../relay/RunWorkflowMutation';
@@ -26,7 +25,7 @@ import {
   serializeNotifications,
 } from './NotificationsEditor';
 import {QueryBoundary, useQueryRetry} from './QueryBoundary';
-import {errorBubble, field} from './ui';
+import {errorBubble, field, TimeAgo} from './ui';
 import {
   config,
   editor,
@@ -97,7 +96,9 @@ function HistoryPanelInner({workflowId, onClose}: {workflowId: string; onClose: 
             >
               <div {...stylex.props(history.rowHeader)}>
                 <span {...stylex.props(runStatus.base, statusStyle(run.status))}>{run.status}</span>
-                <span {...stylex.props(history.time)}>{formatRelativeTime(run.started_at)}</span>
+                <span {...stylex.props(history.time)}>
+                  <TimeAgo iso={run.started_at} />
+                </span>
                 {duration && <span {...stylex.props(history.duration)}>{duration}</span>}
                 {nodeCount > 0 && (
                   <span {...stylex.props(history.nodeCount)}>

@@ -14,7 +14,17 @@ import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
 import {item, skill as skillStyles} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, field, iconBtn, OverflowMenu, overflowSplit, page, PageHeader, Switch} from './ui';
+import {
+  btn,
+  field,
+  iconBtn,
+  OverflowMenu,
+  overflowSplit,
+  page,
+  PageHeader,
+  Switch,
+  TimeAgo,
+} from './ui';
 
 interface Draft {
   name: string;
@@ -160,7 +170,7 @@ export function SkillsView() {
           <pre {...stylex.props(skillStyles.pre)}>{s.body}</pre>
         </details>
         <span {...stylex.props(item.meta)}>
-          Updated {new Date(s.updated_at).toLocaleDateString()}
+          Updated <TimeAgo iso={s.updated_at} />
         </span>
       </li>
     );

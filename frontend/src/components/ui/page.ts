@@ -123,6 +123,11 @@ export const page = stylex.create({
     gap: 8,
     alignItems: 'center',
   },
+  /** `empty` on a page whose body has no gutter of its own (one under `bar`). */
+  emptyInset: {
+    marginBlockStart: {default: layout.pageTop, '@media (max-width: 768px)': 20},
+    marginInline: {default: layout.pageGutter, '@media (max-width: 768px)': 16},
+  },
   error: {
     paddingBlock: 8,
     paddingInline: 12,

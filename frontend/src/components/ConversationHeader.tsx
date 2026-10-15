@@ -6,6 +6,7 @@ import {decodeGlobalId} from '../relay/globalId';
 import {kf} from '../theme/keyframes.stylex';
 import {colors, layout, radii, space, type} from '../theme/tokens.stylex';
 import {FolderIcon} from './icons';
+import {TimeAgo} from './ui';
 
 export type RunState = 'running' | 'waiting' | null;
 
@@ -20,18 +21,6 @@ interface Props {
   panelOpen?: boolean;
   /** Saves a new title. Without it the title is plain text. */
   onRename?: (title: string) => Promise<void>;
-}
-
-/** "Aug 14", or "Aug 14, 2025" once it is not this year. */
-function startedOn(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    ...(sameYear ? {} : {year: 'numeric'}),
-  });
 }
 
 /**
@@ -51,7 +40,6 @@ export function ConversationHeader({
   panelOpen,
   onRename,
 }: Props) {
-  const started = startedOn(createdAt);
   return (
     <header
       {...stylex.props(
@@ -100,11 +88,7 @@ export function ConversationHeader({
               Waiting for you
             </span>
           ) : (
-            started && (
-              <time dateTime={createdAt} title={new Date(createdAt).toLocaleString()}>
-                {started}
-              </time>
-            )
+            createdAt && <TimeAgo iso={createdAt} />
           )}
         </span>
       </div>

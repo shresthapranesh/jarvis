@@ -6,10 +6,9 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {WorkflowListQuery as TWorkflowListQuery} from '../__generated__/WorkflowListQuery.graphql';
 import {PlusIcon} from '../components/icons';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
-import {btn, page, PageHeader} from '../components/ui';
+import {btn, page, PageHeader, TimeAgo} from '../components/ui';
 import {config, list, modal, wfBtn} from '../components/workflow.styles';
 import {useAsyncAction} from '../hooks/useAsyncAction';
-import {formatRelativeTime} from '../lib/api';
 import {commitCreateWorkflow} from '../relay/CreateWorkflowMutation';
 import {commitDeleteWorkflow} from '../relay/DeleteWorkflowMutation';
 import {mapWorkflow, refreshWorkflowList, workflowListQuery} from '../relay/WorkflowListQuery';
@@ -118,7 +117,15 @@ function WorkflowListPage() {
       )}
 
       {workflows.length === 0 && (
-        <div {...stylex.props(list.empty)}>No workflows yet. Use New workflow to make one.</div>
+        <div {...stylex.props(page.empty, page.emptyInset)}>
+          <p>No workflows yet.</p>
+          <p>Chain agents, tools and approval steps into a graph you can run again and again.</p>
+          {!showCreate && (
+            <button {...stylex.props(btn.base, btn.primary)} onClick={() => setShowCreate(true)}>
+              <PlusIcon size={14} /> New workflow
+            </button>
+          )}
+        </div>
       )}
 
       {workflows.map((wf) => (
@@ -130,7 +137,9 @@ function WorkflowListPage() {
           <div {...stylex.props(list.rowInfo)}>
             <div {...stylex.props(list.rowName)}>{wf.name}</div>
             {wf.description && <div {...stylex.props(list.rowDesc)}>{wf.description}</div>}
-            <div {...stylex.props(list.rowMeta)}>{formatRelativeTime(wf.updated_at)}</div>
+            <div {...stylex.props(list.rowMeta)}>
+              <TimeAgo iso={wf.updated_at} />
+            </div>
           </div>
           <div {...stylex.props(list.rowActions)}>
             <button

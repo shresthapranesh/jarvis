@@ -10,12 +10,6 @@ export const browser = stylex.create({
   page: {display: 'flex', height: '100%', overflow: 'hidden'},
   tablePane: {flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden'},
 
-  empty: {
-    paddingBlock: 40,
-    paddingInline: layout.pageGutter,
-    color: colors.textDim,
-    fontSize: type.tBody,
-  },
   loading: {
     paddingBlockStart: {default: 32, '@media (max-width: 768px)': 24},
     paddingBlockEnd: 32,

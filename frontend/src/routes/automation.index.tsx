@@ -7,13 +7,13 @@ import type {AutomationListQuery as TAutomationListQuery} from '../__generated__
 import {
   AutomationFormPanel,
   dotVariant,
+  ScheduleChip,
   toggledPayload,
   TypeIcon,
 } from '../components/AutomationParts';
 import {ConfirmDialog} from '../components/ConfirmDialog';
 import {
   BoltIcon,
-  CalendarIcon,
   ChevronDownIcon,
   ClockIcon,
   EditIcon,
@@ -24,10 +24,10 @@ import {
   XIcon,
 } from '../components/icons';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
-import {btn, field, OverflowMenu, overflowSplit, page, PageHeader} from '../components/ui';
+import {btn, field, OverflowMenu, overflowSplit, page, PageHeader, TimeAgo} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
-import {formatNextRun, formatRelativeTime} from '../lib/api';
+import {formatNextRun} from '../lib/api';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationInputType} from '../lib/types';
 import {
@@ -127,14 +127,7 @@ function AutomationCard({auto, onOpen, onEdit, onDelete, onTrigger, onToggle}: C
         {auto.description && <div {...stylex.props(card.desc)}>{auto.description}</div>}
         <div {...stylex.props(card.badges)}>
           <span {...stylex.props(chip.base, chip[auto.input_type])}>{auto.input_type}</span>
-          {auto.schedule ? (
-            <span {...stylex.props(chip.base, chip.schedule)} title={`cron: ${auto.schedule}`}>
-              <CalendarIcon size={11} />
-              {auto.schedule}
-            </span>
-          ) : (
-            <span {...stylex.props(chip.base, chip.adhoc)}>ad-hoc</span>
-          )}
+          <ScheduleChip schedule={auto.schedule} />
         </div>
       </div>
 
@@ -148,7 +141,9 @@ function AutomationCard({auto, onOpen, onEdit, onDelete, onTrigger, onToggle}: C
         {auto.last_run_at && (
           <div {...stylex.props(card.metaLine)}>
             <span {...stylex.props(statusDot.base, dotVariant(auto.last_run_status))} />
-            <span>Last {formatRelativeTime(auto.last_run_at)}</span>
+            <span>
+              Last <TimeAgo iso={auto.last_run_at} />
+            </span>
           </div>
         )}
         {!auto.last_run_at && <div {...stylex.props(card.metaLine, card.metaNever)}>Never run</div>}

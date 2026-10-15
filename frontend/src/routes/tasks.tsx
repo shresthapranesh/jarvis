@@ -1,14 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
 import {createFileRoute, useNavigate} from '@tanstack/react-router';
 
-import {kindBadge, kindBadgeStyle, page, PageHeader} from '../components/ui';
+import {kindBadge, kindBadgeStyle, page, PageHeader, TimeAgo} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {
   refreshRunningTasks,
   useRunningTasks,
   useRunningTasksLoaded,
 } from '../hooks/useRunningTasks';
-import {formatRelativeTime} from '../lib/api';
 import type {RunningTask, TaskKind} from '../lib/types';
 import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
 import {channels, colors, type} from '../theme/tokens.stylex';
@@ -55,7 +54,10 @@ function TasksPage() {
       {!loaded ? (
         <div {...stylex.props(page.empty)}>Loading…</div>
       ) : tasks.length === 0 ? (
-        <div {...stylex.props(page.empty)}>No active tasks.</div>
+        <div {...stylex.props(page.empty)}>
+          <p>Nothing is running.</p>
+          <p>Chats, automations and workflows show up here while they work, with their progress.</p>
+        </div>
       ) : (
         <ul {...stylex.props(page.list, styles.list)}>
           {tasks.map((task) => {
@@ -76,7 +78,7 @@ function TasksPage() {
                     </span>
                     <span {...stylex.props(styles.label)}>{task.label || task.id}</span>
                     <span {...stylex.props(styles.elapsed)}>
-                      started {formatRelativeTime(task.started_at)}
+                      started <TimeAgo iso={task.started_at} />
                     </span>
                     {task.has_interrupt && (
                       <span {...stylex.props(styles.flag, styles.flagInterrupt)}>

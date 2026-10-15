@@ -15,7 +15,7 @@ import {FormModal} from './FormModal';
 import {EditIcon, PlusIcon, TrashIcon} from './icons';
 import {item, kindDotStyle, kindDot, memory, seg} from './memory.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, field, iconBtn, page, PageHeader} from './ui';
+import {btn, field, iconBtn, page, PageHeader, TimeAgo} from './ui';
 
 const KIND_INFO: Record<MemoryKind, {label: string; hint: string}> = {
   fact: {label: 'Fact', hint: 'surfaced by relevance each turn'},
@@ -115,7 +115,7 @@ export function MemoryView() {
         <div {...stylex.props(item.main)}>
           <span {...stylex.props(item.text)}>{m.text}</span>
           <span {...stylex.props(item.meta)}>
-            Updated {new Date(m.updated_at).toLocaleDateString()}
+            Updated <TimeAgo iso={m.updated_at} />
           </span>
         </div>
         <div {...stylex.props(item.actions)}>

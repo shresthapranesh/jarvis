@@ -18,7 +18,9 @@ export const projects = stylex.create({
     gap: 12,
   },
   card: {cursor: 'pointer'},
-  cardName: {display: 'inline-flex', alignItems: 'center', gap: 7},
+  // A project's name is written by a person, so it sets in the body face;
+  // `skill.name`'s mono is for slug identifiers.
+  cardName: {display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: type.body},
   /** The folder glyph, in both the card name and the detail title. */
   icon: {color: colors.accent, flexShrink: 0},
 });

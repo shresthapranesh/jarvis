@@ -557,8 +557,8 @@ export function MessageBubble({
             onClick={() => onShowSteps?.(message.steps)}
           >
             <svg
-              width="11"
-              height="11"
+              width="12"
+              height="12"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"

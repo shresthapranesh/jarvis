@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import {useEffect, useState} from 'react';
 
 import {useModels} from '../hooks/useModels';
+import {describeCron} from '../lib/format';
 import type {
   Automation,
   AutomationInputType,
@@ -305,6 +306,11 @@ export function AutomationForm({initialValues, onSave, onCancel}: Props) {
           placeholder="0 9 * * 1  (Mon 9am)"
           disabled={saving}
         />
+        {form.schedule?.trim() && (
+          <span {...stylex.props(field.hint)}>
+            {describeCron(form.schedule) ?? 'Runs on this cron schedule.'}
+          </span>
+        )}
       </div>
 
       <NotificationsEditor value={notifications} onChange={setNotifications} disabled={saving} />

@@ -6,7 +6,6 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {ConversationListQuery as TConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
 import type {ProjectQuery as TProjectQuery} from '../__generated__/ProjectQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
-import {formatRelativeTime} from '../lib/api';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {commitDeleteProject} from '../relay/DeleteProjectMutation';
 import {decodeGlobalId} from '../relay/globalId';
@@ -27,7 +26,7 @@ import {InputBox} from './InputBox';
 import {item} from './memory.styles';
 import {detail, projects} from './project.styles';
 import {useQueryRetry} from './QueryBoundary';
-import {btn, field, iconBtn, page} from './ui';
+import {btn, field, iconBtn, page, TimeAgo} from './ui';
 
 interface Props {
   id: string;
@@ -248,7 +247,7 @@ export function ProjectDetail({id}: Props) {
                   </span>
                   <span {...stylex.props(item.meta)}>
                     {c.message_count} message{c.message_count === 1 ? '' : 's'} ·{' '}
-                    {formatRelativeTime(c.created_at)}
+                    <TimeAgo iso={c.created_at} />
                   </span>
                 </Link>
                 <button

@@ -271,11 +271,19 @@ function RootLayout() {
       <span
         {...stylex.props(
           brand.dot,
-          healthy ? brand.dotOk : brand.dotErr,
-          healthy && runningCount > 0 && brand.dotPulsing,
+          healthy === true && brand.dotOk,
+          healthy === false && brand.dotErr,
+          healthy === true && runningCount > 0 && brand.dotPulsing,
         )}
+        title={healthy === null ? 'Checking the server…' : undefined}
       />
-      {!healthy ? 'offline' : runningCount > 0 ? `${runningCount} running` : 'idle'}
+      {healthy === null
+        ? null
+        : !healthy
+          ? 'offline'
+          : runningCount > 0
+            ? `${runningCount} running`
+            : 'idle'}
     </span>
   );
 
