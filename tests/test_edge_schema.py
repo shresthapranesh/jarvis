@@ -115,7 +115,7 @@ _ADDED = {
                  "duration_ms"],
     "steps": ["subagent"],
     "jobs": ["thread_id", "runtime"],
-    "conversations": ["pinned", "surface", "project_id", "ephemeral"],
+    "conversations": ["pinned", "surface", "project_id", "ephemeral", "effort"],
     "automations": ["notifications", "stateful"],
     "workflows": ["notifications"],
     "board_tasks": ["blocked_kind", "pending_answer"],

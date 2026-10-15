@@ -8,10 +8,13 @@ export function useModels() {
       query useModelsQuery {
         models {
           default
+          defaultEffort
+          effortLevels
           available {
             id
             label
             provider
+            efforts
           }
         }
       }

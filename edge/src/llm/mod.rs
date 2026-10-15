@@ -230,6 +230,16 @@ pub fn preserves_thinking(model: &str) -> bool {
     matches!(model.split_once(':'), Some(("anthropic", name)) if anthropic::thinks_by_default(name))
 }
 
+/// The effort levels a catalog model takes (`Request::effort`), lowest
+/// first: Anthropic's, for the models that take one. None for every other
+/// provider — what it would be sent is left out.
+pub fn efforts(model: &str) -> &'static [&'static str] {
+    match model.split_once(':') {
+        Some(("anthropic", name)) => anthropic::efforts(name),
+        _ => &[],
+    }
+}
+
 /// How many times a transient failure is retried.
 const RETRIES: u32 = 3;
 

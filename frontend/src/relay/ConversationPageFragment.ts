@@ -10,6 +10,7 @@ export const conversationPageFragment = graphql`
     id
     title
     model
+    effort
     ephemeral
     createdAt
     project {

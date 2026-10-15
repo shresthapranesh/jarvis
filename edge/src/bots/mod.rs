@@ -118,6 +118,7 @@ impl Ctx {
             display: Some(text.to_string()),
             project_id: None,
             ephemeral: false,
+            effort: None,
         };
         match start_chat(&self.pool, &self.registry, turn).await {
             Ok(Dispatched::Started { task_id, .. }) => match self.registry.get(&task_id) {

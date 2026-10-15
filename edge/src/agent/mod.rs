@@ -44,12 +44,42 @@ const CANCEL_POLL: Duration = Duration::from_secs(5);
 /// Turns running here at once.
 const MAX_RUNNING: usize = 8;
 
-/// The effort a run's model calls ask for, by the run's kind: unattended
-/// work (automations, board tasks, workflows) thinks harder than a chat or
-/// a worker. `JARVIS_EFFORT` sets one level for every run (`low`, `medium`,
-/// `high`, `xhigh` or `max`), or `default` to leave each model its own.
-/// Only the models that take an effort are sent one (`llm/anthropic.rs`).
-fn effort(kind: &str) -> Option<&'static str> {
+/// The effort a run's calls to `model` ask for: the conversation's own pick
+/// (`chosen`, from the composer), else the operator's default
+/// (`default.effort`, from Settings → Models), else `JARVIS_EFFORT` (`low`,
+/// `medium`, `high`, `xhigh` or `max`, or `default` to leave each model its
+/// own), else by the run's kind — unattended work (automations, board tasks,
+/// workflows) thinks harder than a chat or a worker. Then stepped down to a
+/// level offered for the model (`catalog::effort_for`), as the composer
+/// shows it. None for a model that takes no effort.
+async fn effort(pool: &SqlitePool, model: &str, kind: &str, chosen: Option<&str>) -> Option<&'static str> {
+    let offered = match crate::catalog::effort_levels(pool).await {
+        Ok(levels) => levels,
+        Err(e) => {
+            tracing::warn!("models.efforts unreadable: {e}");
+            crate::llm::anthropic::EFFORTS.to_vec()
+        }
+    };
+    let levels: Vec<&'static str> = crate::llm::efforts(model).iter().copied().filter(|l| offered.contains(l)).collect();
+    if levels.is_empty() {
+        return None;
+    }
+    let want = match chosen.and_then(crate::catalog::effort_level) {
+        Some(level) => level,
+        None => match crate::catalog::default_effort(pool).await {
+            Ok(Some(level)) => level,
+            Ok(None) => fallback_effort(kind)?,
+            Err(e) => {
+                tracing::warn!("default.effort unreadable: {e}");
+                fallback_effort(kind)?
+            }
+        },
+    };
+    crate::catalog::effort_for(want, &levels)
+}
+
+/// With no pick and no default: `JARVIS_EFFORT`, else by the run's kind.
+fn fallback_effort(kind: &str) -> Option<&'static str> {
     static SET: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     let set = SET.get_or_init(|| {
         let v = std::env::var("JARVIS_EFFORT").ok()?.trim().to_lowercase();
@@ -64,7 +94,7 @@ fn effort(kind: &str) -> Option<&'static str> {
     });
     match set.as_deref() {
         Some("default") => None,
-        Some(level) => Some(level),
+        Some(level) => crate::catalog::effort_level(level),
         None => Some(match kind {
             "automation" | "board_task" | "workflow" => "high",
             _ => "medium",

@@ -25,6 +25,9 @@ pub struct ModelSpec {
     provider: String,
     builtin: bool,
     context_window: Option<i32>,
+    /// The effort levels the composer offers for it, lowest first: those it
+    /// takes that `effortLevels` offers. Empty when it takes none.
+    efforts: Vec<String>,
 }
 
 /// An endpoint as it may leave the server: whether it has a key, never the key.
@@ -38,6 +41,11 @@ pub struct ModelEndpoint {
 #[derive(SimpleObject)]
 pub struct ModelCatalog {
     default: String,
+    /// The effort levels the composer offers (`models.efforts`), lowest first.
+    effort_levels: Vec<String>,
+    /// The effort a chat starts at (`default.effort`); none leaves it to the
+    /// run's kind.
+    default_effort: Option<String>,
     available: Vec<ModelSpec>,
     providers: Vec<String>,
     discoverable_providers: Vec<String>,
@@ -58,11 +66,15 @@ async fn load(pool: &SqlitePool) -> Result<ModelCatalog> {
     let (default, specs) = catalog::catalog(pool)
         .await?
         .map_err(|e| unreadable(&e.0))?;
+    let levels = catalog::effort_levels(pool).await?;
     Ok(ModelCatalog {
         default,
+        effort_levels: levels.iter().map(|l| l.to_string()).collect(),
+        default_effort: catalog::default_effort(pool).await?.map(str::to_string),
         available: specs
             .into_iter()
             .map(|s| ModelSpec {
+                efforts: crate::llm::efforts(&s.id).iter().filter(|l| levels.contains(l)).map(|l| l.to_string()).collect(),
                 builtin: catalog::is_builtin(&s.id),
                 context_window: s.context_window.and_then(|w| i32::try_from(w).ok()),
                 id: s.id,
@@ -92,6 +104,8 @@ impl ModelsQuery {
 const CUSTOM: &str = "models.custom";
 const ENDPOINTS: &str = "models.endpoints";
 const DEFAULT: &str = "default.model";
+const EFFORTS: &str = "models.efforts";
+const DEFAULT_EFFORT: &str = "default.effort";
 
 async fn get(conn: &mut SqliteConnection, key: &str) -> sqlx::Result<Option<String>> {
     sqlx::query_scalar("SELECT value FROM config_settings WHERE key = ?").bind(key).fetch_optional(conn).await
@@ -344,6 +358,35 @@ impl ModelsMutation {
         }
         let mut tx = crate::db::write_tx(pool).await?;
         upsert(&mut tx, DEFAULT, &id).await?;
+        tx.commit().await?;
+        Self::changed(ctx).await
+    }
+
+    /// Which effort levels the composer offers, and the one a chat starts
+    /// at (none: by the run's kind). The default must be one offered.
+    async fn set_efforts(&self, ctx: &Context<'_>, levels: Vec<String>, default: Option<String>) -> Result<ModelCatalog> {
+        let mut offered = vec![];
+        for level in &levels {
+            offered.push(catalog::effort_level(pystr::strip(level)).ok_or_else(|| super::start::unknown_effort(level))?);
+        }
+        if offered.is_empty() {
+            return Err("offer at least one effort level".into());
+        }
+        let ordered: Vec<&str> = crate::llm::anthropic::EFFORTS.into_iter().filter(|e| offered.contains(e)).collect();
+        let default = match default.as_deref().map(pystr::strip).filter(|d| !d.is_empty()) {
+            Some(d) => {
+                let level = catalog::effort_level(d).ok_or_else(|| super::start::unknown_effort(d))?;
+                if !ordered.contains(&level) {
+                    return Err(format!("the default effort {level} isn't one of the levels offered").into());
+                }
+                level
+            }
+            None => "",
+        };
+        let pool = ctx.data::<SqlitePool>()?;
+        let mut tx = crate::db::write_tx(pool).await?;
+        upsert(&mut tx, EFFORTS, &ordered.join(",")).await?;
+        upsert(&mut tx, DEFAULT_EFFORT, default).await?;
         tx.commit().await?;
         Self::changed(ctx).await
     }

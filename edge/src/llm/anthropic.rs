@@ -16,7 +16,8 @@
 //!   limit (`MAX_OUTPUT_TOKENS`), not its 4096 fallback;
 //! - models that think by default are asked for a summary of the thinking,
 //!   which they would otherwise stream as empty blocks (`thinking`), and a
-//!   call's effort is sent to the models that take it (`takes_effort`);
+//!   call's effort is sent to the models that take it, at a level they take
+//!   (`efforts`);
 //! - those models preserve thinking (`llm::preserves_thinking`): their past
 //!   blocks go back, old tool output is cleared server-side
 //!   (`context_management`) rather than clipped here, and a block the API
@@ -114,9 +115,18 @@ pub fn max_tokens(name: &str) -> i64 {
 /// default) and return it as empty blocks unless asked for a summary.
 const THINKS_BY_DEFAULT: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable-5", "claude-mythos-5"];
 
-/// Families that take `output_config.effort` at `low`/`medium`/`high`
-/// (Sonnet 4.5 and Haiku 4.5 reject it).
-const TAKES_EFFORT: &[&str] = &["claude-opus-4-5", "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-8"];
+/// Every effort level, lowest first.
+pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// The families that take `output_config.effort`, and the levels each takes
+/// (Sonnet 4.5 and Haiku 4.5 reject it; `xhigh` arrived with Opus 4.7).
+const TAKES_EFFORT: &[(&str, &[&str])] = &[
+    ("claude-opus-4-5", &["low", "medium", "high"]),
+    ("claude-opus-4-6", &["low", "medium", "high", "max"]),
+    ("claude-sonnet-4-6", &["low", "medium", "high", "max"]),
+    ("claude-opus-4-7", &EFFORTS),
+    ("claude-opus-4-8", &EFFORTS),
+];
 
 fn family(name: &str, families: &[&str]) -> bool {
     families.iter().any(|f| name.strip_prefix(f).is_some_and(|rest| rest.is_empty() || rest.starts_with('-')))
@@ -157,8 +167,21 @@ pub fn thinks_by_default(name: &str) -> bool {
     family(name, THINKS_BY_DEFAULT)
 }
 
-fn takes_effort(name: &str) -> bool {
-    family(name, THINKS_BY_DEFAULT) || family(name, TAKES_EFFORT)
+/// The effort levels `name` takes, lowest first; none when it takes no
+/// effort. Every model that thinks by default takes all five.
+pub fn efforts(name: &str) -> &'static [&'static str] {
+    if family(name, THINKS_BY_DEFAULT) {
+        return &EFFORTS;
+    }
+    TAKES_EFFORT.iter().find(|(f, _)| family(name, &[*f])).map_or(&[], |(_, levels)| levels)
+}
+
+/// The level a call asks `name` for: `effort` when the model takes it,
+/// else the highest level it takes below that — a stored choice can outlive
+/// a switch to a model with fewer levels.
+fn effort_for(name: &str, effort: &str) -> Option<&'static str> {
+    let rank = EFFORTS.iter().position(|e| *e == effort)?;
+    efforts(name).iter().rev().find(|e| EFFORTS.iter().position(|x| x == *e).is_some_and(|r| r <= rank)).copied()
 }
 
 /// `ContextCacheConfig.cache_control()` for Anthropic: `ttl` only when
@@ -250,7 +273,7 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
         body["thinking"] = thinking;
         body["context_management"] = context_management();
     }
-    if let Some(effort) = req.effort.filter(|_| takes_effort(name)) {
+    if let Some(effort) = req.effort.and_then(|e| effort_for(name, e)) {
         body["output_config"] = json!({"effort": effort});
     }
     if !req.tools.is_empty() {
@@ -756,6 +779,11 @@ mod tests {
         let opus47 = body("claude-opus-4-7", Some("high"));
         assert!(opus47.get("thinking").is_none() && opus47.get("context_management").is_none());
         assert_eq!(opus47["output_config"], json!({"effort": "high"}));
+        // A level the model doesn't take steps down to one it does.
+        assert_eq!(body("claude-opus-4-6", Some("xhigh"))["output_config"], json!({"effort": "high"}));
+        assert_eq!(body("claude-opus-4-5", Some("max"))["output_config"], json!({"effort": "high"}));
+        assert_eq!(body("claude-opus-4-6", Some("max"))["output_config"], json!({"effort": "max"}));
+        assert!(body("claude-opus-5-5", Some("extreme")).get("output_config").is_none());
         // Rejects effort; and no effort asked, none sent.
         assert!(body("claude-haiku-4-5-20251001", Some("low")).get("output_config").is_none());
         assert!(body("claude-sonnet-5-5", None).get("output_config").is_none());

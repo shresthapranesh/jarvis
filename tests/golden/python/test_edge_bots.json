@@ -4,6 +4,7 @@
    "conversations": [
     {
      "created_at": "<now>",
+     "effort": null,
      "ephemeral": 0,
      "id": "telegram_100",
      "model": "ollama:fake",

@@ -145,6 +145,10 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
         exec(tx, "ALTER TABLE conversations ADD COLUMN ephemeral BOOLEAN DEFAULT 0").await?;
     }
     exec(tx, "CREATE INDEX IF NOT EXISTS ix_conversations_ephemeral ON conversations (ephemeral)").await?;
+    // The effort its turns ask for (the composer's pick) — the edge's own.
+    if !conv.contains("effort") {
+        exec(tx, "ALTER TABLE conversations ADD COLUMN effort VARCHAR").await?;
+    }
     let auto = columns(tx, "automations").await?;
     if !auto.contains("notifications") {
         exec(tx, "ALTER TABLE automations ADD COLUMN notifications TEXT").await?;

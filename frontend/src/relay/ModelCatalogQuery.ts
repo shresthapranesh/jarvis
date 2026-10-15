@@ -8,6 +8,8 @@ export const modelCatalogQuery = graphql`
   query ModelCatalogQuery {
     models {
       default
+      defaultEffort
+      effortLevels
       providers
       discoverableProviders
       endpoints {
@@ -21,6 +23,7 @@ export const modelCatalogQuery = graphql`
         provider
         builtin
         contextWindow
+        efforts
       }
     }
   }
@@ -32,6 +35,8 @@ export interface CatalogModel {
   provider: string;
   builtin: boolean;
   contextWindow: number | null;
+  /** The effort levels the composer offers for it; empty when it takes none. */
+  efforts: readonly string[];
 }
 
 /** An OpenAI-compatible server; its name is the provider prefix of its
@@ -44,6 +49,10 @@ export interface ModelEndpoint {
 
 export interface ModelCatalogData {
   default: string;
+  /** The effort a chat starts at; null leaves it to the run's kind. */
+  defaultEffort: string | null;
+  /** The effort levels the composer offers, lowest first. */
+  effortLevels: readonly string[];
   providers: readonly string[];
   /** Providers that can enumerate their own models — drives the sync picker. */
   discoverableProviders: readonly string[];

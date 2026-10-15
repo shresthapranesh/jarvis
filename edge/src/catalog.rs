@@ -264,10 +264,48 @@ pub async fn resolve_model(pool: &SqlitePool, explicit: Option<&str>) -> sqlx::R
     Ok(seed_model().to_string())
 }
 
+/// `level` as one of the effort levels, if it is one.
+pub fn effort_level(level: &str) -> Option<&'static str> {
+    crate::llm::anthropic::EFFORTS.into_iter().find(|e| *e == level)
+}
+
+/// The effort levels the pickers offer (`models.efforts`, comma-separated),
+/// lowest first: every level when unset or naming none.
+pub async fn effort_levels(pool: &SqlitePool) -> sqlx::Result<Vec<&'static str>> {
+    let raw = setting(pool, "models.efforts").await?.unwrap_or_default();
+    let named: Vec<&str> = raw.split(',').map(str::trim).collect();
+    let levels: Vec<_> = crate::llm::anthropic::EFFORTS.into_iter().filter(|e| named.contains(e)).collect();
+    Ok(if levels.is_empty() { crate::llm::anthropic::EFFORTS.to_vec() } else { levels })
+}
+
+/// `want` among `levels` (lowest first): the highest at or below it, else
+/// the lowest. The composer shows the same (`lib/effort.ts`).
+pub fn effort_for(want: &'static str, levels: &[&'static str]) -> Option<&'static str> {
+    let rank = |l: &str| crate::llm::anthropic::EFFORTS.iter().position(|e| *e == l);
+    levels.iter().rev().find(|l| rank(l) <= rank(want)).or(levels.first()).copied()
+}
+
+/// The operator's default effort (`default.effort`) — none when unset, so
+/// each run's kind picks — when the pickers still offer it.
+pub async fn default_effort(pool: &SqlitePool) -> sqlx::Result<Option<&'static str>> {
+    let Some(level) = setting(pool, "default.effort").await?.as_deref().and_then(|l| effort_level(l.trim())) else {
+        return Ok(None);
+    };
+    Ok(effort_levels(pool).await?.contains(&level).then_some(level))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn effort_steps_down_to_an_offered_level() {
+        assert_eq!(effort_for("max", &["low", "medium", "high", "xhigh"]), Some("xhigh"));
+        assert_eq!(effort_for("xhigh", &["low", "medium", "high", "max"]), Some("high"));
+        assert_eq!(effort_for("low", &["high", "max"]), Some("high"));
+        assert_eq!(effort_for("medium", &[]), None);
+    }
 
     /// The rows `tests/test_model_endpoints.py::test_parse_skips_what_cannot_be_used`
     /// gives Python, with the same answer.

@@ -25,10 +25,13 @@ pub struct Conversation {
     pub ephemeral: bool,
     pub project_id: Option<String>,
     pub created_at: DateTime,
+    /// The effort its turns ask for (`low` … `max`); none leaves the
+    /// operator's default.
+    pub effort: Option<String>,
 }
 
 pub const CONVERSATION_COLUMNS: &str =
-    "id, title, model, surface, pinned, ephemeral, project_id, created_at";
+    "id, title, model, surface, pinned, ephemeral, project_id, created_at, effort";
 
 impl Conversation {
     pub async fn by_id(pool: &SqlitePool, raw_id: &str) -> Result<Option<Self>> {
@@ -274,7 +277,8 @@ pub struct ConversationMutation;
 
 #[Object]
 impl ConversationMutation {
-    // Rename, pin, or pick the model; a model must be in the catalog.
+    // Rename, pin, or pick the model or effort; a model must be in the
+    // catalog, an effort one of the levels ("" clears it).
     async fn update_conversation(
         &self,
         ctx: &Context<'_>,
@@ -282,6 +286,7 @@ impl ConversationMutation {
         title: Option<String>,
         model: Option<String>,
         pinned: Option<bool>,
+        effort: Option<String>,
     ) -> Result<Conversation> {
         let pool: &SqlitePool = ctx.data()?;
         if let Some(m) = &model {
@@ -289,7 +294,12 @@ impl ConversationMutation {
                 return Err(unknown_model(m).into());
             }
         }
-        if title.is_none() && model.is_none() && pinned.is_none() {
+        let effort = match effort.as_deref() {
+            None => None,
+            Some("") => Some(None),
+            Some(e) => Some(Some(crate::catalog::effort_level(e).ok_or_else(|| super::start::unknown_effort(e))?)),
+        };
+        if title.is_none() && model.is_none() && pinned.is_none() && effort.is_none() {
             return Err("no fields to update".into());
         }
         let (_, raw) = decode_global_id(&id)?;
@@ -303,11 +313,15 @@ impl ConversationMutation {
         if let Some(p) = pinned {
             conv.pinned = p;
         }
+        if let Some(e) = effort {
+            conv.effort = e.map(str::to_string);
+        }
         // Conversation has no updated_at column.
-        sqlx::query("UPDATE conversations SET title = ?, model = ?, pinned = ? WHERE id = ?")
+        sqlx::query("UPDATE conversations SET title = ?, model = ?, pinned = ?, effort = ? WHERE id = ?")
             .bind(&conv.title)
             .bind(&conv.model)
             .bind(conv.pinned)
+            .bind(&conv.effort)
             .bind(&raw)
             .execute(pool)
             .await?;

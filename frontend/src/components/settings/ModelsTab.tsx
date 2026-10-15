@@ -4,9 +4,11 @@ import {useLazyLoadQuery} from 'react-relay';
 
 import type {ModelCatalogQuery as TModelCatalogQuery} from '../../__generated__/ModelCatalogQuery.graphql';
 import {useAsyncAction} from '../../hooks/useAsyncAction';
+import {EFFORT_LEVELS, effortLabel} from '../../lib/effort';
 import {useToast} from '../../lib/toast';
 import type {CatalogModel, ModelCatalogData} from '../../relay/ModelCatalogQuery';
 import {modelCatalogQuery, refreshModelCatalog} from '../../relay/ModelCatalogQuery';
+import {colors, type} from '../../theme/tokens.stylex';
 import {ConfirmDialog} from '../ConfirmDialog';
 import {FormModal} from '../FormModal';
 import {EditIcon, PlusIcon, SearchIcon, SyncIcon, TrashIcon} from '../icons';
@@ -110,6 +112,13 @@ export function ModelsTab() {
 
   return (
     <>
+      {data && (
+        <EffortSection
+          levels={data.effortLevels}
+          defaultEffort={data.defaultEffort}
+          onChanged={refresh}
+        />
+      )}
       <EndpointsSection
         endpoints={data?.endpoints ?? []}
         providers={data?.providers ?? []}
@@ -227,6 +236,11 @@ export function ModelsTab() {
                       </span>
                     ) : null}
                   </p>
+                  {m.efforts.length > 0 && (
+                    <span {...stylex.props(models.window)}>
+                      Effort {m.efforts.map(effortLabel).join(' · ')}
+                    </span>
+                  )}
                 </li>
               );
             })}
@@ -271,6 +285,124 @@ export function ModelsTab() {
     </>
   );
 }
+
+/**
+ * Which effort levels the composer's picker offers, and the one a chat
+ * starts at. Each model shows only the offered levels it takes, so turning
+ * one off here takes it out of every model's row at once.
+ */
+function EffortSection({
+  levels,
+  defaultEffort,
+  onChanged,
+}: {
+  levels: readonly string[];
+  defaultEffort: string | null;
+  onChanged: () => Promise<unknown>;
+}) {
+  const toast = useToast();
+  const save = useAsyncAction(
+    async (next: {levels: string[]; defaultEffort: string | null}) => {
+      const {commitSetEfforts} = await import('../../relay/SetEffortsMutation');
+      await commitSetEfforts(next.levels, next.defaultEffort);
+      await onChanged();
+    },
+    {onError: (e) => toast.push(e.message, 'error')},
+  );
+
+  function toggle(level: string) {
+    const on = levels.includes(level);
+    if (on && levels.length === 1) {
+      toast.push('Offer at least one effort level', 'error');
+      return;
+    }
+    const next = EFFORT_LEVELS.filter((l) => (l === level ? !on : levels.includes(l)));
+    // A default that is no longer offered goes back to automatic.
+    const nextDefault =
+      defaultEffort && next.includes(defaultEffort as never) ? defaultEffort : null;
+    void save.run({levels: [...next], defaultEffort: nextDefault});
+  }
+
+  return (
+    <div {...stylex.props(page.section)}>
+      <h2 {...stylex.props(page.sectionTitle)}>
+        Effort
+        <span {...stylex.props(page.sectionHint)}>
+          How hard a model thinks — for the models that take it
+        </span>
+      </h2>
+      <div {...stylex.props(effortStyles.row)}>
+        <span {...stylex.props(effortStyles.label)}>Offered</span>
+        <div {...stylex.props(effortStyles.chips)} role="group" aria-label="Offered effort levels">
+          {EFFORT_LEVELS.map((level) => {
+            const on = levels.includes(level);
+            return (
+              <button
+                key={level}
+                type="button"
+                aria-pressed={on}
+                disabled={save.pending}
+                {...stylex.props(effortStyles.chip, on && effortStyles.chipOn)}
+                onClick={() => toggle(level)}
+              >
+                {effortLabel(level)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <label {...stylex.props(effortStyles.row)}>
+        <span {...stylex.props(effortStyles.label)}>Default</span>
+        <select
+          {...stylex.props(field.select, effortStyles.select, field.selectChrome)}
+          value={defaultEffort ?? ''}
+          disabled={save.pending}
+          onChange={(e) =>
+            void save.run({levels: [...levels], defaultEffort: e.target.value || null})
+          }
+        >
+          <option value="">Automatic</option>
+          {levels.map((level) => (
+            <option key={level} value={level}>
+              {effortLabel(level)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <span {...stylex.props(field.hint)}>
+        The default applies to every model and every run; a pick in the composer overrides it for
+        that conversation. Automatic runs chats at medium and unattended work (automations, board
+        tasks, workflows) at high. A model that can&rsquo;t go as high runs at its highest level
+        below.
+      </span>
+    </div>
+  );
+}
+
+const effortStyles = stylex.create({
+  row: {display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0},
+  label: {width: 64, flexShrink: 0, fontSize: type.tUi, color: colors.textDim},
+  chips: {display: 'flex', flexWrap: 'wrap', gap: 6},
+  chip: {
+    paddingBlock: 4,
+    paddingInline: 10,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {default: colors.border, ':hover:not(:disabled)': colors.borderStrong},
+    borderRadius: 2,
+    backgroundColor: 'transparent',
+    color: {default: colors.textDim, ':hover:not(:disabled)': colors.text},
+    fontSize: type.tSmall,
+    fontFamily: 'inherit',
+    cursor: {default: 'pointer', ':disabled': 'progress'},
+  },
+  chipOn: {
+    backgroundColor: colors.accent,
+    borderColor: {default: colors.accent, ':hover:not(:disabled)': colors.accent},
+    color: {default: colors.accentContrast, ':hover:not(:disabled)': colors.accentContrast},
+  },
+  select: {flexGrow: 0, flexShrink: 1, flexBasis: 220, minWidth: 0},
+});
 
 function ModelModal({
   editor,

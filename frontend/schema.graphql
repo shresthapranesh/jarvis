@@ -243,6 +243,11 @@ type Conversation implements Node {
 	ephemeral: Boolean!
 	projectId: String
 	createdAt: DateTime!
+	"""
+	The effort its turns ask for (`low` … `max`); none leaves the
+	operator's default.
+	"""
+	effort: String
 	id: ID!
 	project: Project
 	messageCount: Int!
@@ -420,6 +425,15 @@ type MessageEdge {
 
 type ModelCatalog {
 	default: String!
+	"""
+	The effort levels the composer offers (`models.efforts`), lowest first.
+	"""
+	effortLevels: [String!]!
+	"""
+	The effort a chat starts at (`default.effort`); none leaves it to the
+	run's kind.
+	"""
+	defaultEffort: String
 	available: [ModelSpec!]!
 	providers: [String!]!
 	discoverableProviders: [String!]!
@@ -441,6 +455,11 @@ type ModelSpec {
 	provider: String!
 	builtin: Boolean!
 	contextWindow: Int
+	"""
+	The effort levels the composer offers for it, lowest first: those it
+	takes that `effortLevels` offers. Empty when it takes none.
+	"""
+	efforts: [String!]!
 }
 
 type ModelSyncReport {
@@ -466,7 +485,7 @@ type ModelSyncReport {
 }
 
 type Mutation {
-	updateConversation(id: ID!, title: String, model: String, pinned: Boolean): Conversation!
+	updateConversation(id: ID!, title: String, model: String, pinned: Boolean, effort: String): Conversation!
 	deleteConversation(id: ID!): Boolean!
 	discardConversation(id: ID!): Boolean!
 	consolidateProjectMemory(id: ID!, model: String): String!
@@ -528,6 +547,11 @@ type Mutation {
 	Persist the default model used when a request names none.
 	"""
 	setDefaultModel(id: String!): ModelCatalog!
+	"""
+	Which effort levels the composer offers, and the one a chat starts
+	at (none: by the run's kind). The default must be one offered.
+	"""
+	setEfforts(levels: [String!]!, default: String): ModelCatalog!
 	"""
 	Name an OpenAI-compatible server.
 	"""
@@ -918,6 +942,11 @@ input SkillUpdateInput {
 input StartTaskInput {
 	query: String!
 	model: String
+	"""
+	The effort the conversation's turns ask for (`low` … `max`); it is
+	sticky per conversation, as the model is. None keeps the one it has.
+	"""
+	effort: String
 	conversationId: String
 	projectId: String
 	ephemeral: Boolean! = false

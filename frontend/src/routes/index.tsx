@@ -42,12 +42,12 @@ function IndexPage() {
 
   const running = useRunningTasks();
 
-  async function handleSubmit(query: string, model: string) {
+  async function handleSubmit(query: string, model: string, effort: string | null) {
     setLoading(true);
     setError(null);
     try {
       const {taskId, conversationId} = await commitStartTask({
-        input: {query, model, ephemeral: incognito},
+        input: {query, model, effort, ephemeral: incognito},
       });
 
       // The /c/$id route loader will fetch the new conversation page (which

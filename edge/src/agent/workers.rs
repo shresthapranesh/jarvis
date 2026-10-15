@@ -338,7 +338,7 @@ impl<'c, 'a> Worker<'c, 'a> {
             prompt: &prompt,
             tools: &self.tools.schemas,
             blobs: &blobs,
-            effort: super::effort("worker"),
+            effort: super::effort(&ctx.agent.pool, &ctx.model, "worker", None).await,
         };
         let tail = &mut self.tail;
         let mut on_delta = |d: Delta| {

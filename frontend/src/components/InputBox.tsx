@@ -3,14 +3,16 @@ import {useEffect, useRef, useState} from 'react';
 
 import {useIsMobile} from '../hooks/useIsMobile';
 import {useModels} from '../hooks/useModels';
-import {shortModelLabel} from '../lib/format';
+import {effectiveEffort} from '../lib/effort';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {composer, control} from './InputBox.styles';
-import {field, iconBtn} from './ui';
+import {ModelPicker} from './ModelPicker';
+import {iconBtn} from './ui';
 
 interface Props {
-  onSubmit: (query: string, model: string) => void;
+  /** `effort` is the user's pick, or null to leave the conversation's (or the default). */
+  onSubmit: (query: string, model: string, effort: string | null) => void;
   disabled?: boolean;
   /**
    * A run is in flight and sending queues instead of starting a second turn.
@@ -23,6 +25,8 @@ interface Props {
   onStop?: () => void;
   conversationId?: string;
   initialModel?: string;
+  /** The conversation's effort pick; null/absent means the default applies. */
+  initialEffort?: string | null;
   // Incognito toggle — only wired on the new-chat surface (index page). When
   // provided, an eye-off button lets the user start the conversation ephemeral.
   incognito?: boolean;
@@ -43,6 +47,7 @@ export function InputBox({
   onStop,
   conversationId,
   initialModel,
+  initialEffort,
   incognito = false,
   onToggleIncognito,
   fullWidth = false,
@@ -50,6 +55,9 @@ export function InputBox({
   const {data: catalog} = useModels();
   const isMobile = useIsMobile();
   const [model, setModel] = useState('');
+  // The user's pick — null until they make one, so a new chat follows the
+  // default rather than freezing whatever the default was when it loaded.
+  const [effort, setEffort] = useState<string | null>(initialEffort ?? null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Seed the model: prefer the per-conversation `initialModel`, then fall back
@@ -62,6 +70,24 @@ export function InputBox({
       setModel(catalog.default);
     }
   }, [catalog, initialModel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setEffort(initialEffort ?? null);
+  }, [conversationId, initialEffort]);
+
+  const modelLevels = catalog?.available.find((m) => m.id === model)?.efforts ?? [];
+  const shownEffort = effectiveEffort(effort, catalog?.defaultEffort, modelLevels);
+
+  async function handleEffortChange(level: string) {
+    setEffort(level);
+    if (conversationId) {
+      try {
+        await commitUpdateConversation(conversationId, {effort: level});
+      } catch (err) {
+        console.error('Failed to persist effort change:', err);
+      }
+    }
+  }
 
   async function handleModelChange(newModel: string) {
     setModel(newModel);
@@ -104,7 +130,7 @@ export function InputBox({
       return;
     }
     if (!query || disabled || !model) return;
-    onSubmit(query, model);
+    onSubmit(query, model, effort);
     clearInput();
   }
 
@@ -168,24 +194,14 @@ export function InputBox({
             </button>
           )}
 
-          <select
-            {...stylex.props(control.model, field.selectChrome)}
-            value={model}
-            onChange={(e) => void handleModelChange(e.target.value)}
-            disabled={!catalog}
-            title={
-              catalog ? catalog.available.find((m) => m.id === model)?.label : 'Loading models…'
-            }
-          >
-            {!catalog && <option value="">Loading…</option>}
-            {/* A closed select shows its chosen option's text, so on a phone
-                only that one is shortened; the open list keeps full labels. */}
-            {catalog?.available.map((m) => (
-              <option key={m.id} value={m.id}>
-                {isMobile && m.id === model ? shortModelLabel(m.label) : m.label}
-              </option>
-            ))}
-          </select>
+          <ModelPicker
+            models={catalog?.available}
+            model={model}
+            effort={shownEffort}
+            compact={isMobile}
+            onModel={(id) => void handleModelChange(id)}
+            onEffort={(level) => void handleEffortChange(level)}
+          />
 
           {/* On touch there is no Enter/Shift+Enter to describe, and at the 16px
               control size the hint pushes the send button off screen. */}

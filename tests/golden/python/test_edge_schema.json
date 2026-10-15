@@ -636,7 +636,7 @@
       "table",
       "conversations",
       "conversations",
-      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tsurface VARCHAR NOT NULL, \n\tpinned BOOLEAN NOT NULL, \n\tephemeral BOOLEAN NOT NULL, \n\tproject_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(project_id) REFERENCES projects (id)\n)"
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tsurface VARCHAR NOT NULL, \n\tpinned BOOLEAN NOT NULL, \n\tephemeral BOOLEAN NOT NULL, \n\tproject_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\teffort VARCHAR, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(project_id) REFERENCES projects (id)\n)"
      ]
     },
     {
@@ -1615,7 +1615,7 @@
       "table",
       "conversations",
       "conversations",
-      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, pinned BOOLEAN DEFAULT 0, surface VARCHAR DEFAULT 'web', project_id VARCHAR REFERENCES projects(id), ephemeral BOOLEAN DEFAULT 0, \n\tPRIMARY KEY (id)\n)"
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, pinned BOOLEAN DEFAULT 0, surface VARCHAR DEFAULT 'web', project_id VARCHAR REFERENCES projects(id), ephemeral BOOLEAN DEFAULT 0, effort VARCHAR, \n\tPRIMARY KEY (id)\n)"
      ]
     },
     {
@@ -1959,7 +1959,8 @@
        0,
        "telegram",
        null,
-       0
+       0,
+       null
       ]
      },
      {
@@ -1971,7 +1972,8 @@
        0,
        "discord",
        null,
-       0
+       0,
+       null
       ]
      },
      {
@@ -1983,7 +1985,8 @@
        0,
        "web",
        null,
-       0
+       0,
+       null
       ]
      }
     ],
@@ -2707,7 +2710,7 @@
       "table",
       "conversations",
       "conversations",
-      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tsurface VARCHAR NOT NULL, \n\tpinned BOOLEAN NOT NULL, \n\tephemeral BOOLEAN NOT NULL, \n\tproject_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(project_id) REFERENCES projects (id)\n)"
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tsurface VARCHAR NOT NULL, \n\tpinned BOOLEAN NOT NULL, \n\tephemeral BOOLEAN NOT NULL, \n\tproject_id VARCHAR, \n\tcreated_at DATETIME NOT NULL, \n\teffort VARCHAR, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(project_id) REFERENCES projects (id)\n)"
      ]
     },
     {
@@ -3686,7 +3689,7 @@
       "table",
       "conversations",
       "conversations",
-      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, pinned BOOLEAN DEFAULT 0, surface VARCHAR DEFAULT 'web', project_id VARCHAR REFERENCES projects(id), ephemeral BOOLEAN DEFAULT 0, \n\tPRIMARY KEY (id)\n)"
+      "CREATE TABLE conversations (\n\tid VARCHAR NOT NULL, \n\ttitle VARCHAR, \n\tmodel VARCHAR NOT NULL, \n\tcreated_at DATETIME NOT NULL, pinned BOOLEAN DEFAULT 0, surface VARCHAR DEFAULT 'web', project_id VARCHAR REFERENCES projects(id), ephemeral BOOLEAN DEFAULT 0, effort VARCHAR, \n\tPRIMARY KEY (id)\n)"
      ]
     },
     {
@@ -4030,7 +4033,8 @@
        0,
        "telegram",
        null,
-       0
+       0,
+       null
       ]
      },
      {
@@ -4042,7 +4046,8 @@
        0,
        "discord",
        null,
-       0
+       0,
+       null
       ]
      },
      {
@@ -4054,7 +4059,8 @@
        0,
        "web",
        null,
-       0
+       0,
+       null
       ]
      }
     ],

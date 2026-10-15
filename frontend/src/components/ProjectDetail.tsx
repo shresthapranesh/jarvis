@@ -100,12 +100,12 @@ export function ProjectDetail({id}: Props) {
     {onSuccess: () => setActionError(null), onError: (e) => setActionError(e.message)},
   );
 
-  async function handleNewChat(query: string, model: string) {
+  async function handleNewChat(query: string, model: string, effort: string | null) {
     setChatBusy(true);
     setActionError(null);
     try {
       const {taskId, conversationId} = await commitStartTask({
-        input: {query, model, projectId: id},
+        input: {query, model, effort, projectId: id},
       });
       await navigate({
         to: '/c/$id',

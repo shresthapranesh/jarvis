@@ -227,6 +227,7 @@ CREATE TABLE conversations (
 	ephemeral BOOLEAN NOT NULL, 
 	project_id VARCHAR, 
 	created_at DATETIME NOT NULL, 
+	effort VARCHAR, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(project_id) REFERENCES projects (id)
 );

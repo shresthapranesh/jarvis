@@ -74,6 +74,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
@@ -81,6 +82,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
@@ -88,6 +90,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
@@ -95,6 +98,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
@@ -102,6 +106,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
@@ -109,6 +114,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
@@ -116,6 +122,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
@@ -123,6 +130,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
@@ -130,6 +138,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
@@ -137,6 +146,13 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -144,6 +160,12 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
@@ -151,6 +173,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
@@ -158,18 +181,27 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
       }
      ],
      "default": "google_genai:gemma-4-31b-it",
+     "defaultEffort": null,
      "discoverableProviders": [
       "anthropic",
       "bedrock",
       "google_genai",
       "ollama",
       "openrouter"
+     ],
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
      ],
      "endpoints": [],
      "providers": [
@@ -188,72 +220,104 @@
     "models": {
      "available": [
       {
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
       },
       {
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
       },
       {
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
       },
       {
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
       },
       {
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
       },
       {
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
       },
       {
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
       },
       {
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
       },
       {
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
       },
       {
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
       },
       {
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
       },
       {
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
       },
       {
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
       }
      ],
-     "default": "google_genai:gemma-4-31b-it"
+     "default": "google_genai:gemma-4-31b-it",
+     "defaultEffort": null,
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+     ]
     }
    }
   },
@@ -264,6 +328,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
@@ -271,6 +336,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
@@ -278,6 +344,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
@@ -285,6 +352,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
@@ -292,6 +360,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
@@ -299,6 +368,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
@@ -306,6 +376,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
@@ -313,6 +384,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
@@ -320,6 +392,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
@@ -327,6 +400,13 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -334,6 +414,12 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
@@ -341,6 +427,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
@@ -348,6 +435,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
@@ -355,6 +443,7 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3",
        "label": "Llama",
        "provider": "ollama"
@@ -362,6 +451,7 @@
       {
        "builtin": false,
        "contextWindow": 128000,
+       "efforts": [],
        "id": "openrouter:x/y:free",
        "label": "openrouter:x/y:free",
        "provider": "openrouter"
@@ -369,6 +459,7 @@
       {
        "builtin": false,
        "contextWindow": 1,
+       "efforts": [],
        "id": "anthropic:a",
        "label": "anthropic:a",
        "provider": "anthropic"
@@ -376,6 +467,7 @@
       {
        "builtin": false,
        "contextWindow": 1,
+       "efforts": [],
        "id": "anthropic:b",
        "label": "anthropic:b",
        "provider": "anthropic"
@@ -383,6 +475,7 @@
       {
        "builtin": false,
        "contextWindow": 12,
+       "efforts": [],
        "id": "anthropic:c",
        "label": "anthropic:c",
        "provider": "anthropic"
@@ -390,6 +483,7 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "anthropic:d",
        "label": "anthropic:d",
        "provider": "anthropic"
@@ -397,6 +491,7 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "anthropic:e",
        "label": "anthropic:e",
        "provider": "anthropic"
@@ -404,18 +499,27 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "anthropic:f",
        "label": "anthropic:f",
        "provider": "anthropic"
       }
      ],
      "default": "ollama:llama3",
+     "defaultEffort": null,
      "discoverableProviders": [
       "anthropic",
       "bedrock",
       "google_genai",
       "ollama",
       "openrouter"
+     ],
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
      ],
      "endpoints": [],
      "providers": [
@@ -436,6 +540,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
@@ -443,6 +548,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
@@ -450,6 +556,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
@@ -457,6 +564,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
@@ -464,6 +572,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
@@ -471,6 +580,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
@@ -478,6 +588,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
@@ -485,6 +596,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
@@ -492,6 +604,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
@@ -499,6 +612,13 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -506,6 +626,12 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
@@ -513,6 +639,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
@@ -520,18 +647,27 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
       }
      ],
      "default": "ollama:llama3",
+     "defaultEffort": null,
      "discoverableProviders": [
       "anthropic",
       "bedrock",
       "google_genai",
       "ollama",
       "openrouter"
+     ],
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
      ],
      "endpoints": [],
      "providers": [
@@ -552,6 +688,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
@@ -559,6 +696,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
@@ -566,6 +704,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
@@ -573,6 +712,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
@@ -580,6 +720,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
@@ -587,6 +728,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
@@ -594,6 +736,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
@@ -601,6 +744,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
@@ -608,6 +752,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
@@ -615,6 +760,13 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -622,6 +774,12 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
@@ -629,6 +787,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
@@ -636,6 +795,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
@@ -643,12 +803,14 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "groq:llama-3.3-70b",
        "label": "Llama",
        "provider": "groq"
       }
      ],
      "default": "ollama:llama3",
+     "defaultEffort": null,
      "discoverableProviders": [
       "anthropic",
       "bedrock",
@@ -657,6 +819,13 @@
       "lmstudio",
       "ollama",
       "openrouter"
+     ],
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
      ],
      "endpoints": [
       {
@@ -690,6 +859,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
@@ -697,6 +867,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
@@ -704,6 +875,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
@@ -711,6 +883,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
@@ -718,6 +891,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
@@ -725,6 +899,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
@@ -732,6 +907,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
@@ -739,6 +915,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
@@ -746,6 +923,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
@@ -753,6 +931,13 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -760,6 +945,12 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
@@ -767,6 +958,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
@@ -774,6 +966,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
@@ -781,18 +974,27 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "groq:llama-3.3-70b",
        "label": "Llama",
        "provider": "groq"
       }
      ],
      "default": "ollama:llama3",
+     "defaultEffort": null,
      "discoverableProviders": [
       "anthropic",
       "bedrock",
       "google_genai",
       "ollama",
       "openrouter"
+     ],
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
      ],
      "endpoints": [],
      "providers": [
@@ -813,6 +1015,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
@@ -820,6 +1023,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
@@ -827,6 +1031,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
@@ -834,6 +1039,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
@@ -841,6 +1047,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
@@ -848,6 +1055,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
@@ -855,6 +1063,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
@@ -862,6 +1071,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
@@ -869,6 +1079,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
@@ -876,6 +1087,13 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -883,6 +1101,12 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
@@ -890,6 +1114,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
@@ -897,6 +1122,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
@@ -904,18 +1130,27 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "groq:llama-3.3-70b",
        "label": "Llama",
        "provider": "groq"
       }
      ],
      "default": "ollama:llama3",
+     "defaultEffort": null,
      "discoverableProviders": [
       "anthropic",
       "bedrock",
       "google_genai",
       "ollama",
       "openrouter"
+     ],
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
      ],
      "endpoints": [],
      "providers": [
@@ -936,6 +1171,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-31b-it",
        "label": "Gemma 4 31B (Google)",
        "provider": "google_genai"
@@ -943,6 +1179,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemma-4-26b-a4b-it",
        "label": "Gemma 4 26B (Google)",
        "provider": "google_genai"
@@ -950,6 +1187,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.5-pro",
        "label": "Gemini 2.5 Pro (Google)",
        "provider": "google_genai"
@@ -957,6 +1195,7 @@
       {
        "builtin": true,
        "contextWindow": 1048576,
+       "efforts": [],
        "id": "google_genai:gemini-2.0-flash",
        "label": "Gemini 2.0 Flash (Google)",
        "provider": "google_genai"
@@ -964,6 +1203,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "google_genai:gemini-3.1-flash-lite",
        "label": "Gemini 3.1 Flash Lite (Google)",
        "provider": "google_genai"
@@ -971,6 +1211,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:gemma4:26b",
        "label": "Gemma 4 26B (Ollama)",
        "provider": "ollama"
@@ -978,6 +1219,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:llama3.3",
        "label": "Llama 3.3 (Ollama)",
        "provider": "ollama"
@@ -985,6 +1227,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "ollama:qwen3:32b",
        "label": "Qwen3 32B (Ollama)",
        "provider": "ollama"
@@ -992,6 +1235,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
@@ -999,6 +1243,13 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -1006,6 +1257,12 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+       ],
        "id": "anthropic:claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (Anthropic)",
        "provider": "anthropic"
@@ -1013,6 +1270,7 @@
       {
        "builtin": true,
        "contextWindow": 200000,
+       "efforts": [],
        "id": "anthropic:claude-haiku-4-5-20251001",
        "label": "Claude Haiku 4.5 (Anthropic)",
        "provider": "anthropic"
@@ -1020,6 +1278,7 @@
       {
        "builtin": true,
        "contextWindow": null,
+       "efforts": [],
        "id": "meta:muse-spark-1.1",
        "label": "Muse Spark 1.1 (Meta)",
        "provider": "meta"
@@ -1027,18 +1286,27 @@
       {
        "builtin": false,
        "contextWindow": null,
+       "efforts": [],
        "id": "groq:llama-3.3-70b",
        "label": "Llama",
        "provider": "groq"
       }
      ],
      "default": "ollama:llama3",
+     "defaultEffort": null,
      "discoverableProviders": [
       "anthropic",
       "bedrock",
       "google_genai",
       "ollama",
       "openrouter"
+     ],
+     "effortLevels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
      ],
      "endpoints": [],
      "providers": [

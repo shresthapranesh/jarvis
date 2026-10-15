@@ -347,12 +347,20 @@ impl<'a> Turn<'a> {
 
         let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(&self.model, compaction.messages));
         let prompt = shape::build(&layout, shaped);
+        // Read each step, so a pick changed mid-run applies from the next call.
+        let chosen: Option<String> = sqlx::query_scalar("SELECT effort FROM conversations WHERE id = ?")
+            .bind(&self.thread_id)
+            .fetch_optional(self.pool())
+            .await
+            .ok()
+            .flatten()
+            .flatten();
         let req = Request {
             model: &self.model,
             prompt: &prompt,
             tools: bound,
             blobs: &thread.blobs,
-            effort: super::effort(self.kind.name()),
+            effort: super::effort(self.pool(), &self.model, self.kind.name(), chosen.as_deref()).await,
         };
 
         let events = &mut self.events;

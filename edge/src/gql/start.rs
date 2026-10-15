@@ -22,6 +22,9 @@ use crate::runs::{Meta, Registry, Run};
 pub struct StartTaskInput {
     query: String,
     model: Option<String>,
+    /// The effort the conversation's turns ask for (`low` … `max`); it is
+    /// sticky per conversation, as the model is. None keeps the one it has.
+    effort: Option<String>,
     conversation_id: Option<String>,
     project_id: Option<String>,
     #[graphql(default)]
@@ -40,6 +43,11 @@ pub struct StartTaskPayload {
 pub struct QueueMessagePayload {
     message_id: String,
     position: i64,
+}
+
+/// An effort that isn't one of the levels.
+pub fn unknown_effort(effort: &str) -> String {
+    format!("unknown effort {}; one of low, medium, high, xhigh, max", pyjson::repr_str(effort))
 }
 
 /// Python's `s[:60]`.
@@ -178,6 +186,9 @@ pub struct ChatTurn {
     pub display: Option<String>,
     pub project_id: Option<String>,
     pub ephemeral: bool,
+    /// Already checked (`catalog::effort_level`); None keeps the
+    /// conversation's.
+    pub effort: Option<&'static str>,
 }
 
 /// What a chat turn turned into.
@@ -197,7 +208,7 @@ pub async fn start_chat(
     registry: &Registry,
     turn: ChatTurn,
 ) -> Result<Dispatched> {
-    let ChatTurn { query, model, conversation_id, title, surface, display, project_id, ephemeral } = turn;
+    let ChatTurn { query, model, conversation_id, title, surface, display, project_id, ephemeral, effort } = turn;
     let mut tx = crate::db::write_tx(pool).await?;
     let conversation_id = conversation_for(
         &mut tx,
@@ -209,6 +220,9 @@ pub async fn start_chat(
         ephemeral,
     )
     .await?;
+    if let Some(effort) = effort {
+        sqlx::query("UPDATE conversations SET effort = ? WHERE id = ?").bind(effort).bind(&conversation_id).execute(&mut *tx).await?;
+    }
 
     // A message for a busy conversation joins the run already going —
     // `route_to_live_run`. A second job would only wait: the conversation's
@@ -290,6 +304,10 @@ impl StartMutation {
         let registry: &Arc<Registry> = ctx.data()?;
 
         let model = catalog::resolve_model(pool, input.model.as_deref()).await?;
+        let effort = match input.effort.as_deref().filter(|e| !e.is_empty()) {
+            Some(e) => Some(catalog::effort_level(e).ok_or_else(|| unknown_effort(e))?),
+            None => None,
+        };
         // An incognito chat joins no project.
         let project_id = input.project_id.filter(|p| !p.is_empty() && !input.ephemeral);
         if let Some(project_id) = &project_id {
@@ -309,6 +327,7 @@ impl StartMutation {
             display: None,
             project_id,
             ephemeral: input.ephemeral,
+            effort,
         };
         Ok(match start_chat(pool, registry, turn).await? {
             Dispatched::Started { task_id, conversation_id } => {

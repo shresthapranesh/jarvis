@@ -100,7 +100,8 @@ export const composer = stylex.create({
 });
 
 /**
- * The footer controls — incognito, model, send.
+ * The footer controls — incognito and send; the model picker styles itself
+ * (`ModelPicker.tsx`).
  *
  * There is no `icon` style here any more: incognito now uses
  * `iconBtn` from `./ui`, which is the same 26px borderless glyph every other
@@ -115,24 +116,6 @@ export const control = stylex.create({
   iconActive: {
     color: {default: colors.accent, ':hover': colors.accent},
     backgroundColor: {default: colors.accentDim, ':hover': colors.accentDim},
-  },
-  model: {
-    backgroundColor: 'transparent',
-    borderStyle: 'none',
-    outline: 'none',
-    color: {default: colors.textDim, ':hover': colors.text, ':focus': colors.text},
-    fontSize: type.tSmall,
-    // The body face, not mono: a model name is a label you pick, and in mono
-    // beside the keyboard hint the footer read as a debug readout.
-    fontFamily: type.body,
-    cursor: 'pointer',
-    transition: 'color 0.15s',
-    maxWidth: {default: 220, '@media (max-width: 860px)': 120},
-    // Everything in the footer row must be able to shrink on a phone, or the
-    // send button — the one control the composer exists for — is pushed past
-    // the right edge once iOS forces 16px controls.
-    flexShrink: {default: 0, '@media (max-width: 860px)': 1},
-    minWidth: 0,
   },
   send: {
     width: {default: 28, '@media (max-width: 860px)': 44},

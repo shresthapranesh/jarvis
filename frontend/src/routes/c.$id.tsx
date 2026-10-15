@@ -380,7 +380,7 @@ function ConversationPage() {
     setPanelOpen(true);
   }
 
-  async function handleSubmit(query: string, model: string) {
+  async function handleSubmit(query: string, model: string, effort: string | null) {
     setPendingUser({
       id: 'pending',
       role: 'user',
@@ -405,7 +405,7 @@ function ConversationPage() {
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
       const {taskId} = await commitStartTask({
-        input: {query, model, conversationId: id},
+        input: {query, model, effort, conversationId: id},
       });
       // Subscribe to the live stream immediately — the connection won't surface
       // the new running message until the refetch below completes.
@@ -671,6 +671,7 @@ function ConversationPage() {
           onStop={handleStop}
           conversationId={id}
           initialModel={conversationModel}
+          initialEffort={data.effort}
         />
       </footer>
     </div>
