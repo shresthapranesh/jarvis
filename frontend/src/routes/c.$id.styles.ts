@@ -3,9 +3,9 @@ import * as stylex from '@stylexjs/stylex';
 import {colors, css, layout, space, type} from '../theme/tokens.stylex';
 
 /* ── Styles for routes/c.$id.tsx ───────────────────────────────────────
-   The page chrome around the thread: the incognito notice, the project
-   badge, and the footer the composer sits in. The thread and the run
-   spine own their own styling. */
+   The page chrome around the thread: the incognito notice and the footer
+   the composer sits in. The header, the thread and the run spine own their
+   own styling. */
 
 export const conv = stylex.create({
   /** Shown only while the conversation is ephemeral. */
@@ -22,24 +22,6 @@ export const conv = stylex.create({
     borderBlockEndWidth: 1,
     borderBlockEndStyle: 'solid',
     borderBlockEndColor: colors.border,
-  },
-
-  projectBar: {display: 'flex', paddingBlock: '8px 0', paddingInline: 16, flexShrink: 0},
-  projectBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    fontSize: type.tSmall,
-    color: {default: colors.textDim, ':hover': colors.text},
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: {default: colors.border, ':hover': colors.borderStrong},
-    borderRadius: 2,
-    paddingBlock: 3,
-    paddingInline: 10,
-    textDecoration: 'none',
-    transition: 'color 0.15s ease, border-color 0.15s ease',
   },
 
   footer: {

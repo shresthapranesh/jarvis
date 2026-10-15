@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 
+import {summarizeStep} from '../lib/steps';
 import type {Step, TodoItem} from '../lib/types';
 import {
   budget as budgetStyles,
@@ -131,19 +132,34 @@ function buildRenderList(steps: Step[], isLive: boolean): RenderItem[] {
 function StepRow({step, nested = false}: {step: Step; nested?: boolean}) {
   const [open, setOpen] = useState(false);
   const hasData = !!step.data && step.data !== '{}';
+  const summary = useMemo(() => summarizeStep(step), [step]);
 
   return (
     <div {...stylex.props(row.root, nested && row.nested)}>
       <div
         {...stylex.props(row.summary, nested && row.inset, hasData ? row.clickable : row.plain)}
         onClick={() => hasData && setOpen((o) => !o)}
+        title={summary.detail ?? undefined}
       >
+        {/* Every step is the main agent's unless it says otherwise; a worker's
+            steps already sit inside its group, so the tag only marks strays. */}
+        {step.source !== 'main' && !nested && (
+          <span {...stylex.props(row.source, row.sourceSub)}>{step.source}</span>
+        )}
         <span
-          {...stylex.props(row.source, step.source === 'subagent' ? row.sourceSub : row.sourceMain)}
+          {...stylex.props(
+            row.kind,
+            summary.kind === 'call' && row.kindCall,
+            summary.kind === 'other' && row.kindOther,
+          )}
         >
-          {step.source}
+          {summary.label}
         </span>
-        <span {...stylex.props(row.node)}>{step.node}</span>
+        {summary.detail && (
+          <span {...stylex.props(row.detailText, summary.kind === 'output' && row.detailDim)}>
+            {summary.detail}
+          </span>
+        )}
         {hasData && (
           <svg
             {...stylex.props(row.chevron, open && row.chevronOpen)}

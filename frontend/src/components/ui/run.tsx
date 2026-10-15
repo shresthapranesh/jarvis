@@ -163,9 +163,15 @@ export const turn = stylex.create({
     animationDuration: '0.28s',
     animationTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
     animationFillMode: 'both',
-    // Resting turns show their action row at 0.4 and bring it up on hover; a
-    // child cannot see the turn's :hover, so the turn publishes it.
-    '--turn-actions-opacity': {default: '0.4', ':hover': '1'},
+    // Resting turns show their action row dimmed and bring it up on hover; a
+    // child cannot see the turn's :hover, so the turn publishes it. The row's
+    // glyphs are borderless, so at rest they need more than the 0.4 the old
+    // outlined boxes got away with.
+    '--turn-actions-opacity': {default: '0.6', ':hover': '1'},
+    // Controls set beside a turn rather than under it (the user bubble's copy
+    // button) stay out of sight until hovered — except on touch, which has no
+    // hover to reveal them with.
+    '--turn-aside-opacity': {default: '0', ':hover': '1', '@media (hover: none)': '0.6'},
   },
 });
 

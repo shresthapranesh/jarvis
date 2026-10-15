@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 
 import {kf} from '../theme/keyframes.stylex';
-import {channels, colors, type} from '../theme/tokens.stylex';
+import {channels, colors, radii, type} from '../theme/tokens.stylex';
 
 /* ── Styles for MessageBubble.tsx ──────────────────────────────────────
    One group per thing a turn can be: the user's bubble, the "still
@@ -12,25 +12,30 @@ import {channels, colors, type} from '../theme/tokens.stylex';
  * The user's own message — the only side of the exchange that gets a bubble.
  * Its position is what attributes it, so it needs no label.
  *
- * A block of stock with a rule down its leading edge, not a floating bubble:
- * nothing in this theme casts a shadow or lifts on hover, because nothing in
- * it sits above the page.
+ * A block of stock with no rule and no shadow: nothing in this theme sits
+ * above the page. It takes the composer's `md` corner rather than the page's
+ * square one, because it *is* what the composer sent — the one soft surface
+ * the reader typed into, carried up into the thread.
  */
 export const bubble = stylex.create({
+  /** The bubble and its copy button, side by side, so the button costs no line. */
+  row: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-end',
+    gap: 6,
+  },
   user: {
-    alignSelf: 'flex-end',
     backgroundColor: colors.userBg,
-    borderInlineStartWidth: 2,
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: colors.borderStrong,
-    paddingBlock: 10,
+    borderRadius: radii.md,
+    paddingBlock: 9,
     paddingInline: 14,
     maxWidth: '71%',
+    minWidth: 0,
     lineHeight: 1.6,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     fontSize: type.tBody,
-    transition: 'border-color 0.15s',
   },
 });
 
@@ -75,42 +80,55 @@ export const actions = stylex.create({
   row: {
     display: 'flex',
     alignItems: 'center',
-    gap: 6,
+    gap: 2,
+    // Pulls the borderless glyphs back so their icons, not their hit areas,
+    // line up with the prose edge above.
+    marginInlineStart: -6,
     opacity: {default: 'var(--turn-actions-opacity)', ':focus-within': 1},
     transition: 'opacity 0.15s',
   },
-  rowUser: {justifyContent: 'flex-end'},
-  // Resting turns used to show nothing at all until hovered, which made settled
-  // conversations look inert. Keep the row present but recessive; `turn.base`
-  // publishes the hover value.
+  /**
+   * The user's copy button, beside the bubble rather than under it. Hidden
+   * until the turn is hovered — the bubble is short, and a standing glyph
+   * beside every prompt reads as clutter rather than as an affordance.
+   */
+  userCopy: {
+    opacity: {default: 'var(--turn-aside-opacity)', ':focus-visible': 1},
+    transition: 'opacity 0.15s',
+  },
+  /**
+   * Borderless glyphs, like every other dense row in the app: three outlined
+   * boxes under every turn turned the thread into a grid of little frames.
+   */
   copy: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 24,
-    height: 24,
-    backgroundColor: {
-      default: `rgba(${channels.tint}, 0.04)`,
-      ':hover': `rgba(${channels.accent}, 0.06)`,
-    },
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: {
-      default: `rgba(${channels.tint}, 0.09)`,
-      ':hover': `rgba(${channels.accent}, 0.3)`,
-    },
-    borderRadius: 2,
-    color: {default: colors.textDim, ':hover': colors.accent},
+    flexShrink: 0,
+    width: 26,
+    height: 26,
+    backgroundColor: {default: 'transparent', ':hover': colors.surface2},
+    borderStyle: 'none',
+    borderRadius: radii.sm,
+    color: {default: colors.textDim, ':hover': colors.text},
     cursor: 'pointer',
     padding: 0,
-    transition: 'color 0.15s, border-color 0.15s, background 0.15s',
+    transition: 'color 0.15s, background-color 0.15s',
   },
-  copyDone: {color: colors.ok, borderColor: `rgba(${channels.ok}, 0.3)`},
+  copyDone: {color: {default: colors.ok, ':hover': colors.ok}},
   /** Held lit while the button's popover is open. */
   copyActive: {
-    color: colors.accent,
-    borderColor: `rgba(${channels.accent}, 0.4)`,
-    backgroundColor: `rgba(${channels.accent}, 0.08)`,
+    color: colors.text,
+    backgroundColor: colors.surface2,
+  },
+  /** `chipBtn` with its frame taken off, to sit in the same row as the glyphs. */
+  steps: {
+    alignSelf: 'center',
+    height: 26,
+    borderColor: {default: 'transparent', ':hover': 'transparent'},
+    backgroundColor: {default: 'transparent', ':hover': colors.surface2},
+    color: {default: colors.textDim, ':hover': colors.text},
+    paddingInline: 7,
   },
 });
 

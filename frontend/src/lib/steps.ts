@@ -34,8 +34,8 @@ export function getStepPreview(step: Step | null | undefined): string | null {
     const parsed = JSON.parse(step.data);
 
     // model_request with tool call — show all input values joined
-    if (step.node === 'model_request' && parsed?.tool_calls?.[0]?.input) {
-      const vals = Object.values(parsed.tool_calls[0].input as Record<string, unknown>)
+    if (step.node === 'model_request' && parsed?.tool_calls?.[0]) {
+      const vals = Object.values(toolArgs(parsed.tool_calls[0]))
         .filter((v) => typeof v === 'string' || typeof v === 'number')
         .map(String)
         .join(', ');
@@ -55,6 +55,12 @@ export function getStepPreview(step: Step | null | undefined): string | null {
     }
   } catch {}
   return null;
+}
+
+/** A tool call's arguments. The Rust loop records them as `args`; rows
+ *  written by the old Python runtime used `input`. */
+function toolArgs(call: {args?: unknown; input?: unknown} | null | undefined) {
+  return (call?.args ?? call?.input ?? {}) as Record<string, unknown>;
 }
 
 function trimInput(val: unknown, max = 40): string | null {
@@ -88,8 +94,7 @@ export function describeStep(step: Step | null | undefined): string {
       // model_request with a pending tool call — show tool name + trimmed first input arg.
       if (step.node === 'model_request' && parsed?.tool_calls?.[0]?.name) {
         const name: string = parsed.tool_calls[0].name;
-        const inputObj = parsed.tool_calls[0].input ?? {};
-        const firstVal = trimInput(Object.values(inputObj)[0]);
+        const firstVal = trimInput(Object.values(toolArgs(parsed.tool_calls[0]))[0]);
         if (firstVal) return `Calling ${name}("${firstVal}")`;
         return `Calling ${name}…`;
       }
@@ -98,7 +103,7 @@ export function describeStep(step: Step | null | undefined): string {
       if (step.node === 'tools') {
         const first = Array.isArray(parsed) ? parsed[0] : parsed;
         if (first?.tool) {
-          const firstVal = trimInput(Object.values(first.input ?? {})[0]);
+          const firstVal = trimInput(Object.values(toolArgs(first))[0]);
           if (firstVal) return `Ran ${first.tool}("${firstVal}")`;
           return `Ran ${first.tool}…`;
         }
@@ -115,4 +120,71 @@ export function describeStep(step: Step | null | undefined): string {
   }
 
   return 'Working…';
+}
+
+/**
+ * One row of the activity panel: what kind of step it was, and the line of it
+ * worth reading. The node name alone ("model_request", "tools") says nothing a
+ * reader can use, so a tool call shows its tool and what it set out to do, an
+ * output its first line, and a reply its opening.
+ */
+export interface StepSummary {
+  kind: 'call' | 'output' | 'reply' | 'other';
+  label: string;
+  detail: string | null;
+}
+
+function firstLine(s: string): string | null {
+  return (
+    s
+      .split('\n')
+      .map((l) => l.trim())
+      .find(Boolean) ?? null
+  );
+}
+
+/** A `run_cell` body's leading comment if it has one, else its first statement. */
+function codeHeadline(code: string): string | null {
+  const line = firstLine(code);
+  return line && line.startsWith('#') ? line.replace(/^#+\s*/, '') || null : line;
+}
+
+export function summarizeStep(step: Step): StepSummary {
+  let parsed: any = null;
+  try {
+    parsed = step.data ? JSON.parse(step.data) : null;
+  } catch {}
+
+  if (step.node === 'model_request') {
+    const calls = Array.isArray(parsed?.tool_calls) ? parsed.tool_calls : [];
+    if (calls[0]?.name) {
+      const args = toolArgs(calls[0]);
+      const detail =
+        typeof args.code === 'string'
+          ? codeHeadline(args.code)
+          : (Object.values(args).find((v): v is string => typeof v === 'string') ?? null);
+      const more = calls.length > 1 ? ` +${calls.length - 1}` : '';
+      return {kind: 'call', label: `${calls[0].name}${more}`, detail: detail && firstLine(detail)};
+    }
+    if (typeof parsed?.text === 'string') {
+      return {
+        kind: 'reply',
+        label: 'reply',
+        detail: firstLine(parsed.text.replace(/[#*_`>]/g, '')),
+      };
+    }
+  }
+  if (step.node === 'tools') {
+    const first = Array.isArray(parsed) ? parsed[0] : parsed;
+    const out = first?.output;
+    return {
+      kind: 'output',
+      label: 'output',
+      detail: typeof out === 'string' ? firstLine(out) : null,
+    };
+  }
+  if (step.node === 'worker_done') {
+    return {kind: 'other', label: 'finished', detail: null};
+  }
+  return {kind: 'other', label: step.node, detail: null};
 }

@@ -120,9 +120,11 @@ export const control = stylex.create({
     backgroundColor: 'transparent',
     borderStyle: 'none',
     outline: 'none',
-    color: {default: colors.textFaint, ':hover': colors.text, ':focus': colors.text},
+    color: {default: colors.textDim, ':hover': colors.text, ':focus': colors.text},
     fontSize: type.tSmall,
-    fontFamily: type.mono,
+    // The body face, not mono: a model name is a label you pick, and in mono
+    // beside the keyboard hint the footer read as a debug readout.
+    fontFamily: type.body,
     cursor: 'pointer',
     transition: 'color 0.15s',
     maxWidth: {default: 220, '@media (max-width: 860px)': 120},

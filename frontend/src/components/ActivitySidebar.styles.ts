@@ -135,9 +135,31 @@ export const row = stylex.create({
     flexShrink: 0,
     fontWeight: 500,
   },
-  sourceMain: {backgroundColor: colors.surface2, color: colors.textDim},
   sourceSub: {backgroundColor: colors.accentDim, color: colors.accent},
-  node: {color: colors.text, wordBreak: 'break-word'},
+  /** What the step was — a tool name, `output`, `reply`. */
+  kind: {
+    flexShrink: 0,
+    // Wide enough for `run_cell` / `output`, so the common rows' text lines up.
+    minWidth: '8ch',
+    fontFamily: type.mono,
+    fontSize: type.tSmall,
+    color: colors.textFaint,
+  },
+  /** A call is the step the reader scans for, so it carries the ink. */
+  kindCall: {color: colors.signalTool},
+  /** Unrecognised nodes (legacy middleware rows) keep their raw name, as text. */
+  kindOther: {color: colors.textDim, wordBreak: 'break-word', flexShrink: 1},
+  /** The one line of the step worth reading, cut to the row. */
+  detailText: {
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.text,
+  },
+  /** Output is what a call came back with — read after the call, not instead of it. */
+  detailDim: {color: colors.textDim},
 });
 
 /** A spawned worker's steps, folded into one collapsible block. */

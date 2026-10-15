@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import {createFileRoute, Link, useNavigate} from '@tanstack/react-router';
+import {createFileRoute, useNavigate} from '@tanstack/react-router';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {useLazyLoadQuery, usePaginationFragment} from 'react-relay';
 
@@ -11,8 +11,8 @@ import type {TodoListQuery} from '../__generated__/TodoListQuery.graphql';
 import {ActivitySidebar} from '../components/ActivitySidebar';
 import {ArtifactPanel} from '../components/ArtifactPanel';
 import {BrowserPanel} from '../components/BrowserPanel';
+import {ConversationHeader} from '../components/ConversationHeader';
 import {DeferredApprovals} from '../components/DeferredApprovals';
-import {FolderIcon} from '../components/icons';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
@@ -481,6 +481,13 @@ function ConversationPage() {
 
   return (
     <div {...stylex.props(page.root)}>
+      <ConversationHeader
+        title={data.title ?? null}
+        project={data.project ?? null}
+        createdAt={data.createdAt}
+        runState={pendingInterrupt ? 'waiting' : isActive ? 'running' : null}
+        spine={!showSpine ? 'none' : isActive ? 'open' : 'collapsed'}
+      />
       {isEphemeral && (
         <div
           {...stylex.props(conv.incognitoBar)}
@@ -501,18 +508,6 @@ function ConversationPage() {
           </svg>
           Incognito — this chat isn’t saved to history or long-term memory, and is deleted when you
           leave.
-        </div>
-      )}
-      {data.project && (
-        <div {...stylex.props(conv.projectBar)}>
-          <Link
-            to="/projects/$id"
-            params={{id: decodeGlobalId(data.project.id)}}
-            {...stylex.props(conv.projectBadge)}
-            title="Open project"
-          >
-            <FolderIcon size={12} /> {data.project.name}
-          </Link>
         </div>
       )}
       <MessageThread

@@ -497,18 +497,19 @@ export function MessageBubble({
       : message.content;
     return (
       <div id={messageAnchorId(message.id)} {...stylex.props(turn.base)}>
-        <div {...stylex.props(bubble.user)}>
-          {parts ? <MultimodalUserContent parts={parts} /> : message.content}
-        </div>
-        <div {...stylex.props(actions.row, actions.rowUser)}>
+        <div {...stylex.props(bubble.row)}>
           <button
-            {...stylex.props(actions.copy, copied && actions.copyDone)}
+            {...stylex.props(actions.copy, actions.userCopy, copied && actions.copyDone)}
             onClick={() => copyText(plainText)}
             title={copied ? 'Copied!' : 'Copy'}
+            aria-label="Copy message"
             type="button"
           >
             {copied ? <CheckIcon /> : <CopyIcon />}
           </button>
+          <div {...stylex.props(bubble.user)}>
+            {parts ? <MultimodalUserContent parts={parts} /> : message.content}
+          </div>
         </div>
       </div>
     );
@@ -536,12 +537,16 @@ export function MessageBubble({
           {...stylex.props(actions.copy, copied && actions.copyDone)}
           onClick={() => copyText(message.content)}
           title={copied ? 'Copied!' : 'Copy'}
+          aria-label="Copy reply"
           type="button"
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </button>
         {message.steps.length > 0 && (
-          <button {...stylex.props(chipBtn.base)} onClick={() => onShowSteps?.(message.steps)}>
+          <button
+            {...stylex.props(chipBtn.base, actions.steps)}
+            onClick={() => onShowSteps?.(message.steps)}
+          >
             <svg
               width="11"
               height="11"
