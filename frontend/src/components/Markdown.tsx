@@ -29,8 +29,29 @@ export const Markdown = memo(function Markdown({text}: {text: string}) {
  * message renders whole once the run ends.
  */
 export function StreamingMarkdown({text}: {text: string}) {
-  const blocks = useMemo(() => splitBlocks(text), [text]);
+  const blocks = useMemo(() => {
+    const list = splitBlocks(text);
+    if (list.length > 0) list[list.length - 1] = closeOpenBold(list[list.length - 1]);
+    return list;
+  }, [text]);
   return blocks.map((block, i) => <Markdown key={i} text={block} />);
+}
+
+/**
+ * A bold run that has opened but not yet closed shows its `**` as literal
+ * text until the closing pair lands, then snaps to bold — a flicker on every
+ * emphasised phrase. Closing it provisionally renders it bold as it grows.
+ * Only the growing last line is touched, and never inside code.
+ */
+function closeOpenBold(block: string): string {
+  if (/^(```|~~~| {4})/.test(block)) return block;
+  const nl = block.lastIndexOf('\n');
+  const line = block.slice(nl + 1).replace(/`[^`]*`/g, '');
+  if ((line.match(/\*\*/g) ?? []).length % 2 === 0) return block;
+  // Just opened, nothing inside yet: hold the marker back rather than close
+  // it on nothing.
+  if (/\*\*\s*$/.test(block)) return block.replace(/\*\*\s*$/, '');
+  return block.trimEnd() + '**';
 }
 
 function splitBlocks(text: string): string[] {

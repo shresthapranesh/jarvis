@@ -173,6 +173,8 @@ export const turn = stylex.create({
     // hover to reveal them with.
     '--turn-aside-opacity': {default: '0', ':hover': '1', '@media (hover: none)': '0.6'},
   },
+  /** A turn that replaces one already on screen, so it has nothing to enter. */
+  still: {animationName: 'none'},
 });
 
 /** A failed turn or action, rendered inline where the result would have gone. */

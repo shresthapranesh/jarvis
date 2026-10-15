@@ -1,6 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 import {useEffect, useMemo, useRef, useState} from 'react';
 
+import {useSmoothText} from '../hooks/useSmoothText';
 import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep, getStepPreview} from '../lib/steps';
 import {messageAnchorId} from '../lib/thread';
@@ -9,7 +10,7 @@ import {GlobeIcon} from './icons';
 import {Markdown, StreamingMarkdown} from './Markdown';
 import {MessageArtifacts} from './MessageArtifacts';
 import {actions, browseChip, bubble, debug, media, safety, working} from './MessageBubble.styles';
-import {chipBtn, prose, stream, ThinkingDots, turn} from './ui';
+import {chipBtn, prose, ThinkingDots, turn} from './ui';
 import {WorkerPanel} from './WorkerPanel';
 
 // Rendering for historical messages persisted with status "blocked" by the
@@ -299,6 +300,8 @@ function MultimodalUserContent({parts}: {parts: ContentPart[]}) {
 
 interface StreamingBubbleProps {
   text: string;
+  /** The stream has finished; the stored message has not replaced this yet. */
+  ended?: boolean;
   thinkingText: string;
   steps: Step[];
   workers?: WorkerInfo[];
@@ -313,6 +316,7 @@ interface StreamingBubbleProps {
 
 export function StreamingBubble({
   text,
+  ended = false,
   thinkingText,
   steps,
   workers,
@@ -323,6 +327,7 @@ export function StreamingBubble({
   browsing,
   onOpenBrowser,
 }: StreamingBubbleProps) {
+  const shownText = useSmoothText(text, ended);
   const latestStep = steps.length > 0 ? steps[steps.length - 1] : null;
   const preview = getStepPreview(latestStep);
   const thinkingRef = useRef<HTMLDivElement | null>(null);
@@ -378,13 +383,14 @@ export function StreamingBubble({
     <div {...stylex.props(turn.base)}>
       {workers && workers.length > 0 && <WorkerPanel workers={workers} />}
       {text ? (
-        <div {...stylex.props(prose.base)} data-md>
+        <div {...stylex.props(prose.base)} data-md data-streaming>
           {/* No `key` here: keying on text.length remounts this node on every
               token, which restarts the fade-in over the whole accumulated
               message and reads as flicker. The fade belongs to the bubble
-              mounting once, not to each token. */}
-          <StreamingMarkdown text={text} />
-          <span {...stylex.props(stream.cursor)} />
+              mounting once, not to each token. The caret is drawn by
+              `[data-streaming]` in base.css, at the end of the last line —
+              a sibling element here could only sit under the last block. */}
+          <StreamingMarkdown text={shownText} />
         </div>
       ) : (
         <div {...stylex.props(working.root)}>
@@ -435,6 +441,8 @@ interface MessageBubbleProps {
   artifacts?: ArtifactCard[];
   onOpenArtifact?: (id: string) => void;
   openArtifactId?: string | null;
+  /** False for a message that takes over from the streaming bubble in place. */
+  appear?: boolean;
 }
 
 function CopyIcon() {
@@ -478,6 +486,7 @@ export function MessageBubble({
   artifacts,
   onOpenArtifact,
   openArtifactId,
+  appear = true,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
 
@@ -518,7 +527,7 @@ export function MessageBubble({
   const blocked = message.status === 'blocked';
 
   return (
-    <div id={messageAnchorId(message.id)} {...stylex.props(turn.base)}>
+    <div id={messageAnchorId(message.id)} {...stylex.props(turn.base, !appear && turn.still)}>
       {blocked && (
         <SafetyBanner layer={message.content.startsWith('[OUTPUT REDACTED') ? 'output' : 'input'} />
       )}

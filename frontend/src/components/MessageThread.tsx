@@ -15,6 +15,8 @@ interface Props {
   streamingSteps?: Step[];
   streamingWorkers?: WorkerInfo[];
   isStreaming?: boolean;
+  /** The stream has finished but the run's stored message hasn't loaded yet. */
+  streamEnded?: boolean;
   streamError?: string;
   todos?: TodoItem[];
   bottomRef: React.RefObject<HTMLDivElement | null>;
@@ -41,6 +43,8 @@ interface Props {
   /** Messages typed during the run and not yet delivered to it. */
   queuedMessages?: Message[];
   onUnqueue?: (messageId: string) => void;
+  /** The message that just replaced the streaming bubble; it appears without animating in. */
+  settledStreamId?: string | null;
 }
 
 export function MessageThread({
@@ -50,6 +54,7 @@ export function MessageThread({
   streamingSteps,
   streamingWorkers,
   isStreaming,
+  streamEnded,
   streamError,
   todos,
   bottomRef,
@@ -67,6 +72,7 @@ export function MessageThread({
   openArtifactId,
   queuedMessages,
   onUnqueue,
+  settledStreamId,
 }: Props) {
   return (
     <div
@@ -88,6 +94,7 @@ export function MessageThread({
           artifacts={artifactsByMessage?.get(msg.id)}
           onOpenArtifact={onOpenArtifact}
           openArtifactId={openArtifactId}
+          appear={msg.id !== settledStreamId}
         />
       ))}
       {todos && todos.length > 0 && (
@@ -98,6 +105,7 @@ export function MessageThread({
       {isStreaming && (
         <StreamingBubble
           text={streamingText ?? ''}
+          ended={streamEnded}
           thinkingText={streamingThinkingText ?? ''}
           steps={streamingSteps ?? []}
           workers={streamingWorkers ?? []}

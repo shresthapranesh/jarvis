@@ -143,6 +143,11 @@ function ConversationPage() {
   // only during the settle window right after a conversation opens — see the
   // scroll-restore effects below.
   const pinBottomRef = useRef(true);
+  // Whether a streaming reply should keep the newest text in view. Unlike the
+  // pin above it outlives the settle window, but the reader owns it: any
+  // scroll up releases it, and coming back to the bottom re-arms it.
+  const followRef = useRef(true);
+  const liveRef = useRef(false);
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelSteps, setPanelSteps] = useState<Step[]>([]);
@@ -243,30 +248,63 @@ function ConversationPage() {
   //
   // The window is deliberately short-lived. It ends at the first scroll away
   // from the bottom, and at SETTLE_MS regardless, so this stays a fix for
-  // late-arriving layout and never becomes follow-the-output-forever: an
-  // already-running conversation opened in a second tab must not start yanking
-  // itself down on every token, and handleSubmit's smooth scroll must not get
-  // cut short by an instant re-pin landing on top of it.
+  // late-arriving layout and never becomes follow-the-output-forever, and
+  // handleSubmit's smooth scroll must not get cut short by an instant re-pin
+  // landing on top of it.
+  //
+  // Following a live reply is the other reason to hold the bottom, and it is
+  // the reader's to give up: it holds only while they are at the bottom, and
+  // it is released by what they *do* — a wheel or key or drag upward — never
+  // inferred from a scroll event, because our own smooth scroll after sending
+  // passes through every position on its way down.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const SETTLE_MS = 1500;
     const BOTTOM_SLACK = 4; // fractional scrollHeight/clientHeight never sum exactly
+    const FOLLOW_SLACK = 48; // "at the bottom" for a reader, who never lands exactly
 
     const repin = () => {
-      if (pinBottomRef.current) container.scrollTop = container.scrollHeight;
+      if (pinBottomRef.current || (followRef.current && liveRef.current)) {
+        container.scrollTop = container.scrollHeight;
+      }
     };
 
     // Every re-pin lands exactly at the bottom, so a scroll that settles
     // anywhere else came from the reader — or from the older-page prepend
     // below, which restores an earlier position on purpose. Either way the
     // scroll position is theirs from then on.
+    let dragging = false;
     const onScroll = () => {
-      if (!pinBottomRef.current) return;
       const fromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+      if (fromBottom <= FOLLOW_SLACK) followRef.current = true;
+      else if (dragging) followRef.current = false;
+      if (!pinBottomRef.current) return;
       if (fromBottom > BOTTOM_SLACK) pinBottomRef.current = false;
     };
+
+    const release = () => {
+      followRef.current = false;
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) release();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home') release();
+    };
+    // A press on the container itself, not on a message, is its scrollbar.
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.target === container) dragging = true;
+    };
+    const onPointerUp = () => {
+      dragging = false;
+    };
+    container.addEventListener('wheel', onWheel, {passive: true});
+    container.addEventListener('touchmove', release, {passive: true});
+    container.addEventListener('keydown', onKey);
+    container.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
 
     const resize = new ResizeObserver(repin);
     for (const child of Array.from(container.children)) resize.observe(child);
@@ -291,6 +329,11 @@ function ConversationPage() {
       resize.disconnect();
       mutation.disconnect();
       container.removeEventListener('scroll', onScroll);
+      container.removeEventListener('wheel', onWheel);
+      container.removeEventListener('touchmove', release);
+      container.removeEventListener('keydown', onKey);
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
       window.clearTimeout(settled);
     };
   }, [id]);
@@ -353,8 +396,10 @@ function ConversationPage() {
       steps: [],
     });
     // Submitting takes over the scroll: this animation owns the trip to the
-    // bottom, so an in-flight settle window must not jump ahead of it.
+    // bottom, so an in-flight settle window must not jump ahead of it. Sending
+    // is also a clear "show me the answer", so the reply is followed.
     pinBottomRef.current = false;
+    followRef.current = true;
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
       const {taskId} = await commitStartTask({
@@ -404,6 +449,24 @@ function ConversationPage() {
   );
 
   const isActive = streaming || !!runningMsg;
+  liveRef.current = isActive;
+  // The run that streamed last on this page. Its stored message replaces the
+  // streaming bubble in place when the run ends, so it must not play the
+  // enter animation — a reply fading out and back in at the finish line.
+  const lastStreamedRef = useRef<string | null>(null);
+  if (streamTaskId) lastStreamedRef.current = streamTaskId;
+
+  // The settled message brings its action row with it, after following has
+  // stopped — so a reader who followed the reply down is left just short of
+  // the end. One last hold, in the same commit that swaps the message in.
+  const wasActiveRef = useRef(isActive);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (wasActiveRef.current && !isActive && followRef.current && container) {
+      container.scrollTop = container.scrollHeight;
+    }
+    wasActiveRef.current = isActive;
+  }, [isActive]);
   // Sending queues instead of starting a turn while a run is up. Not while it
   // is paused: the run is waiting on that answer and will not reach a delivery
   // point until it gets one, so the InterruptPrompt is the input then.
@@ -517,6 +580,7 @@ function ConversationPage() {
         streamingSteps={isActive ? steps : undefined}
         streamingWorkers={isActive ? workers : undefined}
         isStreaming={isActive}
+        streamEnded={isActive && !streaming}
         streamError={error ?? undefined}
         todos={todos}
         bottomRef={bottomRef}
@@ -534,6 +598,7 @@ function ConversationPage() {
         spineCollapsed={!isActive}
         queuedMessages={queuedMessages}
         onUnqueue={canQueue ? handleUnqueue : undefined}
+        settledStreamId={lastStreamedRef.current}
       />
       {showSpine && (
         <ThreadSpine

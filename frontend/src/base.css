@@ -222,6 +222,25 @@ html {
   border-top: 1px solid var(--md-border);
   margin: 0.7em 0;
 }
+/* The streaming caret, at the end of the text rather than under it: on the
+   last block when that block is a line of text, on the last item when it is
+   a list. Code and tables get none — a caret inside them would be content. */
+[data-md][data-streaming] > :last-child:is(p, h1, h2, h3, h4, h5, h6, blockquote)::after,
+[data-md][data-streaming] > :is(ul, ol):last-child > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 2px;
+  vertical-align: -0.1em;
+  background: var(--md-accent);
+  animation: md-caret 1s step-end infinite;
+}
+@keyframes md-caret {
+  50% {
+    opacity: 0;
+  }
+}
 [data-md] > *:first-child {
   margin-top: 0;
 }
