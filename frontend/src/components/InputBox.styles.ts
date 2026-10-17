@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
-import {colors, radii, type} from '../theme/tokens.stylex';
+import {bp, colors, radii, type} from '../theme/tokens.stylex';
 
 /* ── Styles for InputBox.tsx ───────────────────────────────────────────
    The composer card and its footer row. */
@@ -14,28 +14,20 @@ export const composer = stylex.create({
   wrap: {maxWidth: {default: 740, '@media (max-width: 860px)': 'none'}, marginInline: 'auto'},
   wrapFull: {maxWidth: 'none'},
   /**
-   * One field, not a card on a page.
-   *
-   * This carried the whole of the old theme's depth kit — a real
-   * `blur(14px)` (hardcoded, so the `layout.blur` token never reached it), a
-   * `0 6px 24px` drop shadow, an inset top highlight, and a `translateY(-1px)`
-   * lift on focus. On a ground with no light source all four were describing
-   * an elevation that isn't there. Focus is now the one thing it can be on
-   * paper: the rule around the field gets darker.
+   * One field, not a card on a page: a step of fill and no rule. Focus lifts
+   * the fill a step rather than drawing an outline. The 1px stays, clear, so
+   * the queueing and incognito states below can draw theirs without the
+   * field shifting.
    */
   card: {
-    backgroundColor: colors.glassBg,
+    backgroundColor: {default: colors.surface2, ':focus-within': colors.surface3},
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: {default: colors.border, ':focus-within': colors.borderStrong},
+    borderColor: 'transparent',
     borderRadius: radii.lg,
     display: 'flex',
     flexDirection: 'column',
-    // The keyboard hint is a grandchild and cannot see this element's
-    // `:focus-within`, so the state is published as a custom property — the
-    // same trick `turn.base` uses for its action row.
-    '--composer-hint-opacity': {default: '0', ':focus-within': '1'},
-    transition: 'border-color 0.15s ease',
+    transition: 'background-color 0.15s ease, border-color 0.15s ease',
   },
   cardDisabled: {opacity: 0.6},
   /**
@@ -48,6 +40,12 @@ export const composer = stylex.create({
     borderColor: `color-mix(in srgb, ${colors.accent} 35%, ${colors.border})`,
   },
   cardIncognito: {borderColor: `color-mix(in srgb, ${colors.accent} 45%, ${colors.border})`},
+  /** A file held over the field: it will take it. */
+  cardDragging: {
+    backgroundColor: colors.surface3,
+    borderStyle: 'dashed',
+    borderColor: colors.borderStrong,
+  },
   textarea: {
     backgroundColor: 'transparent',
     borderStyle: 'none',
@@ -62,6 +60,7 @@ export const composer = stylex.create({
     paddingInline: 14,
     minHeight: 42,
     maxHeight: 160,
+    overflowY: 'hidden',
     '::placeholder': {color: colors.textDim},
   },
   // No rule above this row. With one it read as a card divided into a text
@@ -75,27 +74,73 @@ export const composer = stylex.create({
     paddingInlineStart: 10,
     paddingInlineEnd: 8,
   },
-  // Everything in the footer row must be able to shrink on a phone, or the
-  // send button — the one control the composer exists for — is pushed past
-  // the right edge once iOS forces 16px controls.
-  hint: {
-    flex: 1,
-    fontSize: type.tMicro,
-    color: colors.textFaint,
-    textAlign: 'right',
-    minWidth: 0,
+  /** Pushes stop/send to the right edge; it gives way first on a phone. */
+  spacer: {flex: 1, minWidth: 0},
+});
+
+/**
+ * The files attached to the draft, above the text: an image as its thumbnail,
+ * anything else as its name and size. Fills, no frames, like the rest of the
+ * field.
+ */
+export const attachment = stylex.create({
+  strip: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingBlockStart: 10,
+    paddingInline: 10,
+  },
+  chip: {
+    position: 'relative',
+    height: 52,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface3,
+    overflow: 'hidden',
+    flexShrink: 0,
+    transition: 'opacity 0.15s ease',
+    // The remove button is a child and cannot see this element's hover.
+    '--chip-remove-opacity': {default: '0', ':hover': '1', ':focus-within': '1', [bp.coarse]: '1'},
+  },
+  chipImage: {width: 52},
+  chipFile: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: 220,
+    paddingInlineStart: 10,
+    paddingInlineEnd: 26,
+  },
+  uploading: {opacity: 0.55},
+  failed: {backgroundColor: colors.errorBg, color: colors.errorText},
+  thumb: {width: '100%', height: '100%', objectFit: 'cover', display: 'block'},
+  icon: {flexShrink: 0, color: colors.textDim},
+  meta: {display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0},
+  name: {
+    fontSize: type.tSmall,
+    color: colors.text,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    paddingInlineEnd: 4,
   },
-  /**
-   * Keyboard advice fades in with focus — it is instruction for someone
-   * already typing, and a resting composer should not be repeating it.
-   */
-  hintIdle: {
-    opacity: 'var(--composer-hint-opacity)',
-    transition: 'opacity 0.18s ease',
+  size: {fontSize: type.tMicro, color: colors.textFaint},
+  remove: {
+    position: 'absolute',
+    insetBlockStart: 4,
+    insetInlineEnd: 4,
+    width: 18,
+    height: 18,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    borderStyle: 'none',
+    borderRadius: '50%',
+    backgroundColor: {default: 'rgba(0, 0, 0, 0.55)', ':hover': 'rgba(0, 0, 0, 0.8)'},
+    color: '#fff',
+    cursor: 'pointer',
+    opacity: 'var(--chip-remove-opacity)',
+    transition: 'opacity 0.15s ease, background-color 0.15s ease',
   },
 });
 
@@ -135,14 +180,18 @@ export const control = stylex.create({
     transform: {default: null, ':active:not(:disabled)': 'translateY(1px)'},
     transition: 'background-color 0.15s ease, opacity 0.15s ease',
   },
+  /**
+   * Nothing typed yet: the arrow waits as a glyph rather than a filled block,
+   * and fills in once there is something to send.
+   */
+  sendIdle: {
+    backgroundColor: {default: 'transparent', ':hover:not(:disabled)': colors.surface3},
+    color: colors.textFaint,
+  },
   sendStop: {
-    // Solid on hover rather than the old translucent `errorBorder`, which is
-    // what lets `dangerContrast` be the right text colour in both themes —
-    // the `#fff` it replaced vanished against a pale wash on light stock.
-    backgroundColor: {default: 'transparent', ':hover:not(:disabled)': colors.danger},
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.errorBorder,
-    color: {default: colors.errorText, ':hover:not(:disabled)': colors.dangerContrast},
+    // Solid on hover, which is what lets `dangerContrast` be the right text
+    // colour in both themes.
+    backgroundColor: {default: colors.surface3, ':hover:not(:disabled)': colors.danger},
+    color: {default: colors.text, ':hover:not(:disabled)': colors.dangerContrast},
   },
 });

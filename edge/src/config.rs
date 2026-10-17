@@ -100,6 +100,18 @@ fn db_path() -> Result<PathBuf, String> {
     Ok(work_dir()?.join("database.db"))
 }
 
+/// Where a chat's attachments are kept, a directory per conversation
+/// (`uploads.rs`): `$WORK_DIR/uploads`. The agent is handed paths under it.
+pub fn uploads_dir() -> PathBuf {
+    resolve(work_dir().unwrap_or_default()).join("uploads")
+}
+
+/// Where `POST /uploads` holds a file until the turn that sends it takes it:
+/// `$WORK_DIR/staging`.
+pub fn staging_dir() -> PathBuf {
+    resolve(work_dir().unwrap_or_default()).join("staging")
+}
+
 /// `$WORK_DIR`, else `~/.jarvis`.
 fn work_dir() -> Result<PathBuf, String> {
     match std::env::var("WORK_DIR") {

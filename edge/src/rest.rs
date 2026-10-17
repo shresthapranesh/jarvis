@@ -1,7 +1,8 @@
 //! The REST routes: `GET /artifacts/{id}/raw` (a port of
 //! `server/routes_artifacts.py`), the log viewer's `/server-logs` (of
-//! `routes_logs.py`, here `logs.rs`), and `/mcp/oauth/callback`, where the
-//! browser comes back from an MCP sign-in started in the UI.
+//! `routes_logs.py`, here `logs.rs`), `/mcp/oauth/callback`, where the
+//! browser comes back from an MCP sign-in started in the UI, and
+//! `POST /uploads`, a chat attachment's bytes (`uploads.rs`).
 //!
 //! A download answers as Starlette's `FileResponse` did: its headers, a
 //! single byte range. `HEAD` is a 405, as FastAPI's GET routes answer it.
@@ -38,6 +39,7 @@ pub async fn serve(state: &AppState, req: Request) -> Result<Response, Request> 
         (Method::GET, "/server-logs") => Ok(crate::logs::list(req.headers())),
         (Method::GET, "/server-logs/stream") => Ok(crate::logs::stream(req.headers())),
         (Method::GET, "/mcp/oauth/callback") => Ok(mcp_signed_in(state, req.uri().query().unwrap_or("").to_string()).await),
+        (Method::POST, "/uploads") => Ok(crate::uploads::upload(req).await),
         _ => Err(req),
     }
 }

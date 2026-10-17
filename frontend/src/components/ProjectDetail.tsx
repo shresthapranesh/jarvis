@@ -6,6 +6,7 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {ConversationListQuery as TConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
 import type {ProjectQuery as TProjectQuery} from '../__generated__/ProjectQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
+import type {UploadedFile} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {commitDeleteProject} from '../relay/DeleteProjectMutation';
 import {decodeGlobalId} from '../relay/globalId';
@@ -100,12 +101,23 @@ export function ProjectDetail({id}: Props) {
     {onSuccess: () => setActionError(null), onError: (e) => setActionError(e.message)},
   );
 
-  async function handleNewChat(query: string, model: string, effort: string | null) {
+  async function handleNewChat(
+    query: string,
+    model: string,
+    effort: string | null,
+    attachments: UploadedFile[],
+  ) {
     setChatBusy(true);
     setActionError(null);
     try {
       const {taskId, conversationId} = await commitStartTask({
-        input: {query, model, effort, projectId: id},
+        input: {
+          query,
+          model,
+          effort,
+          projectId: id,
+          attachmentUploads: attachments.map((a) => ({uploadId: a.uploadId})),
+        },
       });
       await navigate({
         to: '/c/$id',

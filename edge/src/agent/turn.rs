@@ -86,6 +86,8 @@ pub struct Turn<'a> {
     conversation: Option<String>,
     model: String,
     query: String,
+    /// The files sent with a chat turn (`uploads.rs`).
+    attachments: Vec<crate::uploads::Attachment>,
     project_id: Option<String>,
     ephemeral: bool,
     /// This user message's retrieved context, by the message's id — the
@@ -110,6 +112,7 @@ impl<'a> Turn<'a> {
         let conversation_id = payload["conv_id"].as_str()?.to_string();
         let mut turn = Self::new(agent, job, run, Kind::Chat, conversation_id.clone(), payload["model"].as_str()?, payload["query"].as_str()?);
         turn.conversation = Some(conversation_id);
+        turn.attachments = serde_json::from_value(payload["attachments"].clone()).unwrap_or_default();
         Some(turn)
     }
 
@@ -142,6 +145,7 @@ impl<'a> Turn<'a> {
             task_id: job.id.clone(),
             model: model.to_string(),
             query: query.to_string(),
+            attachments: vec![],
             thread_id,
             conversation: None,
             project_id: None,
@@ -194,7 +198,14 @@ impl<'a> Turn<'a> {
         // as Python. An automation's thread keeps its plan between runs.
         // The prompt's id is derived from the run, so a re-claimed run
         // replaces it (Python gives an automation's a fresh one).
-        let prompt = Message { id: Some(user_message_id(&self.task_id)), ..Message::new(Role::User, Content::Text(self.query.clone())) };
+        let content = if self.attachments.is_empty() {
+            Content::Text(self.query.clone())
+        } else {
+            crate::uploads::prompt(self.pool(), &self.query, &self.attachments, &mut thread.blobs)
+                .await
+                .map_err(|e| Stop::Failed(format!("reading the attachments: {e}")))?
+        };
+        let prompt = Message { id: Some(user_message_id(&self.task_id)), ..Message::new(Role::User, content) };
         let wrote = match &self.kind {
             Kind::Chat => {
                 self.events.emit("todos_updated", &json!({"todos": [], "source": "main"}));
