@@ -426,10 +426,6 @@ type MessageEdge {
 type ModelCatalog {
 	default: String!
 	"""
-	The effort levels the composer offers (`models.efforts`), lowest first.
-	"""
-	effortLevels: [String!]!
-	"""
 	The effort a chat starts at (`default.effort`); none leaves it to the
 	run's kind.
 	"""
@@ -456,10 +452,14 @@ type ModelSpec {
 	builtin: Boolean!
 	contextWindow: Int
 	"""
-	The effort levels the composer offers for it, lowest first: those it
-	takes that `effortLevels` offers. Empty when it takes none.
+	The effort levels it takes, lowest first — the composer's choices
+	for it. Empty when it takes none, and is sent none.
 	"""
 	efforts: [String!]!
+	"""
+	Whether Settings set its levels, rather than its defaults.
+	"""
+	effortsCustomized: Boolean!
 }
 
 type ModelSyncReport {
@@ -548,10 +548,16 @@ type Mutation {
 	"""
 	setDefaultModel(id: String!): ModelCatalog!
 	"""
-	Which effort levels the composer offers, and the one a chat starts
-	at (none: by the run's kind). The default must be one offered.
+	The effort levels a model takes — any model, built-in or custom —
+	which the composer offers for it and its calls are sent; `[]` takes
+	none. No `levels` goes back to its defaults.
 	"""
-	setEfforts(levels: [String!]!, default: String): ModelCatalog!
+	setModelEfforts(id: String!, levels: [String!]): ModelCatalog!
+	"""
+	The effort a chat starts at, for every model (none: by the run's
+	kind). Each model runs at the nearest level it takes.
+	"""
+	setDefaultEffort(level: String): ModelCatalog!
 	"""
 	Name an OpenAI-compatible server.
 	"""

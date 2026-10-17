@@ -304,7 +304,19 @@ pub fn render(req: &Request<'_>) -> Result<Value, Error> {
             .collect();
         body["toolConfig"] = json!({"tools": tools});
     }
+    // Claude's effort goes in its own request fields; other models on
+    // Bedrock have no common setting, so are sent none.
+    let name = req.model.split_once(':').map_or(req.model, |(_, n)| n);
+    if let Some(effort) = req.effort.zip(claude_name(name)).and_then(|(e, claude)| super::anthropic::effort_for(claude, e)) {
+        body["additionalModelRequestFields"] = json!({"output_config": {"effort": effort}});
+    }
     Ok(body)
+}
+
+/// A Bedrock id's Claude model name — `us.anthropic.claude-sonnet-4-6` →
+/// `claude-sonnet-4-6` — or none for another vendor's model.
+pub fn claude_name(id: &str) -> Option<&str> {
+    id.find("anthropic.claude-").map(|i| &id[i + "anthropic.".len()..])
 }
 
 /// `merge_content` for two user messages' content.

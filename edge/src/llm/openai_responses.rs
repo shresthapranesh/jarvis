@@ -115,6 +115,9 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
             .collect();
         body["tools"] = tools.into();
     }
+    if let Some(effort) = req.effort {
+        body["reasoning"] = json!({"effort": effort});
+    }
     Ok(body)
 }
 

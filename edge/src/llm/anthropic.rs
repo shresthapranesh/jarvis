@@ -115,8 +115,8 @@ pub fn max_tokens(name: &str) -> i64 {
 /// default) and return it as empty blocks unless asked for a summary.
 const THINKS_BY_DEFAULT: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-haiku-5", "claude-fable-5", "claude-mythos-5"];
 
-/// Every effort level, lowest first.
-pub const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+/// Every effort level Claude takes, lowest first.
+const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 /// The families that take `output_config.effort`, and the levels each takes
 /// (Sonnet 4.5 and Haiku 4.5 reject it; `xhigh` arrived with Opus 4.7).
@@ -176,12 +176,10 @@ pub fn efforts(name: &str) -> &'static [&'static str] {
     TAKES_EFFORT.iter().find(|(f, _)| family(name, &[*f])).map_or(&[], |(_, levels)| levels)
 }
 
-/// The level a call asks `name` for: `effort` when the model takes it,
-/// else the highest level it takes below that — a stored choice can outlive
-/// a switch to a model with fewer levels.
-fn effort_for(name: &str, effort: &str) -> Option<&'static str> {
-    let rank = EFFORTS.iter().position(|e| *e == effort)?;
-    efforts(name).iter().rev().find(|e| EFFORTS.iter().position(|x| x == *e).is_some_and(|r| r <= rank)).copied()
+/// The level a call asks `name` for: the nearest it takes to `effort` — a
+/// stored choice can outlive a switch to a model with fewer levels.
+pub fn effort_for(name: &str, effort: &str) -> Option<&'static str> {
+    super::nearest_effort(effort, efforts(name))
 }
 
 /// `ContextCacheConfig.cache_control()` for Anthropic: `ttl` only when
@@ -783,7 +781,8 @@ mod tests {
         assert_eq!(body("claude-opus-4-6", Some("xhigh"))["output_config"], json!({"effort": "high"}));
         assert_eq!(body("claude-opus-4-5", Some("max"))["output_config"], json!({"effort": "high"}));
         assert_eq!(body("claude-opus-4-6", Some("max"))["output_config"], json!({"effort": "max"}));
-        assert!(body("claude-opus-5-5", Some("extreme")).get("output_config").is_none());
+        // Claude can't turn thinking off: none asks for its lowest.
+        assert_eq!(body("claude-opus-5-5", Some("none"))["output_config"], json!({"effort": "low"}));
         // Rejects effort; and no effort asked, none sent.
         assert!(body("claude-haiku-4-5-20251001", Some("low")).get("output_config").is_none());
         assert!(body("claude-sonnet-5-5", None).get("output_config").is_none());

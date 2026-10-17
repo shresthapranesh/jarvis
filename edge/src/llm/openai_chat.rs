@@ -86,6 +86,16 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
             .collect();
         body["tools"] = tools.into();
     }
+    // OpenRouter's unified `reasoning` object; every other server the
+    // Chat Completions field. The level goes as is: the model's levels in
+    // Settings are the ones it takes.
+    if let Some(effort) = req.effort {
+        if req.model.starts_with("openrouter:") {
+            body["reasoning"] = json!({"effort": effort});
+        } else {
+            body["reasoning_effort"] = effort.into();
+        }
+    }
     Ok(body)
 }
 
