@@ -366,7 +366,6 @@ function RootLayout() {
                         nav.link,
                         active && nav.linkActive,
                         railCollapsed && nav.linkCollapsed,
-                        active && !railCollapsed && nav.linkActiveBar,
                       )}
                       title={label}
                     >

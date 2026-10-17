@@ -144,9 +144,6 @@ const styles = stylex.create({
     color: colors.text,
     fontFamily: type.mono,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     paddingInline: 5,
     borderRadius: 2,
     fontSize: type.tSmall,
@@ -168,10 +165,10 @@ const styles = stylex.create({
 
   actions: {display: 'flex', justifyContent: 'flex-end', gap: 8, marginBlockStart: 18},
   btn: {
-    backgroundColor: {default: colors.surface, ':hover': colors.surface2},
+    backgroundColor: {default: colors.surface2, ':hover': colors.surface3},
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     color: colors.text,
     fontFamily: 'inherit',
     fontSize: type.tUi,
@@ -180,7 +177,7 @@ const styles = stylex.create({
     borderRadius: 2,
     cursor: {default: 'pointer', ':disabled': 'not-allowed'},
     opacity: {default: 1, ':disabled': 0.4},
-    transition: 'background 0.12s, border-color 0.12s',
+    transition: 'background 0.12s',
   },
   btnCancel: {color: colors.textDim},
   btnConfirm: {

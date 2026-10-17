@@ -88,9 +88,6 @@ export function PlanningEmpty({reason}: {reason?: string}) {
 
 const styles = stylex.create({
   card: {
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     backgroundColor: colors.surface2,
     borderRadius: 3,
     paddingBlock: 12,
@@ -162,9 +159,6 @@ const styles = stylex.create({
     paddingBlock: 8,
     paddingInline: 12,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.border,
     borderRadius: 3,
     fontSize: type.tUi,
     color: colors.textDim,

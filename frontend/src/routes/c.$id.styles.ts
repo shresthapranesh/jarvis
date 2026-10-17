@@ -19,9 +19,6 @@ export const conv = stylex.create({
     fontSize: type.tSmall,
     color: colors.textDim,
     backgroundColor: `color-mix(in srgb, ${colors.accent} 8%, transparent)`,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
   },
 
   footer: {

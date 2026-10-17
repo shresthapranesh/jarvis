@@ -43,7 +43,7 @@ export const board = stylex.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 3,
     padding: 10,
   },
@@ -87,9 +87,6 @@ export const board = stylex.create({
     textAlign: 'center',
     fontSize: type.tSmall,
     color: colors.textFaint,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.border,
     borderRadius: 3,
   },
 
@@ -100,9 +97,7 @@ export const board = stylex.create({
     overflowX: 'auto',
     flexShrink: 0,
     padding: 3,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
     borderRadius: 3,
   },
   tab: {
@@ -131,7 +126,7 @@ export const card = stylex.create({
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 3,
     padding: 10,
   },
@@ -168,9 +163,6 @@ export const card = stylex.create({
   reasonQuestion: {
     color: colors.text,
     backgroundColor: colors.warningBg,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.warningBorder,
     borderRadius: 3,
     paddingBlock: 7,
     paddingInline: 9,
@@ -229,7 +221,7 @@ export const chip = stylex.create({
     backgroundColor: colors.surface3,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 2,
     paddingBlock: 1,
     paddingInline: 7,
@@ -238,17 +230,14 @@ export const chip = stylex.create({
   priority: {
     color: colors.accentStrong,
     backgroundColor: colors.accentDim,
-    borderColor: 'transparent',
   },
   danger: {
     color: colors.errorText,
     backgroundColor: colors.errorBg,
-    borderColor: colors.errorBorder,
   },
   question: {
     color: colors.warningText,
     backgroundColor: colors.warningBg,
-    borderColor: colors.warningBorder,
   },
 });
 
@@ -287,7 +276,7 @@ export const parents = stylex.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 3,
   },
   option: {

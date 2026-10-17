@@ -227,12 +227,9 @@ const picker = stylex.create({
     flexShrink: 0,
     color: colors.textFaint,
     whiteSpace: 'nowrap',
-    // A thin rule between the two names rather than a "·", which at 12px
-    // reads as a stray mark.
-    paddingInlineStart: 6,
-    borderInlineStartWidth: 1,
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: colors.border,
+    // Set apart by space alone: a "·" at 12px reads as a stray mark, and a
+    // rule is one more line in the composer.
+    paddingInlineStart: 4,
   },
   chevron: {flexShrink: 0, opacity: 0.7},
   panel: {
@@ -263,9 +260,6 @@ const picker = stylex.create({
   headingRule: {
     marginBlockStart: 6,
     paddingBlockStart: 10,
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: 'solid',
-    borderBlockStartColor: colors.border,
   },
   // A long custom catalog scrolls here rather than running off the top of
   // the screen.
@@ -300,9 +294,9 @@ const picker = stylex.create({
     paddingInline: 8,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: {default: colors.border, ':hover': colors.borderStrong},
+    borderColor: 'transparent',
     borderRadius: radii.sm,
-    backgroundColor: 'transparent',
+    backgroundColor: {default: colors.surface2, ':hover': colors.surface3},
     color: {default: colors.textDim, ':hover': colors.text},
     fontSize: type.tSmall,
     fontFamily: type.body,

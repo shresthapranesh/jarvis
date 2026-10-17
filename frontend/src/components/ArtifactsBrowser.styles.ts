@@ -36,17 +36,11 @@ export const browser = stylex.create({
     paddingBlock: 10,
     paddingInline: 16,
     backgroundColor: colors.bg,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
   },
   thFirst: {paddingInlineStart: layout.pageGutter},
 
   row: {
     cursor: 'pointer',
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     backgroundColor: {default: null, ':hover': colors.surface},
     transition: 'background 0.12s',
     display: {default: null, '@media (max-width: 768px)': 'flex'},
@@ -56,7 +50,7 @@ export const browser = stylex.create({
     paddingBlock: {default: null, '@media (max-width: 768px)': 12},
     paddingInline: {default: null, '@media (max-width: 768px)': 16},
   },
-  rowActive: {backgroundColor: {default: colors.accentDim, ':hover': colors.accentDim}},
+  rowActive: {backgroundColor: {default: colors.surface2, ':hover': colors.surface2}},
 
   td: {
     paddingBlock: {default: 11, '@media (max-width: 768px)': 0},
@@ -83,9 +77,6 @@ export const browser = stylex.create({
     paddingInline: 8,
     borderRadius: 2,
     backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     fontSize: type.tMicro,
     color: colors.textDim,
   },
@@ -93,7 +84,7 @@ export const browser = stylex.create({
 
   /**
    * The drag handle between the two panes. Its `::after` widens the hit area
-   * to 13px without widening the visible 5px line.
+   * to 13px; the 5px strip itself only shows on hover.
    */
   resizer: {
     display: {default: 'block', '@media (max-width: 768px)': 'none'},
@@ -101,7 +92,7 @@ export const browser = stylex.create({
     flexShrink: 0,
     flexBasis: 5,
     cursor: 'col-resize',
-    backgroundColor: {default: colors.border, ':hover': colors.accent, ':active': colors.accent},
+    backgroundColor: {default: 'transparent', ':hover': colors.border, ':active': colors.borderStrong},
     position: 'relative',
     transition: 'background 0.12s',
     '::after': {content: '', position: 'absolute', insetBlock: 0, insetInline: -4},
@@ -109,9 +100,6 @@ export const browser = stylex.create({
   detailPane: {
     display: 'flex',
     flexDirection: 'column',
-    borderInlineStartWidth: 1,
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: colors.border,
     backgroundColor: colors.bg,
     overflow: 'hidden',
     // The dragged width arrives as `--detail-w` set inline, rather than as an
@@ -135,9 +123,6 @@ export const browser = stylex.create({
     gap: 12,
     paddingBlock: 14,
     paddingInline: 16,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     flexShrink: 0,
   },
   detailName: {

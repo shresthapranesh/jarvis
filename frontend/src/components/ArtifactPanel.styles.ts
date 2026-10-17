@@ -23,9 +23,6 @@ export const panel = stylex.create({
     backgroundColor: {default: colors.glassBg, '@media (max-width: 860px)': colors.bg},
     backdropFilter: {default: 'blur(14px)', '@media (max-width: 860px)': 'none'},
     WebkitBackdropFilter: {default: 'blur(14px)', '@media (max-width: 860px)': 'none'},
-    borderInlineStartWidth: {default: 1, '@media (max-width: 860px)': 0},
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: colors.glassBorder,
     boxShadow: `-4px 0 28px rgba(${channels.shadow}, 0.45)`,
     display: 'flex',
     flexDirection: 'column',
@@ -41,9 +38,6 @@ export const panel = stylex.create({
     justifyContent: 'space-between',
     paddingBlock: 14,
     paddingInline: 16,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     flexShrink: 0,
   },
   title: {
@@ -58,9 +52,6 @@ export const panel = stylex.create({
   list: {
     display: 'flex',
     flexDirection: 'column',
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     maxHeight: '30%',
     overflowY: 'auto',
     flexShrink: 0,
@@ -69,9 +60,6 @@ export const panel = stylex.create({
     textAlign: 'left',
     backgroundColor: {default: 'transparent', ':hover': colors.surface},
     borderStyle: 'none',
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     paddingBlock: 10,
     paddingInline: 16,
     color: colors.text,
@@ -81,13 +69,7 @@ export const panel = stylex.create({
     gap: 2,
     transition: 'background 0.12s',
   },
-  itemActive: {
-    backgroundColor: colors.accentDim,
-    borderInlineStartWidth: 2,
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: colors.accent,
-    paddingInlineStart: 14,
-  },
+  itemActive: {backgroundColor: colors.surface2},
   itemTitle: {
     fontSize: type.tBody,
     fontWeight: 500,
@@ -127,10 +109,10 @@ export const detail = stylex.create({
 export const editor = stylex.create({
   root: {display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0},
   title: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: {default: 'transparent', ':focus': colors.borderStrong},
     borderRadius: 2,
     color: colors.text,
     fontSize: type.tBody,
@@ -142,10 +124,10 @@ export const editor = stylex.create({
   content: {
     flex: 1,
     minHeight: 320,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: {default: 'transparent', ':focus': colors.borderStrong},
     borderRadius: 2,
     color: colors.text,
     fontFamily: type.mono,
@@ -162,9 +144,6 @@ export const editor = stylex.create({
 export const version = stylex.create({
   panel: {
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     borderRadius: 3,
     paddingBlock: 10,
     paddingInline: 12,
@@ -201,9 +180,6 @@ export const version = stylex.create({
     paddingInline: 6,
     borderRadius: 2,
     backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     minWidth: 36,
     textAlign: 'center',
   },
@@ -215,9 +191,6 @@ export const version = stylex.create({
 /** The line diff between two versions. */
 export const diff = stylex.create({
   root: {
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: 'solid',
-    borderBlockStartColor: colors.border,
     paddingBlockStart: 8,
   },
   header: {
@@ -232,9 +205,6 @@ export const diff = stylex.create({
     maxHeight: 300,
     overflowY: 'auto',
     backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     borderRadius: 2,
     padding: 8,
     fontFamily: type.mono,

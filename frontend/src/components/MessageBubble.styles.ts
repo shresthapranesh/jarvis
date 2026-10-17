@@ -198,9 +198,6 @@ export const safety = stylex.create({
     alignItems: 'baseline',
     gap: 8,
     backgroundColor: colors.warningBg,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.warningBorder,
     borderRadius: 3,
     paddingBlock: 8,
     paddingInline: 12,
@@ -221,9 +218,6 @@ export const media = stylex.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: `rgba(${channels.tint}, 0.07)`,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: `rgba(${channels.tint}, 0.12)`,
     borderRadius: 2,
     paddingBlock: 4,
     paddingInline: 9,
@@ -239,7 +233,6 @@ export const browseChip = stylex.create({
   row: {display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'},
   live: {
     color: colors.signalLive,
-    borderColor: colors.signalLiveDim,
     // Slow, not attention-grabbing: it marks a state, it isn't an alert.
     animationName: kf.pulse,
     animationDuration: '2.4s',

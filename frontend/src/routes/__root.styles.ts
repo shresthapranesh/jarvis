@@ -53,15 +53,9 @@ export const rail = stylex.create({
     backgroundColor: {default: colors.glassBg, [bp.compact]: colors.bg},
     backdropFilter: {default: layout.blur, [bp.compact]: 'none'},
     WebkitBackdropFilter: {default: layout.blur, [bp.compact]: 'none'},
-    borderInlineEndWidth: 1,
-    borderInlineEndStyle: 'solid',
-    borderInlineEndColor: colors.glassBorder,
-    // Docked, the rail is separated by its hairline alone; only the phone
-    // drawer, which floats over the page, is lifted with a shadow.
-    boxShadow: {
-      default: `inset -1px 0 0 rgba(${channels.tint}, 0.04)`,
-      [bp.compact]: `4px 0 20px rgba(${channels.shadow}, 0.28)`,
-    },
+    // Docked, the rail is set apart by its own shade of stock, with no rule;
+    // only the phone drawer, which floats over the page, is lifted with a shadow.
+    boxShadow: {default: null, [bp.compact]: `4px 0 20px rgba(${channels.shadow}, 0.28)`},
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -115,9 +109,6 @@ export const rail = stylex.create({
     gap: space.s2,
     paddingBlock: `${space.s4} ${space.s3}`,
     paddingInline: space.s3,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     flexShrink: 0,
   },
   headerCollapsed: {justifyContent: 'center', gap: 0},
@@ -221,9 +212,6 @@ export const nav = stylex.create({
   list: {
     paddingBlock: `${space.s3} ${space.s2}`,
     paddingInline: space.s2,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     flexShrink: 0,
     display: 'flex',
     flexDirection: 'column',
@@ -261,26 +249,11 @@ export const nav = stylex.create({
   },
   icon: {flexShrink: 0, opacity: 'var(--nav-icon-opacity)', transition: 'opacity 0.18s'},
   linkActive: {
-    backgroundColor: colors.accentDim,
-    color: colors.accent,
+    backgroundColor: colors.surface2,
+    color: colors.text,
     fontWeight: 550,
     '--nav-icon-opacity': '1',
   },
-  /* Signal bar rather than a fill alone — reads as "current channel". */
-  linkActiveBar: {
-    '::before': {
-      content: '',
-      position: 'absolute',
-      insetInlineStart: 0,
-      insetBlockStart: '50%',
-      transform: 'translateY(-50%)',
-      width: 2,
-      height: 15,
-      borderRadius: '0 2px 2px 0',
-      backgroundColor: colors.accent,
-    },
-  },
-  /* Signal bar rather than a fill alone — reads as "current channel". */
   linkCollapsed: {justifyContent: 'center', paddingBlock: 9, paddingInline: 0, width: '100%'},
   badge: {
     marginInlineStart: 'auto',
@@ -335,9 +308,6 @@ export const mobile = stylex.create({
     paddingBlockEnd: 6,
     paddingInlineStart: `calc(${space.s2} + ${css.safeLeft})`,
     paddingInlineEnd: `calc(${space.s2} + ${css.safeRight})`,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     // In normal flow, so nothing ever scrolls under it — a backdrop-filter here
     // would cost a frame's work to blur the flat page background.
     backgroundColor: colors.glassBg,

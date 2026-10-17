@@ -62,7 +62,7 @@ export const detail = stylex.create({
     paddingInline: 12,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: {default: colors.border, ':hover': colors.borderStrong},
+    borderColor: 'transparent',
     borderRadius: 3,
     backgroundColor: {default: colors.surface, ':hover': colors.surface2},
   },

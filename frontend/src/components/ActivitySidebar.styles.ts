@@ -25,9 +25,6 @@ export const panel = stylex.create({
     backgroundColor: {default: colors.glassBg, '@media (max-width: 860px)': colors.bg},
     backdropFilter: {default: layout.blur, '@media (max-width: 860px)': 'none'},
     WebkitBackdropFilter: {default: layout.blur, '@media (max-width: 860px)': 'none'},
-    borderInlineStartWidth: {default: 1, '@media (max-width: 860px)': 0},
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: colors.glassBorder,
     // Above 1100px the thread makes room for the panel, so it is a docked
     // column and its rule is the whole edge; below, it floats over the thread
     // and the shadow is what lifts it off.
@@ -49,9 +46,6 @@ export const panel = stylex.create({
     justifyContent: 'space-between',
     paddingBlock: 14,
     paddingInline: 16,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     flexShrink: 0,
   },
   title: {display: 'flex', alignItems: 'center', gap: 8, fontSize: type.tBody, fontWeight: 600},
@@ -84,16 +78,11 @@ export const row = stylex.create({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: 'solid',
-    borderBlockStartColor: colors.border,
     animationName: kf.stepEnter,
     animationDuration: '0.18s',
     animationTimingFunction: 'ease',
     animationFillMode: 'forwards',
-    ':first-of-type': {borderBlockStartStyle: 'none'},
   },
-  nested: {':first-of-type': {borderBlockStartStyle: 'none'}},
   summary: {
     display: 'flex',
     alignItems: 'center',
@@ -121,7 +110,7 @@ export const row = stylex.create({
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 2,
     paddingBlock: 10,
     paddingInline: 12,
@@ -193,14 +182,10 @@ export const row = stylex.create({
 /** A spawned worker's steps, folded into one collapsible block. */
 export const group = stylex.create({
   root: {
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: 'solid',
-    borderBlockStartColor: colors.border,
     animationName: kf.stepEnter,
     animationDuration: '0.18s',
     animationTimingFunction: 'ease',
     animationFillMode: 'forwards',
-    ':first-of-type': {borderBlockStartStyle: 'none'},
   },
   head: {
     display: 'flex',
@@ -234,7 +219,7 @@ export const budget = stylex.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 3,
     fontSize: type.tUi,
   },
@@ -255,9 +240,6 @@ export const budget = stylex.create({
   perf: {
     marginBlockStart: 4,
     paddingBlockStart: 4,
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: 'solid',
-    borderBlockStartColor: colors.border,
     fontVariantNumeric: 'tabular-nums',
   },
 });

@@ -28,16 +28,13 @@ export const counts = stylex.create({
     fontSize: type.tSmall,
     color: colors.textDim,
     backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     paddingBlock: 3,
     paddingInline: 9,
     borderRadius: 2,
   },
 });
 
-/** One request. The accent stripe down its left edge marks it as open. */
+/** One request. */
 export const card = stylex.create({
   list: {
     listStyle: 'none',
@@ -49,11 +46,6 @@ export const card = stylex.create({
   },
   root: {
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
-    borderInlineStartWidth: 3,
-    borderInlineStartColor: colors.accent,
     borderRadius: 3,
     paddingBlock: 12,
     paddingInline: 14,
@@ -75,9 +67,6 @@ export const card = stylex.create({
     fontSize: type.tSmall,
     fontFamily: type.mono,
     backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     borderRadius: 2,
     paddingBlock: 1,
     paddingInline: 6,
@@ -107,15 +96,13 @@ export const card = stylex.create({
     fontFamily: 'inherit',
     paddingBlock: 4,
     paddingInline: 10,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: {default: colors.border, ':hover': colors.accent},
+    backgroundColor: {default: colors.surface2, ':hover': colors.surface3},
+    borderStyle: 'none',
     borderRadius: 2,
     color: {default: colors.textDim, ':hover': colors.text},
     cursor: 'pointer',
     flexShrink: 0,
-    transition: 'color 0.12s, border-color 0.12s',
+    transition: 'color 0.12s, background 0.12s',
   },
   question: {
     margin: 0,
@@ -141,9 +128,6 @@ export const card = stylex.create({
     paddingBlock: 8,
     paddingInline: 10,
     backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     borderRadius: 2,
     fontSize: type.tSmall,
     maxHeight: 220,
@@ -192,7 +176,7 @@ export const answer = stylex.create({
   },
   deny: {
     backgroundColor: colors.errorBg,
-    borderColor: colors.errorBorder,
+    borderColor: 'transparent',
     color: colors.errorText,
   },
 });
