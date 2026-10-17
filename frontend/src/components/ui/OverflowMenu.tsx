@@ -118,7 +118,7 @@ const styles = stylex.create({
     backgroundColor: {default: colors.surface, ':hover': colors.surface2},
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 2,
     color: {default: colors.textDim, ':hover': colors.text},
     cursor: 'pointer',

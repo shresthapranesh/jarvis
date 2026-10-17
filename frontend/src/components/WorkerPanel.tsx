@@ -100,7 +100,7 @@ const styles = stylex.create({
   card: {
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 3,
     backgroundColor: colors.surface,
     paddingBlock: 8,

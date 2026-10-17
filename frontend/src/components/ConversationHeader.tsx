@@ -172,9 +172,6 @@ const styles = stylex.create({
     paddingBlock: 10,
     // The thread scroller's own gutter, so the column below lines up exactly.
     paddingInline: {default: 20, '@media (max-width: 768px)': 14},
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
     backgroundColor: colors.bg,
   },
   /**

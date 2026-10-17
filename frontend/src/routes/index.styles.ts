@@ -91,12 +91,8 @@ export const recent = stylex.create({
     paddingInline: space.s3,
     borderRadius: radii.sm,
     textDecoration: 'none',
-    borderInlineStartWidth: 2,
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: {default: 'transparent', ':hover': colors.accent},
     backgroundColor: {default: 'transparent', ':hover': `rgba(${channels.tint}, 0.05)`},
-    transition:
-      'background 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+    transition: 'background 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
     // The title brightens with the row, which no selector on the title can see.
     '--recent-title-color': {default: colors.textDim, ':hover': colors.text},
   },
@@ -131,9 +127,6 @@ export const run = stylex.create({
     paddingInline: space.s3,
     borderRadius: radii.sm,
     fontSize: type.tUi,
-    borderInlineStartWidth: 2,
-    borderInlineStartStyle: 'solid',
-    borderInlineStartColor: colors.signalLive,
     backgroundColor: colors.signalLiveDim,
     marginBlockEnd: 2,
   },

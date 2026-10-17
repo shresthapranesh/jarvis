@@ -207,7 +207,7 @@ function StepRow({step, nested = false}: {step: Step; nested?: boolean}) {
   const summary = useMemo(() => summarizeStep(step), [step]);
 
   return (
-    <div {...stylex.props(row.root, nested && row.nested)}>
+    <div {...stylex.props(row.root)}>
       <div
         {...stylex.props(row.summary, nested && row.inset, hasData ? row.clickable : row.plain)}
         onClick={() => hasData && setOpen((o) => !o)}

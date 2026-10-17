@@ -108,9 +108,6 @@ const styles = stylex.create({
   },
   card: {
     backgroundColor: colors.warningBg,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.warningBorder,
     borderRadius: 3,
     display: 'flex',
     flexDirection: 'column',
@@ -139,11 +136,11 @@ const styles = stylex.create({
   footer: {display: 'flex', alignItems: 'center', gap: 8},
   hint: {flex: 1, fontSize: type.tMicro, color: colors.textDim},
   btn: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
     color: colors.text,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 3,
     paddingBlock: 6,
     paddingInline: 12,

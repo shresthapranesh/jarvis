@@ -53,7 +53,7 @@ export const page = stylex.create({
   /**
    * The header of a page that pins its title above a scrolling body (a table,
    * a log tail, a list with filters) instead of scrolling as one document. Same
-   * gutter and title position as `scroll`, closed off by a rule.
+   * gutter and title position as `scroll`; whitespace, not a rule, ends it.
    */
   bar: {
     display: 'flex',
@@ -61,11 +61,8 @@ export const page = stylex.create({
     gap: 14,
     flexShrink: 0,
     paddingBlockStart: {default: layout.pageTop, '@media (max-width: 768px)': 20},
-    paddingBlockEnd: 16,
+    paddingBlockEnd: 20,
     paddingInline: {default: layout.pageGutter, '@media (max-width: 768px)': 16},
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: colors.border,
   },
   subtitle: {
     fontSize: type.tBody,
@@ -114,10 +111,8 @@ export const page = stylex.create({
     textAlign: 'center',
     color: colors.textDim,
     fontSize: type.tBody,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.border,
-    borderRadius: 3,
+    backgroundColor: colors.surface,
+    borderRadius: 6,
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
@@ -150,9 +145,6 @@ export const badge = stylex.create({
     paddingBlock: 1,
     paddingInline: 8,
     borderRadius: 2,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     backgroundColor: colors.surface2,
     color: colors.textDim,
     whiteSpace: 'nowrap',
@@ -160,27 +152,22 @@ export const badge = stylex.create({
   live: {
     backgroundColor: colors.signalLiveDim,
     color: colors.signalLive,
-    borderColor: `rgba(${channels.signalLive}, 0.22)`,
   },
   warn: {
     backgroundColor: `rgba(${channels.warn}, 0.12)`,
     color: colors.warn,
-    borderColor: `rgba(${channels.warn}, 0.24)`,
   },
   stdio: {
     backgroundColor: `rgba(${channels.signalTool}, 0.12)`,
     color: colors.signalTool,
-    borderColor: `rgba(${channels.signalTool}, 0.2)`,
   },
   http: {
     backgroundColor: 'rgba(96, 165, 250, 0.12)',
     color: '#60a5fa',
-    borderColor: 'rgba(96, 165, 250, 0.2)',
   },
   sse: {
     backgroundColor: `rgba(${channels.signalInsight}, 0.12)`,
     color: colors.signalInsight,
-    borderColor: `rgba(${channels.signalInsight}, 0.2)`,
   },
 });
 

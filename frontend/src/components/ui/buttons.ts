@@ -17,10 +17,10 @@ export const btn = stylex.create({
     lineHeight: 1,
     paddingBlock: 7,
     paddingInline: 11,
-    backgroundColor: {default: colors.surface, ':hover': colors.surface2},
+    backgroundColor: {default: colors.surface2, ':hover': colors.surface3},
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: {default: colors.border, ':hover': `rgba(${channels.tint}, 0.2)`},
+    borderColor: 'transparent',
     borderRadius: 3,
     color: colors.text,
     cursor: {default: 'pointer', ':disabled': 'not-allowed'},
@@ -44,21 +44,19 @@ export const btn = stylex.create({
   },
   success: {
     color: colors.ok,
-    backgroundColor: `rgba(${channels.ok}, 0.1)`,
-    borderColor: `rgba(${channels.ok}, 0.45)`,
+    backgroundColor: `rgba(${channels.ok}, 0.12)`,
     '--btn-icon-opacity': '1',
   },
   danger: {
     color: colors.errorText,
-    backgroundColor: {default: colors.surface, ':hover': colors.errorBg},
-    borderColor: {default: colors.border, ':hover': colors.errorBorder},
+    backgroundColor: {default: colors.surface2, ':hover': colors.errorBg},
   },
   small: {fontSize: type.tMicro, paddingBlock: 3, paddingInline: 8, borderRadius: 2},
   /** For an svg inside `btn.base`. */
   icon: {opacity: 'var(--btn-icon-opacity)', flexShrink: 0, transition: 'opacity 0.14s ease'},
 });
 
-/** Square, borderless-until-hover button for a lone glyph in a dense row. */
+/** Square, borderless button for a lone glyph in a dense row. */
 export const iconBtn = stylex.create({
   base: {
     display: 'inline-flex',
@@ -70,7 +68,7 @@ export const iconBtn = stylex.create({
     backgroundColor: {default: 'transparent', ':hover': colors.surface3},
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: {default: 'transparent', ':hover': colors.border},
+    borderColor: 'transparent',
     color: {default: colors.textDim, ':hover': colors.text},
     cursor: {default: 'pointer', ':disabled': 'not-allowed'},
     opacity: {default: 1, ':disabled': 0.4},
@@ -79,7 +77,6 @@ export const iconBtn = stylex.create({
   },
   danger: {
     backgroundColor: {default: 'transparent', ':hover': colors.errorBg},
-    borderColor: {default: 'transparent', ':hover': colors.errorBorder},
     color: {default: colors.textDim, ':hover': colors.errorText},
   },
 });
@@ -91,17 +88,17 @@ export const chipBtn = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'transparent',
+    backgroundColor: {default: colors.surface, ':hover': colors.surface2},
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: {default: colors.border, ':hover': colors.accentDim},
+    borderColor: 'transparent',
     borderRadius: 2,
-    color: {default: colors.textDim, ':hover': colors.accent},
+    color: {default: colors.textDim, ':hover': colors.text},
     fontSize: type.tSmall,
     paddingBlock: 3,
     paddingInline: 9,
     cursor: 'pointer',
-    transition: 'color 0.15s, border-color 0.15s',
+    transition: 'color 0.15s, background 0.15s',
     fontFamily: 'inherit',
   },
 });
@@ -114,21 +111,13 @@ export const closeBtn = stylex.create({
     justifyContent: 'center',
     width: 24,
     height: 24,
-    backgroundColor: {
-      default: `rgba(${channels.tint}, 0.04)`,
-      ':hover': `rgba(${channels.tint}, 0.08)`,
-    },
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: {
-      default: `rgba(${channels.tint}, 0.09)`,
-      ':hover': `rgba(${channels.tint}, 0.15)`,
-    },
+    backgroundColor: {default: 'transparent', ':hover': colors.surface3},
+    borderStyle: 'none',
     borderRadius: 2,
     color: {default: colors.textDim, ':hover': colors.text},
     cursor: 'pointer',
     padding: 0,
-    transition: 'color 0.15s, border-color 0.15s, background 0.15s',
+    transition: 'color 0.15s, background 0.15s',
   },
 });
 

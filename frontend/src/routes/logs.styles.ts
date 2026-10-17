@@ -36,11 +36,11 @@ export const logs = stylex.create({
   // The old rule was `.logs-field select, .logs-field input`; the control
   // now carries the style itself.
   control: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
     color: colors.text,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 2,
     paddingBlock: 6,
     paddingInline: 8,
@@ -50,11 +50,11 @@ export const logs = stylex.create({
   },
   controlGrow: {width: '100%'},
   btn: {
-    backgroundColor: {default: colors.surface, ':hover': colors.surface2},
+    backgroundColor: {default: colors.surface2, ':hover': colors.surface3},
     color: colors.text,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: colors.border,
+    borderColor: 'transparent',
     borderRadius: 2,
     paddingBlock: 6,
     paddingInline: 12,
@@ -63,18 +63,14 @@ export const logs = stylex.create({
     cursor: 'pointer',
   },
   btnActive: {
-    backgroundColor: {default: colors.accentDim, ':hover': colors.accentDim},
-    borderColor: colors.accent,
-    color: colors.accent,
+    backgroundColor: {default: colors.surface3, ':hover': colors.surface3},
+    color: colors.text,
   },
 
   body: {
     flex: 1,
     minHeight: 0,
     overflowY: 'auto',
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: colors.border,
     borderRadius: 3,
     backgroundColor: `rgba(${channels.shadow}, 0.25)`,
   },
@@ -101,9 +97,6 @@ export const logs = stylex.create({
     columnGap: 8,
     paddingBlock: {default: 2, '@media (max-width: 768px)': 6},
     paddingInline: 12,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: 'solid',
-    borderBlockEndColor: `rgba(${channels.tint}, 0.03)`,
     alignItems: 'baseline',
     lineHeight: 1.45,
     backgroundColor: {default: null, ':hover': colors.surface},

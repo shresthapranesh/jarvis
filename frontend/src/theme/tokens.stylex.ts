@@ -4,8 +4,12 @@
    The previous theme ("Abyssal") built depth out of luminance: frosted
    panels, an ambient radial field, warm copper chrome. This one throws
    that model out. There is no glass, no gradient, no ambient wash and no
-   brand hue — structure comes from hairline rules and whitespace, exactly
-   the way a printed page gets it, and every surface is opaque.
+   brand hue — structure comes from whitespace and quiet tonal fills, and
+   every surface is opaque. Rules are the exception, not the system: a
+   field takes one on focus, a floating panel keeps its edge, a state
+   (error, warning, running) may draw one. Dividers between regions, card
+   outlines and button frames are gone — a step of `surface` does that job
+   with less noise.
 
    The one rule that governs the palette: **chrome is monochrome; colour
    is reserved for machine state.** The accent is ink (bone, inverted), so
@@ -56,10 +60,9 @@ export const colors = stylex.defineVars({
   surface: `rgba(${channels.tint}, 0.035)`,
   surface2: `rgba(${channels.tint}, 0.065)`,
   surface3: `rgba(${channels.tint}, 0.1)`,
-  // Rules are the whole structural system now, so they carry roughly twice the
-  // contrast the glass build needed — a 0.1 hairline disappears once there is
-  // no luminance step behind it to imply the edge.
-  border: `rgba(${channels.tint}, 0.15)`,
+  // Rules are rare now (see the header), so the few left can be quiet: the
+  // composer, a floating panel's edge, a field the moment it is focused.
+  border: `rgba(${channels.tint}, 0.1)`,
   borderStrong: `rgba(${channels.tint}, 0.28)`,
   text: '#e9e7e2',
   textDim: '#9b988f',
@@ -104,7 +107,7 @@ export const colors = stylex.defineVars({
   // stock laid on the first. `layout.blur` is `none`, so the backdrop-filter
   // those sites still declare compiles to a no-op rather than needing a sweep.
   glassBg: '#17171a',
-  glassBorder: `rgba(${channels.tint}, 0.13)`,
+  glassBorder: `rgba(${channels.tint}, 0.09)`,
   // Flat. The ambient radial field was the single loudest thing in the old
   // theme; paper has no light source.
   appBg: 'linear-gradient(#111113, #111113)',

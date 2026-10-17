@@ -9,7 +9,7 @@ import {channels, colors} from './tokens.stylex';
    classes on <html> together.
 
    The two modes are the *same* design, not two designs: flat opaque stock,
-   hairline rules, monochrome chrome, colour only on machine state. What flips
+   tonal fills over rules, monochrome chrome, colour only on machine state. What flips
    is which of ink/stock is the ground — so `tint` and `accent` swap roles and
    almost everything derived from them follows without restating.
 
@@ -48,7 +48,7 @@ export const lightColors = stylex.createTheme(colors, {
   bg: '#f4f2ed',
   // Ink rules on stock read heavier than bone rules on ink at equal alpha, so
   // both steps come down rather than being inherited.
-  border: `rgba(${channels.tint}, 0.13)`,
+  border: `rgba(${channels.tint}, 0.09)`,
   borderStrong: `rgba(${channels.tint}, 0.24)`,
   text: '#16161a',
   textDim: '#5e5c57',
@@ -71,6 +71,6 @@ export const lightColors = stylex.createTheme(colors, {
   // A second sheet of stock, one step brighter than the page — opaque, so it
   // cannot pick up the tint swap the way a translucent panel would.
   glassBg: '#fbfaf7',
-  glassBorder: `rgba(${channels.tint}, 0.11)`,
+  glassBorder: `rgba(${channels.tint}, 0.08)`,
   appBg: 'linear-gradient(#f4f2ed, #f4f2ed)',
 });
