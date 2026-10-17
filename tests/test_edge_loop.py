@@ -1958,4 +1958,4 @@ async def test_arguments_a_tool_wont_take_are_answered_for_the_model(twins):
         "Please fix the error and try again."
     )
     [(content, status)] = _rows(twins.edge_db, "SELECT content, status FROM messages WHERE id = ?", edge.task_id)
-    assert (content, status) == ("On it. Fixed.", "done")
+    assert (content, status) == ("On it. \n\nFixed.", "done")
