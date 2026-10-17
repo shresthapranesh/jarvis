@@ -1,7 +1,10 @@
-/** Every effort level, lowest first — the server's `EFFORTS`. */
-export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+/** Every effort level, lowest first — the server's `llm::EFFORTS`. A model's
+ *  levels are picked from these; each provider gets them as its own setting. */
+export const EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 const LABELS: Record<string, string> = {
+  none: 'Off',
+  minimal: 'Minimal',
   low: 'Low',
   medium: 'Medium',
   high: 'High',
@@ -16,19 +19,27 @@ export function effortLabel(level: string): string {
 /** What a chat runs at with no pick and no default set (`agent::effort`). */
 const CHAT_FALLBACK = 'medium';
 
+const rank = (l: string) => EFFORT_LEVELS.indexOf(l as (typeof EFFORT_LEVELS)[number]);
+
 /**
  * The level a turn will actually ask `model` for: the pick, else the default,
- * else a chat's own — stepped down to the highest level the model takes, as
- * the server does (`anthropic::effort_for`). Null when the model takes none.
+ * else a chat's own — then the nearest the model takes, the lower of two as
+ * near, and `none` only when asked for. The server does the same
+ * (`llm::nearest_effort`). Null when the model takes none.
  */
 export function effectiveEffort(
   chosen: string | null | undefined,
   defaultEffort: string | null | undefined,
   modelLevels: readonly string[],
 ): string | null {
-  if (modelLevels.length === 0) return null;
   const want = chosen ?? defaultEffort ?? CHAT_FALLBACK;
-  const rank = (l: string) => EFFORT_LEVELS.indexOf(l as (typeof EFFORT_LEVELS)[number]);
-  const below = modelLevels.filter((l) => rank(l) <= rank(want));
-  return below.length ? below[below.length - 1] : modelLevels[0];
+  if (modelLevels.includes(want)) return want;
+  let best: string | null = null;
+  for (const l of modelLevels) {
+    if (l === 'none') continue;
+    const d = Math.abs(rank(l) - rank(want));
+    // Lowest first, so a tie keeps the lower.
+    if (best === null || d < Math.abs(rank(best) - rank(want))) best = l;
+  }
+  return best;
 }

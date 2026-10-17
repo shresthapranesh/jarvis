@@ -9,7 +9,6 @@ export function useModels() {
         models {
           default
           defaultEffort
-          effortLevels
           available {
             id
             label

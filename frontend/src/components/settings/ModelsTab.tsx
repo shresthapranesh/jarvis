@@ -35,6 +35,7 @@ export function ModelsTab() {
   const [editor, setEditor] = useState<ModelEditor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CatalogModel | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [effortTarget, setEffortTarget] = useState<CatalogModel | null>(null);
 
   const refresh = refreshModelCatalog;
 
@@ -112,13 +113,7 @@ export function ModelsTab() {
 
   return (
     <>
-      {data && (
-        <EffortSection
-          levels={data.effortLevels}
-          defaultEffort={data.defaultEffort}
-          onChanged={refresh}
-        />
-      )}
+      {data && <EffortSection defaultEffort={data.defaultEffort} onChanged={refresh} />}
       <EndpointsSection
         endpoints={data?.endpoints ?? []}
         providers={data?.providers ?? []}
@@ -236,15 +231,34 @@ export function ModelsTab() {
                       </span>
                     ) : null}
                   </p>
-                  {m.efforts.length > 0 && (
+                  <div {...stylex.props(effortStyles.cardRow)}>
                     <span {...stylex.props(models.window)}>
-                      Effort {m.efforts.map(effortLabel).join(' · ')}
+                      {m.efforts.length > 0
+                        ? `Effort ${m.efforts.map(effortLabel).join(' · ')}`
+                        : 'No effort setting'}
+                      {m.effortsCustomized && ' (set here)'}
                     </span>
-                  )}
+                    <button
+                      type="button"
+                      {...stylex.props(effortStyles.cardEdit)}
+                      onClick={() => setEffortTarget(m)}
+                      title="Which effort levels this model takes"
+                    >
+                      Edit
+                    </button>
+                  </div>
                 </li>
               );
             })}
           </ul>
+        )}
+
+        {effortTarget && (
+          <ModelEffortsModal
+            model={effortTarget}
+            onClose={() => setEffortTarget(null)}
+            onChanged={refresh}
+          />
         )}
 
         {syncOpen && (
@@ -286,54 +300,100 @@ export function ModelsTab() {
   );
 }
 
-/**
- * Which effort levels the composer's picker offers, and the one a chat
- * starts at. Each model shows only the offered levels it takes, so turning
- * one off here takes it out of every model's row at once.
- */
+/** The effort a chat starts at, for every model that takes one. */
 function EffortSection({
-  levels,
   defaultEffort,
   onChanged,
 }: {
-  levels: readonly string[];
   defaultEffort: string | null;
   onChanged: () => Promise<unknown>;
 }) {
   const toast = useToast();
   const save = useAsyncAction(
-    async (next: {levels: string[]; defaultEffort: string | null}) => {
-      const {commitSetEfforts} = await import('../../relay/SetEffortsMutation');
-      await commitSetEfforts(next.levels, next.defaultEffort);
+    async (level: string | null) => {
+      const {commitSetDefaultEffort} = await import('../../relay/SetDefaultEffortMutation');
+      await commitSetDefaultEffort(level);
       await onChanged();
     },
     {onError: (e) => toast.push(e.message, 'error')},
   );
 
-  function toggle(level: string) {
-    const on = levels.includes(level);
-    if (on && levels.length === 1) {
-      toast.push('Offer at least one effort level', 'error');
-      return;
-    }
-    const next = EFFORT_LEVELS.filter((l) => (l === level ? !on : levels.includes(l)));
-    // A default that is no longer offered goes back to automatic.
-    const nextDefault =
-      defaultEffort && next.includes(defaultEffort as never) ? defaultEffort : null;
-    void save.run({levels: [...next], defaultEffort: nextDefault});
-  }
-
   return (
     <div {...stylex.props(page.section)}>
       <h2 {...stylex.props(page.sectionTitle)}>
         Effort
-        <span {...stylex.props(page.sectionHint)}>
-          How hard a model thinks — for the models that take it
-        </span>
+        <span {...stylex.props(page.sectionHint)}>How hard a model thinks</span>
       </h2>
-      <div {...stylex.props(effortStyles.row)}>
-        <span {...stylex.props(effortStyles.label)}>Offered</span>
-        <div {...stylex.props(effortStyles.chips)} role="group" aria-label="Offered effort levels">
+      <label {...stylex.props(effortStyles.row)}>
+        <span {...stylex.props(effortStyles.label)}>Default</span>
+        <select
+          {...stylex.props(field.select, effortStyles.select, field.selectChrome)}
+          value={defaultEffort ?? ''}
+          disabled={save.pending}
+          onChange={(e) => void save.run(e.target.value || null)}
+        >
+          <option value="">Automatic</option>
+          {EFFORT_LEVELS.filter((l) => l !== 'none').map((level) => (
+            <option key={level} value={level}>
+              {effortLabel(level)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <span {...stylex.props(field.hint)}>
+        Applies to every model and run; a pick in the composer overrides it for that conversation.
+        Automatic runs chats at medium and unattended work (automations, board tasks, workflows) at
+        high. Each model runs at the nearest level it takes — set those with Edit on its card below.
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The effort levels one model takes. Claude models start with their own;
+ * any other model takes none until its levels are set here.
+ */
+function ModelEffortsModal({
+  model,
+  onClose,
+  onChanged,
+}: {
+  model: CatalogModel;
+  onClose: () => void;
+  onChanged: () => Promise<unknown>;
+}) {
+  const toast = useToast();
+  const [levels, setLevels] = useState<string[]>([...model.efforts]);
+  const save = useAsyncAction(
+    async (next: string[] | null) => {
+      const {commitSetModelEfforts} = await import('../../relay/SetModelEffortsMutation');
+      await commitSetModelEfforts(model.id, next);
+      await onChanged();
+      onClose();
+    },
+    {onError: (e) => toast.push(e.message, 'error')},
+  );
+
+  function toggle(level: string) {
+    setLevels((cur) =>
+      EFFORT_LEVELS.filter((l) => (l === level ? !cur.includes(l) : cur.includes(l))),
+    );
+  }
+
+  return (
+    <FormModal
+      open
+      title={`Effort — ${model.label || model.id}`}
+      subtitle="The levels the composer offers for this model. Each is sent as the provider's own setting — reasoning effort, thinking level or budget, or Ollama's think."
+      submitLabel="Save"
+      pending={save.pending}
+      error={null}
+      onSubmit={() => void save.run(levels)}
+      onClose={onClose}
+    >
+      <div {...stylex.props(field.group)}>
+        <span {...stylex.props(field.label)}>Levels</span>
+        <div {...stylex.props(effortStyles.chips)} role="group" aria-label="Effort levels">
           {EFFORT_LEVELS.map((level) => {
             const on = levels.includes(level);
             return (
@@ -341,7 +401,6 @@ function EffortSection({
                 key={level}
                 type="button"
                 aria-pressed={on}
-                disabled={save.pending}
                 {...stylex.props(effortStyles.chip, on && effortStyles.chipOn)}
                 onClick={() => toggle(level)}
               >
@@ -350,32 +409,22 @@ function EffortSection({
             );
           })}
         </div>
+        <span {...stylex.props(field.hint)}>
+          None selected: the model gets no effort setting. For an Ollama model that only turns
+          thinking off or on, pick Off and Max.
+        </span>
       </div>
-      <label {...stylex.props(effortStyles.row)}>
-        <span {...stylex.props(effortStyles.label)}>Default</span>
-        <select
-          {...stylex.props(field.select, effortStyles.select, field.selectChrome)}
-          value={defaultEffort ?? ''}
+      {model.effortsCustomized && (
+        <button
+          type="button"
+          {...stylex.props(btn.base, effortStyles.reset)}
           disabled={save.pending}
-          onChange={(e) =>
-            void save.run({levels: [...levels], defaultEffort: e.target.value || null})
-          }
+          onClick={() => void save.run(null)}
         >
-          <option value="">Automatic</option>
-          {levels.map((level) => (
-            <option key={level} value={level}>
-              {effortLabel(level)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <span {...stylex.props(field.hint)}>
-        The default applies to every model and every run; a pick in the composer overrides it for
-        that conversation. Automatic runs chats at medium and unattended work (automations, board
-        tasks, workflows) at high. A model that can&rsquo;t go as high runs at its highest level
-        below.
-      </span>
-    </div>
+          Reset to defaults
+        </button>
+      )}
+    </FormModal>
   );
 }
 
@@ -388,20 +437,35 @@ const effortStyles = stylex.create({
     paddingInline: 10,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: {default: colors.border, ':hover:not(:disabled)': colors.borderStrong},
+    borderColor: {default: colors.border, ':hover': colors.borderStrong},
     borderRadius: 2,
     backgroundColor: 'transparent',
-    color: {default: colors.textDim, ':hover:not(:disabled)': colors.text},
+    color: {default: colors.textDim, ':hover': colors.text},
     fontSize: type.tSmall,
     fontFamily: 'inherit',
-    cursor: {default: 'pointer', ':disabled': 'progress'},
+    cursor: 'pointer',
   },
   chipOn: {
     backgroundColor: colors.accent,
-    borderColor: {default: colors.accent, ':hover:not(:disabled)': colors.accent},
-    color: {default: colors.accentContrast, ':hover:not(:disabled)': colors.accentContrast},
+    borderColor: {default: colors.accent, ':hover': colors.accent},
+    color: {default: colors.accentContrast, ':hover': colors.accentContrast},
   },
   select: {flexGrow: 0, flexShrink: 1, flexBasis: 220, minWidth: 0},
+  cardRow: {display: 'flex', alignItems: 'center', gap: 8, minWidth: 0},
+  cardEdit: {
+    marginInlineStart: 'auto',
+    flexShrink: 0,
+    paddingBlock: 2,
+    paddingInline: 6,
+    borderStyle: 'none',
+    borderRadius: 2,
+    backgroundColor: {default: 'transparent', ':hover': colors.surface2},
+    color: {default: colors.textDim, ':hover': colors.text},
+    fontSize: type.tSmall,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+  },
+  reset: {alignSelf: 'flex-start'},
 });
 
 function ModelModal({

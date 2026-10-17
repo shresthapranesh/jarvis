@@ -230,12 +230,32 @@ pub fn preserves_thinking(model: &str) -> bool {
     matches!(model.split_once(':'), Some(("anthropic", name)) if anthropic::thinks_by_default(name))
 }
 
-/// The effort levels a catalog model takes (`Request::effort`), lowest
-/// first: Anthropic's, for the models that take one. None for every other
-/// provider — what it would be sent is left out.
-pub fn efforts(model: &str) -> &'static [&'static str] {
+/// Every effort level, lowest first: the vocabulary a model's levels are
+/// picked from. Each client sends a level as its provider's own setting —
+/// Anthropic's `output_config.effort` (Bedrock's too, for Claude), OpenAI's
+/// `reasoning.effort` / `reasoning_effort`, OpenRouter's `reasoning.effort`,
+/// Gemini's `thinkingLevel` (a `thinkingBudget` on 2.5), Ollama's `think`.
+pub const EFFORTS: [&str; 7] = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/// `want` among `levels` (lowest first): the nearest, the lower of two as
+/// near — a model without `xhigh` runs at `high`. `none` (thinking off) is
+/// only ever what was asked for, so a model that goes off or on runs on for
+/// `medium`, and one that can't go off runs at its least for `none`.
+pub fn nearest_effort(want: &str, levels: &[&'static str]) -> Option<&'static str> {
+    if levels.contains(&want) {
+        return levels.iter().copied().find(|l| *l == want);
+    }
+    let rank = |l: &str| EFFORTS.iter().position(|e| *e == l).unwrap_or(0) as i64;
+    levels.iter().copied().filter(|l| *l != "none").min_by_key(|l| ((rank(l) - rank(want)).abs(), rank(l)))
+}
+
+/// The levels a catalog model takes when nobody has said: Claude's, by
+/// family, on Anthropic's API or Bedrock. None for everything else — a
+/// model's levels are set in Settings → Models (`catalog::model_efforts`).
+pub fn default_efforts(model: &str) -> &'static [&'static str] {
     match model.split_once(':') {
         Some(("anthropic", name)) => anthropic::efforts(name),
+        Some(("bedrock", name)) => bedrock::claude_name(name).map_or(&[], anthropic::efforts),
         _ => &[],
     }
 }
@@ -513,5 +533,79 @@ mod tests {
         assert_eq!(waits, [1, 2, 4]);
         assert_eq!(backoff(0, Some(Duration::from_secs(7))), Duration::from_secs(7));
         assert_eq!(backoff(0, Some(Duration::from_secs(600))), Duration::from_secs(30));
+    }
+}
+
+#[cfg(test)]
+mod effort_tests {
+    use super::shape::{Prompt, SystemBlock};
+    use super::transcript::{Content, Message, Role};
+    use super::*;
+    use serde_json::{Value, json};
+
+    fn prompt() -> Prompt {
+        Prompt {
+            system: vec![SystemBlock { text: "S".into(), breakpoint: false }],
+            messages: vec![Message::new(Role::User, Content::Text("hi".into()))],
+            history_breakpoint: None,
+            cached: false,
+        }
+    }
+
+    /// The request body each client makes for `model` (a catalog id) at `effort`.
+    fn body(model: &str, effort: Option<&str>) -> Value {
+        let p = prompt();
+        let req = Request { model, prompt: &p, tools: &[], blobs: &Default::default(), effort };
+        let (provider, name) = model.split_once(':').unwrap();
+        match provider {
+            "anthropic" => anthropic::render(name, &req),
+            "bedrock" => bedrock::render(&req),
+            "google_genai" => google::render(name, &req),
+            "ollama" => ollama::render(name, &req),
+            "meta" => openai_responses::render(name, &req),
+            _ => openai_chat::render(name, &req),
+        }
+        .unwrap()
+    }
+
+    #[test]
+    fn each_provider_gets_effort_as_its_own_setting() {
+        assert_eq!(body("meta:muse-spark-1.1", Some("high"))["reasoning"], json!({"effort": "high"}));
+        assert_eq!(body("openrouter:openai/gpt-5", Some("minimal"))["reasoning"], json!({"effort": "minimal"}));
+        let endpoint = body("groq:openai/gpt-oss-120b", Some("low"));
+        assert_eq!(endpoint["reasoning_effort"], "low");
+        assert!(endpoint.get("reasoning").is_none());
+        assert_eq!(body("ollama:gpt-oss:20b", Some("medium"))["think"], "medium");
+        assert_eq!(body("ollama:qwen3:32b", Some("none"))["think"], false);
+        assert_eq!(body("ollama:qwen3:32b", Some("max"))["think"], true);
+        assert_eq!(
+            body("google_genai:gemini-3.1-flash-lite", Some("xhigh"))["generationConfig"],
+            json!({"thinkingConfig": {"thinkingLevel": "high"}})
+        );
+        let g25 = body("google_genai:gemini-2.5-pro", Some("low"))["generationConfig"].clone();
+        assert_eq!(g25, json!({"temperature": 0.7, "thinkingConfig": {"thinkingBudget": 1024}}));
+        assert_eq!(
+            body("bedrock:us.anthropic.claude-sonnet-4-6", Some("xhigh"))["additionalModelRequestFields"],
+            json!({"output_config": {"effort": "high"}})
+        );
+        assert!(body("bedrock:us.meta.llama3-3-70b", Some("high")).get("additionalModelRequestFields").is_none());
+    }
+
+    #[test]
+    fn no_effort_sends_nothing() {
+        for model in ["meta:m", "openrouter:x/y", "groq:m", "ollama:m", "google_genai:gemini-3-pro", "bedrock:us.anthropic.claude-opus-4-7"] {
+            let b = body(model, None);
+            for key in ["reasoning", "reasoning_effort", "think", "additionalModelRequestFields"] {
+                assert!(b.get(key).is_none(), "{model}: {key}");
+            }
+            assert!(b["generationConfig"].get("thinkingConfig").is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn claude_takes_its_levels_by_default_anywhere() {
+        assert_eq!(default_efforts("anthropic:claude-opus-5-5").len(), 5);
+        assert_eq!(default_efforts("bedrock:us.anthropic.claude-sonnet-4-6"), ["low", "medium", "high", "max"]);
+        assert!(default_efforts("meta:muse-spark-1.1").is_empty());
     }
 }

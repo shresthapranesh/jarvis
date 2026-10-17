@@ -47,7 +47,7 @@ pub struct QueueMessagePayload {
 
 /// An effort that isn't one of the levels.
 pub fn unknown_effort(effort: &str) -> String {
-    format!("unknown effort {}; one of low, medium, high, xhigh, max", pyjson::repr_str(effort))
+    format!("unknown effort {}; one of none, minimal, low, medium, high, xhigh, max", pyjson::repr_str(effort))
 }
 
 /// Python's `s[:60]`.

@@ -1,29 +1,28 @@
 import {commitMutation, graphql} from 'react-relay';
 
-import type {SetEffortsMutation} from '../__generated__/SetEffortsMutation.graphql';
+import type {SetModelEffortsMutation} from '../__generated__/SetModelEffortsMutation.graphql';
 import {environment} from './environment';
 
 const mutation = graphql`
-  mutation SetEffortsMutation($levels: [String!]!, $default: String) {
-    setEfforts(levels: $levels, default: $default) {
+  mutation SetModelEffortsMutation($id: String!, $levels: [String!]) {
+    setModelEfforts(id: $id, levels: $levels) {
       default
       defaultEffort
-      effortLevels
       available {
         id
         efforts
+        effortsCustomized
       }
     }
   }
 `;
 
-/** Which effort levels the composer offers, and the one a chat starts at
- *  (null: by the run's kind). */
-export function commitSetEfforts(levels: string[], defaultEffort: string | null) {
+/** The effort levels a model takes; null goes back to its defaults. */
+export function commitSetModelEfforts(id: string, levels: string[] | null) {
   return new Promise<void>((resolve, reject) => {
-    commitMutation<SetEffortsMutation>(environment, {
+    commitMutation<SetModelEffortsMutation>(environment, {
       mutation,
-      variables: {levels, default: defaultEffort},
+      variables: {id, levels},
       onCompleted: (_res, errors) => {
         if (errors && errors.length) {
           reject(new Error(errors.map((e) => e.message).join('; ')));

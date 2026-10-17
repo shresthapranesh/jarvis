@@ -110,7 +110,21 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
             .collect();
         body["tools"] = tools.into();
     }
+    if let Some(effort) = req.effort {
+        body["think"] = think(effort);
+    }
     Ok(body)
+}
+
+/// An effort as Ollama's `think`: `none` is off; `low`, `medium` and `high`
+/// are the named levels some models take (gpt-oss); any other level is on —
+/// so an off/on model is given the levels `none` and `max`.
+fn think(effort: &str) -> Value {
+    match effort {
+        "none" => false.into(),
+        "low" | "medium" | "high" => effort.into(),
+        _ => true.into(),
+    }
 }
 
 /// A tool's parameters as the `ollama` client's `Tool` model keeps them —

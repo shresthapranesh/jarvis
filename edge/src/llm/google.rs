@@ -109,7 +109,34 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
     if !is_gemini_3(name) {
         body["generationConfig"] = json!({"temperature": 0.7});
     }
+    if let Some(thinking) = req.effort.map(|e| thinking_config(name, e)) {
+        body["generationConfig"]["thinkingConfig"] = thinking;
+    }
     Ok(body)
+}
+
+/// An effort as Gemini's `thinkingConfig`: a `thinkingLevel` (minimal, low,
+/// medium or high — `none` is its least, `xhigh` and `max` its most), or on
+/// 2.5, which predates levels, a `thinkingBudget` in tokens (0 is off,
+/// where the model allows it).
+fn thinking_config(name: &str, effort: &str) -> Value {
+    if name.to_lowercase().contains("gemini-2.5") {
+        let budget = match effort {
+            "none" => 0,
+            "minimal" => 512,
+            "low" => 1024,
+            "medium" => 8192,
+            "high" => 16_384,
+            _ => 24_576,
+        };
+        return json!({"thinkingBudget": budget});
+    }
+    let level = match effort {
+        "none" => "minimal",
+        "xhigh" | "max" => "high",
+        other => other,
+    };
+    json!({"thinkingLevel": level})
 }
 
 fn is_gemini_3(name: &str) -> bool {
