@@ -395,6 +395,13 @@ impl Teardown {
                 }
             }
         }
+        // Its attachments (`uploads.rs`).
+        let uploads = crate::config::uploads_dir().join(&self.conversation_id);
+        if let Err(e) = std::fs::remove_dir_all(&uploads) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!("failed to remove {}: {e}", uploads.display());
+            }
+        }
         kernels.shutdown(&self.conversation_id).await;
     }
 }

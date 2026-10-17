@@ -17,6 +17,13 @@ use super::codec::{decode_global_id, iso_from_db, new_id, now_stored};
 use crate::catalog;
 use crate::pyjson;
 use crate::runs::{Meta, Registry, Run};
+use crate::uploads::{self, Attachment, Staged};
+
+/// A file staged by `POST /uploads`, sent with the turn.
+#[derive(InputObject)]
+pub struct UploadReferenceInput {
+    upload_id: String,
+}
 
 #[derive(InputObject)]
 pub struct StartTaskInput {
@@ -29,6 +36,9 @@ pub struct StartTaskInput {
     project_id: Option<String>,
     #[graphql(default)]
     ephemeral: bool,
+    /// Files staged by `POST /uploads`: saved where the agent can open them,
+    /// and images shown to the model. Not for a conversation with a run going.
+    attachment_uploads: Option<Vec<UploadReferenceInput>>,
 }
 
 #[derive(SimpleObject)]
@@ -189,6 +199,9 @@ pub struct ChatTurn {
     /// Already checked (`catalog::effort_level`); None keeps the
     /// conversation's.
     pub effort: Option<&'static str>,
+    /// Staged uploads, moved into the conversation's directory when the turn
+    /// starts (`uploads.rs`).
+    pub attachments: Vec<Staged>,
 }
 
 /// What a chat turn turned into.
@@ -208,7 +221,8 @@ pub async fn start_chat(
     registry: &Registry,
     turn: ChatTurn,
 ) -> Result<Dispatched> {
-    let ChatTurn { query, model, conversation_id, title, surface, display, project_id, ephemeral, effort } = turn;
+    let ChatTurn { query, model, conversation_id, title, surface, display, project_id, ephemeral, effort, attachments } =
+        turn;
     let mut tx = crate::db::write_tx(pool).await?;
     let conversation_id = conversation_for(
         &mut tx,
@@ -229,15 +243,25 @@ pub async fn start_chat(
     // thread lease (`jobs.thread_id`) runs its turns one at a time.
     if let Some(run) = registry.in_flight_chat(&conversation_id) {
         tx.commit().await?;
+        if !attachments.is_empty() {
+            return Ok(Dispatched::Refused(
+                "a run is already going on this conversation, and files can't be added to it — wait for it to \
+                 finish, or stop it first"
+                    .into(),
+            ));
+        }
         return Ok(match queue_onto(pool, &run, &query).await {
             Ok((message_id, _)) => Dispatched::Queued { task_id: run.id.clone(), conversation_id, message_id },
             Err(e) => Dispatched::Refused(e.message),
         });
     }
 
-    let display = display.unwrap_or_else(|| query.clone());
+    let attachments = uploads::take(attachments, &conversation_id)?;
+    let display = display.unwrap_or_else(|| {
+        if attachments.is_empty() { query.clone() } else { uploads::display(&query, &attachments) }
+    });
     insert_message(&mut *tx, &conversation_id, "user", &display, None, "done").await?;
-    let task_id = enqueue_turn(registry, tx, &conversation_id, &query, &model).await?;
+    let task_id = enqueue_turn(registry, tx, &conversation_id, &query, &model, &attachments).await?;
     Ok(Dispatched::Started { task_id, conversation_id })
 }
 
@@ -250,6 +274,7 @@ async fn enqueue_turn(
     conversation_id: &str,
     query: &str,
     model: &str,
+    attachments: &[Attachment],
 ) -> Result<String> {
     let task_id = new_id();
     sqlx::query(
@@ -262,10 +287,17 @@ async fn enqueue_turn(
     .bind(now_stored())
     .execute(&mut *tx)
     .await?;
-    let payload = json!({"query": query, "model": model, "conv_id": conversation_id});
+    let mut payload = json!({"query": query, "model": model, "conv_id": conversation_id});
+    if !attachments.is_empty() {
+        payload["attachments"] = serde_json::to_value(attachments)?;
+    }
     // The conversation is the thread: its turns run one at a time.
     let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(conversation_id)).await?;
-    commit_run(registry, tx, &task_id, "chat", first_chars(query, 60), conversation_id, &enqueued_at).await?;
+    let label = match attachments.first() {
+        Some(a) if query.trim().is_empty() => first_chars(&a.name, 60),
+        _ => first_chars(query, 60),
+    };
+    commit_run(registry, tx, &task_id, "chat", label, conversation_id, &enqueued_at).await?;
     Ok(task_id)
 }
 
@@ -285,7 +317,7 @@ pub async fn redispatch_queued(pool: &SqlitePool, registry: &Registry, conversat
     let started = async {
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query("UPDATE messages SET status = 'done' WHERE id = ?").bind(&message_id).execute(&mut *tx).await?;
-        enqueue_turn(registry, tx, conversation_id, &text, model).await
+        enqueue_turn(registry, tx, conversation_id, &text, model, &[]).await
     };
     if let Err(e) = started.await {
         // The rows are still queued: the next run on the conversation adopts them.
@@ -317,9 +349,20 @@ impl StartMutation {
                 return Err(format!("project not found: {project_id}").into());
             }
         }
+        let ids: Vec<String> =
+            input.attachment_uploads.unwrap_or_default().into_iter().map(|u| u.upload_id).collect();
+        let attachments = uploads::staged(&ids)?;
+        if input.query.trim().is_empty() && attachments.is_empty() {
+            return Err("empty message".into());
+        }
         let new_conversation = input.conversation_id.as_deref().is_none_or(str::is_empty);
+        // A message that is only files is titled by its first one.
+        let title_from = match ids.first() {
+            Some(_) if input.query.trim().is_empty() => attachments[0].filename().to_string(),
+            _ => input.query.clone(),
+        };
         let turn = ChatTurn {
-            title: new_conversation.then(|| first_chars(&input.query, 60)),
+            title: new_conversation.then(|| first_chars(&title_from, 60)),
             query: input.query,
             model,
             conversation_id: input.conversation_id,
@@ -328,6 +371,7 @@ impl StartMutation {
             project_id,
             ephemeral: input.ephemeral,
             effort,
+            attachments,
         };
         Ok(match start_chat(pool, registry, turn).await? {
             Dispatched::Started { task_id, conversation_id } => {

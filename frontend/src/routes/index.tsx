@@ -8,6 +8,7 @@ import {InputBox} from '../components/InputBox';
 import {errorBubble, page, TimeAgo} from '../components/ui';
 import {useRunningTasks} from '../hooks/useRunningTasks';
 import {greeting} from '../lib/format';
+import type {UploadedFile} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {decodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
@@ -42,12 +43,23 @@ function IndexPage() {
 
   const running = useRunningTasks();
 
-  async function handleSubmit(query: string, model: string, effort: string | null) {
+  async function handleSubmit(
+    query: string,
+    model: string,
+    effort: string | null,
+    attachments: UploadedFile[],
+  ) {
     setLoading(true);
     setError(null);
     try {
       const {taskId, conversationId} = await commitStartTask({
-        input: {query, model, effort, ephemeral: incognito},
+        input: {
+          query,
+          model,
+          effort,
+          ephemeral: incognito,
+          attachmentUploads: attachments.map((a) => ({uploadId: a.uploadId})),
+        },
       });
 
       // The /c/$id route loader will fetch the new conversation page (which

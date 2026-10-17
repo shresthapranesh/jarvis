@@ -119,6 +119,7 @@ impl Ctx {
             project_id: None,
             ephemeral: false,
             effort: None,
+            attachments: vec![],
         };
         match start_chat(&self.pool, &self.registry, turn).await {
             Ok(Dispatched::Started { task_id, .. }) => match self.registry.get(&task_id) {

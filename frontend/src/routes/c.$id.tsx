@@ -25,6 +25,7 @@ import {messageAnchorId} from '../lib/thread';
 import {useToast} from '../lib/toast';
 import type {ArtifactCard, Message, Step, TodoItem, TodoStatus} from '../lib/types';
 import {mapMessage} from '../lib/types';
+import {messageContent, type UploadedFile} from '../lib/uploads';
 import {artifactListQuery} from '../relay/ArtifactListQuery';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {conversationPageFragment} from '../relay/ConversationPageFragment';
@@ -380,11 +381,16 @@ function ConversationPage() {
     setPanelOpen(true);
   }
 
-  async function handleSubmit(query: string, model: string, effort: string | null) {
+  async function handleSubmit(
+    query: string,
+    model: string,
+    effort: string | null,
+    attachments: UploadedFile[],
+  ) {
     setPendingUser({
       id: 'pending',
       role: 'user',
-      content: query,
+      content: messageContent(query, attachments),
       model: null,
       status: 'done',
       input_tokens: null,
@@ -405,7 +411,13 @@ function ConversationPage() {
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
       const {taskId} = await commitStartTask({
-        input: {query, model, effort, conversationId: id},
+        input: {
+          query,
+          model,
+          effort,
+          conversationId: id,
+          attachmentUploads: attachments.map((a) => ({uploadId: a.uploadId})),
+        },
       });
       // Subscribe to the live stream immediately — the connection won't surface
       // the new running message until the refetch below completes.

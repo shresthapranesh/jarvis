@@ -956,6 +956,11 @@ input StartTaskInput {
 	conversationId: String
 	projectId: String
 	ephemeral: Boolean! = false
+	"""
+	Files staged by `POST /uploads`: saved where the agent can open them,
+	and images shown to the model. Not for a conversation with a run going.
+	"""
+	attachmentUploads: [UploadReferenceInput!]
 }
 
 type StartTaskPayload {
@@ -1037,6 +1042,13 @@ type ToolApprovalRequest {
 type UnreachableModel {
 	id: String!
 	reason: String!
+}
+
+"""
+A file staged by `POST /uploads`, sent with the turn.
+"""
+input UploadReferenceInput {
+	uploadId: String!
 }
 
 """

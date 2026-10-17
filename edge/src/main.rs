@@ -29,6 +29,7 @@ mod rest;
 mod runs;
 mod schedule;
 mod schema;
+mod uploads;
 mod web;
 
 use std::net::SocketAddr;
