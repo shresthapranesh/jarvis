@@ -365,8 +365,17 @@ impl<'a> Turn<'a> {
 
         let events = &mut self.events;
         let text = &mut self.text;
+        let mut first = true;
         let mut on_delta = |d: Delta| match d {
             Delta::Text(t) => {
+                // A call's text after an earlier call's ("Searching
+                // Eventbrite…" → tools → "Found 12 events…") is set apart.
+                if first && !t.is_empty() {
+                    first = false;
+                    let joint = joint(text, t);
+                    text.push_str(joint);
+                    events.token(joint);
+                }
                 text.push_str(t);
                 events.token(t);
             }
@@ -1075,6 +1084,23 @@ async fn compact_threshold(pool: &SqlitePool, model: &str) -> i64 {
     }
 }
 
+/// What goes between the turn's text so far and the next model call's: a
+/// paragraph break after a finished thought, a space (or nothing) when the
+/// new text carries on the sentence — starts lowercase or with punctuation.
+fn joint(before: &str, next: &str) -> &'static str {
+    let Some(last) = before.trim_end().chars().last() else { return "" };
+    let lead = next.chars().next().unwrap_or(' ');
+    let carries_on = (last.is_alphanumeric() || matches!(last, ',' | ';' | '-' | '('))
+        && (lead.is_lowercase() || matches!(lead, ',' | '.' | ';' | ':' | ')' | '!' | '?'));
+    if carries_on {
+        let spaced = before.ends_with(char::is_whitespace) || lead.is_whitespace() || !lead.is_alphanumeric();
+        return if spaced { "" } else { " " };
+    }
+    let lead_breaks = next.chars().take_while(|c| c.is_whitespace()).filter(|&c| c == '\n').count();
+    let tail_breaks = before.chars().rev().take_while(|c| c.is_whitespace()).filter(|&c| c == '\n').count();
+    ["\n\n", "\n", ""][(lead_breaks + tail_breaks).min(2)]
+}
+
 /// `_extract_step_data` for a model step: its calls, else its text.
 pub(super) fn model_step_data(m: &Message) -> String {
     if !m.tool_calls.is_empty() {
@@ -1192,6 +1218,23 @@ mod tests {
         assert_eq!(retrieval_query(&[say("user", "and that one?")]), "and that one?");
         assert!(leans_on_context("what about it, in two sentences"));
         assert!(!leans_on_context("summarize the quarterly revenue numbers for the three largest cloud providers"));
+    }
+
+    #[test]
+    fn a_later_call_s_text_is_set_apart_unless_it_carries_on() {
+        assert_eq!(joint("", "Searching Eventbrite."), "");
+        assert_eq!(joint("Searching Eventbrite for Bay Area events.", "Found 12 events:"), "\n\n");
+        assert_eq!(joint("Let me check Meetup", "Here is what I found"), "\n\n");
+        assert_eq!(joint("Checking:\n", "Found"), "\n");
+        assert_eq!(joint("Checking.\n\n", "Found"), "");
+        assert_eq!(joint("Done.", "\n\nFound"), "");
+        assert_eq!(joint("- [SF Jazz](https://sfjazz.org)", "Those are"), "\n\n");
+        // A capital reads as a new sentence, even after an unfinished one.
+        assert_eq!(joint("The top events are on", "Eventbrite and Meetup"), "\n\n");
+        // Mid-sentence: no break.
+        assert_eq!(joint("I found events on", "eventbrite and meetup."), " ");
+        assert_eq!(joint("I found events on ", "meetup."), "");
+        assert_eq!(joint("Twelve events", ", mostly free."), "");
     }
 
     #[test]
