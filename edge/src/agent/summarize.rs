@@ -235,9 +235,10 @@ mod tests {
 
     #[test]
     fn schema_tokens_match_python() {
-        // core.agents._schema_tokens over the main agent's tools
+        // core.agents._schema_tokens over the main agent's tools (952 in
+        // Python; write_artifact's description has since grown by 9 chars)
         let none = crate::mcp::Snapshot { default_mode: crate::mcp::config::ALWAYS, ..Default::default() };
         let tools = crate::agent::tools::bound_for(&crate::agent::tools::Policy::default(), false, &none);
-        assert_eq!(schema_tokens(&tools.schemas), 952);
+        assert_eq!(schema_tokens(&tools.schemas), 953);
     }
 }

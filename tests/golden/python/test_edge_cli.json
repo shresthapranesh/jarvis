@@ -115,7 +115,7 @@
   {
    "$tuple": [
     0,
-    "\nanthropic  3 model(s) offered\n  gone — in the catalog, no longer offered:\n      anthropic:claude-sonnet-4-6\n  new — offered, not in the catalog (1):\n      anthropic:claude-new  claude-new\n\nRead-only. Re-run with --add-new to register the new models; 'gone' entries in BUILTIN_MODELS need a code change."
+    "\nanthropic  3 model(s) offered\n  gone — in the catalog, no longer offered:\n      anthropic:claude-haiku-5-5\n      anthropic:claude-opus-5-5\n      anthropic:claude-sonnet-4-6\n      anthropic:claude-sonnet-5-5\n  new — offered, not in the catalog (1):\n      anthropic:claude-new  claude-new\n\nRead-only. Re-run with --add-new to register the new models; 'gone' entries in BUILTIN_MODELS need a code change."
    ]
   },
   {

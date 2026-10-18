@@ -112,7 +112,10 @@
      {
       "clean": false,
       "missing": [
-       "anthropic:claude-sonnet-4-6"
+       "anthropic:claude-haiku-5-5",
+       "anthropic:claude-opus-5-5",
+       "anthropic:claude-sonnet-4-6",
+       "anthropic:claude-sonnet-5-5"
       ],
       "newModels": [
        {
@@ -358,7 +361,10 @@
      {
       "clean": false,
       "missing": [
-       "anthropic:claude-sonnet-4-6"
+       "anthropic:claude-haiku-5-5",
+       "anthropic:claude-opus-5-5",
+       "anthropic:claude-sonnet-4-6",
+       "anthropic:claude-sonnet-5-5"
       ],
       "newModels": [
        {
@@ -831,7 +837,10 @@
      {
       "clean": false,
       "missing": [
-       "anthropic:claude-sonnet-4-6"
+       "anthropic:claude-haiku-5-5",
+       "anthropic:claude-opus-5-5",
+       "anthropic:claude-sonnet-4-6",
+       "anthropic:claude-sonnet-5-5"
       ],
       "newModels": [
        {

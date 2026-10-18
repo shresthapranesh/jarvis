@@ -159,6 +159,51 @@
       },
       {
        "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
        "contextWindow": null,
        "efforts": [
         "low",
@@ -297,6 +342,42 @@
         "xhigh",
         "max"
        ],
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
        "id": "anthropic:claude-opus-4-7",
        "label": "Claude Opus 4.7 (Anthropic)",
        "provider": "anthropic"
@@ -419,6 +500,51 @@
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
       },
       {
        "builtin": true,
@@ -653,6 +779,51 @@
       },
       {
        "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
        "contextWindow": null,
        "efforts": [
         "low",
@@ -809,6 +980,51 @@
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
       },
       {
        "builtin": true,
@@ -995,6 +1211,51 @@
       },
       {
        "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
        "contextWindow": null,
        "efforts": [
         "low",
@@ -1163,6 +1424,51 @@
       },
       {
        "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
        "contextWindow": null,
        "efforts": [
         "low",
@@ -1328,6 +1634,51 @@
        "id": "bedrock:us.anthropic.claude-sonnet-4-6",
        "label": "Claude Sonnet 4.6 (AWS Bedrock)",
        "provider": "bedrock"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-opus-5-5",
+       "label": "Claude Opus 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-sonnet-5-5",
+       "label": "Claude Sonnet 5.5 (Anthropic)",
+       "provider": "anthropic"
+      },
+      {
+       "builtin": true,
+       "contextWindow": 1000000,
+       "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "effortsCustomized": false,
+       "id": "anthropic:claude-haiku-5-5",
+       "label": "Claude Haiku 5.5 (Anthropic)",
+       "provider": "anthropic"
       },
       {
        "builtin": true,
