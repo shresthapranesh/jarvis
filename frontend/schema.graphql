@@ -248,6 +248,11 @@ type Conversation implements Node {
 	operator's default.
 	"""
 	effort: String
+	"""
+	Its newest message's time, or `created_at` before it has one. Derived,
+	not stored: a rename or a pin isn't activity.
+	"""
+	lastActiveAt: DateTime!
 	id: ID!
 	project: Project
 	messageCount: Int!

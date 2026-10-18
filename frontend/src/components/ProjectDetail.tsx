@@ -259,7 +259,7 @@ export function ProjectDetail({id}: Props) {
                   </span>
                   <span {...stylex.props(item.meta)}>
                     {c.message_count} message{c.message_count === 1 ? '' : 's'} ·{' '}
-                    <TimeAgo iso={c.created_at} />
+                    <TimeAgo iso={c.last_active_at} />
                   </span>
                 </Link>
                 <button

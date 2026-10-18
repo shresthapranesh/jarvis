@@ -12,7 +12,7 @@ export const conversationListQuery = graphql`
       title
       pinned
       projectId
-      createdAt
+      lastActiveAt
       messageCount
     }
   }

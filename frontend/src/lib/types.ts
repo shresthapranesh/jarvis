@@ -390,7 +390,7 @@ export interface ProjectConversation {
   title: string | null;
   pinned: boolean;
   message_count: number;
-  created_at: string;
+  last_active_at: string;
 }
 
 export interface ProjectDetail extends Project {

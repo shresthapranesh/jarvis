@@ -35,7 +35,7 @@ function IndexPage() {
       convData.conversations.slice(0, RECENT_LIMIT).map((c) => ({
         id: decodeGlobalId(c.id),
         title: c.title ?? 'Untitled',
-        createdAt: c.createdAt as string,
+        lastActiveAt: c.lastActiveAt as string,
         messageCount: c.messageCount as number,
       })),
     [convData.conversations],
@@ -141,7 +141,7 @@ function IndexPage() {
                         <span {...stylex.props(recentStyles.dot)} aria-hidden="true">
                           ·
                         </span>
-                        <TimeAgo iso={conv.createdAt} compact />
+                        <TimeAgo iso={conv.lastActiveAt} compact />
                       </span>
                     </Link>
                   </li>

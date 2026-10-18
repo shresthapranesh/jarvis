@@ -22,7 +22,7 @@ export const projectQuery = graphql`
         title
         pinned
         messageCount
-        createdAt
+        lastActiveAt
       }
     }
   }
@@ -49,7 +49,7 @@ export function mapProjectDetail(p: ProjectNode): ProjectDetail {
       title: c.title ?? null,
       pinned: c.pinned,
       message_count: c.messageCount,
-      created_at: c.createdAt,
+      last_active_at: c.lastActiveAt,
     })),
   };
 }

@@ -157,6 +157,17 @@ async def test_conversation_list(edge, seeded):
     assert _gid("Conversation", "telegram_1") not in ids
 
 
+async def test_conversation_list_orders_by_last_message(edge, seeded, database):
+    # c-old was created first; a reply after c-proj's last message puts it ahead.
+    insert(database, "messages", id="m6", conversation_id="c-old", role="user", content="back", created_at=_ts(2026, 1, 6))
+    resp = await _edge(edge, "{ conversations { id lastActiveAt } }")
+    rows = resp.json()["data"]["conversations"]
+    assert [r["id"] for r in rows] == [_gid("Conversation", c) for c in ("c-pinned", "c-old", "c-proj")]
+    assert rows[1]["lastActiveAt"] == "2026-01-06T00:00:00"
+    # No messages yet: its creation time.
+    assert rows[0]["lastActiveAt"] == "2026-01-02T10:00:00.000005"
+
+
 @pytest.mark.parametrize("surface", ["null", '"telegram"', '"web"', '"nowhere"'])
 async def test_conversation_list_surface_argument(edge, seeded, surface):
     await _assert_same(edge, f"{{ conversations(surface: {surface}) {{ id surface ephemeral model projectId }} }}")

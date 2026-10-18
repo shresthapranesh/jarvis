@@ -28,10 +28,16 @@ pub struct Conversation {
     /// The effort its turns ask for (`low` … `max`); none leaves the
     /// operator's default.
     pub effort: Option<String>,
+    /// Its newest message's time, or `created_at` before it has one. Derived,
+    /// not stored: a rename or a pin isn't activity.
+    pub last_active_at: DateTime,
 }
 
-pub const CONVERSATION_COLUMNS: &str =
-    "id, title, model, surface, pinned, ephemeral, project_id, created_at, effort";
+/// Selects from `conversations` unaliased; `last_active_at` is a column alias,
+/// so a query can `ORDER BY` it.
+pub const CONVERSATION_COLUMNS: &str = "id, title, model, surface, pinned, ephemeral, project_id, created_at, effort, \
+     COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = conversations.id), created_at) \
+     AS last_active_at";
 
 impl Conversation {
     pub async fn by_id(pool: &SqlitePool, raw_id: &str) -> Result<Option<Self>> {
@@ -258,7 +264,7 @@ impl ConversationQuery {
         if surface.is_some() {
             sql.push_str(" AND surface = ?");
         }
-        sql.push_str(" ORDER BY pinned DESC, created_at DESC");
+        sql.push_str(" ORDER BY pinned DESC, last_active_at DESC");
         let mut q = sqlx::query_as(&sql);
         if let Some(s) = &surface {
             q = q.bind(s);
