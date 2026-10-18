@@ -37,7 +37,7 @@ export function ConversationList() {
         id: decodeGlobalId(c.id),
         title: c.title,
         pinned: c.pinned,
-        createdAt: c.createdAt as string,
+        lastActiveAt: c.lastActiveAt as string,
       })),
     [data.conversations],
   );
@@ -50,7 +50,7 @@ export function ConversationList() {
 
     const byBucket = new Map<TimeBucket, typeof rest>();
     for (const conv of rest) {
-      const bucket = timeBucket(conv.createdAt);
+      const bucket = timeBucket(conv.lastActiveAt);
       const list = byBucket.get(bucket);
       if (list) list.push(conv);
       else byBucket.set(bucket, [conv]);
@@ -178,7 +178,7 @@ export function ConversationList() {
                           {conv.title ?? 'Untitled'}
                         </span>
                         <span {...stylex.props(row.time)}>
-                          <TimeAgo iso={conv.createdAt} compact />
+                          <TimeAgo iso={conv.lastActiveAt} compact />
                         </span>
                       </Link>
                     )}

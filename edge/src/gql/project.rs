@@ -50,7 +50,7 @@ impl Project {
     async fn conversations(&self, ctx: &Context<'_>) -> Result<Vec<Conversation>> {
         Ok(sqlx::query_as(&format!(
             "SELECT {CONVERSATION_COLUMNS} FROM conversations WHERE project_id = ? \
-             ORDER BY pinned DESC, created_at DESC"
+             ORDER BY pinned DESC, last_active_at DESC"
         ))
         .bind(&self.raw_id)
         .fetch_all(ctx.data::<SqlitePool>()?)

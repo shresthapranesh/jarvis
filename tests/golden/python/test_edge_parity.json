@@ -52040,24 +52040,24 @@
    "data": {
     "conversations": [
      {
-      "createdAt": "2026-01-02T10:00:00.000005",
       "id": "Q29udmVyc2F0aW9uOmMtcGlubmVk",
+      "lastActiveAt": "2026-01-02T10:00:00.000005",
       "messageCount": 0,
       "pinned": true,
       "projectId": null,
       "title": null
      },
      {
-      "createdAt": "2026-01-05T01:02:03.456789",
       "id": "Q29udmVyc2F0aW9uOmMtcHJvag==",
+      "lastActiveAt": "2026-01-05T02:00:00",
       "messageCount": 1,
       "pinned": false,
       "projectId": "p1",
       "title": "in project"
      },
      {
-      "createdAt": "2026-01-01T10:00:00",
       "id": "Q29udmVyc2F0aW9uOmMtb2xk",
+      "lastActiveAt": "2026-01-01T10:06:00",
       "messageCount": 5,
       "pinned": false,
       "projectId": null,
@@ -106791,8 +106791,8 @@
      "conversationCount": 1,
      "conversations": [
       {
-       "createdAt": "2026-01-05T01:02:03.456789",
        "id": "Q29udmVyc2F0aW9uOmMtcHJvag==",
+       "lastActiveAt": "2026-01-05T02:00:00",
        "messageCount": 1,
        "pinned": false,
        "title": "in project"
