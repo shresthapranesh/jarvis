@@ -77,3 +77,30 @@ async def test_workers_run_on_the_worker_model(database: Path, work_dir: Path, e
     assert job["status"] == "done", job
     assert [r["body"]["model"] for r in fake.requests] == ["claude-opus-5-5", "claude-haiku-5-5", "claude-opus-5-5"]
     assert "You are a research worker." in json.dumps(fake.requests[1]["body"]["system"])
+
+
+async def test_more_workers_than_pool_connections(database: Path, work_dir: Path, edge_binary: Path):
+    """Six workers on a pool of four connections: the run keeps them
+    going while it writes what they tell it, or a worker waiting on a
+    connection holds up the very write that would free one (`db.rs`)."""
+    workers = 6
+    tasks = [{"task": f"Look up {i}", "role": "researcher"} for i in range(workers)]
+    fake = FakeAnthropic([("spawn_workers", {"tasks": tasks}), *["Found it."] * workers, "Done."])
+    try:
+        insert(database, "config_settings", key="models.custom", value=json.dumps([{"id": MODEL, "label": "Opus"}]))
+        env = _edge_env(work_dir, {**EDGE_ON, "ANTHROPIC_BASE_URL": fake.url, "ANTHROPIC_API_KEY": "test-key",
+                                   "OLLAMA_HOST": f"http://127.0.0.1:{_free_port()}", "GOOGLE_API_KEY": ""})
+        async with _run_edge(edge_binary, work_dir, work_dir / "database.db", env) as client:
+            task_id = await _start(client, query="Look them all up", model=MODEL)
+            job = await _finished(work_dir / "database.db", task_id, timeout=60)
+    finally:
+        fake.server.shutdown()
+    assert job["status"] == "done", job
+    assert len(fake.requests) == workers + 2
+    with sqlite3.connect(work_dir / "database.db") as conn:
+        # The job is done even when the run failed; the reply says which.
+        (status,) = conn.execute("SELECT status FROM messages WHERE id = ?", (task_id,)).fetchone()
+        done = conn.execute("SELECT COUNT(*) FROM steps WHERE message_id = ? AND node = 'worker_done'",
+                            (task_id,)).fetchone()[0]
+    assert status == "done"
+    assert done == workers
