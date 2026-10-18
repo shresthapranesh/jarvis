@@ -560,24 +560,34 @@ impl<'a> Turn<'a> {
             announce_to: chat.then(|| self.task_id.clone()),
             notes,
         };
-        let all = workers::spawn(&ctx, tasks);
-        tokio::pin!(all);
         let stopped = until_stopped(self.run.clone());
-        tokio::pin!(stopped);
-        let answer = loop {
-            tokio::select! {
-                biased;
-                // A stop drops the workers there and then, mid-call or not.
-                () = &mut stopped => return Err(Stop::Cancelled),
-                Some(note) = rx.recv() => self.note(note).await?,
-                answer = &mut all => break answer,
-            }
+        // The workers own the only sender: once the last is done the channel
+        // closes, after everything they said.
+        let all = async move {
+            let ctx = ctx;
+            workers::spawn(&ctx, tasks).await
         };
-        // What the last of them said as they finished.
-        while let Ok(note) = rx.try_recv() {
-            self.note(note).await?;
+        // Both stay polled while a note is written. A worker left unpolled
+        // keeps the pool connection it holds, or its place in the pool's
+        // queue, and the note's write waits on that very connection: with
+        // more workers than connections the run deadlocks until the acquire
+        // times out.
+        let written = async {
+            while let Some(note) = rx.recv().await {
+                self.note(note).await?;
+            }
+            Ok::<_, Stop>(())
+        };
+        let both = async {
+            let (answer, ()) = tokio::try_join!(async { Ok(all.await) }, written)?;
+            Ok(answer)
+        };
+        tokio::select! {
+            biased;
+            // A stop drops the workers there and then, mid-call or not.
+            () = stopped => Err(Stop::Cancelled),
+            answer = both => answer,
         }
-        Ok(answer)
     }
 
     /// `run_workflow`: the workflow runs inside the call, shown on the run as
