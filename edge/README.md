@@ -114,6 +114,7 @@ Every timer the Python server ran, ported:
 | memory consolidation | every 30 min, first 2 min after start | the sweep (`src/consolidate/`), once the user has been quiet 15 min (or the oldest new message waited 6 h) |
 | project memory | every 30 min, first 2 min after start | the sweep (`src/consolidate/`), if due |
 | memory housekeeping | once a day, checked every 30 min, first 2 min after start | archives unused facts (`src/consolidate/stale.rs`), then deletes access-log rows older than 90 days |
+| memory topics | every 30 min, first 2 min after start | gives each memory without a topic one, tidying "The user …" into a fragment (`src/consolidate/topics.rs`), while any is unsorted |
 
 - **Cron is APScheduler's, not a library's.** `cron.rs` ports
   `CronTrigger.from_crontab` (after `normalize_crontab`) with Python's
@@ -252,7 +253,8 @@ Every chat turn, automation run, board task and workflow run.
   the budget, the step limit, messages queued mid-run, and the leftover
   queue starting the next turn all behave as Python's.
 - **The prompt** (`prompt.rs`) is `model_request_node`'s: the system prompt
-  (read from the checkout), memory how-to, core and relevant memories, the
+  (read from the checkout), memory how-to, core memories (under their
+  topic's heading) and relevant ones (each naming its topic), the
   skill catalog (ranked against the request past 8), earlier episodes, the
   live browser, the project, then the todo list or the planning directive.
   Retrieval runs once per user message, as Python's cache does.

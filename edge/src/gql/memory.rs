@@ -16,6 +16,9 @@ pub struct MemoryItem {
     pub id: String,
     pub kind: String,
     pub text: String,
+    /// What it is about — one of `memoryTopics`. None until the topics sweep
+    /// sorts it.
+    pub topic: Option<String>,
     #[graphql(skip)]
     #[sqlx(rename = "updated_at")]
     pub updated: DateTime,
@@ -113,7 +116,8 @@ impl MemoryActivity {
 impl MemoryItem {
     async fn by_id(pool: &SqlitePool, id: &str) -> Result<Option<Self>> {
         Ok(sqlx::query_as(
-            "SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at, archived_at FROM memories WHERE id = ?",
+            "SELECT id, kind, text, topic, updated_at, source, conversation_id, last_confirmed_at, archived_at FROM memories \
+             WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(pool)
@@ -123,7 +127,9 @@ impl MemoryItem {
 
 /// The live items, or with `archived` the archived ones.
 async fn list_memories(pool: &SqlitePool, kind: Option<&str>, archived: bool) -> Result<Vec<MemoryItem>> {
-    let mut sql = String::from("SELECT id, kind, text, updated_at, source, conversation_id, last_confirmed_at, archived_at FROM memories");
+    let mut sql = String::from(
+        "SELECT id, kind, text, topic, updated_at, source, conversation_id, last_confirmed_at, archived_at FROM memories",
+    );
     sql.push_str(if archived { " WHERE archived_at IS NOT NULL" } else { " WHERE archived_at IS NULL" });
     if kind.is_some() {
         sql.push_str(" AND kind = ?");
@@ -150,6 +156,11 @@ impl MemoryQuery {
         #[graphql(default = false)] archived: bool,
     ) -> Result<Vec<MemoryItem>> {
         list_memories(ctx.data()?, kind.as_deref(), archived).await
+    }
+
+    /// The topics a memory can have, in the order they are shown.
+    async fn memory_topics(&self) -> Vec<&'static str> {
+        crate::agent::retrieve::TOPICS.to_vec()
     }
 
     /// Audit log for when a specific memory was surfaced.
@@ -186,20 +197,22 @@ impl MemoryQuery {
             .embed(&ctx.data::<EdgeData>()?.http, &query, Space::Query)
             .await
             .map_err(|e| format!("embedding the query failed: {e}"))?;
-        let rows: Vec<(String, String, Option<Vec<u8>>)> = sqlx::query_as(
-            "SELECT id, text, embedding FROM memories WHERE kind = 'fact' AND embedding IS NOT NULL \
+        let rows: Vec<(String, String, Option<Vec<u8>>, Option<String>)> = sqlx::query_as(
+            "SELECT id, text, embedding, topic FROM memories WHERE kind = 'fact' AND embedding IS NOT NULL \
              AND (? OR archived_at IS NULL) ORDER BY rowid",
         )
         .bind(include_archived)
         .fetch_all(pool)
         .await?;
-        let texts: std::collections::HashMap<&str, &str> = rows.iter().map(|(id, text, _)| (id.as_str(), text.as_str())).collect();
-        let items: Vec<(String, Option<Vec<u8>>)> = rows.iter().map(|(id, _, blob)| (id.clone(), blob.clone())).collect();
+        let found: std::collections::HashMap<&str, (&str, Option<&str>)> =
+            rows.iter().map(|(id, text, _, topic)| (id.as_str(), (text.as_str(), topic.as_deref()))).collect();
+        let items: Vec<(String, Option<Vec<u8>>)> = rows.iter().map(|(id, _, blob, _)| (id.clone(), blob.clone())).collect();
         Ok(crate::agent::retrieve::cosine_ranking(&vector, &items)
             .into_iter()
             .take(usize::try_from(k).unwrap_or(0))
             .map(|(id, score)| MemoryHit {
-                text: texts[id.as_str()].to_string(),
+                text: found[id.as_str()].0.to_string(),
+                topic: found[id.as_str()].1.map(String::from),
                 id,
                 score: (score * 10_000.0).round() / 10_000.0,
             })
@@ -212,6 +225,7 @@ impl MemoryQuery {
 pub struct MemoryHit {
     pub id: String,
     pub text: String,
+    pub topic: Option<String>,
     /// Cosine similarity, to four places.
     pub score: f64,
 }
@@ -229,27 +243,38 @@ impl MemoryMutation {
         ctx: &Context<'_>,
         text: String,
         #[graphql(default_with = "\"fact\".to_string()")] kind: String,
+        topic: Option<String>,
     ) -> Result<MemoryItem> {
         let text = text.trim();
         if text.is_empty() {
             return Err("memory text is empty".into());
         }
         let kind = if kind == "core" || kind == "fact" { kind.as_str() } else { "fact" };
+        let topic = known_topic(topic.as_deref())?;
         let pool: &SqlitePool = ctx.data()?;
         let origin = crate::agent::retrieve::Origin { source: "manual", conversation_id: None };
-        let id = crate::agent::retrieve::upsert_memory(pool, &ctx.data::<EdgeData>()?.http, text, kind, origin)
+        let id = crate::agent::retrieve::upsert_memory(pool, &ctx.data::<EdgeData>()?.http, text, kind, topic, origin)
             .await
             .map_err(|e| format!("embedding failed: {e}"))?;
         MemoryItem::by_id(pool, &id).await?.ok_or_else(|| "memory vanished".into())
     }
 
     // Re-embedded before the row is looked up, as Python does; a kind other
-    // than core/fact leaves the kind alone. A correction confirms the item.
-    async fn update_memory_item(&self, ctx: &Context<'_>, id: String, text: String, kind: Option<String>) -> Result<MemoryItem> {
+    // than core/fact leaves the kind alone, as no topic does. A correction
+    // confirms the item.
+    async fn update_memory_item(
+        &self,
+        ctx: &Context<'_>,
+        id: String,
+        text: String,
+        kind: Option<String>,
+        topic: Option<String>,
+    ) -> Result<MemoryItem> {
         let text = text.trim();
         if text.is_empty() {
             return Err("memory text is empty".into());
         }
+        let topic = known_topic(topic.as_deref())?;
         let pool: &SqlitePool = ctx.data()?;
         let blob = crate::agent::embed::for_storage(pool, &ctx.data::<EdgeData>()?.http, text)
             .await
@@ -257,14 +282,15 @@ impl MemoryMutation {
         let kind = kind.filter(|k| k == "core" || k == "fact");
         let now = now_stored();
         let updated = sqlx::query(
-            "UPDATE memories SET text = ?, kind = COALESCE(?, kind), embedding = ?, updated_at = ?, last_confirmed_at = ? \
-             WHERE id = ?",
+            "UPDATE memories SET text = ?, kind = COALESCE(?, kind), embedding = ?, updated_at = ?, last_confirmed_at = ?, \
+             topic = COALESCE(?, topic) WHERE id = ?",
         )
         .bind(text)
         .bind(&kind)
         .bind(&blob)
         .bind(&now)
         .bind(&now)
+        .bind(topic)
         .bind(&id)
         .execute(pool)
         .await?;
@@ -272,6 +298,12 @@ impl MemoryMutation {
             return Err("memory not found".into());
         }
         MemoryItem::by_id(pool, &id).await?.ok_or_else(|| "memory not found".into())
+    }
+
+    // A topics pass now: unsorted memories given a topic and tidied.
+    async fn sort_memory_topics(&self, ctx: &Context<'_>, model: Option<String>) -> Result<String> {
+        let pool: &SqlitePool = ctx.data()?;
+        Ok(crate::consolidate::topics::sort(pool, &ctx.data::<EdgeData>()?.http, model.as_deref()).await?)
     }
 
     // A consolidation pass now.
@@ -299,5 +331,15 @@ impl MemoryMutation {
     async fn delete_memory(&self, ctx: &Context<'_>, id: String) -> Result<bool> {
         let deleted = sqlx::query("DELETE FROM memories WHERE id = ?").bind(&id).execute(ctx.data::<SqlitePool>()?).await?;
         Ok(deleted.rows_affected() > 0)
+    }
+}
+
+/// A topic as given, checked against `TOPICS`; none is none.
+fn known_topic(topic: Option<&str>) -> Result<Option<&'static str>> {
+    match topic {
+        None => Ok(None),
+        Some(raw) => crate::agent::retrieve::topic_of(raw)
+            .map(Some)
+            .ok_or_else(|| format!("unknown memory topic {raw:?}: one of {}", crate::agent::retrieve::TOPICS.join(", ")).into()),
     }
 }

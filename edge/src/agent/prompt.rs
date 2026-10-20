@@ -133,12 +133,14 @@ const CORE_MAX_CHARS: usize = 2000;
 /// always has (Gemini with a key, else Ollama's).
 async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str, conversation_id: &str) -> Result<Vec<Segment>, Unbuilt> {
     let mut parts = vec![seg("memory_howto", MEMORY_HOWTO, true)];
-    let core: Vec<(String, String, Option<String>)> = db(sqlx::query_as(
-        "SELECT id, text, last_confirmed_at FROM memories WHERE kind = 'core' AND archived_at IS NULL ORDER BY updated_at DESC",
+    let core: Vec<(String, String, Option<String>, Option<String>)> = db(sqlx::query_as(
+        "SELECT id, text, last_confirmed_at, topic FROM memories WHERE kind = 'core' AND archived_at IS NULL \
+         ORDER BY updated_at DESC",
     )
     .fetch_all(pool)
     .await)?;
-    let core: Vec<Recalled> = core.into_iter().map(|(id, text, confirmed)| Recalled { id, text, confirmed }).collect();
+    let core: Vec<Recalled> =
+        core.into_iter().map(|(id, text, confirmed, topic)| Recalled { id, text, confirmed, topic }).collect();
     let text = core_text(&core);
     if !text.is_empty() {
         parts.push(seg("core_memory", format!("## Agent Memory\n\n{text}"), true));
@@ -156,18 +158,44 @@ async fn memory(pool: &SqlitePool, http: &reqwest::Client, query: &str, conversa
     Ok(parts)
 }
 
-/// `load_core`: a line per `(id, text)`, capped, saying how many were left out.
+/// `load_core`: a line per `(id, text)`, capped, saying how many were left
+/// out. Sorted memories go under their topic's heading, in `TOPICS` order;
+/// unsorted ones (the topics sweep hasn't reached them) first, bare.
 fn core_text(rows: &[Recalled]) -> String {
-    let text = rows.iter().map(super::retrieve::memory_line).collect::<Vec<_>>().join("\n");
+    use super::retrieve::{TOPICS, topic_label};
+    let sorted = |m: &&Recalled| m.topic.as_deref().is_some_and(|t| TOPICS.contains(&t));
+    // (line, whether it is a memory rather than a heading)
+    let mut lines: Vec<(String, bool)> =
+        rows.iter().filter(|m| !sorted(m)).map(|m| (super::retrieve::memory_line(m), true)).collect();
+    for topic in TOPICS {
+        let under: Vec<&Recalled> = rows.iter().filter(|m| m.topic.as_deref() == Some(topic)).collect();
+        if !under.is_empty() {
+            lines.push((format!("### {}", topic_label(topic)), false));
+            lines.extend(under.into_iter().map(|m| (super::retrieve::memory_line(m), true)));
+        }
+    }
+    let text = lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join("\n");
     if text.chars().count() <= CORE_MAX_CHARS {
         return text;
     }
-    let head: String = text.chars().take(CORE_MAX_CHARS).collect();
-    let mut truncated = match head.rfind('\n') {
-        Some(i) => head[..i].to_string(),
-        None => head,
-    };
-    let remaining = rows.len() as i64 - truncated.matches('\n').count() as i64 - 1;
+    // Whole lines, each with the newline after it, up to the cap.
+    let mut kept: Vec<&(String, bool)> = vec![];
+    let mut used = 0;
+    for line in &lines {
+        used += line.0.chars().count() + 1;
+        if used > CORE_MAX_CHARS {
+            break;
+        }
+        kept.push(line);
+    }
+    while kept.last().is_some_and(|(_, memory)| !memory) {
+        kept.pop();
+    }
+    if kept.is_empty() {
+        return text.chars().take(CORE_MAX_CHARS).collect();
+    }
+    let remaining = rows.len() - kept.iter().filter(|(_, memory)| *memory).count();
+    let mut truncated = kept.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join("\n");
     if remaining > 0 {
         truncated.push_str(&format!(
             "\n- ... and {remaining} more core memories (use search_memory to find specific ones)"
@@ -469,13 +497,44 @@ mod tests {
 
     #[test]
     fn core_memory_is_capped_like_load_core() {
-        let item = |id: &str, text: &str| Recalled { id: id.into(), text: text.into(), confirmed: None };
+        let item = |id: &str, text: &str| Recalled { id: id.into(), text: text.into(), confirmed: None, topic: None };
         let rows: Vec<Recalled> = (0..200).map(|i| item(&format!("m{i}"), &format!("fact number {i} about the user"))).collect();
         let text = core_text(&rows);
         assert!(text.chars().count() < 2200);
         assert!(text.ends_with("more core memories (use search_memory to find specific ones)"));
         assert_eq!(core_text(&[item("x", "a"), item("y", "b")]), "- a (id: x)\n- b (id: y)");
     }
+
+    #[test]
+    fn core_memory_is_grouped_by_topic() {
+        let item = |id: &str, text: &str, topic: Option<&str>| Recalled {
+            id: id.into(),
+            text: text.into(),
+            confirmed: None,
+            topic: topic.map(Into::into),
+        };
+        let rows = [
+            item("p", "Wants direct answers", Some("preferences")),
+            item("u", "The user is called Sam", None),
+            item("e", "Software engineer", Some("profile")),
+            item("l", "Lives in Austin", Some("profile")),
+        ];
+        assert_eq!(
+            core_text(&rows),
+            "- The user is called Sam (id: u)\n### Profile\n- Software engineer (id: e)\n- Lives in Austin (id: l)\n\
+             ### Preferences\n- Wants direct answers (id: p)"
+        );
+        // A heading is never left without its memories when the cap cuts.
+        let many: Vec<Recalled> =
+            (0..200).map(|i| item(&format!("m{i}"), &format!("fact number {i}"), Some(TOPICS_FOR_TEST[i % 2]))).collect();
+        let text = core_text(&many);
+        assert!(text.chars().count() < 2200);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(!lines[lines.len() - 2].starts_with("###"));
+        assert!(text.ends_with("more core memories (use search_memory to find specific ones)"));
+    }
+
+    const TOPICS_FOR_TEST: [&str; 2] = ["profile", "work"];
 
     #[test]
     fn trivial_matches_is_trivial_query() {

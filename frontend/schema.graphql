@@ -350,6 +350,7 @@ One `searchMemory` result.
 type MemoryHit {
 	id: String!
 	text: String!
+	topic: String
 	"""
 	Cosine similarity, to four places.
 	"""
@@ -364,6 +365,11 @@ type MemoryItem {
 	id: String!
 	kind: String!
 	text: String!
+	"""
+	What it is about — one of `memoryTopics`. None until the topics sweep
+	sorts it.
+	"""
+	topic: String
 	"""
 	How it was made: `remember`, `sweep`, `seed` or `manual`. None for
 	items from before this was kept.
@@ -609,8 +615,9 @@ type Mutation {
 	Whether it reached a run; false (no live run) is normal, not an error.
 	"""
 	browserActivity(url: String!, phase: String! = "start", conversationId: String): Boolean!
-	addMemory(text: String!, kind: String! = "fact"): MemoryItem!
-	updateMemoryItem(id: String!, text: String!, kind: String): MemoryItem!
+	addMemory(text: String!, kind: String! = "fact", topic: String): MemoryItem!
+	updateMemoryItem(id: String!, text: String!, kind: String, topic: String): MemoryItem!
+	sortMemoryTopics(model: String): String!
 	consolidateMemory(model: String): String!
 	restoreMemory(id: String!): MemoryItem!
 	deleteMemory(id: String!): Boolean!
@@ -798,6 +805,10 @@ type Query {
 	archived for going unused.
 	"""
 	memories(kind: String, archived: Boolean! = false): [MemoryItem!]!
+	"""
+	The topics a memory can have, in the order they are shown.
+	"""
+	memoryTopics: [String!]!
 	"""
 	Audit log for when a specific memory was surfaced.
 	"""

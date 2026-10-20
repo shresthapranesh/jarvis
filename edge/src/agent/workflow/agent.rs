@@ -239,14 +239,15 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
                 }
                 Err(answer) => Ok(answer),
             },
-            Native::Remember { text, kind } => {
+            Native::Remember { text, kind, topic } => {
                 if text.trim().is_empty() {
                     return Ok("Nothing to remember (empty text).".into());
                 }
                 let kind = if kind == "core" || kind == "fact" { kind } else { "fact".into() };
                 // A workflow agent's thread is its own, not a conversation.
                 let origin = crate::agent::retrieve::Origin { source: "remember", conversation_id: None };
-                Ok(match crate::agent::retrieve::upsert_memory(&agent.pool, &agent.http, &text, &kind, origin).await {
+                let topic = topic.as_deref().and_then(crate::agent::retrieve::topic_of);
+                Ok(match crate::agent::retrieve::upsert_memory(&agent.pool, &agent.http, &text, &kind, topic, origin).await {
                     Ok(_) => format!("Remembered ({kind})."),
                     Err(e) => format!("Could not save memory: {e}"),
                 })

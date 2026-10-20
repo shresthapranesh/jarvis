@@ -11,8 +11,10 @@ export const memoriesQuery = graphql`
       id
       kind
       text
+      topic
       updatedAt
     }
+    memoryTopics
   }
 `;
 
@@ -27,6 +29,7 @@ export async function fetchMemories(): Promise<MemoryItem[]> {
     id: m.id,
     kind: m.kind as MemoryKind,
     text: m.text,
+    topic: m.topic ?? null,
     updated_at: m.updatedAt,
   }));
 }

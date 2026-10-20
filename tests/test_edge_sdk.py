@@ -30,7 +30,7 @@ def _numpy_ranking(query: str, k: int) -> list[dict]:
     for i, text in enumerate(FACTS):
         v = np.frombuffer(fake_blob(text), dtype=np.float32)
         score = float(np.dot(v, q) / ((float(np.linalg.norm(v)) or 1.0) * (float(np.linalg.norm(q)) or 1.0)))
-        scored.append((score, {"id": f"f{i}", "text": text}))
+        scored.append((score, {"id": f"f{i}", "text": text, "topic": None}))  # unsorted: no topic yet
     scored.sort(key=lambda t: t[0], reverse=True)
     return [{**hit, "score": round(score, 4)} for score, hit in scored[:k]]
 

@@ -528,11 +528,11 @@ impl<'a> Turn<'a> {
                     Ok((mcp_content(&r.blocks), if r.is_error { "error" } else { "success" }, r.artifact))
                 })
             }
-            Step::Run(Native::Remember { text, kind }) => {
+            Step::Run(Native::Remember { text, kind, topic }) => {
                 let (pool, http, ephemeral) = (self.agent.pool.clone(), self.agent.http.clone(), self.ephemeral);
-                let (conversation, text, kind) = (self.thread_id.clone(), text.clone(), kind.clone());
+                let (conversation, text, kind, topic) = (self.thread_id.clone(), text.clone(), kind.clone(), topic.clone());
                 tokio::spawn(async move {
-                    let answer = remember(&pool, &http, ephemeral, &conversation, &text, &kind).await;
+                    let answer = remember(&pool, &http, ephemeral, &conversation, &text, &kind, topic.as_deref()).await;
                     Ok((Content::Text(answer), "success", None))
                 })
             }
@@ -964,7 +964,8 @@ impl Drop for Beside {
 }
 
 /// `remember`: a durable fact, replacing a restatement of it. Its answer
-/// is the model's, failures included.
+/// is the model's, failures included. A topic not in `TOPICS` is left for
+/// the topics sweep.
 async fn remember(
     pool: &SqlitePool,
     http: &reqwest::Client,
@@ -972,6 +973,7 @@ async fn remember(
     conversation_id: &str,
     text: &str,
     kind: &str,
+    topic: Option<&str>,
 ) -> String {
     if text.trim().is_empty() {
         return "Nothing to remember (empty text).".into();
@@ -981,7 +983,8 @@ async fn remember(
     }
     let kind = if kind == "core" || kind == "fact" { kind } else { "fact" };
     let origin = super::retrieve::Origin { source: "remember", conversation_id: Some(conversation_id) };
-    match super::retrieve::upsert_memory(pool, http, text, kind, origin).await {
+    let topic = topic.and_then(super::retrieve::topic_of);
+    match super::retrieve::upsert_memory(pool, http, text, kind, topic, origin).await {
         Ok(_) => format!("Remembered ({kind})."),
         Err(e) => {
             tracing::warn!("remember failed: {e}");

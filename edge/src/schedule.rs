@@ -192,6 +192,7 @@ impl Scheduler {
             Entry::new(Action::Dispatch, When::Every(chrono::Duration::seconds(dispatch_every())), 30, self.tz, now),
             Entry::new(Action::Maintenance("memory_consolidation"), minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
             Entry::new(Action::Maintenance("project_memory"), minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
+            Entry::new(Action::Maintenance("memory_topics"), minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
             Entry::new(Action::Housekeeping, minutes(30), 300, self.tz, now).first_after(MAINTENANCE_FIRST, now),
         ]
     }
@@ -339,6 +340,9 @@ impl Scheduler {
         match task {
             "memory_consolidation" => self.memory_due().await,
             "project_memory" => self.project_memory_due().await,
+            "memory_topics" => {
+                sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM memories WHERE topic IS NULL)").fetch_one(&self.pool).await
+            }
             _ => Ok(true),
         }
     }

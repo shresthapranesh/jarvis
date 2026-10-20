@@ -429,7 +429,7 @@ def search_memory(query: str, k: int = 5, include_archived: bool = False) -> lis
     restore_memory).
     """
     data = api("query($q: String!, $k: Int!, $a: Boolean!) {"
-               " searchMemory(query: $q, k: $k, includeArchived: $a) { id text score } }",
+               " searchMemory(query: $q, k: $k, includeArchived: $a) { id text topic score } }",
                {"q": query, "k": k, "a": include_archived})
     return data["searchMemory"]
 
@@ -440,16 +440,19 @@ def restore_memory(memory_id: str) -> dict:
     return data["restoreMemory"]
 
 
-def update_memory(memory_id: str, text: str, kind: str | None = None) -> dict:
+def update_memory(memory_id: str, text: str, kind: str | None = None, topic: str | None = None) -> dict:
     """Correct a long-term memory in place — e.g. when the user contradicts it.
 
     `memory_id` is the id shown next to the memory in your context, or from
-    search_memory. `kind`: "core" | "fact" to move it; omit to keep its kind.
+    search_memory. `text` is a short fragment ("Lives in Austin", not "The
+    user lives in Austin"). `kind`: "core" | "fact" to move it; `topic`:
+    profile | work | projects | preferences | people | interests | other to
+    refile it; omit either to keep it.
     """
     data = api(
-        "mutation($id: String!, $text: String!, $kind: String) {"
-        " updateMemoryItem(id: $id, text: $text, kind: $kind) { id kind text } }",
-        {"id": memory_id, "text": text, "kind": kind},
+        "mutation($id: String!, $text: String!, $kind: String, $topic: String) {"
+        " updateMemoryItem(id: $id, text: $text, kind: $kind, topic: $topic) { id kind topic text } }",
+        {"id": memory_id, "text": text, "kind": kind, "topic": topic},
     )
     return data["updateMemoryItem"]
 

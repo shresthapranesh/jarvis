@@ -157,6 +157,7 @@ CREATE TABLE memories (
 	last_confirmed_at DATETIME, 
 	last_retrieved_at DATETIME, 
 	archived_at DATETIME, 
+	topic VARCHAR, 
 	PRIMARY KEY (id)
 );
 

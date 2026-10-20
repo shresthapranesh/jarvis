@@ -472,7 +472,7 @@
        },
        {
         "function": {
-         "description": "Persist a durable fact, recalled in future conversations.\n\nFor preferences, ongoing projects, lasting facts — not conversation-only detail.\n\nArgs:\n    text: One atomic, self-contained fact.\n    kind: \"core\" for identity/preferences always in context; \"fact\" (default) otherwise.",
+         "description": "Persist a durable fact, recalled in future conversations.\n\nFor preferences, ongoing projects, lasting facts — not conversation-only detail.\n\nArgs:\n    text: One atomic fact as a short fragment — \"Lives in Austin\", not \"The user lives in Austin\". Name other people outright.\n    topic: What it is about.\n    kind: \"core\" for identity/preferences always in context; \"fact\" (default) otherwise.",
          "name": "remember",
          "parameters": {
           "properties": {
@@ -481,6 +481,18 @@
            },
            "text": {
             "type": "string"
+           },
+           "topic": {
+            "type": "string",
+            "enum": [
+             "profile",
+             "work",
+             "projects",
+             "preferences",
+             "people",
+             "interests",
+             "other"
+            ]
            }
           },
           "required": [
@@ -658,7 +670,7 @@
        },
        {
         "function": {
-         "description": "Persist a durable fact, recalled in future conversations.\n\nFor preferences, ongoing projects, lasting facts — not conversation-only detail.\n\nArgs:\n    text: One atomic, self-contained fact.\n    kind: \"core\" for identity/preferences always in context; \"fact\" (default) otherwise.",
+         "description": "Persist a durable fact, recalled in future conversations.\n\nFor preferences, ongoing projects, lasting facts — not conversation-only detail.\n\nArgs:\n    text: One atomic fact as a short fragment — \"Lives in Austin\", not \"The user lives in Austin\". Name other people outright.\n    topic: What it is about.\n    kind: \"core\" for identity/preferences always in context; \"fact\" (default) otherwise.",
          "name": "remember",
          "parameters": {
           "properties": {
@@ -667,6 +679,18 @@
            },
            "text": {
             "type": "string"
+           },
+           "topic": {
+            "type": "string",
+            "enum": [
+             "profile",
+             "work",
+             "projects",
+             "preferences",
+             "people",
+             "interests",
+             "other"
+            ]
            }
           },
           "required": [

@@ -208,3 +208,58 @@ export const skill = stylex.create({
   /** Name and body are code, so the editor fields go mono. */
   monoField: {fontFamily: type.mono, fontSize: type.tUi},
 });
+
+/** The memory index: a card per topic, each a link to that topic's page. */
+export const topics = stylex.create({
+  grid: {
+    listStyle: 'none',
+    margin: 0,
+    padding: 0,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+    gap: 12,
+  },
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    height: '100%',
+    boxSizing: 'border-box',
+    paddingBlock: 12,
+    paddingInline: 14,
+    borderRadius: 3,
+    backgroundColor: {default: colors.surface, ':hover': colors.surface2},
+    color: 'inherit',
+    textDecorationLine: 'none',
+    outline: {default: 'none', ':focus-visible': `2px solid ${colors.accent}`},
+    outlineOffset: 2,
+    transition: 'background 0.14s ease',
+  },
+  /** Waiting for the topics sweep — quieter than the sorted ones. */
+  cardUnsorted: {opacity: 0.75},
+  head: {display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10},
+  name: {fontSize: type.tBody, fontWeight: 600, color: colors.text},
+  hint: {fontSize: type.tSmall, color: colors.textFaint},
+  /** The first few details, so a card says what is in it without opening. */
+  preview: {
+    fontSize: type.tUi,
+    lineHeight: 1.5,
+    color: colors.textDim,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    overflowWrap: 'anywhere',
+  },
+  core: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    marginBlockStart: 'auto',
+    paddingBlockStart: 2,
+    fontSize: type.tMicro,
+    color: colors.textFaint,
+  },
+  /** A detail's meta line, with room for the core dot. */
+  itemMeta: {display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'},
+});

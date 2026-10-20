@@ -1628,6 +1628,31 @@ async def test_memory_is_consolidated_through_the_edge(twins, edge_binary):
     assert _edge_sweep(twins, edge_binary, "nope") == {"error": "unknown maintenance task 'nope'"}
 
 
+async def test_unsorted_memories_are_given_topics(twins, edge_binary):
+    """The `memory_topics` sweep — the edge's own: each memory without a topic
+    gets one, its "The user ..." wording tidied (and re-embedded); one the
+    reply leaves out is filed under other, an unknown topic too; then nothing
+    is left to sort."""
+    _sql(twins, "INSERT INTO config_settings (key, value, updated_at) VALUES ('default.model', ?, '2026-01-01 00:00:00')", MODEL)
+    reply = json.dumps([
+        {"id": "m0", "topic": "preferences", "text": "Favourite colour is green"},
+        {"id": "m1", "topic": "Work", "text": "The user deploys the rust edge"},
+        {"id": "core1", "topic": "profile", "text": "Called Sam"},
+        {"id": "ghost", "topic": "people", "text": "Nobody"},
+    ])
+    # m2 is left out of the reply.
+    twins.fake.script = [Reply("Sorted:\n" + reply)]
+    assert _edge_sweep(twins, edge_binary, "memory_topics") == {"result": "sorted 4 memories into topics, reworded 2"}
+    rows = _rows(twins.edge_db, "SELECT id, kind, topic, text FROM memories ORDER BY id")
+    assert rows == [("core1", "core", "profile", "Called Sam"), ("m0", "fact", "preferences", "Favourite colour is green"),
+                    ("m1", "fact", "work", "The user deploys the rust edge"), ("m2", "fact", "other", "Lunch is at noon")]
+    # Only the reworded ones are embedded again.
+    assert sorted(t for batch in twins.fake.embeds for t in batch) == ["Called Sam", "Favourite colour is green"]
+    [[(_system, (_, user))]] = _asked(twins, sides=1)
+    assert "- id=core1 [core] The user is called Sam" in user
+    assert _edge_sweep(twins, edge_binary, "memory_topics") == {"result": "skipped: every memory has a topic"}
+
+
 async def test_project_memory_is_consolidated_through_the_edge(twins, edge_binary):
     """`consolidateProjectMemory` and the 30-minute sweep: merge (lines
     already said dropped), nothing new, a due rewrite, a merge that would

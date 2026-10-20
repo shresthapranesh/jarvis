@@ -371,6 +371,8 @@ export interface MemoryItem {
   id: string;
   kind: MemoryKind;
   text: string;
+  /** One of the server's `memoryTopics`; null until the topics sweep sorts it. */
+  topic: string | null;
   updated_at: string;
 }
 

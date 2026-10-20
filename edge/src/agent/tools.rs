@@ -136,7 +136,7 @@ pub enum Native {
     RunCell { code: String },
     WriteTodos { todos: Vec<String> },
     SetTodoStatus { index: i64, status: String },
-    Remember { text: String, kind: String },
+    Remember { text: String, kind: String, topic: Option<String> },
     WriteArtifact { title: String, content: Option<String>, file_path: Option<String>, artifact_id: Option<String> },
     CompleteTask { summary: String, metadata: Option<String> },
     BlockTask { reason: String, needs_input: bool },
@@ -207,7 +207,7 @@ fn native(name: &str, args: &Value) -> Result<Native, String> {
         "set_todo_status" => {
             Native::SetTodoStatus { index: a.int("index"), status: a.choice("status", &["pending", "in_progress", "done"]) }
         }
-        "remember" => Native::Remember { text: a.str("text"), kind: a.str_or("kind", "fact") },
+        "remember" => Native::Remember { text: a.str("text"), kind: a.str_or("kind", "fact"), topic: a.opt_str("topic") },
         "write_artifact" => Native::WriteArtifact {
             title: a.str("title"),
             content: a.opt_str("content"),
