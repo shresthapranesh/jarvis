@@ -30,7 +30,7 @@ const FETCH_LIMIT: i64 = 200;
 
 /// `_run_lock`: the timer and the mutation read the same watermark, so one
 /// pass at a time.
-static RUN_LOCK: Mutex<()> = Mutex::const_new(());
+pub(super) static RUN_LOCK: Mutex<()> = Mutex::const_new(());
 
 const EXTRACT_SYSTEM_PROMPT: &str = r#"You maintain durable memory items about the user from recent
 conversations, so an AI assistant can remember them across sessions.
@@ -45,16 +45,21 @@ never store what the assistant said, found or did, and never store anything abou
 assistant, its tools or this app work.
 
 Output ONLY a JSON array. Each element is an operation:
-  {"op": "add", "text": "<one atomic self-contained fact>", "kind": "core" | "fact"}
-  {"op": "update", "id": "<existing_id>", "text": "<corrected version>", "kind": "core" | "fact"}
+  {"op": "add", "text": "<one atomic fact>", "kind": "core" | "fact", "topic": "<topic>"}
+  {"op": "update", "id": "<existing_id>", "text": "<corrected version>", "kind": "core" | "fact", "topic": "<topic>"}
   {"op": "delete", "id": "<existing_id>", "reason": "<why — contradicted|temporary_expired|user_requested|outdated|duplicate>"}
 
 - "core": durable identity and strong preferences that should ALWAYS be in mind —
   who the user is, their role/expertise, hard preferences, how they want the assistant to behave.
 - "fact": everything else worth remembering — project details, decisions, context, one-off facts.
 
+"topic" is what the item is about, one of: profile (who they are, where they live), work, projects,
+preferences (how they want things done), people, interests, other.
+
 Rules for ADD / UPDATE:
-- One atomic fact per item. Keep each short and self-contained (no pronouns pointing outside the item).
+- One atomic fact per item, written as a short fragment whose subject is the user: "Lives in Austin",
+  "Prefers concise answers" — never "The user lives in Austin" or "User is ...". Name any other person or
+  thing outright ("Maya: sister, nurse in Denver"), never by a pronoun pointing outside the item.
 - Only ADD information not already covered by existing items.
 - If transcript contradicts an existing item, emit UPDATE with corrected version pointing to its id.
 - DO NOT ADD temporary facts: if user says "for today only", "this week only", "temporarily", "just for now",
@@ -76,9 +81,13 @@ Output ONLY the JSON array — no prose, no markdown fences.
 
 #[derive(Debug, PartialEq)]
 enum Op {
-    Add { text: String, kind: &'static str },
-    Update { id: String, text: String, kind: &'static str },
+    Add { text: String, kind: &'static str, topic: Option<&'static str> },
+    Update { id: String, text: String, kind: &'static str, topic: Option<&'static str> },
     Delete { id: String, reason: String },
+}
+
+fn topic_of(el: &serde_json::Map<String, Value>) -> Option<&'static str> {
+    el.get("topic").and_then(Value::as_str).and_then(crate::agent::retrieve::topic_of)
 }
 
 fn kind_of(el: &serde_json::Map<String, Value>) -> &'static str {
@@ -129,14 +138,14 @@ fn coerce_items(text: &str) -> Vec<Op> {
                 if id.is_empty() || text.is_empty() {
                     continue;
                 }
-                out.push(Op::Update { id, text, kind: kind_of(el) });
+                out.push(Op::Update { id, text, kind: kind_of(el), topic: topic_of(el) });
             }
             _ => {
                 let text = field(el, "text");
                 if text.is_empty() {
                     continue;
                 }
-                out.push(Op::Add { text, kind: kind_of(el) });
+                out.push(Op::Add { text, kind: kind_of(el), topic: topic_of(el) });
             }
         }
     }
@@ -235,18 +244,28 @@ async fn save_watermark(pool: &SqlitePool, through: chrono::NaiveDateTime) -> Re
     kv_put(pool, META_NS, META_KEY, &value).await
 }
 
-fn existing_block(existing: &[(String, String, String)]) -> String {
+/// (id, kind, text, topic) — `list_memories`' rows.
+type Existing = (String, String, String, Option<String>);
+
+fn existing_block(existing: &[Existing]) -> String {
     if existing.is_empty() {
         return "(none yet)".into();
     }
-    existing.iter().map(|(id, kind, text)| format!("- id={id} [{kind}] {text}")).collect::<Vec<_>>().join("\n")
+    existing
+        .iter()
+        .map(|(id, kind, text, topic)| match topic {
+            Some(topic) => format!("- id={id} [{kind}, {topic}] {text}"),
+            None => format!("- id={id} [{kind}] {text}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-/// `list_memories`: (id, kind, text), most recently updated first. Not the
-/// archived ones (`stale.rs`): a restated one comes back as an add, which
-/// `upsert_memory` matches to it.
-async fn list_memories(pool: &SqlitePool) -> Result<Vec<(String, String, String)>, String> {
-    sqlx::query_as("SELECT id, kind, text FROM memories WHERE archived_at IS NULL ORDER BY updated_at DESC")
+/// `list_memories`: (id, kind, text, topic), most recently updated first.
+/// Not the archived ones (`stale.rs`): a restated one comes back as an add,
+/// which `upsert_memory` matches to it.
+async fn list_memories(pool: &SqlitePool) -> Result<Vec<Existing>, String> {
+    sqlx::query_as("SELECT id, kind, text, topic FROM memories WHERE archived_at IS NULL ORDER BY updated_at DESC")
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())
@@ -297,7 +316,7 @@ async fn consolidate_items(pool: &SqlitePool, http: &reqwest::Client, model: Opt
             ),
         )
         .await?;
-        let mut ids: HashSet<String> = existing.into_iter().map(|(id, _, _)| id).collect();
+        let mut ids: HashSet<String> = existing.into_iter().map(|(id, ..)| id).collect();
         let origin = || crate::agent::retrieve::Origin { source: "sweep", conversation_id: conversation };
         let (a, u, d) = apply_ops(pool, http, coerce_items(&reply), &mut ids, max_delete - deleted, origin).await?;
         (added, updated, deleted) = (added + a, updated + u, deleted + d);
@@ -362,13 +381,13 @@ async fn apply_ops<'a>(
                 }
             }
             // An id it doesn't know is an add.
-            Op::Update { id, text, kind } if existing.contains(&id) => {
-                if update_memory(pool, http, &id, &text, kind).await? {
+            Op::Update { id, text, kind, topic } if existing.contains(&id) => {
+                if update_memory(pool, http, &id, &text, kind, topic).await? {
                     updated += 1;
                 }
             }
-            Op::Update { text, kind, .. } | Op::Add { text, kind } => {
-                crate::agent::retrieve::upsert_memory(pool, http, &text, kind, origin()).await?;
+            Op::Update { text, kind, topic, .. } | Op::Add { text, kind, topic } => {
+                crate::agent::retrieve::upsert_memory(pool, http, &text, kind, topic, origin()).await?;
                 added += 1;
             }
         }
@@ -376,9 +395,17 @@ async fn apply_ops<'a>(
     Ok((added, updated, deleted))
 }
 
-/// `update_memory_with_embedding`: new text, kind and embedding, confirmed
-/// now. An embedder failure fails the pass; a failed write only this item.
-async fn update_memory(pool: &SqlitePool, http: &reqwest::Client, id: &str, text: &str, kind: &str) -> Result<bool, String> {
+/// `update_memory_with_embedding`: new text, kind, topic (if given) and
+/// embedding, confirmed now. An embedder failure fails the pass; a failed
+/// write only this item.
+async fn update_memory(
+    pool: &SqlitePool,
+    http: &reqwest::Client,
+    id: &str,
+    text: &str,
+    kind: &str,
+    topic: Option<&str>,
+) -> Result<bool, String> {
     let text = pystr::strip(text);
     if text.is_empty() {
         return Ok(false);
@@ -386,13 +413,15 @@ async fn update_memory(pool: &SqlitePool, http: &reqwest::Client, id: &str, text
     let blob = crate::agent::embed::for_storage(pool, http, text).await?;
     let now = crate::gql::codec::now_stored();
     let done = sqlx::query(
-        "UPDATE memories SET text = ?, kind = ?, embedding = ?, updated_at = ?, last_confirmed_at = ? WHERE id = ?",
+        "UPDATE memories SET text = ?, kind = ?, embedding = ?, updated_at = ?, last_confirmed_at = ?, \
+         topic = COALESCE(?, topic) WHERE id = ?",
     )
     .bind(text)
     .bind(kind)
     .bind(&blob)
     .bind(&now)
     .bind(&now)
+    .bind(topic)
     .bind(id)
     .execute(pool)
     .await;
@@ -415,17 +444,20 @@ mod tests {
         [{"op": "add", "text": "  Likes tea ", "kind": "core"}, {"text": "No op", "kind": "weird"},
          {"op": "update", "id": "m1", "text": "Fixed"}, {"op": "update", "id": "", "text": "x"},
          {"op": "delete", "id": 7}, {"op": "delete", "id": null, "reason": " old "}, {"op": "delete"},
-         {"op": "explode", "text": 5}, "junk", {"op": "add", "text": "  "}]
+         {"op": "explode", "text": 5}, "junk", {"op": "add", "text": "  "},
+         {"op": "add", "text": "Lives in Austin", "topic": " Profile "}, {"op": "add", "text": "Odd", "topic": "misc"}]
         ```"#;
         assert_eq!(
             coerce_items(reply),
             [
-                Op::Add { text: "Likes tea".into(), kind: "core" },
-                Op::Add { text: "No op".into(), kind: "fact" },
-                Op::Update { id: "m1".into(), text: "Fixed".into(), kind: "fact" },
+                Op::Add { text: "Likes tea".into(), kind: "core", topic: None },
+                Op::Add { text: "No op".into(), kind: "fact", topic: None },
+                Op::Update { id: "m1".into(), text: "Fixed".into(), kind: "fact", topic: None },
                 Op::Delete { id: "7".into(), reason: "unknown".into() },
                 Op::Delete { id: "None".into(), reason: "old".into() },
-                Op::Add { text: "5".into(), kind: "fact" },
+                Op::Add { text: "5".into(), kind: "fact", topic: None },
+                Op::Add { text: "Lives in Austin".into(), kind: "fact", topic: Some("profile") },
+                Op::Add { text: "Odd".into(), kind: "fact", topic: None },
             ]
         );
         assert_eq!(coerce_items("] nothing ["), []);

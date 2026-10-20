@@ -10,6 +10,8 @@
 //!   `consolidateProjectMemory`).
 //! - `dedupe` — `tools/text_dedupe.py`, the merge's "already said?".
 //! - `stale` — the edge's own: unused facts archived, once a day.
+//! - `topics` — the edge's own: unsorted memories given a topic and tidied
+//!   into fragments, while there are any.
 //!
 //! Ports, all three, tested against Python's recorded sweeps in
 //! `tests/test_edge_loop.py`.
@@ -23,6 +25,7 @@ pub mod dedupe;
 pub mod memory;
 pub mod project;
 pub mod stale;
+pub mod topics;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
 use serde_json::Value;
@@ -35,6 +38,7 @@ pub async fn sweep(pool: &SqlitePool, http: &reqwest::Client, task: &str) -> Res
         "memory_consolidation" => memory::consolidate(pool, http, None).await,
         "project_memory" => project::consolidate_all(pool, http).await,
         "stale_memories" => stale::archive_stale(pool).await,
+        "memory_topics" => topics::sort(pool, http, None).await,
         other => Err(format!("unknown maintenance task {}", crate::pyjson::repr_str(other))),
     }
 }

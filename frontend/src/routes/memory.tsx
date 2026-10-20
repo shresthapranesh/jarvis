@@ -6,16 +6,20 @@ import {QueryBoundary} from '../components/QueryBoundary';
 import {page} from '../components/ui';
 
 export const Route = createFileRoute('/memory')({
+  // `?topic=` opens one topic's memories; without it, the list of topics.
+  validateSearch: (search: Record<string, unknown>): {topic?: string} =>
+    typeof search.topic === 'string' ? {topic: search.topic} : {},
   component: MemoryPage,
 });
 
 function MemoryPage() {
+  const {topic} = Route.useSearch();
   return (
     <QueryBoundary
       label="Failed to load memory"
       fallback={<div {...stylex.props(page.empty)}>Loading…</div>}
     >
-      <MemoryView />
+      <MemoryView topic={topic ?? null} />
     </QueryBoundary>
   );
 }

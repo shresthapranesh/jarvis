@@ -132,6 +132,25 @@ pub struct Recalled {
     pub id: String,
     pub text: String,
     pub confirmed: Option<String>,
+    /// None until the topics sweep (`consolidate/topics.rs`) sorts it.
+    pub topic: Option<String>,
+}
+
+/// What a memory is about, in the order the prompt and the memory page show
+/// them. A memory is written as a fragment under its topic ("Lives in
+/// Austin" under profile), never "The user lives in Austin".
+pub const TOPICS: [&str; 7] = ["profile", "work", "projects", "preferences", "people", "interests", "other"];
+
+/// A topic as written, if it is one of `TOPICS`.
+pub fn topic_of(raw: &str) -> Option<&'static str> {
+    let raw = raw.trim().to_ascii_lowercase();
+    TOPICS.into_iter().find(|t| *t == raw)
+}
+
+/// A topic as a heading: "profile" → "Profile".
+pub fn topic_label(topic: &str) -> String {
+    let mut chars = topic.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// `search_memory(query, k)`: the live (not archived) `fact` items that
@@ -150,7 +169,7 @@ pub async fn search_memory(
     let embedder = Embedder::resolve(pool).await;
     let qvec = embedder.query(http, query, true).await;
     let rows = sqlx::query(
-        "SELECT id, text, embedding, last_confirmed_at FROM memories WHERE kind = 'fact' AND archived_at IS NULL \
+        "SELECT id, text, embedding, last_confirmed_at, topic FROM memories WHERE kind = 'fact' AND archived_at IS NULL \
          ORDER BY updated_at DESC",
     )
     .fetch_all(pool)
@@ -184,7 +203,7 @@ pub async fn search_memory(
         .iter()
         .map(|r| {
             let id: String = r.get("id");
-            (id.clone(), Recalled { id, text: r.get("text"), confirmed: r.get("last_confirmed_at") })
+            (id.clone(), Recalled { id, text: r.get("text"), confirmed: r.get("last_confirmed_at"), topic: r.get("topic") })
         })
         .collect();
     let scores: HashMap<&str, f64> = dense.iter().map(|(i, s)| (i.as_str(), *s)).collect();
@@ -245,12 +264,14 @@ pub struct Origin<'a> {
 /// `upsert_memory`: embed `text` in document space, then replace a
 /// restatement of it of the same kind, or insert it. The id it landed on.
 /// A restatement keeps the item's origin and counts as confirming it — and
-/// brings it back if it was archived for going unused.
+/// brings it back if it was archived for going unused. Without a `topic` a
+/// restatement keeps its own, and a new item waits for the topics sweep.
 pub async fn upsert_memory(
     pool: &SqlitePool,
     http: &reqwest::Client,
     text: &str,
     kind: &str,
+    topic: Option<&str>,
     origin: Origin<'_>,
 ) -> Result<String, String> {
     let text = text.trim();
@@ -266,13 +287,14 @@ pub async fn upsert_memory(
     match cosine_ranking(&vec, &items).first() {
         Some((id, score)) if *score >= merge_cosine() => {
             sqlx::query(
-                "UPDATE memories SET text = ?, embedding = ?, updated_at = ?, last_confirmed_at = ?, archived_at = NULL \
-                 WHERE id = ?",
+                "UPDATE memories SET text = ?, embedding = ?, updated_at = ?, last_confirmed_at = ?, archived_at = NULL, \
+                 topic = COALESCE(?, topic) WHERE id = ?",
             )
             .bind(text)
             .bind(&blob)
             .bind(&now)
             .bind(&now)
+            .bind(topic)
             .bind(id)
             .execute(pool)
             .await
@@ -285,7 +307,7 @@ pub async fn upsert_memory(
             let id = new_id();
             sqlx::query(
                 "INSERT INTO memories (id, kind, text, embedding, created_at, updated_at, source, conversation_id, \
-                 last_confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT id FROM conversations WHERE id = ?), ?)",
+                 last_confirmed_at, topic) VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT id FROM conversations WHERE id = ?), ?, ?)",
             )
             .bind(&id)
             .bind(kind)
@@ -296,6 +318,7 @@ pub async fn upsert_memory(
             .bind(origin.source)
             .bind(origin.conversation_id)
             .bind(&now)
+            .bind(topic)
             .execute(pool)
             .await
             .map_err(|e| e.to_string())?;
@@ -429,9 +452,16 @@ fn long_ago(confirmed: Option<&str>, now: chrono::NaiveDateTime) -> Option<Strin
     ((now - at).num_days() > CONFIRMED_LONG_AGO_DAYS).then(|| at.format("%Y-%m").to_string())
 }
 
-/// What `search_memory` reports as text, for the prompt.
+/// What `search_memory` reports as text, for the prompt. A sorted memory
+/// is a fragment that reads only under its topic, so its line names it.
 pub fn relevant_memories(hits: &[Recalled]) -> String {
-    let lines: Vec<String> = hits.iter().map(memory_line).collect();
+    let lines: Vec<String> = hits
+        .iter()
+        .map(|m| match m.topic.as_deref() {
+            Some(topic) => memory_line(m).replacen("- ", &format!("- [{}] ", topic_label(topic)), 1),
+            None => memory_line(m),
+        })
+        .collect();
     format!("## Relevant Memories\n\n{}", lines.join("\n"))
 }
 
@@ -446,8 +476,17 @@ mod tests {
         assert_eq!(long_ago(Some("2026-06-01 09:00:00.000000"), now), None);
         assert_eq!(long_ago(None, now), None);
         assert_eq!(long_ago(Some("garbage"), now), None);
-        let m = Recalled { id: "m1".into(), text: "Lunch is at noon".into(), confirmed: None };
+        let m = Recalled { id: "m1".into(), text: "Lunch is at noon".into(), confirmed: None, topic: None };
         assert_eq!(memory_line(&m), "- Lunch is at noon (id: m1)");
+    }
+
+    #[test]
+    fn a_sorted_memory_names_its_topic_when_retrieved() {
+        let m = |topic: Option<&str>| Recalled { id: "m1".into(), text: "Lives in Austin".into(), confirmed: None, topic: topic.map(Into::into) };
+        assert_eq!(relevant_memories(&[m(Some("profile"))]), "## Relevant Memories\n\n- [Profile] Lives in Austin (id: m1)");
+        assert_eq!(relevant_memories(&[m(None)]), "## Relevant Memories\n\n- Lives in Austin (id: m1)");
+        assert_eq!(topic_of(" Work "), Some("work"));
+        assert_eq!(topic_of("misc"), None);
     }
 
     #[test]

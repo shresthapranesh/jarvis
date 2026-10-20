@@ -5,21 +5,26 @@ import type {MemoryItem, MemoryKind} from '../lib/types';
 import {environment} from './environment';
 
 const mutation = graphql`
-  mutation AddMemoryMutation($text: String!, $kind: String!) {
-    addMemory(text: $text, kind: $kind) {
+  mutation AddMemoryMutation($text: String!, $kind: String!, $topic: String) {
+    addMemory(text: $text, kind: $kind, topic: $topic) {
       id
       kind
       text
+      topic
       updatedAt
     }
   }
 `;
 
-export function commitAddMemory(text: string, kind: MemoryKind): Promise<MemoryItem> {
+export function commitAddMemory(
+  text: string,
+  kind: MemoryKind,
+  topic: string | null,
+): Promise<MemoryItem> {
   return new Promise((resolve, reject) => {
     commitMutation<AddMemoryMutation>(environment, {
       mutation,
-      variables: {text, kind},
+      variables: {text, kind, topic},
       // `memories` is a plain list, not a @connection, so Relay has no
       // declarative directive for this — the new node is normalized into the
       // store automatically, but nothing links it into the root list.
@@ -39,7 +44,13 @@ export function commitAddMemory(text: string, kind: MemoryKind): Promise<MemoryI
           return;
         }
         const m = response.addMemory;
-        resolve({id: m.id, kind: m.kind as MemoryKind, text: m.text, updated_at: m.updatedAt});
+        resolve({
+          id: m.id,
+          kind: m.kind as MemoryKind,
+          text: m.text,
+          topic: m.topic ?? null,
+          updated_at: m.updatedAt,
+        });
       },
       onError: reject,
     });

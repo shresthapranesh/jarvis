@@ -199,6 +199,11 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
     if !mem.contains("archived_at") {
         exec(tx, "ALTER TABLE memories ADD COLUMN archived_at DATETIME").await?;
     }
+    // What a memory is about (`retrieve::TOPICS`); older ones are sorted by
+    // the `memory_topics` sweep.
+    if !mem.contains("topic") {
+        exec(tx, "ALTER TABLE memories ADD COLUMN topic VARCHAR").await?;
+    }
     // The LangGraph store's import copied its values as BLOBs, which no
     // `kv_store` reader decodes as text.
     exec(tx, "UPDATE kv_store SET value = CAST(value AS TEXT) WHERE typeof(value) = 'blob'").await?;
