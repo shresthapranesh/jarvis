@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useReducer, useRef, useState} from 'react';
 
 import {colors} from '../../theme/tokens.stylex';
 
@@ -40,14 +40,16 @@ export function useResizableWidth(storageKey: string, initial: number) {
   }, [storageKey, width]);
 
   // A viewport that shrinks below the stored width would leave the panel
-  // wider than the screen with no way back except dragging it.
+  // wider than the screen, so the width is clamped on the way out — but the
+  // stored width is left alone, or one narrow window would shrink the panel
+  // for good.
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
-    const onResize = () => setWidth((w) => clamp(w));
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.addEventListener('resize', rerender);
+    return () => window.removeEventListener('resize', rerender);
   }, []);
 
-  return [width, setWidth] as const;
+  return [clamp(width), setWidth] as const;
 }
 
 export function ResizeHandle({
