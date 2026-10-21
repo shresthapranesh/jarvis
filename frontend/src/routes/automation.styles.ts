@@ -1,7 +1,7 @@
 import * as stylex from '@stylexjs/stylex';
 
 import {kf} from '../theme/keyframes.stylex';
-import {channels, colors, css, layout, type} from '../theme/tokens.stylex';
+import {channels, colors, layout, type} from '../theme/tokens.stylex';
 
 /* ── Styles for routes/automation.tsx ──────────────────────────────────
    The command-center list: a header with KPI chips and filters, then one
@@ -449,60 +449,6 @@ export const empty = stylex.create({
 });
 
 /** The slide-in editor sheet. */
-export const panel = stylex.create({
-  backdrop: {
-    position: 'fixed',
-    inset: 0,
-    // A full-viewport blur is the one backdrop-filter cost worth caring about
-    // on a mid-range phone; the scrim already carries the separation, so touch
-    // trades the blur for a heavier tint.
-    backgroundColor: {
-      default: `rgba(${channels.shadow}, 0.6)`,
-      '@media (hover: none)': `rgba(${channels.shadow}, 0.72)`,
-    },
-    backdropFilter: {default: 'blur(4px)', '@media (hover: none)': 'none'},
-    WebkitBackdropFilter: {default: 'blur(4px)', '@media (hover: none)': 'none'},
-    zIndex: 42,
-  },
-  root: {
-    position: 'fixed',
-    insetBlock: 0,
-    insetInlineEnd: 0,
-    width: {default: 440, '@media (max-width: 860px)': '100%'},
-    maxWidth: {default: null, '@media (max-width: 860px)': '100%'},
-    minWidth: {default: null, '@media (max-width: 860px)': 0},
-    paddingBlockStart: {default: null, '@media (max-width: 860px)': css.safeTop},
-    paddingBlockEnd: {default: null, '@media (max-width: 860px)': css.safeBottom},
-    backgroundColor: {default: colors.glassBg, '@media (max-width: 860px)': colors.bg},
-    backdropFilter: {default: layout.blur, '@media (max-width: 860px)': 'none'},
-    WebkitBackdropFilter: {default: layout.blur, '@media (max-width: 860px)': 'none'},
-    boxShadow: `-4px 0 28px rgba(${channels.shadow}, 0.45)`,
-    display: 'flex',
-    flexDirection: 'column',
-    zIndex: 52,
-    animationName: kf.slideIn,
-    animationDuration: '0.22s',
-    animationTimingFunction: 'ease',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBlock: 14,
-    paddingInline: 16,
-    fontSize: type.tBody,
-    fontWeight: 600,
-    flexShrink: 0,
-  },
-  body: {
-    flex: 1,
-    overflowY: 'auto',
-    padding: 0,
-    '::-webkit-scrollbar': {width: 4},
-    '::-webkit-scrollbar-thumb': {backgroundColor: colors.border, borderRadius: 2},
-  },
-});
-
 /** A red note under a destructive confirm dialog's body. */
 export const confirmWarn = stylex.create({
   base: {color: colors.danger, fontSize: type.tUi},

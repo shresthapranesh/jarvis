@@ -6,9 +6,10 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {NotificationChannelsQuery as TNotificationChannelsQuery} from '../__generated__/NotificationChannelsQuery.graphql';
 import type {NotificationConfig, NotificationOn} from '../lib/types';
 import {mapChannel, notificationChannelsQuery} from '../relay/NotificationChannelsQuery';
+import {colors, type} from '../theme/tokens.stylex';
+import {PlusIcon, XIcon} from './icons';
 import {QueryBoundary} from './QueryBoundary';
-import {chipBtn, field} from './ui';
-import {type} from '../theme/tokens.stylex';
+import {chipBtn, field, iconBtn} from './ui';
 
 interface Props {
   value: NotificationConfig[];
@@ -74,42 +75,34 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
   const noChannels = channels.length === 0;
 
   return (
-    <div {...stylex.props(field.group)}>
+    <div {...stylex.props(field.group, s.root)}>
       <label {...stylex.props(field.label)}>Notifications</label>
       {value.length === 0 && (
-        <div style={{fontSize: type.tUi, color: 'var(--text-dim)', marginBottom: 6}}>
+        <p {...stylex.props(s.empty)}>
           {noChannels ? (
             <>
-              No channels configured.{' '}
-              <Link to="/settings" style={{color: 'var(--accent)'}}>
+              No channels yet.{' '}
+              <Link to="/settings" {...stylex.props(s.link)}>
                 Add one in Settings
               </Link>{' '}
-              to enable notifications.
+              to get a message when this finishes.
             </>
           ) : (
-            'No notifications. Add one to get a Telegram or Discord message when this finishes.'
+            'Get a Telegram or Discord message when this finishes.'
           )}
-        </div>
+        </p>
       )}
       {value.map((row, idx) => {
         const channel = channels.find((c) => c.id === row.id);
         const orphan = row.id && !channel;
         return (
-          <div
-            key={idx}
-            style={{
-              display: 'flex',
-              gap: 6,
-              marginBottom: 6,
-              alignItems: 'center',
-            }}
-          >
+          <div key={idx} {...stylex.props(s.row)}>
             <select
-              {...stylex.props(field.select, field.selectChrome)}
+              {...stylex.props(field.select, field.selectChrome, s.channel)}
               value={row.id}
               onChange={(e) => update(idx, {id: e.target.value})}
               disabled={disabled}
-              style={{flex: 1}}
+              aria-label="Channel"
             >
               {orphan && <option value={row.id}>(missing channel {row.id.slice(0, 8)}…)</option>}
               {channels.length === 0 && !orphan && (
@@ -124,24 +117,25 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
               ))}
             </select>
             <select
-              {...stylex.props(field.select, field.selectChrome)}
+              {...stylex.props(field.select, field.selectChrome, s.on)}
               value={row.on}
               onChange={(e) => update(idx, {on: e.target.value as NotificationOn})}
               disabled={disabled}
-              style={{flex: '0 0 110px'}}
+              aria-label="When to notify"
             >
-              <option value="both">on: both</option>
-              <option value="done">on: done</option>
-              <option value="error">on: error</option>
+              <option value="both">Always</option>
+              <option value="done">On success</option>
+              <option value="error">On failure</option>
             </select>
             <button
               type="button"
-              {...stylex.props(chipBtn.base)}
+              {...stylex.props(iconBtn.base, iconBtn.danger)}
               onClick={() => remove(idx)}
               disabled={disabled}
-              style={{flex: '0 0 auto'}}
+              aria-label="Remove notification"
+              title="Remove"
             >
-              Remove
+              <XIcon size={12} />
             </button>
           </div>
         );
@@ -150,12 +144,21 @@ function NotificationsEditorInner({value, onChange, disabled}: Props) {
         type="button"
         {...stylex.props(chipBtn.base)}
         onClick={add}
-        disabled={disabled || channels.length === 0}
-        style={{marginTop: 4}}
-        title={channels.length === 0 ? 'Add a channel in Settings first' : undefined}
+        disabled={disabled || noChannels}
+        title={noChannels ? 'Add a channel in Settings first' : undefined}
       >
-        + Add notification
+        <PlusIcon size={11} />
+        Add notification
       </button>
     </div>
   );
 }
+
+const s = stylex.create({
+  root: {gap: 8},
+  empty: {margin: 0, fontSize: type.tSmall, color: colors.textDim, lineHeight: 1.45},
+  link: {color: colors.text, textDecoration: 'underline', textUnderlineOffset: 2},
+  row: {display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap'},
+  channel: {flex: '1 1 140px', minWidth: 0, fontSize: type.tUi},
+  on: {flex: '0 0 auto', fontSize: type.tUi},
+});

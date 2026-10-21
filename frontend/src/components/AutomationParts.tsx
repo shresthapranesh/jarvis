@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import {useEffect} from 'react';
+import {Suspense} from 'react';
 
 import {describeCron} from '../lib/format';
 import {useToast} from '../lib/toast';
@@ -7,11 +7,10 @@ import type {Automation, AutomationInputType, CreateAutomationPayload} from '../
 import {refreshAutomationList} from '../relay/AutomationListQuery';
 import {commitCreateAutomation} from '../relay/CreateAutomationMutation';
 import {commitUpdateAutomation} from '../relay/UpdateAutomationMutation';
-import {chip, panel, statusDot} from '../routes/automation.styles';
+import {chip, statusDot} from '../routes/automation.styles';
 import {pill} from './AutomationDetail.styles';
-import {AutomationForm} from './AutomationForm';
-import {BoltIcon, CalendarIcon, CodeIcon, EyeIcon, WebhookIcon, XIcon} from './icons';
-import {closeBtn} from './ui';
+import {AutomationEditor, AutomationEditorLoading} from './AutomationEditor';
+import {BoltIcon, CalendarIcon, CodeIcon, EyeIcon, WebhookIcon} from './icons';
 
 /* The pieces the automation list, detail and run pages share. */
 
@@ -69,6 +68,7 @@ export function toggledPayload(auto: Automation): CreateAutomationPayload {
     webhook_body: auto.webhook_body,
     schedule: auto.schedule,
     enabled: !auto.enabled,
+    stateful: auto.stateful,
     notifications: auto.notifications,
   };
 }
@@ -83,49 +83,21 @@ export function AutomationFormPanel({
 }) {
   const toast = useToast();
 
+  // A failure rejects back into the sheet, which shows it and stays open.
   async function handleSave(payload: CreateAutomationPayload) {
-    try {
-      if (editing) {
-        await commitUpdateAutomation(editing.id, payload);
-        toast.push('Automation updated', 'success');
-      } else {
-        await commitCreateAutomation(payload);
-        toast.push('Automation created', 'success');
-      }
-      await refreshAutomationList();
-      onClose();
-    } catch (err) {
-      toast.push((err as Error).message || 'Failed to save', 'error');
-    }
+    if (editing) await commitUpdateAutomation(editing.id, payload);
+    else await commitCreateAutomation(payload);
+    toast.push(editing ? 'Automation updated' : 'Automation created', 'success');
+    await refreshAutomationList();
+    onClose();
   }
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
+  // The editor suspends on the model catalog the first time; the empty sheet
+  // stands in so the page behind it doesn't drop to its own fallback.
   return (
-    <>
-      <div {...stylex.props(panel.backdrop)} onClick={onClose} />
-      <div {...stylex.props(panel.root)}>
-        <div {...stylex.props(panel.header)}>
-          <span>{editing ? 'Edit Automation' : 'New Automation'}</span>
-          <button {...stylex.props(closeBtn.base)} onClick={onClose} aria-label="Close">
-            <XIcon size={14} />
-          </button>
-        </div>
-        <div {...stylex.props(panel.body)}>
-          <AutomationForm
-            initialValues={editing ?? undefined}
-            onSave={handleSave}
-            onCancel={onClose}
-          />
-        </div>
-      </div>
-    </>
+    <Suspense fallback={<AutomationEditorLoading onClose={onClose} />}>
+      <AutomationEditor editing={editing} onSave={handleSave} onClose={onClose} />
+    </Suspense>
   );
 }
 
