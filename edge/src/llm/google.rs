@@ -381,7 +381,7 @@ mod tests {
     }
 
     fn body(name: &str, p: &Prompt) -> Value {
-        render(name, &Request { model: "", prompt: p, tools: &[], blobs: &Blobs::new(), effort: None }).unwrap()
+        render(name, &Request { model: "", prompt: p, tools: &[], blobs: &Blobs::new(), effort: None, cache_key: None }).unwrap()
     }
 
     #[test]
@@ -455,7 +455,7 @@ mod tests {
             description: "Run".into(),
             parameters: json!({"type": "object", "properties": {"t": {"type": ["integer", "null"]}}}),
         }];
-        let b = render("gemma", &Request { model: "", prompt: &p, tools: &tools, blobs: &blobs, effort: None }).unwrap();
+        let b = render("gemma", &Request { model: "", prompt: &p, tools: &tools, blobs: &blobs, effort: None, cache_key: None }).unwrap();
         assert_eq!(b["contents"][0]["parts"][1], json!({"inlineData": {"mimeType": "image/png", "data": "iVBO"}}));
         assert_eq!(
             b["tools"],
@@ -463,7 +463,7 @@ mod tests {
                 "parametersJsonSchema": {"type": "object", "properties": {"t": {"type": ["integer", "null"]}}}}]}])
         );
         let missing = Blobs::new();
-        assert!(render("gemma", &Request { model: "", prompt: &p, tools: &[], blobs: &missing, effort: None }).is_err());
+        assert!(render("gemma", &Request { model: "", prompt: &p, tools: &[], blobs: &missing, effort: None, cache_key: None }).is_err());
     }
 
     #[test]

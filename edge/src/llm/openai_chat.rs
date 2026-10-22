@@ -337,7 +337,7 @@ mod tests {
         ]));
         let layout = Layout { system: "S", segments: &[], volatile: "todo", cache: true, provider: "openrouter", append_only: false };
         let p = build(&layout, history);
-        let b = render("anthropic/claude", &Request { model: "", prompt: &p, tools: &[], blobs: &Blobs::new(), effort: None }).unwrap();
+        let b = render("anthropic/claude", &Request { model: "", prompt: &p, tools: &[], blobs: &Blobs::new(), effort: None, cache_key: None }).unwrap();
         assert_eq!(
             b["messages"],
             json!([
