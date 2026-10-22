@@ -57,6 +57,11 @@ pub struct Request<'a> {
     /// How hard the model works on this call (`low` … `max`), for the
     /// models that take it; `None` leaves the model's default.
     pub effort: Option<&'a str>,
+    /// Which calls share a prompt prefix — a conversation, a worker. Sent as
+    /// Responses' `prompt_cache_key`, it keeps a thread's calls on the server
+    /// holding its cached prefix; without it about one follow-up in seven
+    /// missed the cache on Meta.
+    pub cache_key: Option<&'a str>,
 }
 
 /// What arrives while the reply streams: its text and thinking, and the
@@ -340,7 +345,7 @@ pub async fn ask(
         cached: false,
     };
     let ends = Endpoints { compatible: crate::catalog::endpoints(pool).await.unwrap_or_default(), ..Endpoints::from_env() };
-    let req = Request { model, prompt: &prompt, tools: &[], blobs: &Default::default(), effort: None };
+    let req = Request { model, prompt: &prompt, tools: &[], blobs: &Default::default(), effort: None, cache_key: None };
     let reply = complete(http, &ends, &req, &mut |_| {}).await?;
     Ok(match reply.message.content {
         Content::Text(s) => vec![s],
@@ -419,6 +424,8 @@ struct CliInput {
     kind: String,
     #[serde(default)]
     effort: Option<String>,
+    #[serde(default)]
+    cache_key: Option<String>,
 }
 
 fn chat() -> String {
@@ -472,6 +479,7 @@ pub async fn cli(call: bool) {
         tools: &input.tools,
         blobs: &input.blobs,
         effort: input.effort.as_deref(),
+        cache_key: input.cache_key.as_deref(),
     };
     let mut print = |d: Delta| match d {
         Delta::Text(t) => println!("{}", serde_json::json!({"text": t})),
@@ -555,7 +563,7 @@ mod effort_tests {
     /// The request body each client makes for `model` (a catalog id) at `effort`.
     fn body(model: &str, effort: Option<&str>) -> Value {
         let p = prompt();
-        let req = Request { model, prompt: &p, tools: &[], blobs: &Default::default(), effort };
+        let req = Request { model, prompt: &p, tools: &[], blobs: &Default::default(), effort, cache_key: None };
         let (provider, name) = model.split_once(':').unwrap();
         match provider {
             "anthropic" => anthropic::render(name, &req),

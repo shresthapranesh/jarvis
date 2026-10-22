@@ -118,6 +118,9 @@ pub fn render(name: &str, req: &Request<'_>) -> Result<Value, Error> {
     if let Some(effort) = req.effort {
         body["reasoning"] = json!({"effort": effort});
     }
+    if let Some(key) = req.cache_key {
+        body["prompt_cache_key"] = key.into();
+    }
     Ok(body)
 }
 
@@ -387,7 +390,7 @@ mod tests {
         ]))
         .unwrap();
         let p = Prompt { system: vec![SystemBlock { text: "S".into(), breakpoint: false }], messages: msgs, history_breakpoint: None, cached: false };
-        let b = render("m", &Request { model: "", prompt: &p, tools: &[], blobs: &Blobs::new(), effort: None }).unwrap();
+        let b = render("m", &Request { model: "", prompt: &p, tools: &[], blobs: &Blobs::new(), effort: None, cache_key: None }).unwrap();
         assert_eq!(
             b["input"],
             json!([
@@ -402,6 +405,16 @@ mod tests {
                 {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done", "annotations": []}]},
             ])
         );
+    }
+
+    #[test]
+    fn a_cache_key_is_sent_when_given() {
+        let msgs: Vec<Message> = serde_json::from_value(json!([{"v": 1, "role": "user", "content": "q"}])).unwrap();
+        let p = Prompt { system: vec![], messages: msgs, history_breakpoint: None, cached: false };
+        let blobs = Blobs::new();
+        let req = |cache_key| Request { model: "", prompt: &p, tools: &[], blobs: &blobs, effort: None, cache_key };
+        assert_eq!(render("m", &req(Some("thread-1"))).unwrap()["prompt_cache_key"], json!("thread-1"));
+        assert!(render("m", &req(None)).unwrap().get("prompt_cache_key").is_none());
     }
 
     #[test]

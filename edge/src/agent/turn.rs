@@ -372,6 +372,7 @@ impl<'a> Turn<'a> {
             tools: bound,
             blobs: &thread.blobs,
             effort: super::effort(self.pool(), &self.model, self.kind.name(), chosen.as_deref()).await,
+            cache_key: Some(&self.thread_id),
         };
 
         let events = &mut self.events;

@@ -763,7 +763,7 @@ mod tests {
             cached: false,
         };
         let body = |name: &str, effort| {
-            render(name, &Request { model: "", prompt: &p, tools: &[], blobs: &Default::default(), effort }).unwrap()
+            render(name, &Request { model: "", prompt: &p, tools: &[], blobs: &Default::default(), effort, cache_key: None }).unwrap()
         };
         let current = body("claude-opus-5-5", Some("medium"));
         assert_eq!(
@@ -839,7 +839,7 @@ mod tests {
             let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(model, history.clone()));
             let prompt = shape::build(&layout, shaped);
             let mut body = render("claude-opus-5-5", &Request {
-                model, prompt: &prompt, tools: &[], blobs: &Default::default(), effort: None,
+                model, prompt: &prompt, tools: &[], blobs: &Default::default(), effort: None, cache_key: None,
             })
             .unwrap();
             fn unmark(v: &mut Value) {

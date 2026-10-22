@@ -143,6 +143,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             tools: &self.bound.schemas,
             blobs: &blobs,
             effort: crate::agent::effort(pool, self.model, "workflow", None).await,
+            cache_key: None,
         };
         let (env, node_id, text) = (self.env, self.node_id, &mut self.text);
         let mut on_delta = |d: Delta| {

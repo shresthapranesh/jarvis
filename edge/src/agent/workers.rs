@@ -339,6 +339,8 @@ impl<'c, 'a> Worker<'c, 'a> {
             tools: &self.tools.schemas,
             blobs: &blobs,
             effort: super::effort(&ctx.agent.pool, &ctx.model, "worker", None).await,
+            // Its kernel's key: the worker's own, so its calls stay together.
+            cache_key: Some(&self.kernel),
         };
         let tail = &mut self.tail;
         let mut on_delta = |d: Delta| {
