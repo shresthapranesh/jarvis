@@ -29,6 +29,7 @@ mod rest;
 mod runs;
 mod schedule;
 mod schema;
+mod transcribe;
 mod uploads;
 mod web;
 

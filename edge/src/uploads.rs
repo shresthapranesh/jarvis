@@ -33,6 +33,9 @@ pub const MAX_UPLOAD_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
 /// The image types every provider the edge calls reads.
 const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+/// The most of a transcript the prompt carries — about 5k tokens, or half an
+/// hour of speech; the whole one is a file beside the audio.
+const MAX_TRANSCRIPT_CHARS: usize = 20_000;
 /// A staged file no turn took within this long is swept on the next upload.
 const STAGED_FOR: Duration = Duration::from_secs(60 * 60);
 
@@ -202,6 +205,11 @@ impl Attachment {
     fn seen(&self) -> bool {
         IMAGE_TYPES.contains(&self.mime_type.as_str()) && self.size <= MAX_IMAGE_BYTES
     }
+
+    /// Transcribed, when a transcription model is set.
+    fn heard(&self) -> bool {
+        self.mime_type.starts_with("audio/")
+    }
 }
 
 /// Move each staged file into the conversation's uploads directory. A name
@@ -249,16 +257,47 @@ pub fn display(query: &str, attachments: &[Attachment]) -> String {
     crate::pyjson::dumps(&Value::Array(parts))
 }
 
-/// The turn's prompt: the query, a note of where each file is, and the images
-/// the model can see. The blobs the image parts name are written, and added to
-/// `blobs` for this turn's calls.
-pub async fn prompt(pool: &SqlitePool, query: &str, attachments: &[Attachment], blobs: &mut Blobs) -> Result<Content, String> {
+/// The turn's prompt: the query, a note of where each file is, the images
+/// the model can see, and what was said in the audio when `transcription.model`
+/// names a model (`transcribe.rs`). The blobs the image parts name are written,
+/// and added to `blobs` for this turn's calls.
+pub async fn prompt(
+    pool: &SqlitePool,
+    http: &reqwest::Client,
+    query: &str,
+    attachments: &[Attachment],
+    blobs: &mut Blobs,
+) -> Result<Content, String> {
+    let transcriber = match attachments.iter().any(Attachment::heard) {
+        true => crate::transcribe::model(pool).await,
+        false => None,
+    };
+    let ends = crate::llm::Endpoints::from_env();
     let mut note = String::from("[Attached — saved in the workspace; open them with run_cell:");
+    let mut transcripts = String::new();
     for a in attachments {
-        let seen = if a.seen() { ", also shown to you as an image" } else { "" };
-        note.push_str(&format!("\n- {} ({}, {}{seen})", a.path, a.mime_type, human_size(a.size)));
+        let extra = match &transcriber {
+            _ if a.seen() => ", also shown to you as an image".to_string(),
+            Some(model) if a.heard() => {
+                match crate::transcribe::transcribe(http, &ends, model, Path::new(&a.path)).await {
+                    Ok(text) if text.trim().is_empty() => ", no speech in it".to_string(),
+                    Ok(text) => {
+                        let kept = crate::transcribe::transcript_path(Path::new(&a.path));
+                        transcripts.push_str(&format!("\n\n[Transcript of {}]\n{}", a.name, clip(&text, &kept)));
+                        format!(", transcript below and in {}", kept.display())
+                    }
+                    Err(e) => {
+                        tracing::warn!("{} not transcribed: {e}", a.path);
+                        format!(", couldn't be transcribed: {e}")
+                    }
+                }
+            }
+            _ => String::new(),
+        };
+        note.push_str(&format!("\n- {} ({}, {}{extra})", a.path, a.mime_type, human_size(a.size)));
     }
     note.push(']');
+    note.push_str(&transcripts);
     let text = if query.trim().is_empty() { note } else { format!("{query}\n\n{note}") };
     let mut parts = vec![Part::Typed(Typed::Text { text, signature: None, extras: Default::default() })];
     for a in attachments.iter().filter(|a| a.seen()) {
@@ -293,6 +332,15 @@ pub async fn prompt(pool: &SqlitePool, query: &str, attachments: &[Attachment], 
         })));
     }
     Ok(Content::Parts(parts))
+}
+
+/// A transcript as the prompt carries it: whole up to `MAX_TRANSCRIPT_CHARS`,
+/// past that cut, with where the rest is.
+fn clip(text: &str, kept: &Path) -> String {
+    match text.char_indices().nth(MAX_TRANSCRIPT_CHARS) {
+        None => text.to_string(),
+        Some((at, _)) => format!("{}…\n[cut at {MAX_TRANSCRIPT_CHARS} characters — the whole transcript is in {}]", &text[..at], kept.display()),
+    }
 }
 
 fn human_size(bytes: u64) -> String {

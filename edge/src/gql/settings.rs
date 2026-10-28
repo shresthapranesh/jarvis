@@ -72,6 +72,16 @@ const KNOWN: &[Spec] = &[
         restart_required: false,
     },
     Spec {
+        key: "transcription.model",
+        label: "Transcription model",
+        description: "Model that transcribes audio attached in chat; the agent gets the transcript with the file. Meta's `meta:muse-voice-transcribe-1.0` (needs META_API_KEY) or a Gemini model such as `google_genai:gemini-3.1-flash-lite` (needs GOOGLE_API_KEY). Unset, audio is only a file.",
+        managed_by: "",
+        kind: "text",
+        choices: &[],
+        placeholder: "meta:muse-voice-transcribe-1.0",
+        restart_required: false,
+    },
+    Spec {
         key: "embedding.model",
         label: "Embedding model",
         description: "Gemini embedding model for vector memory, skills and episodes. Needs GOOGLE_API_KEY. Applied immediately; already-embedded content keeps its old vectors.",

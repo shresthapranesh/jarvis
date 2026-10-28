@@ -1,6 +1,6 @@
 """Chat attachments (`edge/src/uploads.rs`): `POST /uploads` stages a file,
-`startTask` sends it, the turn saves it where the agent can open it and shows
-an image to the model.
+`startTask` sends it, the turn saves it where the agent can open it, shows
+an image to the model and has audio transcribed (`edge/src/transcribe.rs`).
 
 A real edge over a fresh database, its model a fake Ollama that records what
 it was sent. Skipped when `cargo` isn't installed.
@@ -9,9 +9,14 @@ it was sent. Skipped when `cargo` isn't installed.
 from __future__ import annotations
 
 import base64
+import email.parser
+import io
 import json
+import math
 import sqlite3
+import struct
 import threading
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -28,16 +33,56 @@ PNG = base64.b64decode(
 )
 
 
+def _wav(rate: int, channels: int, secs: float) -> bytes:
+    """A 440 Hz tone, 16-bit PCM."""
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        frames = (int(12000 * math.sin(2 * math.pi * 440 * i / rate)) for i in range(int(rate * secs)))
+        w.writeframes(b"".join(struct.pack("<h", s) * channels for s in frames))
+    return out.getvalue()
+
+
 class FakeOllama:
-    """Answers every chat with "seen", and keeps each request's body."""
+    """Answers every chat with "seen", and keeps each request's body. Also
+    Meta's `/asr/transcribe` and Gemini's `streamGenerateContent`, as speech
+    to text, each answering `heard`."""
 
     def __init__(self) -> None:
         self.requests: list[dict] = []
+        self.meta: list[dict] = []
+        self.gemini: list[dict] = []
+        self.heard = "hello there"
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):  # noqa: N802 — the stdlib's name
-                body = json.loads(self.rfile.read(int(self.headers["content-length"])) or b"{}")
+                raw = self.rfile.read(int(self.headers["content-length"]))
+                if self.path == "/v1/asr/transcribe":
+                    form = email.parser.BytesParser().parsebytes(
+                        f"content-type: {self.headers['content-type']}\r\n\r\n".encode() + raw)
+                    parts = {p.get_param("name", header="content-disposition"): p for p in form.get_payload()}
+                    fake.meta.append({
+                        "auth": self.headers["authorization"],
+                        "request": json.loads(parts["request"].get_payload(decode=True)),
+                        "request_type": parts["request"].get_content_type(),
+                        "audio": parts["audio"].get_payload(decode=True),
+                    })
+                    self._json({"sessionId": "s", "transcript": fake.heard, "audioDurationMs": 2000, "turns": []})
+                    return
+                if ":streamGenerateContent" in self.path:
+                    fake.gemini.append({"path": self.path, "body": json.loads(raw)})
+                    reply = {"candidates": [{"content": {"role": "model", "parts": [{"text": fake.heard}]},
+                                             "finishReason": "STOP"}],
+                             "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 2}}
+                    self.send_response(200)
+                    self.send_header("content-type", "text/event-stream")
+                    self.end_headers()
+                    self.wfile.write(f"data: {json.dumps(reply)}\r\n\r\n".encode())
+                    return
+                body = json.loads(raw or b"{}")
                 if self.path == "/api/embed":
                     self._json({"embeddings": [[1.0, 0.0] for _ in body.get("input", [])]})
                     return
@@ -184,3 +229,93 @@ async def test_upload_needs_a_file(edge_binary, tmp_path: Path):
         assert resp.status_code == 400 and resp.json() == {"error": "no `file` field in the form"}
         resp = await client.post("/uploads", content=b"not a form")
         assert resp.status_code == 400
+
+
+SET = "mutation($k: String!, $v: String!) { setSetting(key: $k, value: $v) { setting { key value } } }"
+
+
+async def _transcribed(edge_binary, tmp_path: Path, fake: FakeOllama, model: str, env: dict[str, str],
+                       audio: bytes) -> tuple[Path, str]:
+    """Send `audio` as clip.wav with `transcription.model` set to `model`;
+    the conversation's uploads directory and what the chat model was sent."""
+    work = tmp_path / "work"
+    work.mkdir()
+    db = work / "database.db"
+    async with _run_edge(edge_binary, work, db, {"JARVIS_RUN_JOBS": "1", "OLLAMA_HOST": fake.url, **env}) as client:
+        await client.post("/graphql", json={"query": 'mutation { addModel(id: "ollama:fake", label: "Fake", provider: "ollama") { default } }'})
+        setting = await client.post("/graphql", json={"query": SET, "variables": {"k": "transcription.model", "v": model}})
+        assert "errors" not in setting.json(), setting.text
+        clip = await _upload(client, "clip.wav", audio, "audio/wav")
+        started = await _start(client, query="What did they say?", attachmentUploads=[{"uploadId": clip["uploadId"]}])
+        conv = started["data"]["startTask"]["conversationId"]
+
+        async def replied() -> bool:
+            with sqlite3.connect(db) as c:
+                row = c.execute("SELECT status FROM messages WHERE conversation_id = ? AND role = 'assistant'",
+                                (conv,)).fetchone()
+            return row is not None and row[0] == "done"
+
+        await until(replied, timeout=30)
+    [user] = [m for m in fake.requests[0]["messages"] if m["role"] == "user"]
+    return work / "uploads" / conv, user["content"]
+
+
+def _sent_wav(data: bytes) -> wave.Wave_read:
+    w = wave.open(io.BytesIO(data))
+    assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, 16000)
+    return w
+
+
+async def test_audio_is_transcribed_by_meta(edge_binary, tmp_path: Path, fake: FakeOllama):
+    # 44.1 kHz stereo: mixed down and resampled to what Meta takes.
+    uploads, content = await _transcribed(
+        edge_binary, tmp_path, fake, "meta:muse-voice-transcribe-1.0",
+        {"MODEL_API_BASE": f"{fake.url}/v1", "META_API_KEY": "test-key"}, _wav(44100, 2, 2.0))
+    [call] = fake.meta
+    assert call["auth"] == "Bearer test-key"
+    assert call["request"] == {"model": "muse-voice-transcribe-1.0", "audioEncoding": "WAV"}
+    assert call["request_type"] == "application/json"
+    assert abs(_sent_wav(call["audio"]).getnframes() - 32000) <= 1
+    kept = uploads / "clip.wav.transcript.txt"
+    assert kept.read_text() == "hello there"
+    assert f"{uploads / 'clip.wav'} (audio/wav, 345 KB, transcript below and in {kept})]" in content
+    assert content.endswith("\n\n[Transcript of clip.wav]\nhello there")
+
+
+async def test_audio_is_transcribed_by_gemini(edge_binary, tmp_path: Path, fake: FakeOllama):
+    fake.heard = "hola"
+    uploads, content = await _transcribed(
+        edge_binary, tmp_path, fake, "google_genai:gemini-3.1-flash-lite",
+        {"JARVIS_GOOGLE_BASE_URL": fake.url, "GOOGLE_API_KEY": "test-key"}, _wav(16000, 1, 1.0))
+    [call] = fake.gemini
+    assert call["path"].startswith("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent")
+    [turn] = call["body"]["contents"]
+    [ask, audio] = turn["parts"]
+    assert ask == {"text": "Transcribe this recording."}
+    assert audio["inlineData"]["mimeType"] == "audio/wav"
+    assert _sent_wav(base64.b64decode(audio["inlineData"]["data"])).getnframes() == 16000
+    assert content.endswith("\n\n[Transcript of clip.wav]\nhola")
+    assert (uploads / "clip.wav.transcript.txt").read_text() == "hola"
+
+
+async def test_audio_that_cant_be_read_says_why(edge_binary, tmp_path: Path, fake: FakeOllama):
+    uploads, content = await _transcribed(
+        edge_binary, tmp_path, fake, "meta:muse-voice-transcribe-1.0",
+        {"MODEL_API_BASE": f"{fake.url}/v1", "META_API_KEY": "test-key"}, b"not audio at all")
+    assert fake.meta == []
+    assert f"{uploads / 'clip.wav'} (audio/wav, 16 B, couldn't be transcribed: not an audio format" in content
+    assert "[Transcript of" not in content
+
+
+async def test_silence_sends_nothing(edge_binary, tmp_path: Path, fake: FakeOllama):
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 16000)
+    uploads, content = await _transcribed(
+        edge_binary, tmp_path, fake, "meta:muse-voice-transcribe-1.0",
+        {"MODEL_API_BASE": f"{fake.url}/v1", "META_API_KEY": "test-key"}, out.getvalue())
+    assert fake.meta == []
+    assert "(audio/wav, 31 KB, no speech in it)]" in content

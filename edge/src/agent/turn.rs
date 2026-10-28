@@ -201,7 +201,7 @@ impl<'a> Turn<'a> {
         let content = if self.attachments.is_empty() {
             Content::Text(self.query.clone())
         } else {
-            crate::uploads::prompt(self.pool(), &self.query, &self.attachments, &mut thread.blobs)
+            crate::uploads::prompt(self.pool(), &self.agent.http, &self.query, &self.attachments, &mut thread.blobs)
                 .await
                 .map_err(|e| Stop::Failed(format!("reading the attachments: {e}")))?
         };
