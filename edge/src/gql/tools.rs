@@ -30,11 +30,13 @@ const BOUND: &[(&str, &str)] = &[
     ("remember", "Write a long-term memory item. Bound only when an embedder is configured."),
     ("complete_task", "Finish the current board task. Bound only inside a board run."),
     ("block_task", "Block the current board task or ask its owner a question. Board runs only."),
+    ("ask_user", "Ask the user a question with options to click, and wait for the answer. Web chats only."),
 ];
 
 /// `_BOUND_CONDITIONAL`. `remember`'s note only shows without an embedder,
 /// and there always is one (Gemini with a key, else Ollama).
-const BOUND_DETAIL: &[(&str, &str)] = &[("complete_task", "board runs only"), ("block_task", "board runs only")];
+const BOUND_DETAIL: &[(&str, &str)] =
+    &[("complete_task", "board runs only"), ("block_task", "board runs only"), ("ask_user", "web chats only")];
 
 #[derive(Deserialize)]
 struct SdkTool {

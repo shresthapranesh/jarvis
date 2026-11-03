@@ -65,12 +65,30 @@ interface StreamState {
   artifacts: ArtifactRef[];
   todos: TodoItem[] | null;
   error: string | null;
-  // A per-tool gate (edge/src/approvals.rs) the run is blocked on, inside the tool
-  // call; answering it resolves the durable row `approvalId`.
-  pendingInterrupt: {question: string; approvalId: string} | null;
+  // What the run is blocked on, inside the tool call: a per-tool gate
+  // (edge/src/approvals.rs) or the agent's `ask_user` question. Answering it
+  // resolves the durable row `approvalId`.
+  pendingInterrupt: PendingInterrupt | null;
   budget: BudgetInfo | null;
   perf: PerfInfo | null;
 }
+
+export interface InterruptOption {
+  label: string;
+  description?: string | null;
+}
+
+export interface PendingInterrupt {
+  kind: 'gate' | 'question';
+  question: string;
+  approvalId: string;
+  // Answers the user can click; they can always type their own instead.
+  options: InterruptOption[];
+  multiSelect: boolean;
+}
+
+// A gate reads its answer as yes/no (`approvals::is_affirmative`).
+const GATE_OPTIONS: InterruptOption[] = [{label: 'Approve'}, {label: 'Deny'}];
 
 const EMPTY_STATE: StreamState = {
   streaming: false,
@@ -210,6 +228,19 @@ const taskEventsSubscription = graphql`
         tool
         approved
         answer
+      }
+      ... on QuestionRequestEvent {
+        # Aliased: ApprovalRequestEvent's approvalId is nullable.
+        questionId: approvalId
+        question
+        options {
+          label
+          description
+        }
+        multiSelect
+      }
+      ... on QuestionResolvedEvent {
+        questionId: approvalId
       }
       ... on WorkflowToolEvent {
         parentRunId
@@ -443,12 +474,44 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             if (!evt.approvalId) break;
             const approvalId = evt.approvalId;
             const q = `${evt.tool}: ${evt.reason}\n${evt.args ? `Args: ${evt.args}` : ''}`;
-            setState((s) => ({...s, pendingInterrupt: {question: q, approvalId}}));
+            setState((s) => ({
+              ...s,
+              pendingInterrupt: {
+                kind: 'gate',
+                question: q,
+                approvalId,
+                options: GATE_OPTIONS,
+                multiSelect: false,
+              },
+            }));
             break;
           }
           case 'ApprovalResolvedEvent':
             setState((s) => ({...s, pendingInterrupt: null}));
             break;
+          case 'QuestionRequestEvent': {
+            // The agent's `ask_user`: the run waits inside the call until the
+            // row is answered.
+            const {questionId, question, options, multiSelect} = evt;
+            setState((s) => ({
+              ...s,
+              pendingInterrupt: {
+                kind: 'question',
+                question,
+                approvalId: questionId,
+                options: [...options],
+                multiSelect,
+              },
+            }));
+            break;
+          }
+          case 'QuestionResolvedEvent': {
+            const {questionId} = evt;
+            setState((s) =>
+              s.pendingInterrupt?.approvalId === questionId ? {...s, pendingInterrupt: null} : s,
+            );
+            break;
+          }
           case 'WorkflowToolEvent':
             // Treat workflow sub-agent events as steps for now
             break;

@@ -1,10 +1,11 @@
 //! `resolveApproval` (`server/graphql/mutations/approval.py`, `core/approvals.py:resolve`)
 //! and `requestToolApproval` (`server/graphql/mutations/tool.py`) — ports.
 //!
-//! Every answer lives in a row: a tool gate (the waiter polls the row), a
-//! board task's question, a paused workflow node, and a deferred action — a
-//! denial, or an approved delete of a workflow, automation or skill, or MCP
-//! call (`ACTIONS`' executors). `gate_action` records the deferred ones.
+//! Every answer lives in a row: a tool gate or an agent's `ask_user` (the
+//! waiter polls the row), a board task's question, a paused workflow node,
+//! and a deferred action — a denial, or an approved delete of a workflow,
+//! automation or skill, or MCP call (`ACTIONS`' executors). `gate_action`
+//! records the deferred ones.
 
 use std::sync::Arc;
 
@@ -286,6 +287,13 @@ impl ApprovalMutation {
             // prompt is told to stop showing it.
             emit(run.as_ref(), "approval_resolved", &approvals::resolved_event(row.tool.as_deref().unwrap_or(""), approved, answer));
             return Ok(ResolveApprovalPayload { id, status: status.into(), result: Some(result.into()) });
+        }
+        if row.source == approvals::ASK_SOURCE {
+            // The agent's question: the turn polls the row for the answer.
+            let run = run_of(registry, row.task_id.as_deref(), row.parent_id.as_deref());
+            close(pool, &id, "answered", answer, "Delivered to the run.").await?;
+            emit(run.as_ref(), "question_resolved", &approvals::answered_event(&id, answer));
+            return Ok(ResolveApprovalPayload { id, status: "answered".into(), result: Some("Delivered to the run.".into()) });
         }
         if let Some(task) = &row.board_task_id {
             super::board::answer_task(pool, ctx.data::<EdgeData>()?, task, answer).await?;

@@ -7,7 +7,7 @@
 //! The bound tools are `run_cell`, `write_artifact`, the todo tools,
 //! `remember`, `spawn_workers` (`workers.rs`, whose roles' tools are in
 //! `tools.json` too), `run_workflow` (`workflow/`), the board tools on a
-//! board run, and the `always` MCP servers' tools (whose schemas are
+//! board run, `ask_user` in a web chat, and the `always` MCP servers' tools (whose schemas are
 //! converted as `convert_to_openai_tool` converts them, `mcp::llm_tool`). A
 //! call a human must approve waits for them (`Step::Gated`). A call naming no
 //! bound tool, or with arguments its signature won't take (`Args`), is
@@ -123,6 +123,16 @@ pub fn bound_named(policy: &Policy, names: &[&str], mcp: Option<&crate::mcp::Sna
     set
 }
 
+/// `ask_user`, bound only where someone can answer in the chat: after the
+/// edge's own tools, before the MCP servers'.
+pub fn bind_ask_user(set: &mut Toolset, policy: &Policy) {
+    if !policy.enabled("ask_user") {
+        return;
+    }
+    let at = set.schemas.iter().position(|t| set.mcp.contains_key(&t.name)).unwrap_or(set.schemas.len());
+    set.schemas.insert(at, schema("ask_user"));
+}
+
 impl Toolset {
     /// The server a bound MCP tool is called on.
     pub fn mcp_server(&self, name: &str) -> Option<&str> {
@@ -141,11 +151,28 @@ pub enum Native {
     CompleteTask { summary: String, metadata: Option<String> },
     BlockTask { reason: String, needs_input: bool },
     SpawnWorkers { tasks: Vec<super::workers::Task> },
+    /// A question for the user in the chat, answered by a click or in words.
+    AskUser { question: String, options: Vec<Choice>, multi_select: bool },
     /// A saved workflow, run to its outputs (`workflow/mod.rs`).
     RunWorkflow { workflow_id: String, inputs_json: Option<String> },
     /// A bound MCP server's tool; the server checks the arguments.
     Mcp { server: String, tool: String, args: Value },
 }
+
+/// One of `ask_user`'s options.
+#[derive(Debug, PartialEq, Clone, serde::Serialize)]
+pub struct Choice {
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// `ask_user` where nobody is in the chat to answer.
+pub const ASK_NOWHERE: &str =
+    "Error: ask_user is only available in a chat in the web app \u{2014} nobody here can answer. Decide yourself and say what you assumed.";
+
+/// How many options a question may offer.
+const CHOICES: std::ops::RangeInclusive<usize> = 2..=6;
 
 #[derive(Debug, PartialEq)]
 pub enum Step {
@@ -225,6 +252,11 @@ fn native(name: &str, args: &Value) -> Result<Native, String> {
             Native::SpawnWorkers { tasks: tasks.unwrap_or_default() }
         }
         "run_workflow" => Native::RunWorkflow { workflow_id: a.str("workflow_id"), inputs_json: a.opt_str("inputs_json") },
+        "ask_user" => Native::AskUser {
+            question: a.str("question"),
+            options: a.choices("options"),
+            multi_select: a.bool("multi_select", false),
+        },
         other => return Err(format!("Error: {other} has no handler.")),
     };
     a.finish(name, args, call)
@@ -400,6 +432,56 @@ impl<'v> Args<'v> {
         }
     }
 
+    /// `ask_user`'s options: objects with a `label` and an optional
+    /// `description` (a bare string is taken as a label), between two and
+    /// six of them, no label empty or repeated.
+    pub fn choices(&mut self, key: &str) -> Vec<Choice> {
+        let Some(raw) = self.value(key) else { return vec![] };
+        let Value::Array(items) = raw else {
+            self.fail(key, "Input should be a valid list");
+            return vec![];
+        };
+        let mut out: Vec<Choice> = vec![];
+        for (i, item) in items.iter().enumerate() {
+            let (label, description) = match item {
+                Value::String(s) => (s.trim().to_string(), None),
+                Value::Object(o) => match (o.get("label"), o.get("description")) {
+                    (Some(Value::String(l)), None | Some(Value::Null)) => (l.trim().to_string(), None),
+                    (Some(Value::String(l)), Some(Value::String(d))) => {
+                        (l.trim().to_string(), Some(d.trim().to_string()).filter(|d| !d.is_empty()))
+                    }
+                    (Some(Value::String(_)), Some(_)) => {
+                        self.fail(&format!("{key}.{i}.description"), "Input should be a valid string");
+                        continue;
+                    }
+                    (None, _) => {
+                        self.fail(&format!("{key}.{i}.label"), "Field required");
+                        continue;
+                    }
+                    (Some(_), _) => {
+                        self.fail(&format!("{key}.{i}.label"), "Input should be a valid string");
+                        continue;
+                    }
+                },
+                _ => {
+                    self.fail(&format!("{key}.{i}"), "Input should be an object with a string `label`");
+                    continue;
+                }
+            };
+            if label.is_empty() {
+                self.fail(&format!("{key}.{i}.label"), "String should have at least 1 character");
+            } else if out.iter().any(|c| c.label == label) {
+                self.fail(&format!("{key}.{i}.label"), "Each option needs a different label");
+            } else {
+                out.push(Choice { label, description });
+            }
+        }
+        if !CHOICES.contains(&items.len()) {
+            self.fail(key, &format!("Give between {} and {} options", CHOICES.start(), CHOICES.end()));
+        }
+        out
+    }
+
     /// The raw value of a required key.
     pub fn value(&mut self, key: &str) -> Option<&'v Value> {
         let v = self.args.get(key);
@@ -505,6 +587,38 @@ mod tests {
             plan_one(call("set_todo_status", json!({"index": "2", "status": "done"})), &tools, &policy),
             Step::Run(Native::SetTodoStatus { index: 2, status: "done".into() })
         );
+    }
+
+    #[test]
+    fn a_question_is_bound_only_where_asked_for_and_its_options_checked() {
+        let policy = Policy::default();
+        let mut tools = bound_for(&policy, false, &no_mcp());
+        assert!(matches!(plan_one(call("ask_user", json!({})), &tools, &policy), Step::Refused(e) if e.contains("not a valid tool")));
+        bind_ask_user(&mut tools, &policy);
+        assert_eq!(tools.schemas.last().unwrap().name, "ask_user");
+        assert_eq!(
+            plan_one(
+                call("ask_user", json!({"question": "Which?", "options": [{"label": " A ", "description": "first"}, "B"]})),
+                &tools,
+                &policy
+            ),
+            Step::Run(Native::AskUser {
+                question: "Which?".into(),
+                options: vec![
+                    Choice { label: "A".into(), description: Some("first".into()) },
+                    Choice { label: "B".into(), description: None }
+                ],
+                multi_select: false,
+            })
+        );
+        let refused = |args: Value| match plan_one(call("ask_user", args), &tools, &policy) {
+            Step::Refused(e) => e,
+            other => panic!("{other:?}"),
+        };
+        assert!(refused(json!({"question": "Q?", "options": ["only"]})).contains("options: Give between 2 and 6 options"));
+        assert!(refused(json!({"question": "Q?", "options": ["a", "a"]})).contains("options.1.label: Each option needs a different label"));
+        assert!(refused(json!({"question": "Q?", "options": [{"description": "x"}, "b"]})).contains("options.0.label: Field required"));
+        assert!(refused(json!({"options": ["a", "b"]})).contains("question: Field required"));
     }
 
     #[test]

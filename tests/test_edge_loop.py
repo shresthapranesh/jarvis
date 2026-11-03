@@ -602,6 +602,9 @@ def _requests(python: list[dict], edge: list[dict]) -> None:
     assert len(edge) == len(python)
     for p, e in zip(python, edge):
         _intended_ollama(p, e)
+        # `ask_user` is the edge's own, bound in web chats after Python was gone.
+        if "tools" in e:
+            e["tools"] = [t for t in e["tools"] if t["function"]["name"] != "ask_user"]
         assert e["messages"] == p["messages"]
         assert [t["function"]["name"] for t in e.get("tools", [])] == [t["function"]["name"] for t in p.get("tools", [])]
         for et, pt in zip(e.get("tools", []), p.get("tools", [])):

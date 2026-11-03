@@ -233,7 +233,7 @@ type BudgetUpdateEvent {
 	snapshot: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | QuestionRequestEvent | QuestionResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
 	title: String
@@ -854,6 +854,33 @@ type Query {
 		"""
 		id: ID!
 	): Node!
+}
+
+"""
+One option of an agent's question.
+"""
+type QuestionOption {
+	label: String!
+	description: String
+}
+
+"""
+The agent asked the user something (`ask_user`) and is waiting inside
+the call; the answer resolves the approval row `approval_id`.
+"""
+type QuestionRequestEvent {
+	approvalId: String!
+	question: String!
+	options: [QuestionOption!]!
+	multiSelect: Boolean!
+}
+
+"""
+The question was answered (or timed out, with an empty answer).
+"""
+type QuestionResolvedEvent {
+	approvalId: String!
+	answer: String!
 }
 
 type QueueMessagePayload {

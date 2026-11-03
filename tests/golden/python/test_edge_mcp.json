@@ -1597,6 +1597,19 @@
        },
        {
         "available": true,
+        "description": "Ask the user a question with options to click, and wait for the answer. Web chats only.",
+        "detail": "web chats only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:ask_user",
+        "inPrompt": true,
+        "key": "bound:ask_user",
+        "kind": "bound",
+        "name": "ask_user",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
         "description": "Saved artifacts, newest first — current conversation unless all_conversations.",
         "detail": "",
         "enabled": true,
@@ -2211,6 +2224,19 @@
         "key": "bound:block_task",
         "kind": "bound",
         "name": "block_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Ask the user a question with options to click, and wait for the answer. Web chats only.",
+        "detail": "web chats only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:ask_user",
+        "inPrompt": true,
+        "key": "bound:ask_user",
+        "kind": "bound",
+        "name": "ask_user",
         "requiresApproval": false
        },
        {
@@ -2833,6 +2859,19 @@
         "key": "bound:block_task",
         "kind": "bound",
         "name": "block_task",
+        "requiresApproval": false
+       },
+       {
+        "available": true,
+        "description": "Ask the user a question with options to click, and wait for the answer. Web chats only.",
+        "detail": "web chats only",
+        "enabled": true,
+        "group": "agent",
+        "id": "bound:ask_user",
+        "inPrompt": true,
+        "key": "bound:ask_user",
+        "kind": "bound",
+        "name": "ask_user",
         "requiresApproval": false
        },
        {

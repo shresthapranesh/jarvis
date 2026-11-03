@@ -244,7 +244,10 @@ impl<'a> Turn<'a> {
         // What is bound is fixed for the run, as Python's built agent is.
         let mcp = self.agent.mcp.snapshot().await;
         let policy = Policy::load(self.pool(), &mcp).await;
-        let bound = tools::bound_for(&policy, matches!(self.kind, Kind::Board(_)), &mcp);
+        let mut bound = tools::bound_for(&policy, matches!(self.kind, Kind::Board(_)), &mcp);
+        if self.answerable().await {
+            tools::bind_ask_user(&mut bound, &policy);
+        }
         loop {
             self.take_step()?;
             let reply = self.model_step(thread, &bound.schemas, &mcp).await?;
@@ -275,6 +278,49 @@ impl<'a> Turn<'a> {
 
     fn cancelled(&self) -> bool {
         self.run.fields().cancelled
+    }
+
+    /// Whether someone can answer `ask_user` here: a chat in the web app,
+    /// which shows the question as a card. The bots can't show one yet.
+    async fn answerable(&self) -> bool {
+        if !matches!(self.kind, Kind::Chat) {
+            return false;
+        }
+        let surface: Option<String> = sqlx::query_scalar("SELECT surface FROM conversations WHERE id = ?")
+            .bind(&self.thread_id)
+            .fetch_optional(self.pool())
+            .await
+            .ok()
+            .flatten();
+        surface.as_deref() == Some("web")
+    }
+
+    /// `ask_user`: the question recorded and shown in the chat, then its row
+    /// polled until the user answers, as a gate waits. A stop while waiting
+    /// stops the run (the caller races it); the row is closed at the end.
+    async fn ask_user(&mut self, question: &str, options: &[tools::Choice], multi_select: bool) -> Result<String, String> {
+        if !matches!(self.kind, Kind::Chat) {
+            return Ok(tools::ASK_NOWHERE.into());
+        }
+        let request = crate::approvals::ask(
+            self.pool(),
+            question,
+            options,
+            multi_select,
+            self.conversation.as_deref(),
+            &self.task_id,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        self.events.emit("question_request", &request.event);
+        tracing::info!("ask_user: waiting on {}", request.id);
+        let outcome = crate::approvals::wait(self.pool(), &request.id, crate::approvals::gate_timeout())
+            .await
+            .map_err(|e| e.to_string())?;
+        if matches!(outcome, crate::approvals::Outcome::TimedOut) {
+            self.events.emit("question_resolved", &crate::approvals::answered_event(&request.id, ""));
+        }
+        Ok(crate::approvals::answer_message(&outcome))
     }
 
 
@@ -716,6 +762,7 @@ impl<'a> Turn<'a> {
                 }
                 Err(answer) => Ok(answer),
             },
+            Native::AskUser { question, options, multi_select } => self.ask_user(&question, &options, multi_select).await,
             Native::Mcp { .. } | Native::Remember { .. } | Native::SpawnWorkers { .. } | Native::RunWorkflow { .. } => {
                 unreachable!("runs in tool_step")
             }
