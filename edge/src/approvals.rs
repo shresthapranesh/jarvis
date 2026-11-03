@@ -122,6 +122,57 @@ pub async fn create(
     Ok(Request { id, event })
 }
 
+/// Where an agent's question (`ask_user`) is recorded from.
+pub const ASK_SOURCE: &str = "ask";
+
+/// `ask_user`'s pending row — an `input`, answered in words — and the
+/// `question_request` event that shows it in the chat. The options ride in
+/// `args_json`, so the inbox can offer them too.
+pub async fn ask(
+    pool: &SqlitePool,
+    question: &str,
+    options: &[crate::agent::tools::Choice],
+    multi_select: bool,
+    conversation_id: Option<&str>,
+    task_id: &str,
+) -> sqlx::Result<Request> {
+    let args = json!({"options": options, "multi_select": multi_select});
+    let (id, now) = (new_id(), now_stored());
+    sqlx::query(
+        "INSERT INTO approvals (id, source, kind, status, question, label, tool, args_json, task_id, parent_id, \
+         requested_at, updated_at) VALUES (?, ?, 'input', 'pending', ?, 'Question', 'ask_user', ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(ASK_SOURCE)
+    .bind(question)
+    .bind(pyjson::dumps(&args))
+    .bind(task_id)
+    .bind(conversation_id)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+    let event = json!({"approval_id": id, "question": question, "options": options, "multi_select": multi_select});
+    Ok(Request { id, event })
+}
+
+/// The `question_resolved` event: the chat stops showing the question.
+pub fn answered_event(id: &str, answer: &str) -> Value {
+    json!({"approval_id": id, "answer": answer})
+}
+
+/// What `ask_user` returns to the model.
+pub fn answer_message(outcome: &Outcome) -> String {
+    match outcome {
+        Outcome::Answered { answer, .. } if !answer.is_empty() => format!("The user answered: {answer}"),
+        Outcome::Answered { .. } => "The question was withdrawn without an answer. Decide yourself and say what you assumed.".into(),
+        Outcome::TimedOut => format!(
+            "The user didn't answer within {} minutes. Decide yourself and say what you assumed, or ask again later.",
+            gate_timeout().as_secs() / 60
+        ),
+    }
+}
+
 /// `announce_resolved`'s event.
 pub fn resolved_event(tool: &str, approved: bool, answer: &str) -> Value {
     json!({"tool": tool, "approved": approved, "answer": answer})

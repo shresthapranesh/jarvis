@@ -218,6 +218,43 @@
   }
  },
  {
+  "name": "ask_user",
+  "description": "Ask the user a question and wait for their answer.\n\nShown in the chat as a card with your options as buttons; the user clicks\none (or several, with multi_select) or types their own answer. Ask only\nwhat you can't settle yourself and that changes what you do next — one\nquestion per call, the decision alone. Put your recommendation first and\nsay so in its description.\n\nArgs:\n    question: The question, ending with a question mark.\n    options: 2-6 distinct choices, each a short label (1-5 words) and an\n             optional description of what picking it means. The user can\n             always answer in their own words instead.\n    multi_select: True when several options can be picked together.",
+  "parameters": {
+   "properties": {
+    "question": {
+     "type": "string"
+    },
+    "options": {
+     "items": {
+      "properties": {
+       "label": {
+        "type": "string"
+       },
+       "description": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "label"
+      ],
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "multi_select": {
+     "default": false,
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "question",
+    "options"
+   ],
+   "type": "object"
+  }
+ },
+ {
   "name": "read_file",
   "description": "Read text content from a file.\n\nPaths starting with memory/ are read from the persistent memory store.\nAll other paths are read from the filesystem.",
   "parameters": {

@@ -140,6 +140,30 @@ pub struct ApprovalResolvedEvent {
     pub answer: String,
 }
 
+/// One option of an agent's question.
+#[derive(SimpleObject, Clone)]
+pub struct QuestionOption {
+    pub label: String,
+    pub description: Option<String>,
+}
+
+/// The agent asked the user something (`ask_user`) and is waiting inside
+/// the call; the answer resolves the approval row `approval_id`.
+#[derive(SimpleObject, Clone)]
+pub struct QuestionRequestEvent {
+    pub approval_id: String,
+    pub question: String,
+    pub options: Vec<QuestionOption>,
+    pub multi_select: bool,
+}
+
+/// The question was answered (or timed out, with an empty answer).
+#[derive(SimpleObject, Clone)]
+pub struct QuestionResolvedEvent {
+    pub approval_id: String,
+    pub answer: String,
+}
+
 #[derive(SimpleObject, Clone)]
 pub struct WorkflowToolEvent {
     pub parent_run_id: String,
@@ -204,6 +228,8 @@ pub enum ChatEvent {
     QueuedConsumedEvent(QueuedConsumedEvent),
     ApprovalRequestEvent(ApprovalRequestEvent),
     ApprovalResolvedEvent(ApprovalResolvedEvent),
+    QuestionRequestEvent(QuestionRequestEvent),
+    QuestionResolvedEvent(QuestionResolvedEvent),
     WorkflowToolEvent(WorkflowToolEvent),
     BudgetExceededEvent(BudgetExceededEvent),
     BudgetUpdateEvent(BudgetUpdateEvent),
@@ -571,6 +597,27 @@ pub fn chat(raw: &Value) -> Result<Option<ChatEvent>> {
         "approval_resolved" => ChatEvent::ApprovalResolvedEvent(ApprovalResolvedEvent {
             tool: d.s("tool", "")?,
             approved: d.truthy("approved"),
+            answer: d.s("answer", "")?,
+        }),
+        "question_request" => {
+            let mut options = Vec::new();
+            if let Some(Value::Array(items)) = d.get("options") {
+                for o in items {
+                    if let Some(Value::String(label)) = o.get("label") {
+                        let description = o.get("description").and_then(Value::as_str).map(str::to_string);
+                        options.push(QuestionOption { label: label.clone(), description });
+                    }
+                }
+            }
+            ChatEvent::QuestionRequestEvent(QuestionRequestEvent {
+                approval_id: d.s("approval_id", "")?,
+                question: d.s("question", "")?,
+                options,
+                multi_select: d.truthy("multi_select"),
+            })
+        }
+        "question_resolved" => ChatEvent::QuestionResolvedEvent(QuestionResolvedEvent {
+            approval_id: d.s("approval_id", "")?,
             answer: d.s("answer", "")?,
         }),
         "workflow_event" => {

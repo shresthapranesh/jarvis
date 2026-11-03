@@ -278,6 +278,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             }
             Native::CompleteTask { .. } => Ok("Error: complete_task is only available while executing a board task.".into()),
             Native::BlockTask { .. } => Ok("Error: block_task is only available while executing a board task.".into()),
+            Native::AskUser { .. } => Ok(tools::ASK_NOWHERE.into()),
             Native::Mcp { .. } => unreachable!("runs in tool_step"),
         }
     }

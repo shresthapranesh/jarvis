@@ -670,10 +670,7 @@ function ConversationPage() {
       >
         <DeferredApprovals conversationId={id} />
         {pendingInterrupt && runningMsg && (
-          <InterruptPrompt
-            question={pendingInterrupt.question}
-            approvalId={pendingInterrupt.approvalId}
-          />
+          <InterruptPrompt key={pendingInterrupt.approvalId} interrupt={pendingInterrupt} />
         )}
         <InputBox
           onSubmit={handleSubmit}

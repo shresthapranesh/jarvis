@@ -353,6 +353,14 @@ Every chat turn, automation run, board task and workflow run.
   action. A request no live run is waiting on is closed `expired` with
   Python's "no longer waiting". `requestToolApproval` is the SDK's request
   from a kernel, on the same terms.
+- **Questions** (`ask_user`, bound only in a web chat — the bots can't show
+  one): the agent's question and 2–6 options become an `approvals` row
+  (`source = 'ask'`, `kind = 'input'`, the options in `args_json`), shown in
+  the chat as `question_request` and waited on as a gate is. The answer —
+  an option's label, several joined with ", ", or the user's own words —
+  comes through `resolveApproval` (status `answered`, `question_resolved`
+  emitted) and reaches the model as "The user answered: …". A timeout or a
+  stop ends the wait as a gate's does.
 - **Deferred actions** (`approval::gate_action`, a port of
   `core/approvals.py:gate_action` and `ACTIONS`): an agent's (`X-Jarvis-Caller:
   agent`) `deleteWorkflow`, `deleteSkill`, `deleteAutomation` or `callMcpTool`,
