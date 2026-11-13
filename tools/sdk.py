@@ -19,8 +19,8 @@ Two transports, chosen by what the operation needs:
   the mutation's own argument validation for free.
 
 What stays a bound tool: anything coupled to the agent loop — the todo tools,
-complete/block_task (current-run lifecycle), spawn_workers/run_workflow (runs
-on the agent's own model), write_artifact (its live event belongs to the run),
+complete/block_task (current-run lifecycle), run_agents/check_agents/run_workflow
+(sub-agents and workflows the server runs), write_artifact (its live event belongs to the run),
 and `remember`.
 
 The SDK needs nothing but the standard library, httpx and numpy: it finds the

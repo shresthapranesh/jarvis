@@ -1,25 +1,26 @@
-//! `spawn_workers` — a port of `tools/workers.py` and the worker roles of
-//! `core/agents.py` (`_ROLE_PROMPTS`, `_ROLE_TOOLS`, `_make_role_factory`).
+//! The roles an agent delegates to (`_ROLE_PROMPTS`, `_ROLE_TOOLS` of
+//! `core/agents.py`), and `spawn_workers` (a port of `tools/workers.py`) for
+//! a workflow's agent node.
 //!
-//! Each task runs on a worker, all at once: the run's model (or the
-//! `workers.model` setting's), a role's prompt and tools, a history of its
-//! own in memory, a kernel of its own. What a
-//! worker does reaches the run as `Note`s — its `worker_*` events, which the
-//! turn writes and announces in order as `core/streaming.py` does, and its
-//! model and tool calls, which count against the run's budget and usage as
-//! the parent's callbacks counted them in Python.
+//! A turn's sub-agents are conversations of their own, run as jobs
+//! (`turn.rs`, `Kind::Subagent`); they take only their role from here
+//! (`role`). A workflow's agent node has no conversation to hang them on, so
+//! its `spawn_workers` still runs each task on a worker in memory, all at
+//! once: the node's model (or the `workers.model` setting's), a role's prompt
+//! and tools, a history and a kernel of its own, gone when it answers. A
+//! worker's model and tool calls reach the node as `Note`s, which count
+//! against the workflow's budget.
 //!
 //! A worker answers unknown tools, arguments its tool's signature won't take
 //! (`tools::Args`) and gated calls itself.
 
 use std::sync::Arc;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::tools::{Args, Policy, Toolset};
 use super::{Agent, artifacts, files};
-use crate::llm::perf::CallPerf;
 use crate::llm::shape::{self, Layout};
 use crate::llm::transcript::{Content, Message, Part, Role, ToolCall, Typed};
 use crate::llm::{self, Delta, Endpoints, Request, compact};
@@ -28,8 +29,6 @@ use crate::{pyjson, pystr};
 const DEFAULT_ROLE: &str = "general";
 /// A worker's `recursion_limit`: generous, but under the main agent's.
 const RECURSION_LIMIT: u32 = 50;
-/// `_TokenTail`'s `max_chars`.
-const TAIL_CHARS: usize = 120;
 
 /// `_ROLE_PROMPTS`.
 const ROLES: [(&str, &str); 4] = [
@@ -77,6 +76,24 @@ fn role_tools(role: &str) -> (&'static [&'static str], bool) {
     }
 }
 
+/// A role a sub-agent's turn runs as (`turn.rs`): its prompt, its tools,
+/// and whether the `always` MCP servers' tools follow.
+#[derive(Clone, Copy, Debug)]
+pub struct RoleSpec {
+    pub name: &'static str,
+    pub prompt: &'static str,
+    pub tools: &'static [&'static str],
+    pub mcp: bool,
+}
+
+/// The role named `name` — the default one for none.
+pub fn role(name: Option<&str>) -> Option<RoleSpec> {
+    let name = name.filter(|n| !n.is_empty()).unwrap_or(DEFAULT_ROLE);
+    let &(name, prompt) = ROLES.iter().find(|(r, _)| *r == name)?;
+    let (tools, mcp) = role_tools(name);
+    Some(RoleSpec { name, prompt, tools, mcp })
+}
+
 /// One task, as far as Python reads it before the worker starts.
 #[derive(Debug, PartialEq)]
 pub struct Task {
@@ -112,13 +129,10 @@ pub fn tasks(raw: &Value) -> Option<Vec<Task>> {
         .collect()
 }
 
-/// What a worker tells the run.
+/// What a worker tells the node that spawned it, for its budget.
 pub enum Note {
-    /// An event for the run's stream: `worker_*`, or one a worker's tool
-    /// announces (`artifact`, a gate's request).
-    Event(&'static str, Value),
     /// A finished model call.
-    Llm { input: Option<i64>, output: Option<i64>, perf: CallPerf },
+    Llm { input: Option<i64>, output: Option<i64> },
     /// A tool call starting.
     Tool,
 }
@@ -139,8 +153,8 @@ pub async fn model_for(pool: &sqlx::SqlitePool, run_model: &str) -> String {
     }
 }
 
-/// What the workers share with the run that spawned them: its model and
-/// tool policy, and the ids its tools are scoped by.
+/// What the workers share with the node that spawned them: its model and
+/// tool policy.
 pub struct Ctx<'a> {
     pub agent: &'a Agent,
     pub policy: &'a Policy,
@@ -149,12 +163,6 @@ pub struct Ctx<'a> {
     pub ends: Endpoints,
     /// `should_use_cache(model)`.
     pub cache: bool,
-    pub conversation: Option<String>,
-    pub project_id: Option<String>,
-    /// The chat reply an artifact sits under.
-    pub message_id: Option<String>,
-    /// The run a gate's request is shown on (a chat's).
-    pub announce_to: Option<String>,
     pub notes: UnboundedSender<Note>,
 }
 
@@ -164,10 +172,6 @@ impl Ctx<'_> {
         // has no one left to tell.
         let _ = self.notes.send(note);
     }
-
-    fn event(&self, event: &'static str, data: Value) {
-        self.note(Note::Event(event, data));
-    }
 }
 
 /// Run every task at once; the answers in task order.
@@ -176,20 +180,17 @@ pub async fn spawn(ctx: &Ctx<'_>, tasks: Vec<Task>) -> String {
     futures_util::future::join_all(runs).await.join("\n\n---\n\n")
 }
 
-/// `run_one`: its events, then its part of the answer.
+/// `run_one`: its part of the answer.
 async fn one(ctx: &Ctx<'_>, spec: Task, idx: usize) -> String {
     let label = pystr::prefix(spec.task.as_deref().unwrap_or(""), 80).to_string();
     let prefix = format!("Task ({}): {label}", spec.role);
     let Some(&(role, prompt)) = ROLES.iter().find(|(r, _)| *r == spec.role) else {
         let err = format!("Unknown role '{}' (available: coder, general, researcher, writer)", spec.role);
-        let result = format!("ERROR: {err}");
-        ctx.event("worker_done", json!({"idx": idx, "role": spec.role, "task": label, "status": "error", "result": result}));
         return format!("{prefix}\n{err}");
     };
-    ctx.event("worker_start", json!({"idx": idx, "role": role, "task": label}));
-    // A kernel of its own, so concurrent workers' cells don't collide on the
-    // conversation's; freed as soon as the worker is done.
-    let key = format!("{}::w{idx}::{}", ctx.conversation.as_deref().unwrap_or("worker"), &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    // A kernel of its own, so concurrent workers' cells don't collide;
+    // freed as soon as the worker is done.
+    let key = format!("worker::w{idx}::{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
     let kernel = Kernel::new(ctx.agent.kernels.clone(), key.clone());
     let outcome = match spec.task {
         None => Err("'task'".to_string()),
@@ -205,14 +206,10 @@ async fn one(ctx: &Ctx<'_>, spec: Task, idx: usize) -> String {
     match outcome {
         Ok(answer) => {
             tracing::info!("worker {idx} ({role}) done ({} chars): {label}", pystr::len(&answer));
-            let data = json!({"idx": idx, "role": role, "task": label, "status": "done", "result": answer});
-            ctx.event("worker_done", data);
             format!("{prefix}\n{answer}")
         }
         Err(e) => {
             tracing::warn!("worker {idx} ({role}) failed: {label} — {e}");
-            let data = json!({"idx": idx, "role": role, "task": label, "status": "error", "result": format!("ERROR: {e}")});
-            ctx.event("worker_done", data);
             format!("{prefix}\nERROR: {e}")
         }
     }
@@ -275,7 +272,6 @@ struct Worker<'c, 'a> {
     prompt: &'static str,
     kernel: String,
     tools: Toolset,
-    tail: Tail,
     steps: u32,
 }
 
@@ -285,7 +281,7 @@ impl<'c, 'a> Worker<'c, 'a> {
         // The main agent's policy: a tool a human switched off doesn't come
         // back through a worker, and a gated one still asks.
         let tools = super::tools::bound_named(ctx.policy, names, with_mcp.then_some(ctx.mcp));
-        Worker { ctx, idx, role, prompt, kernel, tools, tail: Tail { idx, text: String::new(), chars: 0 }, steps: 0 }
+        Worker { ctx, idx, role, prompt, kernel, tools, steps: 0 }
     }
 
     async fn run(&mut self, query: String) -> Result<String, String> {
@@ -294,7 +290,6 @@ impl<'c, 'a> Worker<'c, 'a> {
             self.take_step()?;
             let reply = self.model_step(&history).await?;
             history.push(reply.clone());
-            self.step("model_request", super::turn::model_step_data(&reply));
             if let Some(why) = llm::cut_short(&reply) {
                 return Err(why);
             }
@@ -303,7 +298,6 @@ impl<'c, 'a> Worker<'c, 'a> {
             }
             self.take_step()?;
             let results = self.tool_step(&reply.tool_calls).await?;
-            self.step("tools", super::turn::tools_step_data(&results));
             history.extend(results);
         }
     }
@@ -314,12 +308,6 @@ impl<'c, 'a> Worker<'c, 'a> {
         }
         self.steps += 1;
         Ok(())
-    }
-
-    /// A finished step, after the text that streamed before it.
-    fn step(&mut self, node: &str, data: String) {
-        self.tail.flush(self.ctx);
-        self.ctx.event("worker_step", json!({"idx": self.idx, "role": self.role, "node": node, "data": data}));
     }
 
     /// `role_model`: the role's prompt, and the history trimmed and repaired
@@ -342,16 +330,11 @@ impl<'c, 'a> Worker<'c, 'a> {
             // Its kernel's key: the worker's own, so its calls stay together.
             cache_key: Some(&self.kernel),
         };
-        let tail = &mut self.tail;
-        let mut on_delta = |d: Delta| {
-            // Text only: a worker's thinking stays out of its tail.
-            if let Delta::Text(t) = d {
-                tail.add(ctx, t);
-            }
-        };
+        // Nothing of a worker is shown as it comes.
+        let mut on_delta = |_: Delta| {};
         let reply = llm::complete(&ctx.agent.http, &ctx.ends, &req, &mut on_delta).await.map_err(|e| e.message)?;
         let usage = reply.message.usage.clone().unwrap_or_default();
-        ctx.note(Note::Llm { input: usage.input, output: usage.output, perf: reply.perf });
+        ctx.note(Note::Llm { input: usage.input, output: usage.output });
         Ok(reply.message)
     }
 
@@ -417,23 +400,14 @@ impl<'c, 'a> Worker<'c, 'a> {
         let ctx = self.ctx;
         let pool = &ctx.agent.pool;
         let key = ctx.policy.key_for(&call.name);
+        // Shown in the approvals inbox: a workflow's node has no chat to ask in.
         let request =
-            crate::approvals::create(pool, &key, &call.name, &call.args, ctx.conversation.as_deref(), ctx.announce_to.as_deref())
-                .await
-                .map_err(|e| e.to_string())?;
-        if ctx.announce_to.is_some() {
-            ctx.event("approval_request", request.event);
-        }
+            crate::approvals::create(pool, &key, &call.name, &call.args, None, None).await.map_err(|e| e.to_string())?;
         tracing::info!("tool gate: waiting on approval {} for {} (worker {})", request.id, call.name, self.idx);
         let outcome = crate::approvals::wait(pool, &request.id, crate::approvals::gate_timeout()).await.map_err(|e| e.to_string())?;
         let (approved, answer) = match outcome {
             crate::approvals::Outcome::Answered { approved, answer } => (approved, answer),
-            crate::approvals::Outcome::TimedOut => {
-                if ctx.announce_to.is_some() {
-                    ctx.event("approval_resolved", crate::approvals::resolved_event(&call.name, false, "timed out"));
-                }
-                (false, "timed out".to_string())
-            }
+            crate::approvals::Outcome::TimedOut => (false, "timed out".to_string()),
         };
         tracing::info!("tool gate: {} {} ({})", call.name, if approved { "approved" } else { "denied" }, request.id);
         Ok((!approved).then(|| crate::approvals::denial_message(&call.name, &answer)))
@@ -450,8 +424,8 @@ impl<'c, 'a> Worker<'c, 'a> {
                 let cell = crate::kernels::Cell {
                     code: &code,
                     timeout: super::tools::CELL_TIMEOUT,
-                    conversation_id: ctx.conversation.as_deref(),
-                    project_id: ctx.project_id.as_deref(),
+                    conversation_id: None,
+                    project_id: None,
                 };
                 ctx.agent.kernels.run(&self.kernel, &cell).await
             }
@@ -463,59 +437,25 @@ impl<'c, 'a> Worker<'c, 'a> {
                     pool,
                     dir: &ctx.agent.artifacts_dir,
                     cwd: &cwd,
-                    conversation_id: ctx.conversation.as_deref(),
-                    message_id: ctx.message_id.as_deref(),
+                    conversation_id: None,
+                    message_id: None,
                 };
                 let written =
                     artifacts::write(&scope, &title, content.as_deref(), file_path.as_deref(), artifact_id.as_deref()).await?;
-                if let Some(event) = written.event {
-                    // Flushed first: a tool's event comes after the text before it.
-                    self.tail.flush(ctx);
-                    ctx.event("artifact", event);
-                }
                 Ok(written.answer)
             }
             Call::ReadArtifact { artifact_id, version } => {
                 artifacts::read(pool, &ctx.agent.artifacts_dir, &cwd, &artifact_id, version).await
             }
-            Call::ListArtifacts { all_conversations } => artifacts::list(pool, ctx.conversation.as_deref(), all_conversations).await,
+            Call::ListArtifacts { all_conversations } => artifacts::list(pool, None, all_conversations).await,
             Call::Mcp { .. } => unreachable!("an MCP call runs in tool_step"),
         }
     }
 }
 
-/// `_TokenTail`: a worker's streamed text as `worker_token` events, at
-/// `TAIL_CHARS` or a step boundary.
-struct Tail {
-    idx: usize,
-    text: String,
-    chars: usize,
-}
-
-impl Tail {
-    fn add(&mut self, ctx: &Ctx<'_>, text: &str) {
-        if text.is_empty() {
-            return;
-        }
-        self.text.push_str(text);
-        self.chars += pystr::len(text);
-        if self.chars >= TAIL_CHARS {
-            self.flush(ctx);
-        }
-    }
-
-    fn flush(&mut self, ctx: &Ctx<'_>) {
-        if self.text.is_empty() {
-            return;
-        }
-        self.chars = 0;
-        ctx.event("worker_token", json!({"idx": self.idx, "text": std::mem::take(&mut self.text)}));
-    }
-}
-
 /// The worker's answer: its last reply's text — the text blocks of a
 /// reply in parts, or the parts themselves if none has text.
-fn answer(reply: &Message) -> String {
+pub(super) fn answer(reply: &Message) -> String {
     match &reply.content {
         Content::Text(s) => s.clone(),
         Content::Parts(parts) => {
@@ -561,6 +501,8 @@ fn check(name: &str, args: &Value) -> Result<Call, String> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]

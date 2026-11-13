@@ -16,6 +16,7 @@ import {DeferredApprovals} from '../components/DeferredApprovals';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
+import {isLive, SubagentBar, type SubagentInfo} from '../components/SubagentBar';
 import {ThreadSpine} from '../components/ThreadSpine';
 import {page} from '../components/ui';
 import {useBrowserAvailable} from '../hooks/useBrowserAvailable';
@@ -223,6 +224,21 @@ function ConversationPage() {
   const todos = liveTodos ?? persistedTodos;
 
   const conversationModel = data.model;
+
+  // The sub-agents this conversation's agent spawned. A run announces their
+  // changes (`SubagentEvent` → refetch, in useTaskEvents); between runs there
+  // is no stream to hear on, so while one is still going the page asks. That
+  // same refetch is what surfaces the turn a background answer starts here.
+  const subagents = useMemo<SubagentInfo[]>(
+    () => data.subagents.map((s) => ({...s, title: s.title ?? null, result: s.result ?? null})),
+    [data.subagents],
+  );
+  const subagentsLive = subagents.some(isLive);
+  useEffect(() => {
+    if (!subagentsLive) return;
+    const timer = window.setInterval(() => void loadConversationPage(id), 3000);
+    return () => window.clearInterval(timer);
+  }, [subagentsLive, id]);
 
   useEffect(() => {
     if ((streaming || !!runningMsg) && panelOpen && steps.length > 0) {
@@ -572,6 +588,8 @@ function ConversationPage() {
       <ConversationHeader
         title={data.title ?? null}
         project={data.project ?? null}
+        parent={data.parent ?? null}
+        agentRole={data.agentRole ?? null}
         createdAt={data.createdAt}
         runState={pendingInterrupt ? 'waiting' : isActive ? 'running' : null}
         spine={!showSpine ? 'none' : isActive ? 'open' : 'collapsed'}
@@ -668,6 +686,7 @@ function ConversationPage() {
           panelOpen && conv.footerWithPanel,
         )}
       >
+        <SubagentBar subagents={subagents} />
         <DeferredApprovals conversationId={id} />
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt key={pendingInterrupt.approvalId} interrupt={pendingInterrupt} />

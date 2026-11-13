@@ -64,7 +64,7 @@ const KNOWN: &[Spec] = &[
     Spec {
         key: "workers.model",
         label: "Worker model",
-        description: "Model the workers `spawn_workers` starts run on — a cheaper one suits their reading-heavy sub-tasks. Unset, or not in the catalog, they run on the run's own model.",
+        description: "Model the sub-agents `run_agents` starts (and a workflow's `spawn_workers` workers) run on — a cheaper one suits their reading-heavy sub-tasks. Unset, or not in the catalog, they run on the run's own model.",
         managed_by: "",
         kind: "text",
         choices: &[],

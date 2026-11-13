@@ -58,10 +58,10 @@ async def test_independent_calls_run_together(database: Path, work_dir: Path, ed
 
 
 async def test_workers_run_on_the_worker_model(database: Path, work_dir: Path, edge_binary: Path):
-    """`workers.model` names a model in the catalog: the workers run on it,
-    the run itself on its own."""
+    """`workers.model` names a model in the catalog: the sub-agents run on
+    it, the run itself on its own."""
     haiku = "anthropic:claude-haiku-5-5"
-    fake = FakeAnthropic([("spawn_workers", {"tasks": [{"task": "Look it up", "role": "researcher"}]}),
+    fake = FakeAnthropic([("run_agents", {"tasks": [{"task": "Look it up", "role": "researcher"}]}),
                           "Found it.", "Done."])
     try:
         insert(database, "config_settings", key="models.custom",
@@ -80,12 +80,11 @@ async def test_workers_run_on_the_worker_model(database: Path, work_dir: Path, e
 
 
 async def test_more_workers_than_pool_connections(database: Path, work_dir: Path, edge_binary: Path):
-    """Six workers on a pool of four connections: the run keeps them
-    going while it writes what they tell it, or a worker waiting on a
-    connection holds up the very write that would free one (`db.rs`)."""
+    """Six sub-agents on a pool of four connections, each a turn of its
+    own writing as it goes while the run waits for them all (`db.rs`)."""
     workers = 6
     tasks = [{"task": f"Look up {i}", "role": "researcher"} for i in range(workers)]
-    fake = FakeAnthropic([("spawn_workers", {"tasks": tasks}), *["Found it."] * workers, "Done."])
+    fake = FakeAnthropic([("run_agents", {"tasks": tasks}), *["Found it."] * workers, "Done."])
     try:
         insert(database, "config_settings", key="models.custom", value=json.dumps([{"id": MODEL, "label": "Opus"}]))
         env = _edge_env(work_dir, {**EDGE_ON, "ANTHROPIC_BASE_URL": fake.url, "ANTHROPIC_API_KEY": "test-key",
@@ -100,7 +99,8 @@ async def test_more_workers_than_pool_connections(database: Path, work_dir: Path
     with sqlite3.connect(work_dir / "database.db") as conn:
         # The job is done even when the run failed; the reply says which.
         (status,) = conn.execute("SELECT status FROM messages WHERE id = ?", (task_id,)).fetchone()
-        done = conn.execute("SELECT COUNT(*) FROM steps WHERE message_id = ? AND node = 'worker_done'",
+        done = conn.execute("SELECT COUNT(*) FROM messages WHERE role = 'assistant' AND status = 'done' AND "
+                            "conversation_id IN (SELECT id FROM conversations WHERE spawned_by = ?)",
                             (task_id,)).fetchone()[0]
     assert status == "done"
     assert done == workers

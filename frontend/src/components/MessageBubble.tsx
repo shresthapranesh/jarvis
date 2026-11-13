@@ -1,4 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
+import {Link} from '@tanstack/react-router';
 import {useEffect, useMemo, useRef, useState} from 'react';
 
 import {useSmoothText} from '../hooks/useSmoothText';
@@ -6,6 +7,7 @@ import type {WorkerInfo} from '../hooks/useTaskEvents';
 import {describeStep, getStepPreview} from '../lib/steps';
 import {messageAnchorId} from '../lib/thread';
 import type {ArtifactCard, Message, Step} from '../lib/types';
+import {colors, type} from '../theme/tokens.stylex';
 import {GlobeIcon} from './icons';
 import {Markdown, StreamingMarkdown} from './Markdown';
 import {MessageArtifacts} from './MessageArtifacts';
@@ -480,6 +482,60 @@ function CheckIcon() {
   );
 }
 
+/**
+ * Who a user-side message is from when it isn't the user: the parent agent
+ * setting a sub-agent its task, or a sub-agent's answer coming back — which
+ * links to that sub-agent's conversation.
+ */
+function MessageSource({source, note}: {source?: string | null; note?: string | null}) {
+  if (!source) return null;
+  if (source === 'agent') {
+    return <div {...stylex.props(sourceStyles.label)}>From the parent agent</div>;
+  }
+  if (source.startsWith('subagent:')) {
+    return (
+      <div {...stylex.props(sourceStyles.label)}>
+        From a{' '}
+        <Link
+          to="/c/$id"
+          params={{id: source.slice('subagent:'.length)}}
+          search={{}}
+          {...stylex.props(sourceStyles.link)}
+        >
+          sub-agent
+        </Link>
+        {note && ` · ${note}`}
+      </div>
+    );
+  }
+  return null;
+}
+
+// The line the server puts above a sub-agent's delivered answer, for the
+// model to read (`[Sub-agent <id> (<role>) finished: <status>]`). The reader
+// gets it as the label instead.
+const DELIVERED = /^\[Sub-agent \S+ \(([^)]+)\) finished: (\w+)\]\n?/;
+
+function splitDelivered(message: Message): {note: string | null; content: string} {
+  const head = message.source?.startsWith('subagent:') ? DELIVERED.exec(message.content) : null;
+  if (!head) return {note: null, content: message.content};
+  const [line, role, status] = head;
+  return {
+    note: status === 'done' ? role : `${role}, ${status}`,
+    content: message.content.slice(line.length),
+  };
+}
+
+const sourceStyles = stylex.create({
+  label: {
+    alignSelf: 'flex-end',
+    textAlign: 'end',
+    fontSize: type.tSmall,
+    color: colors.textDim,
+  },
+  link: {color: colors.accent, textDecoration: {default: 'none', ':hover': 'underline'}},
+});
+
 export function MessageBubble({
   message,
   onShowSteps,
@@ -497,15 +553,17 @@ export function MessageBubble({
   }
 
   if (message.role === 'user') {
-    const parts = parseMultimodal(message.content);
+    const delivered = splitDelivered(message);
+    const parts = delivered.note ? null : parseMultimodal(message.content);
     const plainText = parts
       ? parts
           .filter((p) => p.type === 'text')
           .map((p) => (p as {type: 'text'; text: string}).text)
           .join('\n')
-      : message.content;
+      : delivered.content;
     return (
       <div id={messageAnchorId(message.id)} {...stylex.props(turn.base)}>
+        <MessageSource source={message.source} note={delivered.note} />
         <div {...stylex.props(bubble.row)}>
           <button
             {...stylex.props(actions.copy, actions.userCopy, copied && actions.copyDone)}
@@ -517,7 +575,7 @@ export function MessageBubble({
             {copied ? <CheckIcon /> : <CopyIcon />}
           </button>
           <div {...stylex.props(bubble.user)}>
-            {parts ? <MultimodalUserContent parts={parts} /> : message.content}
+            {parts ? <MultimodalUserContent parts={parts} /> : delivered.content}
           </div>
         </div>
       </div>

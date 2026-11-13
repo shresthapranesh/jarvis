@@ -124,6 +124,51 @@
   }
  },
  {
+  "name": "run_agents",
+  "description": "Give tasks to sub-agents, each in a conversation of its own that you can come back to.\n\nEach task is a dict: \"task\" (required), \"context\" (optional background),\n\"role\" (optional: researcher/coder/writer/general), \"agent_id\" (optional: an\nearlier sub-agent's id, to give it a follow-up — it keeps what it did and\nlearned; its role stays). A new sub-agent sees neither this conversation nor\nyour kernel variables — put what it needs in its task/context.\n\nwait=true (default) returns every answer once all have finished. wait=false\nreturns their ids at once: carry on, and collect with check_agents, or their\nanswers reach you as messages when they finish.",
+  "parameters": {
+   "properties": {
+    "tasks": {
+     "items": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "wait": {
+     "default": true,
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "tasks"
+   ],
+   "type": "object"
+  }
+ },
+ {
+  "name": "check_agents",
+  "description": "The status of sub-agents you started, and the answer of each that has finished.\n\nwait=true waits for the ones still running first.",
+  "parameters": {
+   "properties": {
+    "agent_ids": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "wait": {
+     "default": false,
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "agent_ids"
+   ],
+   "type": "object"
+  }
+ },
+ {
   "name": "run_workflow",
   "description": "Run a saved workflow as a sub-agent; returns its final outputs as JSON.\n\nArgs:\n    workflow_id: ID of the workflow to run.\n    inputs_json: JSON object of start-node inputs, e.g. '{\"topic\": \"AI news\"}'.",
   "parameters": {

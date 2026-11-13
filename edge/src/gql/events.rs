@@ -119,6 +119,18 @@ pub struct QueuedWithdrawnEvent {
     pub message_id: String,
 }
 
+/// One of the run's sub-agents changed: a task went to it (`running`), or
+/// its turn ended (`done`, `error`, `stopped`).
+#[derive(SimpleObject, Clone)]
+pub struct SubagentEvent {
+    /// The sub-agent's conversation.
+    pub agent_id: String,
+    /// The turn the change is about.
+    pub task_id: String,
+    pub role: String,
+    pub status: String,
+}
+
 #[derive(SimpleObject, Clone)]
 pub struct QueuedConsumedEvent {
     pub message_ids: Vec<String>,
@@ -221,6 +233,7 @@ pub enum ChatEvent {
     WorkerStepEvent(WorkerStepEvent),
     WorkerTokenEvent(WorkerTokenEvent),
     WorkerDoneEvent(WorkerDoneEvent),
+    SubagentEvent(SubagentEvent),
     ArtifactEvent(ArtifactEvent),
     TodosUpdatedEvent(TodosUpdatedEvent),
     QueuedMessageEvent(QueuedMessageEvent),
@@ -563,6 +576,12 @@ pub fn chat(raw: &Value) -> Result<Option<ChatEvent>> {
             position: d.safe_int("position"),
         }),
         "queued_withdrawn" => ChatEvent::QueuedWithdrawnEvent(QueuedWithdrawnEvent { message_id: d.s("message_id", "")? }),
+        "subagent" => ChatEvent::SubagentEvent(SubagentEvent {
+            agent_id: d.s("agent_id", "")?,
+            task_id: d.s("task_id", "")?,
+            role: d.s("role", "")?,
+            status: d.s("status", "running")?,
+        }),
         "queued_consumed" => {
             let ids = match d.get("message_ids") {
                 Some(Value::Array(ids)) => ids.iter().map(py_str).collect(),
@@ -824,6 +843,13 @@ mod tests {
         assert!(chat(&raw("token", json!({"text": null}))).is_err());
         let Some(ChatEvent::TokenEvent(t)) = chat(&raw("token", json!({}))).unwrap() else { panic!() };
         assert_eq!((t.text.as_str(), t.source.as_str()), ("", "main"));
+    }
+
+    #[test]
+    fn a_sub_agents_change_is_a_chat_event() {
+        let changed = raw("subagent", json!({"agent_id": "c", "task_id": "t", "role": "writer", "status": "done"}));
+        let Some(ChatEvent::SubagentEvent(e)) = chat(&changed).unwrap() else { panic!() };
+        assert_eq!((e.agent_id.as_str(), e.task_id.as_str(), e.role.as_str(), e.status.as_str()), ("c", "t", "writer", "done"));
     }
 
     #[test]

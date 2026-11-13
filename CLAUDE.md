@@ -62,7 +62,7 @@ Tests run against a throwaway `WORK_DIR`, never `~/.jarvis`. `tests/test_edge_*.
 - Every automation write tells the scheduler (`Scheduler::schedules_changed`).
 
 **Agent tools**
-- The main agent is code-first: only loop-coupled tools are bound (`run_cell`, `write_artifact`, `write_todos`/`set_todo_status`, `spawn_workers`, `run_workflow`, `remember`, `ask_user` in web chats, `complete_task`/`block_task` on board runs; schemas in `edge/src/agent/tools.json`). Everything else goes in the `jarvis` SDK (`tools/sdk.py`). See `tools/CLAUDE.md`.
+- The main agent is code-first: only loop-coupled tools are bound (`run_cell`, `write_artifact`, `write_todos`/`set_todo_status`, `run_agents`/`check_agents`, `run_workflow`, `remember`, `ask_user` in web chats, `complete_task`/`block_task` on board runs; schemas in `edge/src/agent/tools.json`). Everything else goes in the `jarvis` SDK (`tools/sdk.py`). See `tools/CLAUDE.md`.
 - SDK writes go through GraphQL mutations, not direct DB writes, so server-side side effects fire.
 
 **Frontend**

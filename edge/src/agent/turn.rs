@@ -8,9 +8,9 @@
 //! re-claimed after a crash goes on from the rows.
 //!
 //! A history that outgrows the model's threshold is summarized before the
-//! call (`summarize.rs`). `spawn_workers` runs its workers here too
-//! (`workers.rs`), their events written and announced as they come, and
-//! `run_workflow` its workflow (`workflow/`).
+//! call (`summarize.rs`). `run_agents` gives tasks to sub-agents — each a
+//! conversation of its own, its turns queued jobs (`Kind::Subagent`) — and
+//! waits for them or not; `run_workflow` runs its workflow here (`workflow/`).
 
 use std::sync::Arc;
 
@@ -62,6 +62,9 @@ pub enum Kind {
     Automation(Spec),
     /// A board task's run (`board.rs`), with the board tools bound.
     Board(board::Spec),
+    /// A sub-agent's turn on its own conversation: a chat turn with its
+    /// role's prompt and tools in place of the main agent's.
+    Subagent(workers::RoleSpec),
 }
 
 impl Kind {
@@ -70,7 +73,14 @@ impl Kind {
             Kind::Chat => "chat",
             Kind::Automation(_) => "automation",
             Kind::Board(_) => "board_task",
+            Kind::Subagent(_) => "subagent",
         }
+    }
+
+    /// A turn on a conversation someone reads: answered on its Message row,
+    /// taking in what is sent to it meanwhile.
+    fn conversational(&self) -> bool {
+        matches!(self, Kind::Chat | Kind::Subagent(_))
     }
 }
 
@@ -104,6 +114,21 @@ pub struct Turn<'a> {
     output_tokens: i64,
     has_usage: bool,
     steps: u32,
+    /// A sub-agent's parent conversation.
+    parent: Option<String>,
+    /// A sub-agent's turn whose answer goes to its parent as a message,
+    /// unless someone is waiting for it.
+    deliver: bool,
+    /// The sub-agent turns whose usage this run has counted.
+    collected: std::collections::HashSet<String>,
+}
+
+/// A sub-agent one of `run_agents`' tasks went to.
+struct Tasked {
+    agent_id: String,
+    task_id: String,
+    role: String,
+    label: String,
 }
 
 impl<'a> Turn<'a> {
@@ -113,6 +138,17 @@ impl<'a> Turn<'a> {
         let mut turn = Self::new(agent, job, run, Kind::Chat, conversation_id.clone(), payload["model"].as_str()?, payload["query"].as_str()?);
         turn.conversation = Some(conversation_id);
         turn.attachments = serde_json::from_value(payload["attachments"].clone()).unwrap_or_default();
+        Some(turn)
+    }
+
+    /// A sub-agent's turn: a chat turn's payload, and the role it runs as.
+    /// None for a payload without them, or naming no role.
+    pub fn subagent(agent: &'a Agent, job: &Job, run: Arc<Run>) -> Option<Self> {
+        let role = workers::role(job.payload["role"].as_str())?;
+        let mut turn = Self::chat(agent, job, run)?;
+        turn.budget = Budget::new(Limits::for_kind("subagent"));
+        turn.kind = Kind::Subagent(role);
+        turn.deliver = job.payload["deliver"].as_bool().unwrap_or(false);
         Some(turn)
     }
 
@@ -159,6 +195,9 @@ impl<'a> Turn<'a> {
             output_tokens: 0,
             has_usage: false,
             steps: 0,
+            parent: None,
+            deliver: false,
+            collected: Default::default(),
         }
     }
 
@@ -167,10 +206,11 @@ impl<'a> Turn<'a> {
     }
 
     pub async fn run(mut self) -> Outcome {
-        if matches!(self.kind, Kind::Chat) {
-            let (project_id, ephemeral) = self.scope().await;
+        if self.kind.conversational() {
+            let (project_id, ephemeral, parent) = self.scope().await;
             self.project_id = project_id;
             self.ephemeral = ephemeral;
+            self.parent = parent;
         }
         if self.cancel_requested {
             self.run.update(|st| st.fields.cancelled = true);
@@ -179,10 +219,19 @@ impl<'a> Turn<'a> {
             Ok(mut thread) => self.start(&mut thread).await,
             Err(e) => Err(Stop::Failed(format!("reading the thread: {e}"))),
         };
+        // A stopped run's sub-agents stop with it.
+        if !matches!(self.kind, Kind::Subagent(_)) && (matches!(result, Err(Stop::Cancelled)) || self.cancelled()) {
+            self.cancel_agents().await;
+        }
+        // A run with no conversation leaves nowhere to find its sub-agents
+        // again: their answers are in its reply, and they go with it.
+        if self.conversation.is_none() {
+            self.discard_agents().await;
+        }
         match self.kind {
             Kind::Automation(_) => return self.finish_automation(result).await,
             Kind::Board(_) => return self.finish_board(result).await,
-            Kind::Chat => {}
+            Kind::Chat | Kind::Subagent(_) => {}
         }
         match result {
             Ok(()) => self.finish_done(false).await,
@@ -207,7 +256,7 @@ impl<'a> Turn<'a> {
         };
         let prompt = Message { id: Some(user_message_id(&self.task_id)), ..Message::new(Role::User, content) };
         let wrote = match &self.kind {
-            Kind::Chat => {
+            Kind::Chat | Kind::Subagent(_) => {
                 self.events.emit("todos_updated", &json!({"todos": [], "source": "main"}));
                 let wrote = async {
                     thread.set_todos(self.pool(), vec![]).await?;
@@ -244,10 +293,16 @@ impl<'a> Turn<'a> {
         // What is bound is fixed for the run, as Python's built agent is.
         let mcp = self.agent.mcp.snapshot().await;
         let policy = Policy::load(self.pool(), &mcp).await;
-        let mut bound = tools::bound_for(&policy, matches!(self.kind, Kind::Board(_)), &mcp);
+        let mut bound = match &self.kind {
+            // The main agent's policy: a tool a human switched off doesn't
+            // come back through a sub-agent, and a gated one still asks.
+            Kind::Subagent(role) => tools::bound_named(&policy, role.tools, role.mcp.then_some(&mcp)),
+            kind => tools::bound_for(&policy, matches!(kind, Kind::Board(_)), true, &mcp),
+        };
         if self.answerable().await {
             tools::bind_ask_user(&mut bound, &policy);
         }
+        self.resume_agents(thread).await?;
         loop {
             self.take_step()?;
             let reply = self.model_step(thread, &bound.schemas, &mcp).await?;
@@ -261,7 +316,7 @@ impl<'a> Turn<'a> {
             }
             let steps = tools::plan(&reply.tool_calls, &bound, &policy);
             self.take_step()?;
-            self.tool_step(thread, &reply.tool_calls, steps, &policy, &mcp).await?;
+            self.tool_step(thread, &reply.tool_calls, steps, &policy).await?;
         }
     }
 
@@ -325,26 +380,29 @@ impl<'a> Turn<'a> {
 
 
     async fn model_step(&mut self, thread: &mut Thread, bound: &[llm::Tool], mcp: &crate::mcp::Snapshot) -> Result<Message, Stop> {
-        // Mid-run messages are a chat's; nothing queues behind other runs.
-        let mut queued = match self.kind {
-            Kind::Chat => self.drain_queued().await.map_err(Stop::Failed)?,
-            Kind::Automation(_) | Kind::Board(_) => vec![],
-        };
+        // Mid-run messages are a conversation's; nothing queues behind other runs.
+        let mut queued = if self.kind.conversational() { self.drain_queued().await.map_err(Stop::Failed)? } else { vec![] };
         let mut history = thread.messages.clone();
         history.extend(queued.iter().cloned());
         let query = latest_user_text(&history);
         let message_id = history.iter().rev().find(|m| m.role == Role::User).and_then(|m| m.id.clone());
 
-        let retrieved = match &self.retrieved {
-            Some((id, parts)) if *id == message_id => Ok(parts.clone()),
-            _ => prompt::retrieved(self.pool(), &self.agent.http, &retrieval_query(&history), &self.thread_id, mcp).await,
-        };
-        let context = match retrieved {
-            Ok(parts) => {
-                self.retrieved = Some((message_id, parts.clone()));
-                prompt::build(self.pool(), &query, self.project_id.as_deref(), &thread.todos, &parts).await
+        let context = if let Kind::Subagent(role) = &self.kind {
+            // Its role's prompt is the whole of it: a sub-agent is told what
+            // it needs in its task, and retrieves nothing.
+            Ok(prompt::Context { system: role.prompt.to_string(), segments: vec![], volatile: String::new() })
+        } else {
+            let retrieved = match &self.retrieved {
+                Some((id, parts)) if *id == message_id => Ok(parts.clone()),
+                _ => prompt::retrieved(self.pool(), &self.agent.http, &retrieval_query(&history), &self.thread_id, mcp).await,
+            };
+            match retrieved {
+                Ok(parts) => {
+                    self.retrieved = Some((message_id, parts.clone()));
+                    prompt::build(self.pool(), &query, self.project_id.as_deref(), &thread.todos, &parts).await
+                }
+                Err(e) => Err(e),
             }
-            Err(e) => Err(e),
         };
         let context = match context {
             Ok(c) => c,
@@ -472,8 +530,8 @@ impl<'a> Turn<'a> {
             self.output_tokens += output.unwrap_or(0);
         }
         let mut emitted = self.budget.record_llm(input, output);
-        // Only a chat run tracks throughput (`start_run_callbacks(with_perf=…)`).
-        if matches!(self.kind, Kind::Chat) {
+        // Only a conversation's run tracks throughput (`start_run_callbacks(with_perf=…)`).
+        if self.kind.conversational() {
             emitted.push(("perf_update", self.perf.record(perf)));
         }
         emitted.extend(self.budget.check());
@@ -494,7 +552,6 @@ impl<'a> Turn<'a> {
         calls: &[ToolCall],
         steps: Vec<Step>,
         policy: &Policy,
-        mcp: &crate::mcp::Snapshot,
     ) -> Result<(), Stop> {
         // Every gate is answered, in call order, before anything runs.
         let mut ready = Vec::with_capacity(steps.len());
@@ -526,9 +583,13 @@ impl<'a> Turn<'a> {
                 (step, None) => match step {
                     Step::Refused(error) | Step::Denied(error) => (Content::Text(error), "error", None),
                     Step::Gated(_) => unreachable!("gates are answered first"),
-                    Step::Run(Native::SpawnWorkers { tasks }) => {
+                    Step::Run(Native::RunAgents { tasks, wait }) => {
                         self.count_tool();
-                        (Content::Text(self.spawn_workers(tasks, policy, mcp).await?), "success", None)
+                        (Content::Text(self.run_agents(tasks, wait).await?), "success", None)
+                    }
+                    Step::Run(Native::CheckAgents { agent_ids, wait }) => {
+                        self.count_tool();
+                        (Content::Text(self.check_agents(agent_ids, wait).await?), "success", None)
                     }
                     Step::Run(Native::RunWorkflow { workflow_id, inputs_json }) => {
                         self.count_tool();
@@ -588,53 +649,359 @@ impl<'a> Turn<'a> {
         Some(Beside(task))
     }
 
-    /// `spawn_workers`: the workers run while what they tell the run is
-    /// written and announced as it comes, in order; a stop drops them all.
-    async fn spawn_workers(&mut self, tasks: Vec<workers::Task>, policy: &Policy, mcp: &crate::mcp::Snapshot) -> Result<String, Stop> {
-        let (notes, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let chat = matches!(self.kind, Kind::Chat);
+    // ── sub-agents ──────────────────────────────────────────────────────────
+
+    /// `run_agents`: each task to a sub-agent — a new one, or an earlier one
+    /// named by its id — as a turn on the sub-agent's own conversation. With
+    /// `wait`, their answers once all have finished; without, their ids, and
+    /// each answer comes to this conversation as a message when it is ready.
+    async fn run_agents(&mut self, tasks: Vec<tools::AgentTask>, wait: bool) -> Result<String, Stop> {
+        // Only a chat in the web app can be told later: any other run ends
+        // with its reply, and a bot follows only the turns its own messages
+        // start, so a turn an answer started there would never be posted.
+        let later = !wait && self.answerable().await;
         let model = workers::model_for(self.pool(), &self.model).await;
-        let ctx = workers::Ctx {
-            agent: self.agent,
-            policy,
-            mcp,
-            cache: honors_cache_control(&model),
-            model,
-            ends: Endpoints { compatible: crate::catalog::endpoints(self.pool()).await.unwrap_or_default(), ..Endpoints::from_env() },
-            conversation: self.conversation.clone(),
-            project_id: self.project_id.clone(),
-            message_id: chat.then(|| self.task_id.clone()),
-            announce_to: chat.then(|| self.task_id.clone()),
-            notes,
-        };
-        let stopped = until_stopped(self.run.clone());
-        // The workers own the only sender: once the last is done the channel
-        // closes, after everything they said.
-        let all = async move {
-            let ctx = ctx;
-            workers::spawn(&ctx, tasks).await
-        };
-        // Both stay polled while a note is written. A worker left unpolled
-        // keeps the pool connection it holds, or its place in the pool's
-        // queue, and the note's write waits on that very connection: with
-        // more workers than connections the run deadlocks until the acquire
-        // times out.
-        let written = async {
-            while let Some(note) = rx.recv().await {
-                self.note(note).await?;
+        let mut parts: Vec<Result<Tasked, String>> = Vec::with_capacity(tasks.len());
+        for task in &tasks {
+            let label = crate::pystr::prefix(&task.task, 80).to_string();
+            match self.task_agent(task, &label, &model, later).await {
+                Ok((agent_id, task_id, role)) => {
+                    let tasked = Tasked { agent_id, task_id, role, label };
+                    self.announce_agent(&tasked, "running");
+                    parts.push(Ok(tasked));
+                }
+                Err(e) => parts.push(Err(format!("Task: {label}\nERROR: {e}"))),
             }
-            Ok::<_, Stop>(())
+        }
+        if later {
+            let lines: Vec<String> = parts
+                .into_iter()
+                .map(|part| match part {
+                    Ok(t) => format!("Agent {} ({}) started: {}", t.agent_id, t.role, t.label),
+                    Err(e) => e,
+                })
+                .collect();
+            return Ok(format!(
+                "{}\n\nTheir answers will reach you as messages when they finish; check_agents shows where they stand.",
+                lines.join("\n")
+            ));
+        }
+        let turns: Vec<String> = parts.iter().flatten().map(|t| t.task_id.clone()).collect();
+        self.await_agents(&turns).await?;
+        let mut answers = Vec::with_capacity(parts.len());
+        for part in parts {
+            let t = match part {
+                Ok(t) => t,
+                Err(e) => {
+                    answers.push(e);
+                    continue;
+                }
+            };
+            let (status, answer) = self.collect(&t.agent_id, &t.task_id).await.map_err(Stop::Failed)?;
+            self.announce_agent(&t, &status);
+            answers.push(format!("Agent {} ({}) — {status}: {}\n{answer}", t.agent_id, t.role, t.label));
+        }
+        Ok(answers.join("\n\n---\n\n"))
+    }
+
+    /// The run's subscribers are told a sub-agent changed (`SubagentEvent`).
+    fn announce_agent(&mut self, t: &Tasked, status: &str) {
+        self.events.emit("subagent", &json!({"agent_id": t.agent_id, "task_id": t.task_id, "role": t.role, "status": status}));
+    }
+
+    /// One task on its way: the sub-agent's id, its turn's, and its role.
+    /// An `Err` is the model's to read.
+    async fn task_agent(
+        &self,
+        task: &tools::AgentTask,
+        label: &str,
+        model: &str,
+        deliver: bool,
+    ) -> Result<(String, String, String), String> {
+        use crate::gql::start;
+        let query = match &task.context {
+            Some(context) => format!("Context: {context}\n\nTask: {}", task.task),
+            None => task.task.clone(),
         };
-        let both = async {
-            let (answer, ()) = tokio::try_join!(async { Ok(all.await) }, written)?;
-            Ok(answer)
+        let from = start::FromAgent { deliver };
+        let (pool, runs) = (self.pool(), &self.agent.runs);
+        if let Some(id) = &task.agent_id {
+            let (role, model) = self.owned(id).await?;
+            if runs.in_flight_chat(id).is_some() {
+                return Err(format!("agent {id} is still on its last task \u{2014} check_agents(wait=true) first"));
+            }
+            // Its stored model may have left the catalog since.
+            let model = crate::catalog::resolve_model(pool, Some(&model)).await.map_err(|e| e.to_string())?;
+            let turn = start::task_subagent(pool, runs, id, &query, &model, from).await.map_err(|e| e.message)?;
+            return Ok((id.clone(), turn, role));
+        }
+        let Some(role) = workers::role(task.role.as_deref()) else {
+            let named = task.role.as_deref().unwrap_or_default();
+            return Err(format!("Unknown role '{named}' (available: coder, general, researcher, writer)"));
         };
+        let spawn = start::Spawn {
+            parent_id: self.conversation.as_deref(),
+            spawned_by: &self.task_id,
+            role: role.name,
+            model,
+            title: label,
+            query: &query,
+            project_id: self.project_id.as_deref(),
+            ephemeral: self.ephemeral,
+            from,
+        };
+        let (turn, id) = start::spawn_subagent(pool, runs, spawn).await.map_err(|e| e.message)?;
+        Ok((id, turn, role.name.to_string()))
+    }
+
+    /// A sub-agent of this run's — spawned by it, or by its conversation
+    /// before: its role and its model.
+    async fn owned(&self, id: &str) -> Result<(String, String), String> {
+        let row: Option<(Option<String>, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT agent_role, model, parent_id, spawned_by FROM conversations WHERE id = ? AND surface = 'subagent'",
+        )
+        .bind(id)
+        .fetch_optional(self.pool())
+        .await
+        .map_err(|e| e.to_string())?;
+        match row {
+            Some((role, model, parent, spawned_by))
+                if (parent.is_some() && parent == self.conversation) || spawned_by.as_deref() == Some(&self.task_id) =>
+            {
+                Ok((role.unwrap_or_else(|| "general".into()), model))
+            }
+            _ => Err(format!("no sub-agent of yours has the id {id}")),
+        }
+    }
+
+    /// Until every one of these sub-agent turns has ended. Meanwhile their
+    /// answers are this run's to read, not messages for its conversation. A
+    /// stop stops the wait (and, as the run ends, the sub-agents).
+    async fn await_agents(&mut self, turns: &[String]) -> Result<(), Stop> {
+        let agent = self.agent;
+        let _waiting = agent.wait_on(turns);
+        let all = futures_util::future::join_all(turns.iter().map(|turn| until_answered(agent, turn)));
         tokio::select! {
             biased;
-            // A stop drops the workers there and then, mid-call or not.
-            () = stopped => Err(Stop::Cancelled),
-            answer = both => answer,
+            () = until_stopped(self.run.clone()) => Err(Stop::Cancelled),
+            _ = all => Ok(()),
         }
+    }
+
+    /// A sub-agent turn's end and answer, read here: its usage counts
+    /// against this run once, and the message that brought the answer, if it
+    /// is still waiting to be read, is read.
+    async fn collect(&mut self, agent_id: &str, turn: &str) -> Result<(String, String), String> {
+        let row: Option<(String, String, Option<i64>, Option<i64>)> =
+            sqlx::query_as("SELECT status, content, input_tokens, output_tokens FROM messages WHERE id = ?")
+                .bind(turn)
+                .fetch_optional(self.pool())
+                .await
+                .map_err(|e| e.to_string())?;
+        let Some((status, said, input, output)) = row else {
+            return Ok(("error".into(), "the sub-agent's turn is gone".into()));
+        };
+        let answer = if status == "done" { last_reply(self.pool(), agent_id).await.unwrap_or(said) } else { said };
+        if status != "running" && self.collected.insert(turn.to_string()) && (input.is_some() || output.is_some()) {
+            self.has_usage = true;
+            self.input_tokens += input.unwrap_or(0);
+            self.output_tokens += output.unwrap_or(0);
+            let mut emitted = self.budget.record_llm(input, output);
+            emitted.extend(self.budget.check());
+            for (event, data) in emitted {
+                self.events.emit(event, &data);
+            }
+            self.sync_fields();
+        }
+        if let Some(conversation) = &self.conversation {
+            let read: Vec<String> = sqlx::query_scalar(
+                "UPDATE messages SET status = 'delivered' WHERE conversation_id = ? AND status = 'queued' AND source = ? \
+                 RETURNING id",
+            )
+            .bind(conversation)
+            .bind(crate::gql::start::from_subagent(agent_id))
+            .fetch_all(self.pool())
+            .await
+            .map_err(|e| e.to_string())?;
+            if !read.is_empty() {
+                self.events.emit("queued_consumed", &json!({"message_ids": read}));
+            }
+        }
+        Ok((status, answer))
+    }
+
+    /// `check_agents`: where each sub-agent's latest turn stands, with its
+    /// answer if it has ended — after waiting for the running ones, with `wait`.
+    async fn check_agents(&mut self, agent_ids: Vec<String>, wait: bool) -> Result<String, Stop> {
+        let mut found: Vec<Result<(String, String, Option<String>), String>> = Vec::with_capacity(agent_ids.len());
+        for id in agent_ids {
+            let role = match self.owned(&id).await {
+                Ok((role, _)) => role,
+                Err(e) => {
+                    found.push(Err(e));
+                    continue;
+                }
+            };
+            let turn: Option<String> = sqlx::query_scalar(
+                "SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            )
+            .bind(&id)
+            .fetch_optional(self.pool())
+            .await
+            .map_err(|e| Stop::Failed(e.to_string()))?;
+            found.push(Ok((id, role, turn)));
+        }
+        if wait {
+            let turns: Vec<String> = found.iter().flatten().filter_map(|(_, _, turn)| turn.clone()).collect();
+            self.await_agents(&turns).await?;
+        }
+        let mut lines = Vec::with_capacity(found.len());
+        for each in found {
+            lines.push(match each {
+                Err(e) => e,
+                Ok((id, role, None)) => format!("Agent {id} ({role}) — has no turn yet"),
+                Ok((id, role, Some(turn))) => match self.collect(&id, &turn).await.map_err(Stop::Failed)? {
+                    (status, _) if status == "running" => format!("Agent {id} ({role}) — running"),
+                    (status, answer) => format!("Agent {id} ({role}) — {status}\n{answer}"),
+                },
+            });
+        }
+        Ok(lines.join("\n\n---\n\n"))
+    }
+
+    /// A turn claimed again after a restart, whose last reply called
+    /// `run_agents` and never got the answer: the sub-agents it had started
+    /// went on (their turns are jobs of their own), so the call is answered
+    /// with what they said rather than made again, which would start them
+    /// all twice. A call that had started none is left for the model to
+    /// repeat (`shape::repair_orphan_tool_calls`).
+    async fn resume_agents(&mut self, thread: &mut Thread) -> Result<(), Stop> {
+        let Some(at) = thread.messages.iter().rposition(|m| m.role == Role::Assistant) else { return Ok(()) };
+        let (reply, after) = (&thread.messages[at], &thread.messages[at + 1..]);
+        // A new turn's prompt comes after the last reply; a resumed one's
+        // reply has only its tools' results after it.
+        if after.iter().any(|m| m.role != Role::Tool) {
+            return Ok(());
+        }
+        let open = reply
+            .tool_calls
+            .iter()
+            .find(|call| call.name == "run_agents" && !after.iter().any(|m| m.tool_call_id == call.id));
+        let (Some(call), Some(reply_id)) = (open.cloned(), reply.id.clone()) else { return Ok(()) };
+        let since: Option<String> =
+            sqlx::query_scalar("SELECT created_at FROM thread_messages WHERE thread_id = ? AND message_id = ?")
+                .bind(&self.thread_id)
+                .bind(&reply_id)
+                .fetch_optional(self.pool())
+                .await
+                .map_err(|e| Stop::Failed(e.to_string()))?;
+        let Some(since) = since else { return Ok(()) };
+        let started: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT j.id, c.id, c.agent_role, c.title FROM jobs j JOIN conversations c ON c.id = j.thread_id \
+             WHERE j.kind = 'subagent' AND json_extract(j.payload, '$.by') = 'agent' AND j.created_at >= ? \
+             AND (c.spawned_by = ? OR (? IS NOT NULL AND c.parent_id = ?)) ORDER BY j.created_at, j.rowid",
+        )
+        .bind(&since)
+        .bind(&self.task_id)
+        .bind(&self.conversation)
+        .bind(&self.conversation)
+        .fetch_all(self.pool())
+        .await
+        .map_err(|e| Stop::Failed(e.to_string()))?;
+        if started.is_empty() {
+            return Ok(());
+        }
+        tracing::info!("run {}: waiting again on {} sub-agent turn(s) from before a restart", self.task_id, started.len());
+        let turns: Vec<String> = started.iter().map(|(turn, ..)| turn.clone()).collect();
+        self.await_agents(&turns).await?;
+        let mut answers = vec![
+            "(The server restarted while this call was waiting. These are the sub-agents it had started; a task not \
+             listed here was never started.)"
+                .to_string(),
+        ];
+        for (turn, agent_id, role, title) in started {
+            let (status, answer) = self.collect(&agent_id, &turn).await.map_err(Stop::Failed)?;
+            let role = role.unwrap_or_else(|| "general".into());
+            answers.push(format!("Agent {agent_id} ({role}) — {status}: {}\n{answer}", title.unwrap_or_default()));
+        }
+        let result = Message {
+            name: Some(call.name.clone()),
+            tool_call_id: call.id.clone(),
+            status: Some("success".into()),
+            ..Message::new(Role::Tool, Content::Text(answers.join("\n\n---\n\n")))
+        };
+        thread.apply(self.pool(), vec![result]).await.map_err(Stop::Failed)
+    }
+
+    /// The sub-agents of a run that has no conversation, deleted as it ends
+    /// (`discard_agents` in `run`): their conversations, threads and kernels.
+    async fn discard_agents(&self) {
+        let discarded = async {
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM conversations WHERE surface = 'subagent' AND parent_id IS NULL AND spawned_by = ?",
+            )
+            .bind(&self.task_id)
+            .fetch_all(self.pool())
+            .await?;
+            for id in ids {
+                let mut tx = crate::db::write_tx(self.pool()).await?;
+                let teardown = crate::gql::conversation::delete_conversation(&mut tx, &id, &self.agent.artifacts_dir).await?;
+                tx.commit().await?;
+                if let Some(teardown) = teardown {
+                    teardown.finish(&self.agent.kernels).await;
+                }
+            }
+            Ok::<_, sqlx::Error>(())
+        };
+        if let Err(e) = discarded.await {
+            tracing::warn!("deleting run {}'s sub-agents: {e}", self.task_id);
+        }
+    }
+
+    /// Stop the sub-agent turns this run's agent started that are still
+    /// queued or running — not one the user is talking to themself.
+    async fn cancel_agents(&self) {
+        let turns: sqlx::Result<Vec<String>> = sqlx::query_scalar(
+            "SELECT j.id FROM jobs j JOIN conversations c ON c.id = j.thread_id \
+             WHERE j.kind = 'subagent' AND j.status IN ('pending', 'running') AND json_extract(j.payload, '$.by') = 'agent' \
+             AND (c.spawned_by = ? OR (? IS NOT NULL AND c.parent_id = ?))",
+        )
+        .bind(&self.task_id)
+        .bind(&self.conversation)
+        .bind(&self.conversation)
+        .fetch_all(self.pool())
+        .await;
+        let turns = match turns {
+            Ok(turns) => turns,
+            Err(e) => return tracing::warn!("stopping run {}'s sub-agents: {e}", self.task_id),
+        };
+        for turn in turns {
+            let asked = sqlx::query("UPDATE jobs SET cancel_requested = 1, updated_at = ? WHERE id = ? AND status IN ('pending', 'running')")
+                .bind(now_stored())
+                .bind(&turn)
+                .execute(self.pool())
+                .await;
+            if let Err(e) = asked {
+                tracing::warn!("stopping sub-agent turn {turn}: {e}");
+            }
+            if let Some(run) = self.agent.runs.get(&turn) {
+                run.update(|st| st.fields.cancelled = true);
+            }
+        }
+    }
+
+    /// A sub-agent's answer to its parent's conversation, when its parent
+    /// asked not to wait for it — unless something is waiting after all.
+    async fn deliver(&self, status: &str, answer: &str) {
+        let (Kind::Subagent(role), Some(parent)) = (&self.kind, &self.parent) else { return };
+        if !self.deliver || self.agent.waited(&self.task_id) {
+            return;
+        }
+        let reply = if status == "done" { last_reply(self.pool(), &self.thread_id).await } else { None };
+        let answer = reply.as_deref().unwrap_or(answer);
+        let text = format!("[Sub-agent {} ({}) finished: {status}]\n{answer}", self.thread_id, role.name);
+        let changed = json!({"agent_id": self.thread_id, "task_id": self.task_id, "role": role.name, "status": status});
+        crate::gql::start::deliver_to_parent(self.pool(), &self.agent.runs, parent, &self.thread_id, &text, &changed).await;
     }
 
     /// `run_workflow`: the workflow runs inside the call, shown on the run as
@@ -654,34 +1021,30 @@ impl<'a> Turn<'a> {
         Ok(call.answer(ran))
     }
 
-    async fn note(&mut self, note: workers::Note) -> Result<(), Stop> {
-        match note {
-            workers::Note::Event(event, data) => self.events.worker(event, &data).await.map_err(Stop::Failed)?,
-            workers::Note::Llm { input, output, perf } => self.count_call(input, output, perf),
-            workers::Note::Tool => self.count_tool(),
-        }
-        Ok(())
-    }
-
     /// `make_tool_gate`'s wait for one call: the request recorded (and shown
     /// in a chat), then the row polled until a human answers or it times
     /// out. A stop while waiting stops the run.
     async fn gate(&mut self, call: &ToolCall, native: Native, key: &str) -> Result<Step, Stop> {
-        // `live_task_id(conversation_id)`: only a chat run is its
-        // conversation's, so only a chat's request names its run and is shown.
-        let task_id = matches!(self.kind, Kind::Chat).then(|| self.task_id.clone());
-        let request = crate::approvals::create(
-            self.pool(),
-            key,
-            &call.name,
-            &call.args,
-            self.conversation.as_deref(),
-            task_id.as_deref(),
-        )
-        .await
-        .map_err(|e| Stop::Failed(e.to_string()))?;
-        if task_id.is_some() {
-            self.events.emit("approval_request", &request.event);
+        // `live_task_id(conversation_id)`: only a chat's or a sub-agent's run
+        // is its conversation's, so only its request names its run and is shown.
+        // A sub-agent whose parent's run is up asks there: that is the chat
+        // someone is watching.
+        let parent_run = match (&self.kind, &self.parent) {
+            (Kind::Subagent(_), Some(parent)) => self.agent.runs.in_flight_chat(parent),
+            _ => None,
+        };
+        let (conversation, task_id) = match &parent_run {
+            Some(run) => (self.parent.clone(), Some(run.id.clone())),
+            None => (self.conversation.clone(), self.kind.conversational().then(|| self.task_id.clone())),
+        };
+        let request =
+            crate::approvals::create(self.pool(), key, &call.name, &call.args, conversation.as_deref(), task_id.as_deref())
+                .await
+                .map_err(|e| Stop::Failed(e.to_string()))?;
+        match &parent_run {
+            Some(run) => run.emit_local("approval_request", &request.event),
+            None if task_id.is_some() => self.events.emit("approval_request", &request.event),
+            None => {}
         }
         tracing::info!("tool gate: waiting on approval {} for {}", request.id, call.name);
         let run = self.run.clone();
@@ -692,8 +1055,11 @@ impl<'a> Turn<'a> {
         let (approved, answer) = match outcome.map_err(|e| Stop::Failed(e.to_string()))? {
             crate::approvals::Outcome::Answered { approved, answer } => (approved, answer),
             crate::approvals::Outcome::TimedOut => {
-                if task_id.is_some() {
-                    self.events.emit("approval_resolved", &crate::approvals::resolved_event(&call.name, false, "timed out"));
+                let resolved = crate::approvals::resolved_event(&call.name, false, "timed out");
+                match &parent_run {
+                    Some(run) => run.emit_local("approval_resolved", &resolved),
+                    None if task_id.is_some() => self.events.emit("approval_resolved", &resolved),
+                    None => {}
                 }
                 (false, "timed out".to_string())
             }
@@ -730,7 +1096,7 @@ impl<'a> Turn<'a> {
                     cwd: &cwd,
                     conversation_id: self.conversation.as_deref(),
                     // `message_id == task_id`: the chat reply the card sits under.
-                    message_id: matches!(self.kind, Kind::Chat).then_some(self.task_id.as_str()),
+                    message_id: self.kind.conversational().then_some(self.task_id.as_str()),
                 };
                 let written = super::artifacts::write(
                     &scope,
@@ -763,9 +1129,24 @@ impl<'a> Turn<'a> {
                 Err(answer) => Ok(answer),
             },
             Native::AskUser { question, options, multi_select } => self.ask_user(&question, &options, multi_select).await,
-            Native::Mcp { .. } | Native::Remember { .. } | Native::SpawnWorkers { .. } | Native::RunWorkflow { .. } => {
+            Native::ReadFile { filepath } => super::files::read_file(&crate::config::app_dir(), &filepath),
+            Native::WriteFile { filepath, content } => super::files::write_file(&crate::config::app_dir(), &filepath, &content),
+            Native::ListFiles { directory } => super::files::list_files(&crate::config::app_dir(), &directory),
+            Native::ReadArtifact { artifact_id, version } => {
+                let cwd = crate::config::app_dir();
+                super::artifacts::read(self.pool(), &self.agent.artifacts_dir, &cwd, &artifact_id, version).await
+            }
+            Native::ListArtifacts { all_conversations } => {
+                super::artifacts::list(self.pool(), self.conversation.as_deref(), all_conversations).await
+            }
+            Native::Mcp { .. }
+            | Native::Remember { .. }
+            | Native::RunAgents { .. }
+            | Native::CheckAgents { .. }
+            | Native::RunWorkflow { .. } => {
                 unreachable!("runs in tool_step")
             }
+            Native::SpawnWorkers { .. } => unreachable!("a workflow agent node's tool, never bound here"),
         }
     }
 
@@ -821,15 +1202,16 @@ impl<'a> Turn<'a> {
     // ── context ─────────────────────────────────────────────────────────────
 
     /// `_resolve_conv_scope`: the project and incognito flag, read at the start.
-    async fn scope(&self) -> (Option<String>, bool) {
-        let row: Option<(Option<String>, Option<bool>)> =
-            sqlx::query_as("SELECT project_id, ephemeral FROM conversations WHERE id = ?")
+    /// And a sub-agent's parent conversation.
+    async fn scope(&self) -> (Option<String>, bool, Option<String>) {
+        let row: Option<(Option<String>, Option<bool>, Option<String>)> =
+            sqlx::query_as("SELECT project_id, ephemeral, parent_id FROM conversations WHERE id = ?")
                 .bind(&self.thread_id)
                 .fetch_optional(self.pool())
                 .await
                 .ok()
                 .flatten();
-        row.map_or((None, false), |(p, e)| (p, e.unwrap_or(false)))
+        row.map_or((None, false, None), |(p, e, parent)| (p, e.unwrap_or(false), parent))
     }
 
     // ── the end ─────────────────────────────────────────────────────────────
@@ -945,6 +1327,8 @@ impl<'a> Turn<'a> {
         let perf = self.perf.message_perf().unwrap_or(Value::Null);
         let (input, output) = if self.has_usage { (Some(self.input_tokens), Some(self.output_tokens)) } else { (None, None) };
         let now = now_stored();
+        // Before the row says the turn ended: a waiter leaves once it does.
+        let waited = self.agent.waited(&self.task_id);
         let written = async {
             let mut tx = crate::db::write_tx(self.pool()).await?;
             sqlx::query(
@@ -978,6 +1362,9 @@ impl<'a> Turn<'a> {
         };
         if let Err(e) = written.await {
             tracing::error!("agent: finalizing run {}: {e}", self.task_id);
+        }
+        if !waited {
+            self.deliver(status, content).await;
         }
     }
 
@@ -1037,6 +1424,38 @@ async fn remember(
         Err(e) => {
             tracing::warn!("remember failed: {e}");
             format!("Could not save memory: {e}")
+        }
+    }
+}
+
+/// What a sub-agent answered with: its thread's last reply, without what it
+/// said on the way there (its Message row has all of it, for its page).
+async fn last_reply(pool: &SqlitePool, thread_id: &str) -> Option<String> {
+    let thread = Thread::load(pool, thread_id).await.ok()?;
+    let reply = thread.messages.iter().rev().find(|m| m.role == Role::Assistant)?;
+    Some(workers::answer(reply)).filter(|text| !text.trim().is_empty())
+}
+
+/// Resolves once the sub-agent turn `turn` has ended: its run is done, and
+/// its Message row says how. A turn whose run this process doesn't have (it
+/// restarted since) is followed by its row alone.
+async fn until_answered(agent: &Agent, turn: &str) {
+    loop {
+        let status: Option<String> = sqlx::query_scalar("SELECT status FROM messages WHERE id = ?")
+            .bind(turn)
+            .fetch_optional(&agent.pool)
+            .await
+            .ok()
+            .flatten();
+        if status.as_deref() != Some("running") {
+            return;
+        }
+        match agent.runs.get(turn).filter(|run| !run.fields().done) {
+            Some(run) => {
+                let mut watch = run.subscribe();
+                while !run.fields().done && watch.changed().await.is_ok() {}
+            }
+            None => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
         }
     }
 }

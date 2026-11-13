@@ -233,7 +233,7 @@ type BudgetUpdateEvent {
 	snapshot: String!
 }
 
-union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | QuestionRequestEvent | QuestionResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
+union ChatEvent = TokenEvent | ThinkingTokenEvent | StepEvent | BrowserStepEvent | WorkerStartEvent | WorkerStepEvent | WorkerTokenEvent | WorkerDoneEvent | SubagentEvent | ArtifactEvent | TodosUpdatedEvent | QueuedMessageEvent | QueuedWithdrawnEvent | QueuedConsumedEvent | ApprovalRequestEvent | ApprovalResolvedEvent | QuestionRequestEvent | QuestionResolvedEvent | WorkflowToolEvent | BudgetExceededEvent | BudgetUpdateEvent | PerfUpdateEvent | DoneEvent | StoppedEvent | ErrorEvent
 
 type Conversation implements Node {
 	title: String
@@ -253,8 +253,21 @@ type Conversation implements Node {
 	not stored: a rename or a pin isn't activity.
 	"""
 	lastActiveAt: DateTime!
+	"""
+	A sub-agent's role (`researcher`, `coder`, `writer`, `general`).
+	"""
+	agentRole: String
 	id: ID!
 	project: Project
+	"""
+	A sub-agent's conversation: the conversation whose agent spawned it.
+	"""
+	parent: Conversation
+	"""
+	The sub-agents its agent spawned, oldest first, each with where its
+	latest turn stands.
+	"""
+	subagents: [Subagent!]!
 	messageCount: Int!
 	"""
 	Backward-paginated message connection. Newest-N older than the cursor,
@@ -417,6 +430,12 @@ type Message implements Node {
 	evalTps: Float
 	durationMs: Float
 	createdAt: DateTime!
+	"""
+	Who sent it, when not the user or the conversation's own agent:
+	`agent` for a task its parent agent set a sub-agent,
+	`subagent:<conversation id>` for a sub-agent's answer to its parent.
+	"""
+	source: String
 	"""
 	Loaded alongside the page (`with_steps`), ordered by `seq`.
 	"""
@@ -1039,6 +1058,59 @@ type StopRunningTaskPayload {
 type StoppedEvent {
 	message: String!
 	conversationId: String!
+}
+
+"""
+A sub-agent of a conversation's agent: a conversation of its own
+(`conversationId`), and its latest turn.
+"""
+type Subagent {
+	"""
+	The sub-agent's conversation: open it to read or write to it.
+	"""
+	conversationId: String!
+	"""
+	The task it was spawned for, shortened.
+	"""
+	title: String
+	"""
+	The parent's reply (a Message's raw id) it was spawned from.
+	"""
+	spawnedBy: String
+	createdAt: DateTime!
+	"""
+	Its latest turn: the run to follow or stop while it is `running`.
+	"""
+	taskId: String
+	lastActiveAt: DateTime!
+	id: ID!
+	role: String!
+	"""
+	`running`, `done`, `error` or `stopped` — its latest turn's; `pending`
+	before it has one.
+	"""
+	status: String!
+	"""
+	What its latest turn said, once it has ended.
+	"""
+	result: String
+}
+
+"""
+One of the run's sub-agents changed: a task went to it (`running`), or
+its turn ended (`done`, `error`, `stopped`).
+"""
+type SubagentEvent {
+	"""
+	The sub-agent's conversation.
+	"""
+	agentId: String!
+	"""
+	The turn the change is about.
+	"""
+	taskId: String!
+	role: String!
+	status: String!
 }
 
 type Subscription {

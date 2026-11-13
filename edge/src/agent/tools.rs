@@ -90,10 +90,17 @@ pub struct Toolset {
 /// human switched off. A board run (`board=True`) also gets `complete_task`
 /// and `block_task`, before `remember`; with an embedder — which Python
 /// always has — `remember` is bound too; then the `always` MCP servers'.
-pub fn bound_for(policy: &Policy, board: bool, mcp: &crate::mcp::Snapshot) -> Toolset {
+///
+/// What it delegates with: a turn's sub-agents are conversations it can come
+/// back to (`run_agents`, `check_agents`); a workflow's agent node, which has
+/// no conversation to hang them on, keeps its in-memory `spawn_workers`.
+pub fn bound_for(policy: &Policy, board: bool, agents: bool, mcp: &crate::mcp::Snapshot) -> Toolset {
     let board_tools: &[&str] = if board { &["complete_task", "block_task"] } else { &[] };
-    let names: Vec<&str> = ["run_cell", "write_artifact", "write_todos", "set_todo_status", "spawn_workers", "run_workflow"]
+    let delegate: &[&str] = if agents { &["run_agents", "check_agents"] } else { &["spawn_workers"] };
+    let names: Vec<&str> = ["run_cell", "write_artifact", "write_todos", "set_todo_status"]
         .iter()
+        .chain(delegate)
+        .chain(&["run_workflow"])
         .chain(board_tools)
         .chain(&["remember"])
         .copied()
@@ -151,12 +158,55 @@ pub enum Native {
     CompleteTask { summary: String, metadata: Option<String> },
     BlockTask { reason: String, needs_input: bool },
     SpawnWorkers { tasks: Vec<super::workers::Task> },
+    /// Tasks for sub-agents, new or earlier ones (`turn.rs`).
+    RunAgents { tasks: Vec<AgentTask>, wait: bool },
+    /// Where sub-agents stand, and what the finished ones answered.
+    CheckAgents { agent_ids: Vec<String>, wait: bool },
     /// A question for the user in the chat, answered by a click or in words.
     AskUser { question: String, options: Vec<Choice>, multi_select: bool },
     /// A saved workflow, run to its outputs (`workflow/mod.rs`).
     RunWorkflow { workflow_id: String, inputs_json: Option<String> },
     /// A bound MCP server's tool; the server checks the arguments.
     Mcp { server: String, tool: String, args: Value },
+    // A sub-agent role's file and artifact tools (`workers::role`).
+    ReadFile { filepath: String },
+    WriteFile { filepath: String, content: String },
+    ListFiles { directory: String },
+    ReadArtifact { artifact_id: String, version: Option<i64> },
+    ListArtifacts { all_conversations: bool },
+}
+
+/// One of `run_agents`' tasks.
+#[derive(Debug, PartialEq, Clone)]
+pub struct AgentTask {
+    pub task: String,
+    /// None: the general role — or, with `agent_id`, the one it has.
+    pub role: Option<String>,
+    pub context: Option<String>,
+    /// An earlier sub-agent to give the task to.
+    pub agent_id: Option<String>,
+}
+
+/// `run_agents`' `tasks`, if each is an object with a string `task` and,
+/// where given, string `role` and `agent_id`.
+fn agent_tasks(raw: &Value) -> Option<Vec<AgentTask>> {
+    let text = |spec: &Map<String, Value>, key: &str| match spec.get(key) {
+        None | Some(Value::Null) => Some(None),
+        Some(Value::String(s)) => Some(Some(s.trim().to_string()).filter(|s| !s.is_empty())),
+        Some(_) => None,
+    };
+    raw.as_array()?
+        .iter()
+        .map(|spec| {
+            let spec = spec.as_object()?;
+            Some(AgentTask {
+                task: text(spec, "task")??,
+                role: text(spec, "role")?,
+                context: spec.get("context").filter(|v| pyjson::truthy(v)).map(pyjson::py_str),
+                agent_id: text(spec, "agent_id")?,
+            })
+        })
+        .collect()
 }
 
 /// One of `ask_user`'s options.
@@ -251,12 +301,29 @@ fn native(name: &str, args: &Value) -> Result<Native, String> {
             }
             Native::SpawnWorkers { tasks: tasks.unwrap_or_default() }
         }
+        "run_agents" => {
+            let raw = a.value("tasks");
+            let tasks = raw.and_then(agent_tasks);
+            if raw.is_some() && tasks.is_none() {
+                a.fail(
+                    "tasks",
+                    "Input should be a list of objects, each with a string `task` and optional strings `role` and `agent_id`",
+                );
+            }
+            Native::RunAgents { tasks: tasks.unwrap_or_default(), wait: a.bool("wait", true) }
+        }
+        "check_agents" => Native::CheckAgents { agent_ids: a.str_list("agent_ids"), wait: a.bool("wait", false) },
         "run_workflow" => Native::RunWorkflow { workflow_id: a.str("workflow_id"), inputs_json: a.opt_str("inputs_json") },
         "ask_user" => Native::AskUser {
             question: a.str("question"),
             options: a.choices("options"),
             multi_select: a.bool("multi_select", false),
         },
+        "read_file" => Native::ReadFile { filepath: a.str("filepath") },
+        "write_file" => Native::WriteFile { filepath: a.str("filepath"), content: a.str("content") },
+        "list_files" => Native::ListFiles { directory: a.str("directory") },
+        "read_artifact" => Native::ReadArtifact { artifact_id: a.str("artifact_id"), version: a.opt_int("version") },
+        "list_artifacts" => Native::ListArtifacts { all_conversations: a.bool("all_conversations", false) },
         other => return Err(format!("Error: {other} has no handler.")),
     };
     a.finish(name, args, call)
@@ -560,7 +627,7 @@ mod tests {
     #[test]
     fn every_call_is_planned_on_its_own() {
         let policy = Policy::default();
-        let tools = bound_for(&policy, false, &no_mcp());
+        let tools = bound_for(&policy, false, true, &no_mcp());
         let steps = plan(
             &[call("run_cell", json!({"code": "1"})), call("nope", json!({})), call("write_todos", json!({"todos": ["a"]}))],
             &tools,
@@ -571,12 +638,18 @@ mod tests {
             steps[1],
             Step::Refused(
                 "Error: nope is not a valid tool, try one of [run_cell, write_artifact, write_todos, set_todo_status, \
-                 spawn_workers, run_workflow, remember]."
+                 run_agents, check_agents, run_workflow, remember]."
                     .into()
             )
         );
         assert_eq!(steps[2], Step::Run(Native::WriteTodos { todos: vec!["a".into()] }));
-        assert_eq!(plan_one(call("spawn_workers", json!({"tasks": []})), &tools, &policy), Step::Run(Native::SpawnWorkers { tasks: vec![] }));
+        assert_eq!(
+            plan_one(call("run_agents", json!({"tasks": []})), &tools, &policy),
+            Step::Run(Native::RunAgents { tasks: vec![], wait: true })
+        );
+        // A workflow's agent node still has its workers.
+        let node = bound_for(&policy, false, false, &no_mcp());
+        assert_eq!(plan_one(call("spawn_workers", json!({"tasks": []})), &node, &policy), Step::Run(Native::SpawnWorkers { tasks: vec![] }));
         assert_eq!(
             plan_one(call("run_workflow", json!({"workflow_id": "w"})), &tools, &policy),
             Step::Run(Native::RunWorkflow { workflow_id: "w".into(), inputs_json: None })
@@ -592,7 +665,7 @@ mod tests {
     #[test]
     fn a_question_is_bound_only_where_asked_for_and_its_options_checked() {
         let policy = Policy::default();
-        let mut tools = bound_for(&policy, false, &no_mcp());
+        let mut tools = bound_for(&policy, false, true, &no_mcp());
         assert!(matches!(plan_one(call("ask_user", json!({})), &tools, &policy), Step::Refused(e) if e.contains("not a valid tool")));
         bind_ask_user(&mut tools, &policy);
         assert_eq!(tools.schemas.last().unwrap().name, "ask_user");
@@ -624,7 +697,7 @@ mod tests {
     #[test]
     fn bad_arguments_are_answered_for_the_model_to_fix() {
         let policy = Policy::default();
-        let tools = bound_for(&policy, false, &no_mcp());
+        let tools = bound_for(&policy, false, true, &no_mcp());
         let refused = |c: ToolCall| match plan_one(c, &tools, &policy) {
             Step::Refused(error) => error,
             other => panic!("{other:?}"),
@@ -640,7 +713,16 @@ mod tests {
             "Error invoking tool 'run_cell' with kwargs {} with error:\n code: Field required\n Please fix the error and try again."
         );
         assert!(refused(call("run_workflow", json!({"workflow_id": "w", "inputs_json": {"a": 1}}))).contains("inputs_json: Input should be a valid string"));
-        assert!(refused(call("spawn_workers", json!({"tasks": [{"task": 1}]}))).contains("tasks: Input should be a list of objects"));
+        assert!(refused(call("run_agents", json!({"tasks": [{"task": 1}]}))).contains("tasks: Input should be a list of objects"));
+        assert!(refused(call("run_agents", json!({"tasks": [{"task": "x", "agent_id": 7}]}))).contains("optional strings `role` and `agent_id`"));
+        assert!(refused(call("check_agents", json!({"agent_ids": "a"}))).contains("agent_ids: "));
+        assert_eq!(
+            plan_one(call("run_agents", json!({"tasks": [{"task": " x ", "role": "", "agent_id": "a"}], "wait": false})), &tools, &policy),
+            Step::Run(Native::RunAgents {
+                tasks: vec![AgentTask { task: "x".into(), role: None, context: None, agent_id: Some("a".into()) }],
+                wait: false
+            })
+        );
         assert!(refused(call("write_todos", json!({"todos": ["a", 2]}))).contains("todos.1: Input should be a valid string"));
         assert!(refused(call("run_cell", json!("print(1)"))).contains("Input should be a valid dictionary"));
     }
@@ -659,7 +741,7 @@ mod tests {
             .unwrap(),
             ..Default::default()
         };
-        let tools = bound_for(&policy, false, &no_mcp());
+        let tools = bound_for(&policy, false, true, &no_mcp());
         assert!(!tools.schemas.iter().any(|t| t.name == "remember"));
         let gated = plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy);
         assert_eq!(gated, Step::Gated(Native::RunCell { code: "1".into() }));
@@ -679,7 +761,7 @@ mod tests {
             ..Default::default()
         };
         policy.owners = mcp.owners();
-        let tools = bound_for(&policy, false, &mcp);
+        let tools = bound_for(&policy, false, true, &mcp);
         let names: Vec<&str> = tools.schemas.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names.last(), Some(&"issue"));
         assert!(!names.contains(&"pr") && !names.contains(&"hidden"));

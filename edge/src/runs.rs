@@ -195,14 +195,15 @@ impl Registry {
         });
     }
 
-    /// The chat run up on a conversation — `in_flight_chat_task`: the first,
-    /// in registration order, that hasn't finished.
+    /// The run up on a conversation — a chat's, or a sub-agent's on its own
+    /// (`in_flight_chat_task`): the first, in registration order, that
+    /// hasn't finished.
     pub fn in_flight_chat(&self, conversation_id: &str) -> Option<Arc<Run>> {
         self.lock()
             .runs
             .values()
             .find(|run| {
-                run.meta.kind == "chat"
+                matches!(run.meta.kind.as_str(), "chat" | "subagent")
                     && run.meta.parent_id.as_deref() == Some(conversation_id)
                     && !run.fields().done
             })

@@ -99,6 +99,11 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
             exec(tx, &format!("ALTER TABLE messages ADD COLUMN {perf} FLOAT")).await?;
         }
     }
+    // Who sent it, when not the user or the conversation's own agent: a
+    // parent agent's task, a sub-agent's result — the edge's own.
+    if !msg.contains("source") {
+        exec(tx, "ALTER TABLE messages ADD COLUMN source VARCHAR").await?;
+    }
     exec(tx, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)").await?;
     exec(tx, "CREATE INDEX IF NOT EXISTS ix_messages_conv_created ON messages (conversation_id, created_at)").await?;
     exec(tx, "CREATE INDEX IF NOT EXISTS ix_steps_message_id ON steps (message_id)").await?;
@@ -149,6 +154,14 @@ async fn migrate(tx: &mut Transaction<'_, Sqlite>) -> sqlx::Result<()> {
     if !conv.contains("effort") {
         exec(tx, "ALTER TABLE conversations ADD COLUMN effort VARCHAR").await?;
     }
+    // A sub-agent's conversation (`surface = 'subagent'`): the conversation
+    // that spawned it, its role, and the parent's reply it was spawned from.
+    for col in ["parent_id", "agent_role", "spawned_by"] {
+        if !conv.contains(col) {
+            exec(tx, &format!("ALTER TABLE conversations ADD COLUMN {col} VARCHAR")).await?;
+        }
+    }
+    exec(tx, "CREATE INDEX IF NOT EXISTS ix_conversations_parent_id ON conversations (parent_id)").await?;
     let auto = columns(tx, "automations").await?;
     if !auto.contains("notifications") {
         exec(tx, "ALTER TABLE automations ADD COLUMN notifications TEXT").await?;

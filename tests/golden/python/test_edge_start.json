@@ -68,7 +68,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -79,7 +82,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -128,7 +134,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -144,7 +151,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -248,7 +256,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -259,7 +270,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -308,7 +322,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -324,7 +339,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "and also this",
@@ -340,7 +356,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -442,7 +459,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -453,7 +473,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -502,7 +525,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -518,7 +542,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "and also this",
@@ -534,7 +559,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "queued",
@@ -550,7 +576,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -655,7 +682,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -666,7 +696,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -715,7 +748,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -731,7 +765,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "and also this",
@@ -747,7 +782,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "queued",
@@ -763,7 +799,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -868,7 +905,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -879,7 +919,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -928,7 +971,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -944,7 +988,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "and also this",
@@ -960,7 +1005,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "queued",
@@ -976,7 +1022,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -1075,7 +1122,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -1086,7 +1136,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -1135,7 +1188,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -1151,7 +1205,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "queued",
@@ -1167,7 +1222,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -1266,7 +1322,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -1277,7 +1336,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -1326,7 +1388,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -1342,7 +1405,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "queued",
@@ -1358,7 +1422,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -1463,7 +1528,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -1474,7 +1542,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -1523,7 +1594,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -1539,7 +1611,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "queued",
@@ -1555,7 +1628,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "queued",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -1656,7 +1730,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -1667,7 +1744,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -1810,7 +1890,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -1821,7 +1904,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -1993,7 +2079,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -2004,7 +2093,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -2211,7 +2303,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -2222,7 +2317,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -2434,7 +2532,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -2445,7 +2546,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -2681,7 +2785,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -2692,7 +2799,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -2913,7 +3023,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -2924,7 +3037,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -3073,7 +3189,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3084,7 +3203,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -3233,7 +3355,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3244,7 +3369,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -3393,7 +3521,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3404,7 +3535,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -3553,7 +3687,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3564,7 +3701,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -3714,7 +3854,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3725,7 +3868,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3736,7 +3882,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -3785,7 +3934,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -3801,7 +3951,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -3905,7 +4056,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3916,7 +4070,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3927,7 +4084,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -3938,7 +4098,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -4005,7 +4168,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4021,7 +4185,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -4037,7 +4202,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4053,7 +4219,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -4157,7 +4324,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4168,7 +4338,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4179,7 +4352,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4190,7 +4366,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4201,7 +4380,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -4286,7 +4468,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4302,7 +4485,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -4318,7 +4502,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4334,7 +4519,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -4350,7 +4536,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4366,7 +4553,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -4470,7 +4658,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4481,7 +4672,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4492,7 +4686,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4503,7 +4700,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4514,7 +4714,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4525,7 +4728,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -4628,7 +4834,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4644,7 +4851,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -4660,7 +4868,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4676,7 +4885,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -4692,7 +4902,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4708,7 +4919,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -4724,7 +4936,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -4740,7 +4953,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -4844,7 +5058,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4855,7 +5072,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4866,7 +5086,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4877,7 +5100,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4888,7 +5114,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -4899,7 +5128,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -5020,7 +5252,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5036,7 +5269,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -5052,7 +5286,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5068,7 +5303,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -5084,7 +5320,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5100,7 +5337,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -5116,7 +5354,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5132,7 +5371,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "again",
@@ -5148,7 +5388,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5164,7 +5405,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -5268,7 +5510,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5279,7 +5524,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5290,7 +5538,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5301,7 +5552,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5312,7 +5566,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5323,7 +5580,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5334,7 +5594,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": null
+       "title": null,
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -5473,7 +5736,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5489,7 +5753,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -5505,7 +5770,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5521,7 +5787,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -5537,7 +5804,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5553,7 +5821,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -5569,7 +5838,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5585,7 +5855,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "again",
@@ -5601,7 +5872,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5617,7 +5889,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "fresh",
@@ -5633,7 +5906,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -5649,7 +5923,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -5753,7 +6028,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5764,7 +6042,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5775,7 +6056,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5786,7 +6070,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5797,7 +6084,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5808,7 +6098,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5819,7 +6112,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": null
+       "title": null,
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -5830,7 +6126,10 @@
        "pinned": 0,
        "project_id": "p1",
        "surface": "web",
-       "title": "in a project"
+       "title": "in a project",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -5987,7 +6286,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6003,7 +6303,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -6019,7 +6320,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6035,7 +6337,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -6051,7 +6354,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6067,7 +6371,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -6083,7 +6388,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6099,7 +6405,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "again",
@@ -6115,7 +6422,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6131,7 +6439,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "fresh",
@@ -6147,7 +6456,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6163,7 +6473,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "in a project",
@@ -6179,7 +6490,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6195,7 +6507,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -6299,7 +6612,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6310,7 +6626,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6321,7 +6640,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6332,7 +6654,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6343,7 +6668,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6354,7 +6682,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6365,7 +6696,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": null
+       "title": null,
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6376,7 +6710,10 @@
        "pinned": 0,
        "project_id": "p1",
        "surface": "web",
-       "title": "in a project"
+       "title": "in a project",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6387,7 +6724,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "secret"
+       "title": "secret",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -6562,7 +6902,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6578,7 +6919,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -6594,7 +6936,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6610,7 +6953,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -6626,7 +6970,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6642,7 +6987,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -6658,7 +7004,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6674,7 +7021,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "again",
@@ -6690,7 +7038,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6706,7 +7055,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "fresh",
@@ -6722,7 +7072,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6738,7 +7089,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "in a project",
@@ -6754,7 +7106,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6770,7 +7123,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "secret",
@@ -6786,7 +7140,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -6802,7 +7157,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -6906,7 +7262,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6917,7 +7276,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6928,7 +7290,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6939,7 +7304,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6950,7 +7318,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6961,7 +7332,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6972,7 +7346,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": null
+       "title": null,
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6983,7 +7360,10 @@
        "pinned": 0,
        "project_id": "p1",
        "surface": "web",
-       "title": "in a project"
+       "title": "in a project",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -6994,7 +7374,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "secret"
+       "title": "secret",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7005,7 +7388,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "secret project"
+       "title": "secret project",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -7198,7 +7584,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7214,7 +7601,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -7230,7 +7618,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7246,7 +7635,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -7262,7 +7652,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7278,7 +7669,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -7294,7 +7686,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7310,7 +7703,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "again",
@@ -7326,7 +7720,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7342,7 +7737,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "fresh",
@@ -7358,7 +7754,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7374,7 +7771,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "in a project",
@@ -7390,7 +7788,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7406,7 +7805,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "secret",
@@ -7422,7 +7822,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7438,7 +7839,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "secret project",
@@ -7454,7 +7856,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7470,7 +7873,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],
@@ -7575,7 +7979,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Existing"
+       "title": "Existing",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7586,7 +7993,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Busy"
+       "title": "Busy",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7597,7 +8007,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — anthropic:claude-opus-4-7 xxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7608,7 +8021,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7619,7 +8035,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7630,7 +8049,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+       "title": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7641,7 +8063,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": null
+       "title": null,
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7652,7 +8077,10 @@
        "pinned": 0,
        "project_id": "p1",
        "surface": "web",
-       "title": "in a project"
+       "title": "in a project",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7663,7 +8091,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "secret"
+       "title": "secret",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       },
       {
        "created_at": "<now>",
@@ -7674,7 +8105,10 @@
        "pinned": 0,
        "project_id": null,
        "surface": "web",
-       "title": "secret project"
+       "title": "secret project",
+       "parent_id": null,
+       "agent_role": null,
+       "spawned_by": null
       }
      ],
      "jobs": [
@@ -7867,7 +8301,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7883,7 +8318,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — ollama:custom xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -7899,7 +8335,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7915,7 +8352,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — gone:model xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -7931,7 +8369,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7947,7 +8386,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "Hello wörld — None xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -7963,7 +8403,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -7979,7 +8420,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "again",
@@ -7995,7 +8437,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -8011,7 +8454,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "fresh",
@@ -8027,7 +8471,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -8043,7 +8488,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "in a project",
@@ -8059,7 +8505,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -8075,7 +8522,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "secret",
@@ -8091,7 +8539,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -8107,7 +8556,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "secret project",
@@ -8123,7 +8573,8 @@
        "prefill_tps": null,
        "role": "user",
        "status": "done",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       },
       {
        "content": "",
@@ -8139,7 +8590,8 @@
        "prefill_tps": null,
        "role": "assistant",
        "status": "running",
-       "ttft_ms": null
+       "ttft_ms": null,
+       "source": null
       }
      ],
      "notification_channels": [],

@@ -112,10 +112,11 @@ async def test_starting_again_changes_nothing(edge_binary, tmp_path):
 # What `_migrate` adds, by table — dropped again to make an old database.
 _ADDED = {
     "messages": ["status", "input_tokens", "output_tokens", "ttft_ms", "llm_ms", "prefill_tps", "eval_tps",
-                 "duration_ms"],
+                 "duration_ms", "source"],
     "steps": ["subagent"],
     "jobs": ["thread_id", "runtime"],
-    "conversations": ["pinned", "surface", "project_id", "ephemeral", "effort"],
+    "conversations": ["pinned", "surface", "project_id", "ephemeral", "effort", "parent_id", "agent_role",
+                      "spawned_by"],
     "automations": ["notifications", "stateful"],
     "workflows": ["notifications"],
     "board_tasks": ["blocked_kind", "pending_answer"],
