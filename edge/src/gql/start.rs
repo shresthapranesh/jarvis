@@ -128,6 +128,10 @@ pub(crate) async fn insert_message(
     Ok(id)
 }
 
+/// `conversations.surface` of a sub-agent's conversation: one an agent
+/// spawned (`parent_id`), answered by its `agent_role`.
+pub const SUBAGENT: &str = "subagent";
+
 /// Register the run, then commit its rows and wake the agent loop.
 /// Registered first: once the job is visible the loop may claim it, and must
 /// find the run its subscribers watch.
@@ -261,7 +265,7 @@ pub async fn start_chat(
         if attachments.is_empty() { query.clone() } else { uploads::display(&query, &attachments) }
     });
     insert_message(&mut *tx, &conversation_id, "user", &display, None, "done").await?;
-    let task_id = enqueue_turn(registry, tx, &conversation_id, &query, &model, &attachments).await?;
+    let task_id = enqueue_turn(registry, tx, &conversation_id, &query, &model, &attachments, None).await?;
     Ok(Dispatched::Started { task_id, conversation_id })
 }
 
@@ -275,6 +279,7 @@ async fn enqueue_turn(
     query: &str,
     model: &str,
     attachments: &[Attachment],
+    from_agent: Option<FromAgent>,
 ) -> Result<String> {
     let task_id = new_id();
     sqlx::query(
@@ -291,14 +296,174 @@ async fn enqueue_turn(
     if !attachments.is_empty() {
         payload["attachments"] = serde_json::to_value(attachments)?;
     }
+    // A sub-agent's conversation is answered by its role, whoever wrote to
+    // it — the agent that spawned it, or the user on its page.
+    let role: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT surface, agent_role FROM conversations WHERE id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let kind = match role {
+        Some((surface, role)) if surface == SUBAGENT => {
+            payload["role"] = json!(role);
+            if let Some(from) = from_agent {
+                // The agent that spawned it set the task: a stop of that
+                // agent stops this turn, and `deliver` sends its answer back
+                // as a message when nobody is waiting for it.
+                payload["by"] = json!("agent");
+                payload["deliver"] = json!(from.deliver);
+            }
+            "subagent"
+        }
+        _ => "chat",
+    };
     // The conversation is the thread: its turns run one at a time.
-    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, "chat", &payload, Some(conversation_id)).await?;
+    let enqueued_at = crate::jobs::insert(&mut *tx, &task_id, kind, &payload, Some(conversation_id)).await?;
     let label = match attachments.first() {
         Some(a) if query.trim().is_empty() => first_chars(&a.name, 60),
         _ => first_chars(query, 60),
     };
-    commit_run(registry, tx, &task_id, "chat", label, conversation_id, &enqueued_at).await?;
+    commit_run(registry, tx, &task_id, kind, label, conversation_id, &enqueued_at).await?;
     Ok(task_id)
+}
+
+/// A sub-agent turn its parent agent starts, not the user.
+#[derive(Clone, Copy)]
+pub struct FromAgent {
+    /// Send the answer to the parent's conversation when the turn ends with
+    /// nobody waiting on it.
+    pub deliver: bool,
+}
+
+/// `messages.source` of a task an agent set its sub-agent.
+pub const FROM_AGENT: &str = "agent";
+
+/// `messages.source` of a sub-agent's answer delivered to its parent.
+pub fn from_subagent(conversation_id: &str) -> String {
+    format!("subagent:{conversation_id}")
+}
+
+async fn insert_sourced(
+    executor: impl sqlx::SqliteExecutor<'_>,
+    conversation_id: &str,
+    content: &str,
+    status: &str,
+    source: &str,
+) -> sqlx::Result<String> {
+    let id = new_id();
+    sqlx::query(
+        "INSERT INTO messages (id, conversation_id, role, content, model, created_at, status, source) \
+         VALUES (?, ?, 'user', ?, NULL, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(conversation_id)
+    .bind(content)
+    .bind(now_stored())
+    .bind(status)
+    .bind(source)
+    .execute(executor)
+    .await?;
+    Ok(id)
+}
+
+/// A sub-agent to spawn: its conversation, and the first task on it.
+pub struct Spawn<'a> {
+    /// The conversation of the agent spawning it, if it has one.
+    pub parent_id: Option<&'a str>,
+    /// The run spawning it (a chat's is its reply's id).
+    pub spawned_by: &'a str,
+    pub role: &'a str,
+    /// Already resolved.
+    pub model: &'a str,
+    pub title: &'a str,
+    pub query: &'a str,
+    pub project_id: Option<&'a str>,
+    pub ephemeral: bool,
+    pub from: FromAgent,
+}
+
+/// Spawn a sub-agent: its conversation, linked to its parent, and its first
+/// turn. The turn's id and the conversation's.
+pub async fn spawn_subagent(pool: &SqlitePool, registry: &Registry, spawn: Spawn<'_>) -> Result<(String, String)> {
+    let mut tx = crate::db::write_tx(pool).await?;
+    let id = new_id();
+    sqlx::query(
+        "INSERT INTO conversations (id, title, model, created_at, surface, pinned, project_id, ephemeral, parent_id, \
+         agent_role, spawned_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(spawn.title)
+    .bind(spawn.model)
+    .bind(now_stored())
+    .bind(SUBAGENT)
+    .bind(spawn.project_id)
+    .bind(spawn.ephemeral)
+    .bind(spawn.parent_id)
+    .bind(spawn.role)
+    .bind(spawn.spawned_by)
+    .execute(&mut *tx)
+    .await?;
+    insert_sourced(&mut *tx, &id, spawn.query, "done", FROM_AGENT).await?;
+    let task_id = enqueue_turn(registry, tx, &id, spawn.query, spawn.model, &[], Some(spawn.from)).await?;
+    Ok((task_id, id))
+}
+
+/// Another task for a sub-agent that isn't running: its next turn, on the
+/// thread it already has.
+pub async fn task_subagent(
+    pool: &SqlitePool,
+    registry: &Registry,
+    conversation_id: &str,
+    query: &str,
+    model: &str,
+    from: FromAgent,
+) -> Result<String> {
+    let mut tx = crate::db::write_tx(pool).await?;
+    insert_sourced(&mut *tx, conversation_id, query, "done", FROM_AGENT).await?;
+    enqueue_turn(registry, tx, conversation_id, query, model, &[], Some(from)).await
+}
+
+/// A sub-agent's answer for a parent that wasn't waiting for it: a message
+/// on the parent's conversation, from the sub-agent. It joins the run going
+/// there, or starts the parent's next turn.
+///
+/// `changed` is the `subagent` event a run going on the parent is told with.
+pub async fn deliver_to_parent(
+    pool: &SqlitePool,
+    registry: &Registry,
+    parent_id: &str,
+    subagent_id: &str,
+    text: &str,
+    changed: &Value,
+) {
+    let source = from_subagent(subagent_id);
+    let delivered = async {
+        if let Some(run) = registry.in_flight_chat(parent_id) {
+            run.emit_local("subagent", changed);
+            let message_id = insert_sourced(pool, parent_id, text, "queued", &source).await?;
+            let position: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND role = 'user' AND status = 'queued'",
+            )
+            .bind(parent_id)
+            .fetch_one(pool)
+            .await?;
+            run.emit_local("queued_message", &json!({"message_id": message_id, "text": text, "position": position}));
+            return Ok(());
+        }
+        let mut tx = crate::db::write_tx(pool).await?;
+        let model: Option<String> =
+            sqlx::query_scalar("SELECT model FROM conversations WHERE id = ?").bind(parent_id).fetch_optional(&mut *tx).await?;
+        // A parent deleted meanwhile has nobody to tell.
+        let Some(model) = model else { return Ok(()) };
+        // Its stored model may have left the catalog since.
+        let model = catalog::resolve_model(pool, Some(&model)).await?;
+        insert_sourced(&mut *tx, parent_id, text, "done", &source).await?;
+        enqueue_turn(registry, tx, parent_id, text, &model, &[], None).await.map(|_| ())
+    };
+    let delivered: Result<()> = delivered.await;
+    if let Err(e) = delivered {
+        tracing::warn!("delivering sub-agent {subagent_id}'s answer to {parent_id} failed: {}", e.message);
+    }
 }
 
 /// `_redispatch_queued`: a message queued after a run's last model call has
@@ -317,7 +482,7 @@ pub async fn redispatch_queued(pool: &SqlitePool, registry: &Registry, conversat
     let started = async {
         let mut tx = crate::db::write_tx(pool).await?;
         sqlx::query("UPDATE messages SET status = 'done' WHERE id = ?").bind(&message_id).execute(&mut *tx).await?;
-        enqueue_turn(registry, tx, conversation_id, &text, model, &[]).await
+        enqueue_turn(registry, tx, conversation_id, &text, model, &[], None).await
     };
     if let Err(e) = started.await {
         // The rows are still queued: the next run on the conversation adopts them.

@@ -8,7 +8,7 @@ Tool schemas are re-sent on every LLM call, so only tools coupled to the agent *
 | `run_cell` | the door into the per-conversation kernel |
 | `write_todos` / `set_todo_status` | write the run's thread state |
 | `complete_task` / `block_task` | act on the current board run; bound only on board runs |
-| `spawn_workers` / `run_workflow` | run agents on this agent's model |
+| `run_agents` / `check_agents` / `run_workflow` | sub-agents (each a conversation of its own, re-usable by id) and workflows run on the server |
 | `write_artifact` | its live event belongs to the run |
 | `remember` (only with an embedder) | a memory write the loop makes |
 

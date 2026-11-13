@@ -229,11 +229,16 @@ CREATE TABLE conversations (
 	project_id VARCHAR, 
 	created_at DATETIME NOT NULL, 
 	effort VARCHAR, 
+	parent_id VARCHAR, 
+	agent_role VARCHAR, 
+	spawned_by VARCHAR, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(project_id) REFERENCES projects (id)
 );
 
 CREATE INDEX ix_conversations_ephemeral ON conversations (ephemeral);
+
+CREATE INDEX ix_conversations_parent_id ON conversations (parent_id);
 
 CREATE INDEX ix_conversations_project_id ON conversations (project_id);
 
@@ -313,6 +318,7 @@ CREATE TABLE messages (
 	eval_tps FLOAT, 
 	duration_ms FLOAT, 
 	created_at DATETIME NOT NULL, 
+	source VARCHAR, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(conversation_id) REFERENCES conversations (id)
 );

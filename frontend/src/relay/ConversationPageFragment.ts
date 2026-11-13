@@ -17,6 +17,18 @@ export const conversationPageFragment = graphql`
       id
       name
     }
+    agentRole
+    parent {
+      id
+      title
+    }
+    subagents {
+      conversationId
+      role
+      title
+      status
+      result
+    }
     messages(last: $count, before: $cursor) @connection(key: "ConversationPageFragment_messages") {
       edges {
         node {
@@ -33,6 +45,7 @@ export const conversationPageFragment = graphql`
           evalTps
           durationMs
           createdAt
+          source
           steps {
             id
             node

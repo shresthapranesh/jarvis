@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import sqlite3
 import sys
 import threading
@@ -570,7 +571,14 @@ def _thread(turn: Turn) -> list[dict]:
 
 def _record(turn: Turn) -> dict[str, Any]:
     """`_record_of`, with ports and this machine's paths named (`portable`)."""
-    return portable(_record_of(turn))
+    return _delegates(portable(_record_of(turn)))
+
+
+def _delegates(value: Any) -> Any:
+    """`value` with the tools a turn delegates with named as Python's one was,
+    where an answer lists the bound tools ("… is not a valid tool, try one
+    of […]"): sub-agents with conversations of their own are the edge's."""
+    return json.loads(json.dumps(value).replace("run_agents, check_agents, run_workflow", "spawn_workers, run_workflow"))
 
 
 def _record_of(turn: Turn) -> dict[str, Any]:
@@ -597,14 +605,26 @@ def _record_of(turn: Turn) -> dict[str, Any]:
     })
 
 
+_DELEGATING = re.compile(r"## Delegating to [^\n]*\n.*?(?=\n## )", re.S)
+
+
 def _requests(python: list[dict], edge: list[dict]) -> None:
-    python, edge = portable(python), portable(edge)
+    python, edge = portable(python), _delegates(portable(edge))
     assert len(edge) == len(python)
     for p, e in zip(python, edge):
         _intended_ollama(p, e)
         # `ask_user` is the edge's own, bound in web chats after Python was gone.
         if "tools" in e:
             e["tools"] = [t for t in e["tools"] if t["function"]["name"] != "ask_user"]
+        # So are sub-agents with conversations of their own: `run_agents` and
+        # `check_agents` where Python bound `spawn_workers`, and the prompt's
+        # section on delegating.
+        for side, own in ((p, {"spawn_workers"}), (e, {"run_agents", "check_agents"})):
+            if "tools" in side:
+                side["tools"] = [t for t in side["tools"] if t["function"]["name"] not in own]
+            for m in side["messages"]:
+                if m["role"] == "system" and isinstance(m.get("content"), str):
+                    m["content"] = _DELEGATING.sub("", m["content"])
         assert e["messages"] == p["messages"]
         assert [t["function"]["name"] for t in e.get("tools", [])] == [t["function"]["name"] for t in p.get("tools", [])]
         for et, pt in zip(e.get("tools", []), p.get("tools", [])):
@@ -1794,181 +1814,6 @@ async def test_a_browse_is_announced_on_the_live_run(twins):
     # A human's is refused, in Python's words.
     edge = await _edge_gql(twins, BROWSE, {"u": "x", "p": "start"})
     assert edge == await _python_gql(BROWSE, {"u": "x", "p": "start"}) and edge["errors"]
-
-
-# ── workers ──────────────────────────────────────────────────────────────────
-
-
-def _spawn(*tasks: dict) -> Reply:
-    return Reply("", [("spawn_workers", {"tasks": list(tasks)})])
-
-
-def _by_worker(record: dict) -> dict:
-    """The record with each worker's events and steps apart, in their own
-    order: workers run at once, so how theirs interleave is timing."""
-    events: dict[Any, list] = {"main": []}
-    for e in record["events"]:
-        events.setdefault(e["idx"] if e["kind"].startswith("Worker") else "main", []).append(e)
-    steps: dict[str, list] = {}
-    for _seq, node, source, subagent, data in record["steps"]:
-        steps.setdefault(subagent or "main", []).append([node, source, data])
-    return {**record, "events": events, "steps": steps}
-
-
-async def _both_workers(twins: Twins, query: str, script: ByRole, *, hold: int | None = None,
-                        edge_during: Any = None) -> tuple[dict, dict]:
-    """Both runtimes, the requests matched up in any order and ids minted
-    on each side normalized."""
-    python, python_requests = await twins.python(query, script)
-    edge, edge_requests = await twins.edge(query, script, hold=hold, during=edge_during)
-
-    def key(r: dict) -> str:
-        return json.dumps(r["messages"], sort_keys=True)
-
-    _requests(sorted(Normalizer().value(python_requests), key=key), sorted(Normalizer().value(edge_requests), key=key))
-    out = []
-    for turn in (python, edge):
-        norm = Normalizer({turn.conversation_id: "<conversation>", turn.task_id: "<task>"})
-        out.append({**_record(turn), **_artifacts(turn.db, Normalizer(dict(norm._map)))})
-    return out[0], out[1]
-
-
-async def test_a_worker(twins):
-    script = ByRole([_spawn({"task": "Summarise the thing", "role": "writer"}), Reply("Workers finished.")],
-                    writer=[Reply("The worker's answer.")])
-    python, edge = await _both_workers(twins, "delegate", script)
-    assert edge == python
-    kinds = [e["kind"] for e in python["events"]]
-    assert kinds[kinds.index("WorkerStartEvent"):kinds.index("WorkerDoneEvent") + 1] == [
-        "WorkerStartEvent", "WorkerTokenEvent", "WorkerStepEvent", "WorkerDoneEvent"]
-    assert [s[1:4] for s in python["steps"] if s[2] == "subagent"] == [
-        ["worker_start", "subagent", "writer:1"], ["model_request", "subagent", "writer:1"],
-        ["worker_done", "subagent", "writer:1"]]
-    assert python["thread"][2]["content"] == "Task (writer): Summarise the thing\nThe worker's answer."
-
-
-async def test_workers_at_once(twins):
-    """A coder with a notebook of its own, a researcher whose long answer
-    streams in pieces, a role nobody has and a spec without a task."""
-    long = "The Nile runs north through eleven countries before it reaches the Mediterranean, " * 3
-    script = ByRole(
-        [_spawn({"task": "Compute it", "role": "coder"}, {"task": "Look it up", "role": "researcher", "context": "Rivers"},
-                {"task": "Cook", "role": "chef"}, {"role": "writer"}),
-         Reply("All in.")],
-        coder=[Reply("", [("run_cell", {"code": "x = 6 * 7\nx"})]), Reply("It is 42.")],
-        researcher=[Reply(long.strip())],
-    )
-    python, edge = await _both_workers(twins, "split it up", script)
-    assert _by_worker(edge) == _by_worker(python)
-    workers = _by_worker(python)["events"]
-    assert sum(e["kind"] == "WorkerTokenEvent" for e in workers[2]) > 1
-    assert workers[3] == [{"kind": "WorkerDoneEvent", "idx": 3, "role": "chef", "task": "Cook", "status": "error",
-                           "result": "ERROR: Unknown role 'chef' (available: coder, general, researcher, writer)"}]
-    assert workers[4][-1]["result"] == "ERROR: 'task'"
-    answer = python["thread"][2]["content"]
-    assert "Task (coder): Compute it\nIt is 42." in answer
-    assert "Task (chef): Cook\nUnknown role 'chef'" in answer and answer.endswith("Task (writer): \nERROR: 'task'")
-    assert any("42" in (s[2] or "") for s in _by_worker(python)["steps"]["coder:1"])
-
-
-async def test_a_workers_tools(twins, tmp_path):
-    """A general worker's files and artifacts, a tool it isn't bound to and
-    arguments it got wrong."""
-    for db in (twins.python_db, twins.edge_db):
-        art_dir = (db.parent / "artifacts").resolve()
-        art_dir.mkdir(exist_ok=True)
-        (art_dir / "a-seed.md").write_bytes(b"seed\r\nlive")
-        (art_dir / "a-seed_v1.md").write_bytes(b"seed v1")
-        with contextlib.closing(sqlite3.connect(db)) as c:
-            c.execute("INSERT INTO artifacts (id, title, filename, kind, mime_type, conversation_id, created_at, "
-                      "updated_at) VALUES ('a-seed', 'Seed', ?, 'markdown', 'text/markdown', 'c-old', "
-                      "'2026-10-01 00:00:00.000000', '2026-10-01 12:00:00.500000')", (str(art_dir / "a-seed.md"),))
-            c.execute("INSERT INTO artifact_versions (id, artifact_id, version, title, filename, created_at) VALUES "
-                      "('v-seed', 'a-seed', 1, 'Seed', ?, '2026-10-01 00:00:00.000000')", (str(art_dir / "a-seed_v1.md"),))
-            c.commit()
-    notes = tmp_path / "notes"
-
-    def read_back(body: dict) -> Reply:
-        [written] = [json.loads(m["content"]) for m in body["messages"]
-                     if m["role"] == "tool" and m["content"].startswith('{"id": ')]
-        return Reply("", [("read_artifact", {"artifact_id": written["id"]}),
-                          ("read_artifact", {"artifact_id": written["id"], "version": 2})])
-
-    script = ByRole(
-        [_spawn({"task": "Take notes"}), Reply("Noted.")],
-        general=[
-            # Python runs a batch's calls at once, the edge in order: what
-            # one call needs of another goes in the next batch.
-            Reply("Filing. ", [("write_file", {"filepath": f"{notes}/a.txt", "content": "line one\r\nline two"})]),
-            Reply("", [
-                ("list_files", {"directory": f"{notes}/"}),
-                ("read_file", {"filepath": f"{notes}//a.txt"}),
-                ("read_file", {"filepath": "memory/AGENTS.md"}),
-                ("read_file", {"filepath": 5}),
-                ("run_workflow", {"workflow_id": "w"}),
-            ]),
-            Reply("", [
-                ("list_artifacts", {"all_conversations": True}),
-                ("list_artifacts", {"all_conversations": "maybe"}),
-                ("read_artifact", {"artifact_id": "a-seed"}),
-                ("read_artifact", {"artifact_id": "a-seed", "version": "1"}),
-                ("read_artifact", {"artifact_id": "a-seed", "version": 7}),
-                ("read_artifact", {"artifact_id": "nope"}),
-            ]),
-            Reply("", [("write_artifact", {"title": "Notes", "content": "# Notes"})]),
-            read_back,
-            Reply("Done with the files."),
-        ],
-    )
-    python, edge = await _both_workers(twins, "take notes for me", script)
-    assert edge == python
-    [event] = [e for e in python["events"] if "artifactId" in e]
-    assert event["action"] == "created"
-    assert python["thread"][2]["content"] == "Task (general): Take notes\nDone with the files."
-    assert (notes / "a.txt").read_bytes() == b"line one\r\nline two"
-    worker_tools = [json.loads(s[4]) for s in python["steps"] if s[1] == "tools" and s[3] == "general:1"]
-    outputs = [r["output"] for batch in worker_tools for r in (batch if isinstance(batch, list) else [batch])]
-    assert "line one\nline two" in outputs and "seed\nlive" in outputs and "seed v1" in outputs
-    assert "Memory store unavailable in this context." in outputs
-    assert any(o.startswith("Error invoking tool 'read_file' with kwargs {'filepath': 5}") for o in outputs)
-    assert any(o.startswith("Error: run_workflow is not a valid tool, try one of [run_cell, read_file,") for o in outputs)
-
-
-async def test_a_worker_asks_before_its_gated_tool(twins):
-    await _gate_run_cell(twins)
-    script = ByRole([_spawn({"task": "Compute it", "role": "coder"}), Reply("Done.")],
-                    coder=[Reply("", [("run_cell", {"code": "6 * 7"})]), Reply("It is 42.")])
-    python, edge = await _both_gated(twins, "compute", script, "Approve")
-    # Python announces the gate straight onto the run while the worker's
-    # step before it may still be queued in its stream, so the two land in
-    # either order there; the edge's step always comes first.
-    asked = [{**r, "events": [e for e in r["events"] if e["kind"] != "ApprovalRequestEvent"]} for r in (python, edge)]
-    assert asked[1] == asked[0]
-    for record in (python, edge):
-        kinds = [e["kind"] for e in record["events"]]
-        assert kinds.count("ApprovalRequestEvent") == 1
-        assert kinds.index("WorkerStartEvent") < kinds.index("ApprovalRequestEvent") < kinds.index("ApprovalResolvedEvent")
-    kinds = [e["kind"] for e in edge["events"]]
-    assert kinds[kinds.index("ApprovalRequestEvent") - 1] == "WorkerStepEvent"
-    [row] = python["approvals"]
-    assert row[2] == "approved" and row[7] == "<task>"
-
-
-async def test_a_stop_while_a_worker_is_answering(twins):
-
-    async def edge_stop(task_id: str) -> None:
-        resp = await twins.client.post("/graphql", json={"query": STOP, "variables": {"id": task_id}})
-        assert resp.json()["data"] == {"stopTask": True}
-
-    script = ByRole([_spawn({"task": "Take ages", "role": "writer"})], writer=[Reply("Never sent.")])
-    python, edge = await _both_workers(twins, "a long job", script, hold=1,
-                                       edge_during=edge_stop)
-    # Departure: the edge drops the workers at the stop. Python's stop lands
-    # at the next chunk its stream sees, so the held worker call finishes
-    # first and its tokens count; nothing of it is shown or kept.
-    assert edge["message"] == ["", "stopped", 100, 7] and python["message"] == ["", "stopped", 201, 14]
-    assert {**edge, "message": None} == {**python, "message": None}
-    assert [e["kind"] for e in python["events"]][-2:] == ["WorkerStartEvent", "StoppedEvent"]
 
 
 # ── arguments a tool won't take ─────────────────────────────────────────────

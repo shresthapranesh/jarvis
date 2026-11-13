@@ -330,18 +330,30 @@ Every chat turn, automation run, board task and workflow run.
   renewed at a third of its 300 s TTL; a lost lock abandons the turn. Jobs
   the Python worker queued before it went (`runtime` unset) are claimed like
   any other.
+- **Sub-agents** (`turn.rs`, `gql/start.rs`): `run_agents` gives each task
+  to a sub-agent — a conversation of its own (`surface = 'subagent'`,
+  `parent_id`, `agent_role`, `spawned_by`) whose turns are `subagent` jobs,
+  claimed under their own slots and run as a chat turn with the role's
+  prompt and tools (`Kind::Subagent`; the roles are `workers::role`, the file
+  and artifact tools `files.rs`, `artifacts.rs`). A task naming an `agent_id`
+  goes to that sub-agent's thread. With `wait` the turn waits on the runs and
+  reads each one's last reply; without it (a web chat only) the answer comes
+  back as a `source = 'subagent:<id>'` message that joins the parent's run or
+  starts its next turn. `check_agents` reads where they stand. A collected
+  turn's tokens count against the parent's budget; a stop stops the turns the
+  agent started; a gate asks in the parent's chat while the parent waits. The
+  parent's run is told of each change with a `subagent` event, and the
+  conversation lists them (`Conversation.subagents`). After a restart the
+  turn answers its open `run_agents` call from the turns it had started. The
+  user can write to a sub-agent's conversation like any other.
 - **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
-  roles in `core/agents.py`): `spawn_workers` runs its tasks at
-  once, each on the run's model with its role's prompt and tools (the file
-  and artifact tools are `files.rs`, `artifacts.rs`, ports of
-  `tools/files.py`, `tools/artifacts.py`), a
-  history in memory and a kernel of its own. It answers unknown tools, bad
-  arguments (`tools::Args`) and gates itself. Its events reach the turn as notes, written and
-  announced in order — all but `worker_token` as `subagent` steps of
-  `<role>:<idx>` — and its model and tool calls count against the run's
-  budget and usage. A stop drops the workers at once (Python lets an
-  in-flight worker call finish and counts it); a batch's calls run in order
-  (Python runs them at once).
+  roles in `core/agents.py`): a workflow's agent node has no conversation to
+  hang sub-agents on, so its `spawn_workers` runs its tasks at once in
+  memory, each on the node's model with its role's prompt and tools, a
+  history and a kernel of its own. It answers unknown tools, bad arguments
+  (`tools::Args`) and gates itself; its model and tool calls count against
+  the workflow's budget; a batch's calls run in order (Python ran them at
+  once).
 - **Approvals** (`src/approvals.rs`, a port of `core/tool_gate.py` and
   `core/approval.py`): a call whose policy needs a human's yes
   records an `approvals` row, is shown in the chat (`approval_request`), and

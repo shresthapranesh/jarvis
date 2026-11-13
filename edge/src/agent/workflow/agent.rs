@@ -66,7 +66,7 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         let pool = &agent.pool;
         let mcp = agent.mcp.snapshot().await;
         let policy = Policy::load(pool, &mcp).await;
-        let bound = tools::bound_for(&policy, false, &mcp);
+        let bound = tools::bound_for(&policy, false, false, &mcp);
         let thread_id = Uuid::new_v4().to_string();
         let retrieved = prompt::retrieved(pool, &agent.http, query, &thread_id, &mcp)
             .await
@@ -280,6 +280,12 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             Native::BlockTask { .. } => Ok("Error: block_task is only available while executing a board task.".into()),
             Native::AskUser { .. } => Ok(tools::ASK_NOWHERE.into()),
             Native::Mcp { .. } => unreachable!("runs in tool_step"),
+            Native::RunAgents { .. } | Native::CheckAgents { .. } => unreachable!("a turn's tools, never bound here"),
+            Native::ReadFile { .. }
+            | Native::WriteFile { .. }
+            | Native::ListFiles { .. }
+            | Native::ReadArtifact { .. }
+            | Native::ListArtifacts { .. } => unreachable!("a sub-agent role's tool, never bound here"),
         }
     }
 
@@ -295,10 +301,6 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             model: self.model.to_string(),
             ends: self.ends.clone(),
             cache: turn::honors_cache_control(self.model),
-            conversation: None,
-            project_id: None,
-            message_id: None,
-            announce_to: None,
             notes,
         };
         let meter = self.env.meter.clone();

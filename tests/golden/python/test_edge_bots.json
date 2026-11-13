@@ -11,7 +11,10 @@
      "pinned": 0,
      "project_id": null,
      "surface": "telegram",
-     "title": "hello"
+     "title": "hello",
+     "parent_id": null,
+     "agent_role": null,
+     "spawned_by": null
     }
    ],
    "jobs": [
@@ -49,7 +52,8 @@
      "prefill_tps": null,
      "role": "user",
      "status": "done",
-     "ttft_ms": null
+     "ttft_ms": null,
+     "source": null
     },
     {
      "content": "",
@@ -65,7 +69,8 @@
      "prefill_tps": null,
      "role": "assistant",
      "status": "running",
-     "ttft_ms": null
+     "ttft_ms": null,
+     "source": null
     }
    ]
   }

@@ -43,6 +43,12 @@ const POLL: Duration = Duration::from_secs(5);
 const CANCEL_POLL: Duration = Duration::from_secs(5);
 /// Turns running here at once.
 const MAX_RUNNING: usize = 8;
+/// Sub-agents' turns running at once, counted apart: a turn waiting on its
+/// sub-agents holds its own slot, and must not be what keeps them queued.
+const MAX_SUBAGENTS: usize = 8;
+/// What the turns' slots are for, and what the sub-agents' are.
+const TURNS: &[&str] = &["chat", "automation", "board_task", "workflow"];
+const SUBAGENTS: &[&str] = &["subagent"];
 
 /// The effort a run's calls to `model` ask for: the conversation's own pick
 /// (`chosen`, from the composer), else the operator's default
@@ -110,6 +116,10 @@ pub struct Agent {
     /// `locked_by` on the jobs this process claims.
     worker: String,
     slots: Arc<Semaphore>,
+    subagent_slots: Arc<Semaphore>,
+    /// The sub-agent turns a turn here is waiting on: their answers go to
+    /// the waiter, not to the parent's conversation as a message.
+    waited: std::sync::Mutex<std::collections::HashSet<String>>,
     /// The board dispatcher, for the pass a finished task may unblock.
     scheduler: Option<Arc<crate::schedule::Scheduler>>,
     /// Where `write_artifact` puts files (`AppConfig.artifacts_dir`).
@@ -126,6 +136,32 @@ pub async fn recover(pool: &SqlitePool, kernels: &Kernels, artifacts_dir: &std::
         Err(e) => tracing::warn!("agent: recovering jobs: {e}"),
     }
     sweep::run(pool, kernels, artifacts_dir).await;
+}
+
+/// A wait on sub-agent turns (`Agent::wait_on`), for as long as it is held.
+struct Waiting<'a> {
+    agent: &'a Agent,
+    turns: Vec<String>,
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        let mut waited = self.agent.waited.lock().expect("waited lock");
+        for turn in &self.turns {
+            waited.remove(turn);
+        }
+    }
+}
+
+impl Agent {
+    fn wait_on(&self, turns: &[String]) -> Waiting<'_> {
+        self.waited.lock().expect("waited lock").extend(turns.iter().cloned());
+        Waiting { agent: self, turns: turns.to_vec() }
+    }
+
+    fn waited(&self, turn: &str) -> bool {
+        self.waited.lock().expect("waited lock").contains(turn)
+    }
 }
 
 /// What a turn came to, for the job.
@@ -156,6 +192,8 @@ impl Agent {
             http: reqwest::Client::new(),
             worker: format!("edge-{}", std::process::id()),
             slots: Arc::new(Semaphore::new(MAX_RUNNING)),
+            subagent_slots: Arc::new(Semaphore::new(MAX_SUBAGENTS)),
+            waited: Default::default(),
         })
     }
 
@@ -171,24 +209,38 @@ impl Agent {
             return;
         }
         loop {
-            // A slot before the claim: a claimed job's lock is ticking.
-            let Ok(slot) = self.slots.clone().acquire_owned().await else { return };
-            match queue::claim(&self.pool, &["chat", "automation", "board_task", "workflow"], &self.worker).await {
-                Ok(Some(job)) => {
-                    let me = self.clone();
-                    tokio::spawn(async move {
-                        me.process(job).await;
-                        drop(slot);
-                    });
-                    continue;
-                }
-                Ok(None) => {}
-                Err(e) => tracing::warn!("agent: claiming: {e}"),
+            let mut claimed = false;
+            for (kinds, slots) in [(TURNS, &self.slots), (SUBAGENTS, &self.subagent_slots)] {
+                claimed |= self.clone().claim_one(kinds, slots).await;
             }
-            drop(slot);
+            if claimed {
+                continue;
+            }
+            // A finished job wakes the loop too (`process`), so a slot that
+            // was taken above is tried again once it is free.
             tokio::select! {
                 () = self.runs.agent_work.notified() => {}
                 () = tokio::time::sleep(POLL) => {}
+            }
+        }
+    }
+
+    /// Claim and start one job of `kinds`, if a slot is free and one is due.
+    async fn claim_one(self: Arc<Self>, kinds: &[&str], slots: &Arc<Semaphore>) -> bool {
+        // A slot before the claim: a claimed job's lock is ticking.
+        let Ok(slot) = slots.clone().try_acquire_owned() else { return false };
+        match queue::claim(&self.pool, kinds, &self.worker).await {
+            Ok(Some(job)) => {
+                tokio::spawn(async move {
+                    self.process(job).await;
+                    drop(slot);
+                });
+                true
+            }
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!("agent: claiming: {e}");
+                false
             }
         }
     }
@@ -224,6 +276,12 @@ impl Agent {
             "automation" => return self.serve_automation(job, run).await,
             "board_task" => return self.serve_board(job, run).await,
             "workflow" => return self.serve_workflow(job, run).await,
+            "subagent" => {
+                return match turn::Turn::subagent(self, job, run.clone()) {
+                    Some(turn) => turn.run().await,
+                    None => self.fail_start(job, run, "the sub-agent job has no query, model, conversation or known role".into()).await,
+                };
+            }
             _ => {}
         }
         match turn::Turn::chat(self, job, run.clone()) {
@@ -310,7 +368,7 @@ impl Agent {
         tracing::warn!("agent: {} run {} couldn't start: {error}", job.kind, job.id);
         let now = now_stored();
         let written = match job.kind.as_str() {
-            "chat" => {
+            "chat" | "subagent" => {
                 sqlx::query("UPDATE messages SET content = ?, status = 'error' WHERE id = ? AND status = 'running'")
                     .bind(format!("The run failed before completing: {error}"))
                     .bind(&job.id)

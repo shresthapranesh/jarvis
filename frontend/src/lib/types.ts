@@ -43,6 +43,10 @@ export interface Message {
   // queue wait, tools and any approval pause. Always larger than `llm_ms`.
   duration_ms: number | null;
   created_at: string;
+  // Who sent a user-role message when it wasn't the user: `agent` for a task
+  // the parent agent set a sub-agent, `subagent:<conversation id>` for a
+  // sub-agent's answer delivered to its parent. Null otherwise.
+  source?: string | null;
   steps: Step[];
 }
 
@@ -72,6 +76,7 @@ export interface RelayMessageNode {
   evalTps?: number | null | undefined;
   durationMs?: number | null | undefined;
   createdAt: string;
+  source?: string | null | undefined;
   steps: ReadonlyArray<{
     id: string;
     node: string;
@@ -491,6 +496,7 @@ export function mapMessage(m: RelayMessageNode): Message {
     eval_tps: m.evalTps ?? null,
     duration_ms: m.durationMs ?? null,
     created_at: m.createdAt,
+    source: m.source ?? null,
     steps: m.steps.map((s) => ({
       id: s.id,
       node: s.node,

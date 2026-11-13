@@ -6,13 +6,17 @@ import {decodeGlobalId} from '../relay/globalId';
 import {kf} from '../theme/keyframes.stylex';
 import {colors, layout, radii, space, type} from '../theme/tokens.stylex';
 import {FolderIcon} from './icons';
-import {TimeAgo} from './ui';
+import {TimeAgo, worker} from './ui';
 
 export type RunState = 'running' | 'waiting' | null;
 
 interface Props {
   title: string | null;
   project: {id: string; name: string} | null;
+  /** A sub-agent's conversation: the one whose agent spawned it. */
+  parent?: {id: string; title?: string | null} | null;
+  /** A sub-agent's role, shown beside its task. */
+  agentRole?: string | null;
   createdAt: string;
   runState: RunState;
   /** Mirrors the footer: how much of the right edge the run spine takes. */
@@ -34,6 +38,8 @@ interface Props {
 export function ConversationHeader({
   title,
   project,
+  parent,
+  agentRole,
   createdAt,
   runState,
   spine,
@@ -66,6 +72,24 @@ export function ConversationHeader({
             </span>
           </>
         )}
+        {parent && (
+          <>
+            <Link
+              to="/c/$id"
+              params={{id: decodeGlobalId(parent.id)}}
+              search={{}}
+              {...stylex.props(styles.project)}
+              title="Back to the conversation that started this sub-agent"
+            >
+              <span aria-hidden="true">←</span>
+              <span {...stylex.props(styles.projectName)}>{parent.title ?? 'Conversation'}</span>
+            </Link>
+            <span {...stylex.props(styles.sep)} aria-hidden="true">
+              /
+            </span>
+          </>
+        )}
+        {agentRole && <span {...stylex.props(worker.role)}>{agentRole}</span>}
         {onRename ? (
           <EditableTitle title={title} onRename={onRename} />
         ) : (

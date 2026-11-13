@@ -1,7 +1,8 @@
 //! What a start finds a crash left behind, cleaned up once after
 //! `queue::recover` — ports of what Python ran at its start:
 //! `db/ops.py:cleanup_zombie_running_rows`, `core/approvals.py:reconcile_startup`
-//! and `db/ops.py:sweep_ephemeral_conversations`.
+//! and `db/ops.py:sweep_ephemeral_conversations` — and, the edge's own, the
+//! sub-agents of runs that had no conversation to keep them under.
 //!
 //! A run row is a zombie when no live job — pending or running — stands
 //! behind it: after `recover` the interrupted jobs are pending again and
@@ -33,6 +34,35 @@ pub async fn run(pool: &SqlitePool, kernels: &Kernels, artifacts_dir: &std::path
         Ok(n) => tracing::info!("startup incognito sweep: reaped {n} conversation(s)"),
         Err(e) => tracing::warn!("incognito sweep failed: {e}"),
     }
+    match orphans(pool, kernels, artifacts_dir).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("startup sub-agent sweep: reaped {n} conversation(s)"),
+        Err(e) => tracing::warn!("sub-agent sweep failed: {e}"),
+    }
+}
+
+/// Sub-agents of a run that had no conversation (an automation's, say) and
+/// died before it could delete them (`Turn::discard_agents`) — except one a
+/// job still belongs to, its own or the run's that spawned it. The edge's own.
+async fn orphans(pool: &SqlitePool, kernels: &Kernels, artifacts_dir: &std::path::Path) -> sqlx::Result<u64> {
+    let ids: Vec<String> = sqlx::query_scalar(&format!(
+        "SELECT id FROM conversations WHERE surface = 'subagent' AND parent_id IS NULL \
+         AND (spawned_by IS NULL OR spawned_by NOT IN ({LIVE})) \
+         AND id NOT IN (SELECT thread_id FROM jobs WHERE thread_id IS NOT NULL AND status IN ('pending', 'running'))"
+    ))
+    .fetch_all(pool)
+    .await?;
+    let mut swept = 0;
+    for id in ids {
+        let mut tx = crate::db::write_tx(pool).await?;
+        let teardown = crate::gql::conversation::delete_conversation(&mut tx, &id, artifacts_dir).await?;
+        tx.commit().await?;
+        if let Some(t) = teardown {
+            t.finish(kernels).await;
+        }
+        swept += 1;
+    }
+    Ok(swept)
 }
 
 /// `cleanup_zombie_running_rows`, for the run rows: a message, automation
@@ -93,12 +123,12 @@ async fn approvals(pool: &SqlitePool) -> sqlx::Result<u64> {
 
 /// `sweep_ephemeral_conversations`: incognito conversations a crash, or a
 /// client that never fired `discardConversation`, left behind — except one
-/// a pending or running chat job still belongs to.
+/// a pending or running chat or sub-agent job still belongs to.
 async fn ephemeral(pool: &SqlitePool, kernels: &Kernels, artifacts_dir: &std::path::Path) -> sqlx::Result<u64> {
     let ids: Vec<String> = sqlx::query_scalar(
         "SELECT id FROM conversations WHERE ephemeral = 1 AND id NOT IN \
          (SELECT conversation_id FROM messages WHERE conversation_id IS NOT NULL AND id IN \
-         (SELECT id FROM jobs WHERE kind = 'chat' AND status IN ('pending', 'running')))",
+         (SELECT id FROM jobs WHERE kind IN ('chat', 'subagent') AND status IN ('pending', 'running')))",
     )
     .fetch_all(pool)
     .await?;

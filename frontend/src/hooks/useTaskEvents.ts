@@ -206,6 +206,10 @@ const taskEventsSubscription = graphql`
         }
         source
       }
+      ... on SubagentEvent {
+        agentId
+        status
+      }
       ... on QueuedMessageEvent {
         messageId
         text
@@ -445,6 +449,12 @@ export function useTaskEvents(taskId: string | null, conversationId: string | nu
             setState((s) => ({...s, todos}));
             break;
           }
+          case 'SubagentEvent':
+            // A sub-agent was given a task or finished one. Where each one
+            // stands is the conversation's `subagents`, which outlives the
+            // run — so this too only says "refetch".
+            if (conversationId) void loadConversationPage(conversationId);
+            break;
           case 'QueuedMessageEvent':
           case 'QueuedWithdrawnEvent':
           case 'QueuedConsumedEvent':

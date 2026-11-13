@@ -31,11 +31,16 @@ pub struct Conversation {
     /// Its newest message's time, or `created_at` before it has one. Derived,
     /// not stored: a rename or a pin isn't activity.
     pub last_active_at: DateTime,
+    /// A sub-agent's conversation: the one whose agent spawned it.
+    #[graphql(skip)]
+    pub parent_id: Option<String>,
+    /// A sub-agent's role (`researcher`, `coder`, `writer`, `general`).
+    pub agent_role: Option<String>,
 }
 
 /// Selects from `conversations` unaliased; `last_active_at` is a column alias,
 /// so a query can `ORDER BY` it.
-pub const CONVERSATION_COLUMNS: &str = "id, title, model, surface, pinned, ephemeral, project_id, created_at, effort, \
+pub const CONVERSATION_COLUMNS: &str = "id, title, model, surface, pinned, ephemeral, project_id, created_at, effort, parent_id, agent_role, \
      COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = conversations.id), created_at) \
      AS last_active_at";
 
@@ -59,6 +64,30 @@ impl Conversation {
             Some(pid) => Project::by_id(ctx.data()?, pid).await,
             None => Ok(None),
         }
+    }
+
+    /// A sub-agent's conversation: the conversation whose agent spawned it.
+    async fn parent(&self, ctx: &Context<'_>) -> Result<Option<Conversation>> {
+        match &self.parent_id {
+            Some(parent) => Conversation::by_id(ctx.data()?, parent).await,
+            None => Ok(None),
+        }
+    }
+
+    /// The sub-agents its agent spawned, oldest first, each with where its
+    /// latest turn stands.
+    async fn subagents(&self, ctx: &Context<'_>) -> Result<Vec<Subagent>> {
+        let pool: &SqlitePool = ctx.data()?;
+        Ok(sqlx::query_as(
+            "SELECT c.id AS conversation_id, c.title, c.agent_role, c.spawned_by, c.created_at, m.id AS task_id, \
+             m.status, m.content, COALESCE(m.created_at, c.created_at) AS last_active_at \
+             FROM conversations c LEFT JOIN messages m ON m.id = (SELECT id FROM messages WHERE conversation_id = c.id \
+             AND role = 'assistant' ORDER BY created_at DESC, rowid DESC LIMIT 1) \
+             WHERE c.parent_id = ? AND c.surface = 'subagent' ORDER BY c.created_at, c.rowid",
+        )
+        .bind(&self.raw_id)
+        .fetch_all(pool)
+        .await?)
     }
 
     async fn message_count(&self, ctx: &Context<'_>) -> Result<i64> {
@@ -115,6 +144,54 @@ impl Conversation {
     }
 }
 
+/// A sub-agent of a conversation's agent: a conversation of its own
+/// (`conversationId`), and its latest turn.
+#[derive(SimpleObject, sqlx::FromRow, Clone)]
+#[graphql(complex)]
+pub struct Subagent {
+    /// The sub-agent's conversation: open it to read or write to it.
+    pub conversation_id: String,
+    /// The task it was spawned for, shortened.
+    pub title: Option<String>,
+    #[graphql(skip)]
+    pub agent_role: Option<String>,
+    /// The parent's reply (a Message's raw id) it was spawned from.
+    pub spawned_by: Option<String>,
+    pub created_at: DateTime,
+    /// Its latest turn: the run to follow or stop while it is `running`.
+    pub task_id: Option<String>,
+    #[graphql(skip)]
+    pub status: Option<String>,
+    #[graphql(skip)]
+    pub content: Option<String>,
+    pub last_active_at: DateTime,
+}
+
+#[ComplexObject]
+impl Subagent {
+    async fn id(&self) -> ID {
+        global_id("Subagent", &self.conversation_id)
+    }
+
+    async fn role(&self) -> &str {
+        self.agent_role.as_deref().unwrap_or("general")
+    }
+
+    /// `running`, `done`, `error` or `stopped` — its latest turn's; `pending`
+    /// before it has one.
+    async fn status(&self) -> &str {
+        self.status.as_deref().unwrap_or("pending")
+    }
+
+    /// What its latest turn said, once it has ended.
+    async fn result(&self) -> Option<&str> {
+        match self.status.as_deref() {
+            None | Some("running") => None,
+            Some(_) => self.content.as_deref(),
+        }
+    }
+}
+
 #[derive(SimpleObject, sqlx::FromRow, Clone)]
 #[graphql(complex)]
 pub struct Message {
@@ -133,13 +210,17 @@ pub struct Message {
     pub eval_tps: Option<f64>,
     pub duration_ms: Option<f64>,
     pub created_at: DateTime,
+    /// Who sent it, when not the user or the conversation's own agent:
+    /// `agent` for a task its parent agent set a sub-agent,
+    /// `subagent:<conversation id>` for a sub-agent's answer to its parent.
+    pub source: Option<String>,
     /// Loaded alongside the page (`with_steps`), ordered by `seq`.
     #[sqlx(skip)]
     pub steps: Vec<Step>,
 }
 
 const MESSAGE_COLUMNS: &str = "id, role, content, model, status, input_tokens, output_tokens, \
-     ttft_ms, llm_ms, prefill_tps, eval_tps, duration_ms, created_at";
+     ttft_ms, llm_ms, prefill_tps, eval_tps, duration_ms, created_at, source";
 
 impl Message {
     pub async fn by_id(pool: &SqlitePool, raw_id: &str) -> Result<Option<Self>> {
@@ -373,6 +454,8 @@ pub fn unknown_model(model: &str) -> String {
 /// What's left of a deleted conversation once its rows are committed: its
 /// files and its notebook.
 pub struct Teardown {
+    /// Its sub-agents' conversations, deleted with it.
+    subagents: Vec<Teardown>,
     conversation_id: String,
     files: Vec<PathBuf>,
     /// Artifact ids whose `{id}_v*` files are swept from the artifact
@@ -383,6 +466,13 @@ pub struct Teardown {
 
 impl Teardown {
     pub async fn finish(self, kernels: &crate::kernels::Kernels) {
+        for subagent in &self.subagents {
+            subagent.finish_one(kernels).await;
+        }
+        self.finish_one(kernels).await;
+    }
+
+    async fn finish_one(&self, kernels: &crate::kernels::Kernels) {
         for path in &self.files {
             if let Err(e) = std::fs::remove_file(path) {
                 if e.kind() != std::io::ErrorKind::NotFound {
@@ -418,11 +508,25 @@ impl Teardown {
 /// transcript thread (`transcript_store.delete_thread`). None when there's
 /// no such conversation, which deletes nothing at all, thread included. The
 /// caller commits, then runs the returned `Teardown`.
+///
+/// Its sub-agents' conversations (`parent_id`) go with it, the same way.
 pub async fn delete_conversation(
     tx: &mut Transaction<'_, Sqlite>,
     conv_id: &str,
     artifacts_dir: &Path,
 ) -> sqlx::Result<Option<Teardown>> {
+    let Some(mut teardown) = delete_one(tx, conv_id, artifacts_dir).await? else { return Ok(None) };
+    let subagents: Vec<String> = sqlx::query_scalar("SELECT id FROM conversations WHERE parent_id = ? AND surface = 'subagent'")
+        .bind(conv_id)
+        .fetch_all(&mut **tx)
+        .await?;
+    for id in subagents {
+        teardown.subagents.extend(delete_one(tx, &id, artifacts_dir).await?);
+    }
+    Ok(Some(teardown))
+}
+
+async fn delete_one(tx: &mut Transaction<'_, Sqlite>, conv_id: &str, artifacts_dir: &Path) -> sqlx::Result<Option<Teardown>> {
     let exists: Option<String> =
         sqlx::query_scalar("SELECT id FROM conversations WHERE id = ?").bind(conv_id).fetch_optional(&mut **tx).await?;
     if exists.is_none() {
@@ -461,6 +565,7 @@ pub async fn delete_conversation(
         .collect();
     files.extend(versions.into_iter().map(PathBuf::from));
     Ok(Some(Teardown {
+        subagents: vec![],
         conversation_id: conv_id.to_string(),
         files,
         version_globs: artifacts.into_iter().map(|(id, _)| id).collect(),
