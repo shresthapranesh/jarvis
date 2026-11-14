@@ -50,6 +50,15 @@ pub struct StartTaskPayload {
 }
 
 #[derive(SimpleObject)]
+pub struct SendToConversationPayload {
+    /// The run answering it: the turn it started, or the one it joined.
+    task_id: String,
+    conversation_id: String,
+    /// The conversation had a run going, and the message joined it.
+    queued: bool,
+}
+
+#[derive(SimpleObject)]
 pub struct QueueMessagePayload {
     message_id: String,
     position: i64,
@@ -432,34 +441,55 @@ pub async fn deliver_to_parent(
     text: &str,
     changed: &Value,
 ) {
-    let source = from_subagent(subagent_id);
-    let delivered = async {
-        if let Some(run) = registry.in_flight_chat(parent_id) {
-            run.emit_local("subagent", changed);
-            let message_id = insert_sourced(pool, parent_id, text, "queued", &source).await?;
-            let position: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND role = 'user' AND status = 'queued'",
-            )
-            .bind(parent_id)
-            .fetch_one(pool)
-            .await?;
-            run.emit_local("queued_message", &json!({"message_id": message_id, "text": text, "position": position}));
-            return Ok(());
-        }
-        let mut tx = crate::db::write_tx(pool).await?;
-        let model: Option<String> =
-            sqlx::query_scalar("SELECT model FROM conversations WHERE id = ?").bind(parent_id).fetch_optional(&mut *tx).await?;
-        // A parent deleted meanwhile has nobody to tell.
-        let Some(model) = model else { return Ok(()) };
-        // Its stored model may have left the catalog since.
-        let model = catalog::resolve_model(pool, Some(&model)).await?;
-        insert_sourced(&mut *tx, parent_id, text, "done", &source).await?;
-        enqueue_turn(registry, tx, parent_id, text, &model, &[], None).await.map(|_| ())
-    };
-    let delivered: Result<()> = delivered.await;
-    if let Err(e) = delivered {
+    if let Some(run) = registry.in_flight_chat(parent_id) {
+        run.emit_local("subagent", changed);
+    }
+    // A parent deleted meanwhile has nobody to tell.
+    if let Err(e) = deliver_sourced(pool, registry, parent_id, text, &from_subagent(subagent_id)).await {
         tracing::warn!("delivering sub-agent {subagent_id}'s answer to {parent_id} failed: {}", e.message);
     }
+}
+
+/// A message for a conversation from something other than its user
+/// (`source`): it joins the run going there, or starts the conversation's
+/// next turn. None when there is no such conversation.
+async fn deliver_sourced(
+    pool: &SqlitePool,
+    registry: &Registry,
+    conversation_id: &str,
+    text: &str,
+    source: &str,
+) -> Result<Option<Dispatched>> {
+    if let Some(run) = registry.in_flight_chat(conversation_id) {
+        let message_id = insert_sourced(pool, conversation_id, text, "queued", source).await?;
+        let position: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND role = 'user' AND status = 'queued'",
+        )
+        .bind(conversation_id)
+        .fetch_one(pool)
+        .await?;
+        run.emit_local("queued_message", &json!({"message_id": message_id, "text": text, "position": position}));
+        return Ok(Some(Dispatched::Queued {
+            task_id: run.id.clone(),
+            conversation_id: conversation_id.into(),
+            message_id,
+        }));
+    }
+    let mut tx = crate::db::write_tx(pool).await?;
+    let model: Option<String> =
+        sqlx::query_scalar("SELECT model FROM conversations WHERE id = ?").bind(conversation_id).fetch_optional(&mut *tx).await?;
+    let Some(model) = model else { return Ok(None) };
+    // Its stored model may have left the catalog since.
+    let model = catalog::resolve_model(pool, Some(&model)).await?;
+    insert_sourced(&mut *tx, conversation_id, text, "done", source).await?;
+    let task_id = enqueue_turn(registry, tx, conversation_id, text, &model, &[], None).await?;
+    Ok(Some(Dispatched::Started { task_id, conversation_id: conversation_id.into() }))
+}
+
+/// `messages.source` of a message another conversation's agent sent
+/// (`sendToConversation`).
+pub fn from_conversation(conversation_id: &str) -> String {
+    format!("conversation:{conversation_id}")
 }
 
 /// `_redispatch_queued`: a message queued after a run's last model call has
@@ -543,6 +573,59 @@ impl StartMutation {
             }
             Dispatched::Refused(reason) => return Err(reason.into()),
         })
+    }
+
+    /// A message from one conversation's agent to another conversation: it
+    /// arrives there as a turn of its own (or joins the run going there), said
+    /// to be from the sender, and the agent there answers it in its own
+    /// conversation. Nothing comes back to the sender. The sender is the
+    /// request's `X-Jarvis-Conversation`.
+    async fn send_to_conversation(
+        &self,
+        ctx: &Context<'_>,
+        conversation_id: String,
+        message: String,
+    ) -> Result<SendToConversationPayload> {
+        let pool: &SqlitePool = ctx.data()?;
+        let registry: &Arc<Registry> = ctx.data()?;
+        let text = message.trim();
+        if text.is_empty() {
+            return Err("empty message".into());
+        }
+        let from = ctx.data_opt::<super::RequestFrom>().and_then(|from| from.conversation.as_deref());
+        let Some(from) = from else {
+            return Err("only a conversation's agent can send to another conversation".into());
+        };
+        if from == conversation_id {
+            return Err("a conversation can't send a message to itself".into());
+        }
+        // An incognito conversation is nobody's to write to.
+        let found: Option<bool> = sqlx::query_scalar("SELECT ephemeral FROM conversations WHERE id = ?")
+            .bind(&conversation_id)
+            .fetch_optional(pool)
+            .await?;
+        if found != Some(false) {
+            return Err(format!("conversation not found: {conversation_id}").into());
+        }
+        let title: Option<String> =
+            sqlx::query_scalar("SELECT title FROM conversations WHERE id = ?").bind(from).fetch_optional(pool).await?.flatten();
+        // The line the agent there reads to know who wrote, and where an
+        // answer would go.
+        let head = match title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+            Some(title) => format!("[Message from conversation {from} ({})]", title.replace(['\n', '\r'], " ")),
+            None => format!("[Message from conversation {from}]"),
+        };
+        let text = format!("{head}\n{text}");
+        match deliver_sourced(pool, registry, &conversation_id, &text, &from_conversation(from)).await? {
+            Some(Dispatched::Started { task_id, conversation_id }) => {
+                Ok(SendToConversationPayload { task_id, conversation_id, queued: false })
+            }
+            Some(Dispatched::Queued { task_id, conversation_id, .. }) => {
+                Ok(SendToConversationPayload { task_id, conversation_id, queued: true })
+            }
+            Some(Dispatched::Refused(reason)) => Err(reason.into()),
+            None => Err(format!("conversation not found: {conversation_id}").into()),
+        }
     }
 
     /// Queue a message for a run that is already in flight; delivered just

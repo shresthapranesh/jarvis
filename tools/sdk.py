@@ -396,6 +396,24 @@ def read_conversation(
     return out
 
 
+def send_message(conversation_id: str, message: str) -> dict:
+    """Send a message to another conversation; the agent there answers it in that conversation.
+
+    It arrives as a turn of its own, marked as coming from this conversation
+    (or joins the run already going there — `queued`). One-way: nothing comes
+    back here, so say everything the other agent needs, and what you want done
+    with it. Find the id with search_conversations / list_conversations. A
+    message you received this way names its sender's id; write back only when
+    there is something the sender needs to know.
+    """
+    data = api(
+        "mutation($c: String!, $m: String!) { sendToConversation(conversationId: $c, message: $m)"
+        " { taskId conversationId queued } }",
+        {"c": conversation_id, "m": message},
+    )
+    sent = data["sendToConversation"]
+    return {"conversation_id": sent["conversationId"], "task_id": sent["taskId"], "queued": sent["queued"]}
+
 # ── Task board ────────────────────────────────────────────────────────────────
 
 def list_tasks(status: str | None = None) -> list[dict]:
@@ -1149,8 +1167,8 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
         [list_artifacts, read_artifact, list_artifact_versions],
     ),
     "conversations": (
-        "search and re-read past chats (in a project, its other conversations)",
-        [search_conversations, read_conversation, list_conversations],
+        "search and re-read past chats (in a project, its other conversations), message another one",
+        [search_conversations, read_conversation, list_conversations, send_message],
     ),
     "automations": (
         "scheduled or on-demand tasks (cron, code, webhook, monitor)",
