@@ -17,14 +17,12 @@ export const conversationPageFragment = graphql`
       id
       name
     }
-    agentRole
     parent {
       id
       title
     }
     subagents {
       conversationId
-      role
       title
       status
       result

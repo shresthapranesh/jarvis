@@ -5,7 +5,7 @@
 //! prefix stayed byte-stable when it moved over from Python.
 //!
 //! The bound tools are `run_cell`, `write_artifact`, the todo tools,
-//! `remember`, `spawn_workers` (`workers.rs`, whose roles' tools are in
+//! `remember`, `spawn_workers` (`workers.rs`, whose workers' tools are in
 //! `tools.json` too), `run_workflow` (`workflow/`), the board tools on a
 //! board run, `ask_user` in a web chat, and the `always` MCP servers' tools (whose schemas are
 //! converted as `convert_to_openai_tool` converts them, `mcp::llm_tool`). A
@@ -168,7 +168,7 @@ pub enum Native {
     RunWorkflow { workflow_id: String, inputs_json: Option<String> },
     /// A bound MCP server's tool; the server checks the arguments.
     Mcp { server: String, tool: String, args: Value },
-    // A sub-agent role's file and artifact tools (`workers::role`).
+    // A sub-agent's file and artifact tools (`workers::SUBAGENT_TOOLS`).
     ReadFile { filepath: String },
     WriteFile { filepath: String, content: String },
     ListFiles { directory: String },
@@ -180,15 +180,13 @@ pub enum Native {
 #[derive(Debug, PartialEq, Clone)]
 pub struct AgentTask {
     pub task: String,
-    /// None: the general role — or, with `agent_id`, the one it has.
-    pub role: Option<String>,
     pub context: Option<String>,
     /// An earlier sub-agent to give the task to.
     pub agent_id: Option<String>,
 }
 
 /// `run_agents`' `tasks`, if each is an object with a string `task` and,
-/// where given, string `role` and `agent_id`.
+/// where given, a string `agent_id`.
 fn agent_tasks(raw: &Value) -> Option<Vec<AgentTask>> {
     let text = |spec: &Map<String, Value>, key: &str| match spec.get(key) {
         None | Some(Value::Null) => Some(None),
@@ -201,7 +199,6 @@ fn agent_tasks(raw: &Value) -> Option<Vec<AgentTask>> {
             let spec = spec.as_object()?;
             Some(AgentTask {
                 task: text(spec, "task")??,
-                role: text(spec, "role")?,
                 context: spec.get("context").filter(|v| pyjson::truthy(v)).map(pyjson::py_str),
                 agent_id: text(spec, "agent_id")?,
             })
@@ -297,7 +294,7 @@ fn native(name: &str, args: &Value) -> Result<Native, String> {
             let raw = a.value("tasks");
             let tasks = raw.and_then(super::workers::tasks);
             if raw.is_some() && tasks.is_none() {
-                a.fail("tasks", "Input should be a list of objects, each with a string `task` and an optional string `role`");
+                a.fail("tasks", "Input should be a list of objects, each with a string `task`");
             }
             Native::SpawnWorkers { tasks: tasks.unwrap_or_default() }
         }
@@ -307,7 +304,7 @@ fn native(name: &str, args: &Value) -> Result<Native, String> {
             if raw.is_some() && tasks.is_none() {
                 a.fail(
                     "tasks",
-                    "Input should be a list of objects, each with a string `task` and optional strings `role` and `agent_id`",
+                    "Input should be a list of objects, each with a string `task` and an optional string `agent_id`",
                 );
             }
             Native::RunAgents { tasks: tasks.unwrap_or_default(), wait: a.bool("wait", true) }
@@ -714,12 +711,12 @@ mod tests {
         );
         assert!(refused(call("run_workflow", json!({"workflow_id": "w", "inputs_json": {"a": 1}}))).contains("inputs_json: Input should be a valid string"));
         assert!(refused(call("run_agents", json!({"tasks": [{"task": 1}]}))).contains("tasks: Input should be a list of objects"));
-        assert!(refused(call("run_agents", json!({"tasks": [{"task": "x", "agent_id": 7}]}))).contains("optional strings `role` and `agent_id`"));
+        assert!(refused(call("run_agents", json!({"tasks": [{"task": "x", "agent_id": 7}]}))).contains("an optional string `agent_id`"));
         assert!(refused(call("check_agents", json!({"agent_ids": "a"}))).contains("agent_ids: "));
         assert_eq!(
             plan_one(call("run_agents", json!({"tasks": [{"task": " x ", "role": "", "agent_id": "a"}], "wait": false})), &tools, &policy),
             Step::Run(Native::RunAgents {
-                tasks: vec![AgentTask { task: "x".into(), role: None, context: None, agent_id: Some("a".into()) }],
+                tasks: vec![AgentTask { task: "x".into(), context: None, agent_id: Some("a".into()) }],
                 wait: false
             })
         );

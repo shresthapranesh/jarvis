@@ -106,7 +106,7 @@
  },
  {
   "name": "spawn_workers",
-  "description": "Run independent tasks concurrently on worker agents; returns when all finish.\n\nEach task is a dict: \"task\" (required), \"context\" (optional background),\n\"role\" (optional: researcher/coder/writer/general). Workers can't see\nyour kernel variables — put what each needs in its task/context.",
+  "description": "Run independent tasks concurrently on worker agents; returns when all finish.\n\nEach task is a dict: \"task\" (required), \"context\" (optional background).\nEvery worker is the same general worker with the full toolset: how it\nshould go about its task is whatever you tell it. Workers can't see your\nkernel variables — put what each needs in its task/context.",
   "parameters": {
    "properties": {
     "tasks": {
@@ -125,7 +125,7 @@
  },
  {
   "name": "run_agents",
-  "description": "Give tasks to sub-agents, each in a conversation of its own that you can come back to.\n\nEach task is a dict: \"task\" (required), \"context\" (optional background),\n\"role\" (optional: researcher/coder/writer/general), \"agent_id\" (optional: an\nearlier sub-agent's id, to give it a follow-up — it keeps what it did and\nlearned; its role stays). A new sub-agent sees neither this conversation nor\nyour kernel variables — put what it needs in its task/context.\n\nwait=true (default) returns every answer once all have finished. wait=false\nreturns their ids at once: carry on, and collect with check_agents, or their\nanswers reach you as messages when they finish.",
+  "description": "Give tasks to sub-agents, each in a conversation of its own that you can come back to.\n\nEach task is a dict: \"task\" (required), \"context\" (optional background),\n\"agent_id\" (optional: an earlier sub-agent's id, to give it a follow-up — it\nkeeps what it did and learned). Every sub-agent is the same general worker\nwith the full toolset: how it should go about the task is whatever you tell\nit. A new sub-agent sees neither this conversation nor your kernel\nvariables — put what it needs in its task/context.\n\nwait=true (default) returns every answer once all have finished. wait=false\nreturns their ids at once: carry on, and collect with check_agents, or their\nanswers reach you as messages when they finish.",
   "parameters": {
    "properties": {
     "tasks": {

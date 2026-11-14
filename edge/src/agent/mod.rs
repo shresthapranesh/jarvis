@@ -279,7 +279,7 @@ impl Agent {
             "subagent" => {
                 return match turn::Turn::subagent(self, job, run.clone()) {
                     Some(turn) => turn.run().await,
-                    None => self.fail_start(job, run, "the sub-agent job has no query, model, conversation or known role".into()).await,
+                    None => self.fail_start(job, run, "the sub-agent job has no query, model or conversation".into()).await,
                 };
             }
             _ => {}

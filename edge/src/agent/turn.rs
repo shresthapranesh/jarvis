@@ -62,9 +62,9 @@ pub enum Kind {
     Automation(Spec),
     /// A board task's run (`board.rs`), with the board tools bound.
     Board(board::Spec),
-    /// A sub-agent's turn on its own conversation: a chat turn with its
-    /// role's prompt and tools in place of the main agent's.
-    Subagent(workers::RoleSpec),
+    /// A sub-agent's turn on its own conversation: a chat turn with the
+    /// sub-agent prompt and tools in place of the main agent's.
+    Subagent,
 }
 
 impl Kind {
@@ -73,14 +73,14 @@ impl Kind {
             Kind::Chat => "chat",
             Kind::Automation(_) => "automation",
             Kind::Board(_) => "board_task",
-            Kind::Subagent(_) => "subagent",
+            Kind::Subagent => "subagent",
         }
     }
 
     /// A turn on a conversation someone reads: answered on its Message row,
     /// taking in what is sent to it meanwhile.
     fn conversational(&self) -> bool {
-        matches!(self, Kind::Chat | Kind::Subagent(_))
+        matches!(self, Kind::Chat | Kind::Subagent)
     }
 }
 
@@ -127,7 +127,6 @@ pub struct Turn<'a> {
 struct Tasked {
     agent_id: String,
     task_id: String,
-    role: String,
     label: String,
 }
 
@@ -141,13 +140,12 @@ impl<'a> Turn<'a> {
         Some(turn)
     }
 
-    /// A sub-agent's turn: a chat turn's payload, and the role it runs as.
-    /// None for a payload without them, or naming no role.
+    /// A sub-agent's turn: a chat turn's payload. None for a payload
+    /// without it.
     pub fn subagent(agent: &'a Agent, job: &Job, run: Arc<Run>) -> Option<Self> {
-        let role = workers::role(job.payload["role"].as_str())?;
         let mut turn = Self::chat(agent, job, run)?;
         turn.budget = Budget::new(Limits::for_kind("subagent"));
-        turn.kind = Kind::Subagent(role);
+        turn.kind = Kind::Subagent;
         turn.deliver = job.payload["deliver"].as_bool().unwrap_or(false);
         Some(turn)
     }
@@ -220,7 +218,7 @@ impl<'a> Turn<'a> {
             Err(e) => Err(Stop::Failed(format!("reading the thread: {e}"))),
         };
         // A stopped run's sub-agents stop with it.
-        if !matches!(self.kind, Kind::Subagent(_)) && (matches!(result, Err(Stop::Cancelled)) || self.cancelled()) {
+        if !matches!(self.kind, Kind::Subagent) && (matches!(result, Err(Stop::Cancelled)) || self.cancelled()) {
             self.cancel_agents().await;
         }
         // A run with no conversation leaves nowhere to find its sub-agents
@@ -231,7 +229,7 @@ impl<'a> Turn<'a> {
         match self.kind {
             Kind::Automation(_) => return self.finish_automation(result).await,
             Kind::Board(_) => return self.finish_board(result).await,
-            Kind::Chat | Kind::Subagent(_) => {}
+            Kind::Chat | Kind::Subagent => {}
         }
         match result {
             Ok(()) => self.finish_done(false).await,
@@ -256,7 +254,7 @@ impl<'a> Turn<'a> {
         };
         let prompt = Message { id: Some(user_message_id(&self.task_id)), ..Message::new(Role::User, content) };
         let wrote = match &self.kind {
-            Kind::Chat | Kind::Subagent(_) => {
+            Kind::Chat | Kind::Subagent => {
                 self.events.emit("todos_updated", &json!({"todos": [], "source": "main"}));
                 let wrote = async {
                     thread.set_todos(self.pool(), vec![]).await?;
@@ -296,7 +294,7 @@ impl<'a> Turn<'a> {
         let mut bound = match &self.kind {
             // The main agent's policy: a tool a human switched off doesn't
             // come back through a sub-agent, and a gated one still asks.
-            Kind::Subagent(role) => tools::bound_named(&policy, role.tools, role.mcp.then_some(&mcp)),
+            Kind::Subagent => tools::bound_named(&policy, workers::SUBAGENT_TOOLS, Some(&mcp)),
             kind => tools::bound_for(&policy, matches!(kind, Kind::Board(_)), true, &mcp),
         };
         if self.answerable().await {
@@ -387,10 +385,10 @@ impl<'a> Turn<'a> {
         let query = latest_user_text(&history);
         let message_id = history.iter().rev().find(|m| m.role == Role::User).and_then(|m| m.id.clone());
 
-        let context = if let Kind::Subagent(role) = &self.kind {
-            // Its role's prompt is the whole of it: a sub-agent is told what
-            // it needs in its task, and retrieves nothing.
-            Ok(prompt::Context { system: role.prompt.to_string(), segments: vec![], volatile: String::new() })
+        let context = if matches!(self.kind, Kind::Subagent) {
+            // The sub-agent prompt is the whole of it: a sub-agent is told
+            // what it needs in its task, and retrieves nothing.
+            Ok(prompt::Context { system: workers::SUBAGENT_PROMPT.to_string(), segments: vec![], volatile: String::new() })
         } else {
             let retrieved = match &self.retrieved {
                 Some((id, parts)) if *id == message_id => Ok(parts.clone()),
@@ -665,8 +663,8 @@ impl<'a> Turn<'a> {
         for task in &tasks {
             let label = crate::pystr::prefix(&task.task, 80).to_string();
             match self.task_agent(task, &label, &model, later).await {
-                Ok((agent_id, task_id, role)) => {
-                    let tasked = Tasked { agent_id, task_id, role, label };
+                Ok((agent_id, task_id)) => {
+                    let tasked = Tasked { agent_id, task_id, label };
                     self.announce_agent(&tasked, "running");
                     parts.push(Ok(tasked));
                 }
@@ -677,7 +675,7 @@ impl<'a> Turn<'a> {
             let lines: Vec<String> = parts
                 .into_iter()
                 .map(|part| match part {
-                    Ok(t) => format!("Agent {} ({}) started: {}", t.agent_id, t.role, t.label),
+                    Ok(t) => format!("Agent {} started: {}", t.agent_id, t.label),
                     Err(e) => e,
                 })
                 .collect();
@@ -699,17 +697,17 @@ impl<'a> Turn<'a> {
             };
             let (status, answer) = self.collect(&t.agent_id, &t.task_id).await.map_err(Stop::Failed)?;
             self.announce_agent(&t, &status);
-            answers.push(format!("Agent {} ({}) — {status}: {}\n{answer}", t.agent_id, t.role, t.label));
+            answers.push(format!("Agent {} — {status}: {}\n{answer}", t.agent_id, t.label));
         }
         Ok(answers.join("\n\n---\n\n"))
     }
 
     /// The run's subscribers are told a sub-agent changed (`SubagentEvent`).
     fn announce_agent(&mut self, t: &Tasked, status: &str) {
-        self.events.emit("subagent", &json!({"agent_id": t.agent_id, "task_id": t.task_id, "role": t.role, "status": status}));
+        self.events.emit("subagent", &json!({"agent_id": t.agent_id, "task_id": t.task_id, "status": status}));
     }
 
-    /// One task on its way: the sub-agent's id, its turn's, and its role.
+    /// One task on its way: the sub-agent's id and its turn's.
     /// An `Err` is the model's to read.
     async fn task_agent(
         &self,
@@ -717,7 +715,7 @@ impl<'a> Turn<'a> {
         label: &str,
         model: &str,
         deliver: bool,
-    ) -> Result<(String, String, String), String> {
+    ) -> Result<(String, String), String> {
         use crate::gql::start;
         let query = match &task.context {
             Some(context) => format!("Context: {context}\n\nTask: {}", task.task),
@@ -726,23 +724,18 @@ impl<'a> Turn<'a> {
         let from = start::FromAgent { deliver };
         let (pool, runs) = (self.pool(), &self.agent.runs);
         if let Some(id) = &task.agent_id {
-            let (role, model) = self.owned(id).await?;
+            let model = self.owned(id).await?;
             if runs.in_flight_chat(id).is_some() {
                 return Err(format!("agent {id} is still on its last task \u{2014} check_agents(wait=true) first"));
             }
             // Its stored model may have left the catalog since.
             let model = crate::catalog::resolve_model(pool, Some(&model)).await.map_err(|e| e.to_string())?;
             let turn = start::task_subagent(pool, runs, id, &query, &model, from).await.map_err(|e| e.message)?;
-            return Ok((id.clone(), turn, role));
+            return Ok((id.clone(), turn));
         }
-        let Some(role) = workers::role(task.role.as_deref()) else {
-            let named = task.role.as_deref().unwrap_or_default();
-            return Err(format!("Unknown role '{named}' (available: coder, general, researcher, writer)"));
-        };
         let spawn = start::Spawn {
             parent_id: self.conversation.as_deref(),
             spawned_by: &self.task_id,
-            role: role.name,
             model,
             title: label,
             query: &query,
@@ -751,24 +744,24 @@ impl<'a> Turn<'a> {
             from,
         };
         let (turn, id) = start::spawn_subagent(pool, runs, spawn).await.map_err(|e| e.message)?;
-        Ok((id, turn, role.name.to_string()))
+        Ok((id, turn))
     }
 
     /// A sub-agent of this run's — spawned by it, or by its conversation
-    /// before: its role and its model.
-    async fn owned(&self, id: &str) -> Result<(String, String), String> {
-        let row: Option<(Option<String>, String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT agent_role, model, parent_id, spawned_by FROM conversations WHERE id = ? AND surface = 'subagent'",
+    /// before: its model.
+    async fn owned(&self, id: &str) -> Result<String, String> {
+        let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT model, parent_id, spawned_by FROM conversations WHERE id = ? AND surface = 'subagent'",
         )
         .bind(id)
         .fetch_optional(self.pool())
         .await
         .map_err(|e| e.to_string())?;
         match row {
-            Some((role, model, parent, spawned_by))
+            Some((model, parent, spawned_by))
                 if (parent.is_some() && parent == self.conversation) || spawned_by.as_deref() == Some(&self.task_id) =>
             {
-                Ok((role.unwrap_or_else(|| "general".into()), model))
+                Ok(model)
             }
             _ => Err(format!("no sub-agent of yours has the id {id}")),
         }
@@ -833,15 +826,12 @@ impl<'a> Turn<'a> {
     /// `check_agents`: where each sub-agent's latest turn stands, with its
     /// answer if it has ended — after waiting for the running ones, with `wait`.
     async fn check_agents(&mut self, agent_ids: Vec<String>, wait: bool) -> Result<String, Stop> {
-        let mut found: Vec<Result<(String, String, Option<String>), String>> = Vec::with_capacity(agent_ids.len());
+        let mut found: Vec<Result<(String, Option<String>), String>> = Vec::with_capacity(agent_ids.len());
         for id in agent_ids {
-            let role = match self.owned(&id).await {
-                Ok((role, _)) => role,
-                Err(e) => {
-                    found.push(Err(e));
-                    continue;
-                }
-            };
+            if let Err(e) = self.owned(&id).await {
+                found.push(Err(e));
+                continue;
+            }
             let turn: Option<String> = sqlx::query_scalar(
                 "SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY created_at DESC, rowid DESC LIMIT 1",
             )
@@ -849,20 +839,20 @@ impl<'a> Turn<'a> {
             .fetch_optional(self.pool())
             .await
             .map_err(|e| Stop::Failed(e.to_string()))?;
-            found.push(Ok((id, role, turn)));
+            found.push(Ok((id, turn)));
         }
         if wait {
-            let turns: Vec<String> = found.iter().flatten().filter_map(|(_, _, turn)| turn.clone()).collect();
+            let turns: Vec<String> = found.iter().flatten().filter_map(|(_, turn)| turn.clone()).collect();
             self.await_agents(&turns).await?;
         }
         let mut lines = Vec::with_capacity(found.len());
         for each in found {
             lines.push(match each {
                 Err(e) => e,
-                Ok((id, role, None)) => format!("Agent {id} ({role}) — has no turn yet"),
-                Ok((id, role, Some(turn))) => match self.collect(&id, &turn).await.map_err(Stop::Failed)? {
-                    (status, _) if status == "running" => format!("Agent {id} ({role}) — running"),
-                    (status, answer) => format!("Agent {id} ({role}) — {status}\n{answer}"),
+                Ok((id, None)) => format!("Agent {id} — has no turn yet"),
+                Ok((id, Some(turn))) => match self.collect(&id, &turn).await.map_err(Stop::Failed)? {
+                    (status, _) if status == "running" => format!("Agent {id} — running"),
+                    (status, answer) => format!("Agent {id} — {status}\n{answer}"),
                 },
             });
         }
@@ -896,8 +886,8 @@ impl<'a> Turn<'a> {
                 .await
                 .map_err(|e| Stop::Failed(e.to_string()))?;
         let Some(since) = since else { return Ok(()) };
-        let started: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
-            "SELECT j.id, c.id, c.agent_role, c.title FROM jobs j JOIN conversations c ON c.id = j.thread_id \
+        let started: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT j.id, c.id, c.title FROM jobs j JOIN conversations c ON c.id = j.thread_id \
              WHERE j.kind = 'subagent' AND json_extract(j.payload, '$.by') = 'agent' AND j.created_at >= ? \
              AND (c.spawned_by = ? OR (? IS NOT NULL AND c.parent_id = ?)) ORDER BY j.created_at, j.rowid",
         )
@@ -919,10 +909,9 @@ impl<'a> Turn<'a> {
              listed here was never started.)"
                 .to_string(),
         ];
-        for (turn, agent_id, role, title) in started {
+        for (turn, agent_id, title) in started {
             let (status, answer) = self.collect(&agent_id, &turn).await.map_err(Stop::Failed)?;
-            let role = role.unwrap_or_else(|| "general".into());
-            answers.push(format!("Agent {agent_id} ({role}) — {status}: {}\n{answer}", title.unwrap_or_default()));
+            answers.push(format!("Agent {agent_id} — {status}: {}\n{answer}", title.unwrap_or_default()));
         }
         let result = Message {
             name: Some(call.name.clone()),
@@ -993,14 +982,14 @@ impl<'a> Turn<'a> {
     /// A sub-agent's answer to its parent's conversation, when its parent
     /// asked not to wait for it — unless something is waiting after all.
     async fn deliver(&self, status: &str, answer: &str) {
-        let (Kind::Subagent(role), Some(parent)) = (&self.kind, &self.parent) else { return };
+        let (Kind::Subagent, Some(parent)) = (&self.kind, &self.parent) else { return };
         if !self.deliver || self.agent.waited(&self.task_id) {
             return;
         }
         let reply = if status == "done" { last_reply(self.pool(), &self.thread_id).await } else { None };
         let answer = reply.as_deref().unwrap_or(answer);
-        let text = format!("[Sub-agent {} ({}) finished: {status}]\n{answer}", self.thread_id, role.name);
-        let changed = json!({"agent_id": self.thread_id, "task_id": self.task_id, "role": role.name, "status": status});
+        let text = format!("[Sub-agent {} finished: {status}]\n{answer}", self.thread_id);
+        let changed = json!({"agent_id": self.thread_id, "task_id": self.task_id, "status": status});
         crate::gql::start::deliver_to_parent(self.pool(), &self.agent.runs, parent, &self.thread_id, &text, &changed).await;
     }
 
@@ -1030,7 +1019,7 @@ impl<'a> Turn<'a> {
         // A sub-agent whose parent's run is up asks there: that is the chat
         // someone is watching.
         let parent_run = match (&self.kind, &self.parent) {
-            (Kind::Subagent(_), Some(parent)) => self.agent.runs.in_flight_chat(parent),
+            (Kind::Subagent, Some(parent)) => self.agent.runs.in_flight_chat(parent),
             _ => None,
         };
         let (conversation, task_id) = match &parent_run {

@@ -253,10 +253,6 @@ type Conversation implements Node {
 	not stored: a rename or a pin isn't activity.
 	"""
 	lastActiveAt: DateTime!
-	"""
-	A sub-agent's role (`researcher`, `coder`, `writer`, `general`).
-	"""
-	agentRole: String
 	id: ID!
 	project: Project
 	"""
@@ -1084,7 +1080,6 @@ type Subagent {
 	taskId: String
 	lastActiveAt: DateTime!
 	id: ID!
-	role: String!
 	"""
 	`running`, `done`, `error` or `stopped` — its latest turn's; `pending`
 	before it has one.
@@ -1109,7 +1104,6 @@ type SubagentEvent {
 	The turn the change is about.
 	"""
 	taskId: String!
-	role: String!
 	status: String!
 }
 

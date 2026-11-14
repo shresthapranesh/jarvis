@@ -127,7 +127,6 @@ pub struct SubagentEvent {
     pub agent_id: String,
     /// The turn the change is about.
     pub task_id: String,
-    pub role: String,
     pub status: String,
 }
 
@@ -579,7 +578,6 @@ pub fn chat(raw: &Value) -> Result<Option<ChatEvent>> {
         "subagent" => ChatEvent::SubagentEvent(SubagentEvent {
             agent_id: d.s("agent_id", "")?,
             task_id: d.s("task_id", "")?,
-            role: d.s("role", "")?,
             status: d.s("status", "running")?,
         }),
         "queued_consumed" => {
@@ -847,9 +845,9 @@ mod tests {
 
     #[test]
     fn a_sub_agents_change_is_a_chat_event() {
-        let changed = raw("subagent", json!({"agent_id": "c", "task_id": "t", "role": "writer", "status": "done"}));
+        let changed = raw("subagent", json!({"agent_id": "c", "task_id": "t", "status": "done"}));
         let Some(ChatEvent::SubagentEvent(e)) = chat(&changed).unwrap() else { panic!() };
-        assert_eq!((e.agent_id.as_str(), e.task_id.as_str(), e.role.as_str(), e.status.as_str()), ("c", "t", "writer", "done"));
+        assert_eq!((e.agent_id.as_str(), e.task_id.as_str(), e.status.as_str()), ("c", "t", "done"));
     }
 
     #[test]
