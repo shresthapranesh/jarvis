@@ -30,6 +30,11 @@
   "group": "conversations"
  },
  {
+  "name": "send_message",
+  "description": "Send a message to another conversation; the agent there answers it in that conversation.",
+  "group": "conversations"
+ },
+ {
   "name": "list_automations",
   "description": "All automations with id, name, input_type, schedule, enabled.",
   "group": "automations"

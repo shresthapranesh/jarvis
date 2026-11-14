@@ -24,7 +24,7 @@ tests/           pytest; tests/test_edge_*.py drive the binary against Python's 
 ```bash
 cd edge && JARVIS_APP_DIR=.. cargo run       # the server on :8000
 edge/target/debug/jarvis-edge run|config|model|mcp …   # the CLI
-cd edge && cargo test                        # unit tests
+cd edge && cargo test                        # unit tests + integration tests (edge/tests/*.rs — new server tests go here)
 
 uv add <package>                             # Python dependency (pyproject.toml + uv.lock) — for the kernels
 uv run pytest                                # tests; `-m llm` for real-model tests (need GOOGLE_API_KEY)

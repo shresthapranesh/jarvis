@@ -484,8 +484,8 @@ function CheckIcon() {
 
 /**
  * Who a user-side message is from when it isn't the user: the parent agent
- * setting a sub-agent its task, or a sub-agent's answer coming back — which
- * links to that sub-agent's conversation.
+ * setting a sub-agent its task, a sub-agent's answer coming back, or another
+ * conversation's agent writing in — the last two link to that conversation.
  */
 function MessageSource({source, note}: {source?: string | null; note?: string | null}) {
   if (!source) return null;
@@ -508,8 +508,30 @@ function MessageSource({source, note}: {source?: string | null; note?: string | 
       </div>
     );
   }
+  if (source.startsWith(FROM_CONVERSATION)) {
+    return (
+      <div {...stylex.props(sourceStyles.label)}>
+        From{' '}
+        <Link
+          to="/c/$id"
+          params={{id: source.slice(FROM_CONVERSATION.length)}}
+          search={{}}
+          {...stylex.props(sourceStyles.link)}
+        >
+          {note || 'another conversation'}
+        </Link>
+      </div>
+    );
+  }
   return null;
 }
+
+const FROM_CONVERSATION = 'conversation:';
+
+// The line the server puts above a message another conversation's agent sent,
+// for the model to read (`[Message from conversation <id> (<title>)]`). The
+// reader gets the title as the label's link instead.
+const SENT = /^\[Message from conversation \S+?(?: \((.*)\))?\]\n?/;
 
 // The line the server puts above a sub-agent's delivered answer, for the
 // model to read (`[Sub-agent <id> finished: <status>]`; older ones name a role
@@ -517,6 +539,11 @@ function MessageSource({source, note}: {source?: string | null; note?: string | 
 const DELIVERED = /^\[Sub-agent \S+(?: \([^)]+\))? finished: (\w+)\]\n?/;
 
 function splitDelivered(message: Message): {note: string | null; content: string} {
+  if (message.source?.startsWith(FROM_CONVERSATION)) {
+    const sent = SENT.exec(message.content);
+    if (!sent) return {note: null, content: message.content};
+    return {note: sent[1] ?? null, content: message.content.slice(sent[0].length)};
+  }
   const head = message.source?.startsWith('subagent:') ? DELIVERED.exec(message.content) : null;
   if (!head) return {note: null, content: message.content};
   const [line, status] = head;

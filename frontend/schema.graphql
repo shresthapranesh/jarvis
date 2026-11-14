@@ -642,6 +642,14 @@ type Mutation {
 	stopWorkflowRun(runId: String!): Boolean!
 	startTask(input: StartTaskInput!): StartTaskPayload!
 	"""
+	A message from one conversation's agent to another conversation: it
+	arrives there as a turn of its own (or joins the run going there), said
+	to be from the sender, and the agent there answers it in its own
+	conversation. Nothing comes back to the sender. The sender is the
+	request's `X-Jarvis-Conversation`.
+	"""
+	sendToConversation(conversationId: String!, message: String!): SendToConversationPayload!
+	"""
 	Queue a message for a run that is already in flight; delivered just
 	before its next LLM call.
 	"""
@@ -942,6 +950,18 @@ type RunningTask {
 	toolCalls: Int!
 	budgetExceeded: Boolean!
 	budgetReason: String
+}
+
+type SendToConversationPayload {
+	"""
+	The run answering it: the turn it started, or the one it joined.
+	"""
+	taskId: String!
+	conversationId: String!
+	"""
+	The conversation had a run going, and the message joined it.
+	"""
+	queued: Boolean!
 }
 
 """
