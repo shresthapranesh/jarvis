@@ -675,12 +675,13 @@ pub fn chat(raw: &Value) -> Result<Option<ChatEvent>> {
             llm_calls: d.safe_int("llm_calls"),
             snapshot: snapshot_or_all(&d),
         }),
+        // An automation's run followed from its conversation says `output`.
         "done" => ChatEvent::DoneEvent(DoneEvent {
-            message: d.s("message", "")?,
+            message: d.s("message", d.opt_s("output")?.as_deref().unwrap_or(""))?,
             conversation_id: d.s("conversation_id", "")?,
         }),
         "stopped" => ChatEvent::StoppedEvent(StoppedEvent {
-            message: d.s("message", "")?,
+            message: d.s("message", d.opt_s("output")?.as_deref().unwrap_or(""))?,
             conversation_id: d.s("conversation_id", "")?,
         }),
         "error" => ChatEvent::ErrorEvent(ErrorEvent { error: d.s("error", "")? }),

@@ -1,6 +1,6 @@
 import '@xyflow/react/dist/style.css';
 import * as stylex from '@stylexjs/stylex';
-import {useNavigate, useParams} from '@tanstack/react-router';
+import {Link, useNavigate, useParams} from '@tanstack/react-router';
 import {Background, Controls, MiniMap, ReactFlow, ReactFlowProvider} from '@xyflow/react';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
@@ -26,9 +26,55 @@ import {
 } from './workflow.styles';
 import {nodeTypes} from './WorkflowEditor';
 
+// ── Agent conversations ───────────────────────────────────────────────────────
+
+/** One agent a node ran: its conversation, named by the node it ran for. */
+interface AgentConversation {
+  conversationId: string;
+  /** The node's id, with `_par_0`, `_seq_1` or `_loop_2` after it for one of several. */
+  node: string;
+  status: string | null;
+}
+
+/** The server titles each `<workflow> · <node>`. */
+function nodeOf(title: string | null | undefined): string {
+  const at = (title ?? '').lastIndexOf(' · ');
+  return at < 0 ? (title ?? '') : (title ?? '').slice(at + 3);
+}
+
+function AgentConversations({items, label}: {items: AgentConversation[]; label: string}) {
+  if (items.length === 0) return null;
+  return (
+    <div {...stylex.props(runDetail.section)}>
+      <div {...stylex.props(runDetail.label)}>{label}</div>
+      {items.map((c) => (
+        <div key={c.conversationId} {...stylex.props(styles.conversationRow)}>
+          <Link
+            to="/c/$id"
+            params={{id: c.conversationId}}
+            search={{}}
+            {...stylex.props(styles.conversationLink)}
+          >
+            {c.node || 'Agent'}
+          </Link>
+          {c.status && (
+            <span {...stylex.props(runStatus.base, statusStyle(c.status))}>{c.status}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Node detail panel ─────────────────────────────────────────────────────────
 
-function RunNodeDetail({rec}: {rec: NodeRecord}) {
+function RunNodeDetail({
+  rec,
+  conversations,
+}: {
+  rec: NodeRecord;
+  conversations: AgentConversation[];
+}) {
   const duration = rec.finished_at
     ? `${((new Date(rec.finished_at).getTime() - new Date(rec.started_at).getTime()) / 1000).toFixed(1)}s`
     : null;
@@ -113,16 +159,29 @@ function RunNodeDetail({rec}: {rec: NodeRecord}) {
           <pre {...stylex.props(runDetail.pre)}>{JSON.stringify(rec.outputs, null, 2)}</pre>
         </div>
       )}
+
+      <AgentConversations
+        items={conversations.filter(
+          (c) => c.node === rec.node_id || c.node.startsWith(`${rec.node_id}_`),
+        )}
+        label="Agent conversation"
+      />
     </div>
   );
 }
 
 // ── All-nodes summary (default / no selection) ───────────────────────────────
 
-function AllNodesSummary({nodeRecordMap}: {nodeRecordMap: Map<string, NodeRecord>}) {
+function AllNodesSummary({
+  nodeRecordMap,
+  conversations,
+}: {
+  nodeRecordMap: Map<string, NodeRecord>;
+  conversations: AgentConversation[];
+}) {
   const records = Array.from(nodeRecordMap.values());
 
-  if (records.length === 0) {
+  if (records.length === 0 && conversations.length === 0) {
     return <div {...stylex.props(runDetail.empty)}>No execution data for this run.</div>;
   }
 
@@ -159,6 +218,7 @@ function AllNodesSummary({nodeRecordMap}: {nodeRecordMap: Map<string, NodeRecord
           </div>
         );
       })}
+      <AgentConversations items={conversations} label="Agent conversations" />
     </div>
   );
 }
@@ -208,6 +268,16 @@ export default function WorkflowRunPage() {
     [baseNodes, nodeRecordMap],
   );
 
+  const conversations = useMemo<AgentConversation[]>(
+    () =>
+      (runData.workflowRun?.conversations ?? []).map((c) => ({
+        conversationId: c.conversationId,
+        node: nodeOf(c.title),
+        status: c.status ?? null,
+      })),
+    [runData.workflowRun?.conversations],
+  );
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedRecord = selectedNodeId ? (nodeRecordMap.get(selectedNodeId) ?? null) : null;
 
@@ -252,9 +322,9 @@ export default function WorkflowRunPage() {
         </ReactFlowProvider>
 
         {selectedRecord ? (
-          <RunNodeDetail rec={selectedRecord} />
+          <RunNodeDetail rec={selectedRecord} conversations={conversations} />
         ) : (
-          <AllNodesSummary nodeRecordMap={nodeRecordMap} />
+          <AllNodesSummary nodeRecordMap={nodeRecordMap} conversations={conversations} />
         )}
       </div>
     </div>
@@ -272,4 +342,12 @@ const styles = stylex.create({
   summaryTitle: {fontSize: type.tSmall, fontWeight: 600, color: colors.text, flex: 1},
   summaryCount: {fontSize: type.tMicro, color: colors.textDim},
   summaryDuration: {fontSize: type.tMicro, color: colors.textDim, marginInlineStart: 'auto'},
+
+  conversationRow: {display: 'flex', alignItems: 'center', gap: 8, paddingBlock: 3},
+  conversationLink: {
+    flex: 1,
+    fontSize: type.tBody,
+    color: colors.accent,
+    textDecoration: {default: 'none', ':hover': 'underline'},
+  },
 });

@@ -72,6 +72,30 @@ impl WorkflowRun {
     pub async fn id(&self) -> ID {
         global_id("WorkflowRun", &self.raw_id)
     }
+
+    /// The conversations of the run's agents, one per agent a node ran, in
+    /// the order they started.
+    async fn conversations(&self, ctx: &Context<'_>) -> Result<Vec<RunConversation>> {
+        Ok(sqlx::query_as(
+            "SELECT c.id AS conversation_id, c.title, \
+             (SELECT m.status FROM messages m WHERE m.conversation_id = c.id AND m.role = 'assistant' \
+              ORDER BY m.created_at, m.rowid LIMIT 1) AS status \
+             FROM conversations c WHERE c.surface = 'workflow' AND c.spawned_by = ? ORDER BY c.created_at, c.rowid",
+        )
+        .bind(&self.raw_id)
+        .fetch_all(ctx.data::<SqlitePool>()?)
+        .await?)
+    }
+}
+
+/// One agent's conversation in a workflow run.
+#[derive(SimpleObject, sqlx::FromRow, Clone)]
+pub struct RunConversation {
+    pub conversation_id: String,
+    /// `<workflow> · <node>`.
+    pub title: Option<String>,
+    /// Its first reply's: running, done, error or stopped.
+    pub status: Option<String>,
 }
 
 #[derive(Default)]
@@ -178,7 +202,7 @@ impl WorkflowMutation {
             let payload = serde_json::json!({"workflow_id": raw, "name": name});
             super::approval::gate_action(ctx, "delete_workflow", payload).await?;
         }
-        if !delete_workflow(ctx.data()?, &raw).await? {
+        if !delete_workflow(ctx.data()?, &raw, ctx.data()?).await? {
             return Err("workflow not found".into());
         }
         Ok(true)
@@ -186,14 +210,29 @@ impl WorkflowMutation {
 }
 
 /// `db/ops.py:delete_workflow`: its runs go with it, as the ORM cascade
-/// takes them. False when there's no such workflow.
-pub async fn delete_workflow(pool: &SqlitePool, raw_id: &str) -> sqlx::Result<bool> {
+/// takes them — and their agents' conversations. False when there's no such
+/// workflow.
+pub async fn delete_workflow(pool: &SqlitePool, raw_id: &str, data: &super::EdgeData) -> sqlx::Result<bool> {
     let mut tx = crate::db::write_tx(pool).await?;
+    let conversations: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM conversations WHERE surface = 'workflow' AND spawned_by IN \
+         (SELECT id FROM workflow_runs WHERE workflow_id = ?)",
+    )
+    .bind(raw_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut teardowns = Vec::new();
+    for id in conversations {
+        teardowns.extend(super::conversation::delete_conversation(&mut tx, &id, &data.artifacts_dir).await?);
+    }
     sqlx::query("DELETE FROM workflow_runs WHERE workflow_id = ?").bind(raw_id).execute(&mut *tx).await?;
     let deleted = sqlx::query("DELETE FROM workflows WHERE id = ?").bind(raw_id).execute(&mut *tx).await?;
     if deleted.rows_affected() == 0 {
         return Ok(false);
     }
     tx.commit().await?;
+    for t in teardowns {
+        t.finish(&data.kernels).await;
+    }
     Ok(true)
 }

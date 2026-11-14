@@ -19,6 +19,11 @@ export const workflowRunDetailQuery = graphql`
       error
       startedAt
       finishedAt
+      conversations {
+        conversationId
+        title
+        status
+      }
     }
   }
 `;

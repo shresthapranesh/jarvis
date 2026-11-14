@@ -181,6 +181,8 @@ export interface AutomationRun {
   error: string | null;
   started_at: string;
   finished_at: string | null;
+  /** The conversation its agent answered in; none for a code or webhook run. */
+  conversation_id: string | null;
 }
 
 export interface ModelSpec {

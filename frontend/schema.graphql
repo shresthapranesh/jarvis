@@ -147,6 +147,12 @@ type AutomationRun implements Node {
 	startedAt: DateTime!
 	finishedAt: DateTime
 	id: ID!
+	"""
+	The conversation the run's agent answered in — the run's own, or its
+	stateful automation's. None for a code or webhook run, and for a run
+	from before runs had conversations.
+	"""
+	conversationId: String
 }
 
 type AutomationStoppedEvent {
@@ -934,6 +940,21 @@ type ResolveApprovalPayload {
 	result: String
 }
 
+"""
+One agent's conversation in a workflow run.
+"""
+type RunConversation {
+	conversationId: String!
+	"""
+	`<workflow> · <node>`.
+	"""
+	title: String
+	"""
+	Its first reply's: running, done, error or stopped.
+	"""
+	status: String
+}
+
 type RunningTask {
 	id: String!
 	kind: String!
@@ -1339,6 +1360,11 @@ type WorkflowRun implements Node {
 	startedAt: DateTime!
 	finishedAt: DateTime
 	id: ID!
+	"""
+	The conversations of the run's agents, one per agent a node ran, in
+	the order they started.
+	"""
+	conversations: [RunConversation!]!
 }
 
 type WorkflowStoppedEvent {

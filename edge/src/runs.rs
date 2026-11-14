@@ -104,6 +104,9 @@ struct Inner {
     /// Registration order, as Python's dict keeps it: `runningTasks` sorts
     /// stably by start time, so ties keep this order.
     runs: IndexMap<String, Arc<Run>>,
+    /// Runs no job stands behind (`register_unqueued`), which `sweep_pending`
+    /// leaves alone.
+    unqueued: std::collections::HashSet<String>,
 }
 
 pub struct Registry {
@@ -159,6 +162,14 @@ impl Registry {
         run
     }
 
+    /// A run that is nobody's job — a workflow agent's reply in its own
+    /// conversation, which the workflow's run produces. Whoever registers it
+    /// ends it (`done`, then `retire`).
+    pub fn register_unqueued(&self, id: &str, meta: Meta) -> Arc<Run> {
+        self.lock().unqueued.insert(id.to_string());
+        self.pre_register(id, meta)
+    }
+
     /// Undo `pre_register` for a job that was never committed.
     pub fn discard_pending(&self, id: &str) {
         if let Some(run) = self.lock().runs.shift_remove(id) {
@@ -191,6 +202,7 @@ impl Registry {
             let mut inner = me.lock();
             if inner.runs.get(&run.id).is_some_and(|r| Arc::ptr_eq(r, &run)) {
                 inner.runs.shift_remove(&run.id);
+                inner.unqueued.remove(&run.id);
             }
         });
     }
@@ -215,6 +227,9 @@ impl Registry {
     /// back to the DB.
     pub async fn sweep_pending(&self, pool: &SqlitePool) {
         for run in self.all() {
+            if self.lock().unqueued.contains(&run.id) {
+                continue;
+            }
             let status: Option<String> = match sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?")
                 .bind(&run.id)
                 .fetch_optional(pool)

@@ -10,16 +10,27 @@
 //! calls count against the workflow's budget. Nothing hands over to
 //! Python: a call whose arguments the edge doesn't take is answered with
 //! an error the model can correct.
+//!
+//! In a workflow's run each agent has a conversation of its own (`Seat`:
+//! `surface = 'workflow'`, so out of the sidebar; `spawned_by` the run): its
+//! prompt, its reply — followed live there, as a chat turn's is — and its
+//! history as the conversation's thread, so it can be opened from the run
+//! and gone on with. A child workflow's agents and `main.py run`'s have none.
+
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::engine::Env;
 use crate::agent::tools::{self, Native, Policy, Step, Toolset};
+use crate::agent::thread::Thread;
 use crate::agent::{artifacts, prompt, turn, workers};
+use crate::gql::codec::{new_id, now_stored};
 use crate::llm::shape::{self, Layout, Segment};
 use crate::llm::transcript::{Content, Message, Role, ToolCall};
 use crate::llm::{self, Delta, Endpoints, Request, compact};
+use crate::runs::{Meta, Registry, Run};
 
 /// `_run_agent_text`'s `recursion_limit`.
 const RECURSION_LIMIT: u32 = 100;
@@ -29,10 +40,200 @@ const RECURSION_LIMIT: u32 = 100;
 pub async fn run_text(env: &Env<'_>, node_id: &str, model: &str, query: String) -> Result<String, String> {
     let mut node = NodeAgent::new(env, node_id, model, &query).await?;
     let kernel = workers::Kernel::new(env.agent.kernels.clone(), node.thread_id.clone());
-    let answer = node.run(query).await.map(|_| std::mem::take(&mut node.text));
+    node.seat = Seat::open(env, node_id, model, &node.thread_id, &query).await;
+    let answer = node.run(query).await;
+    if let Some(seat) = node.seat.take() {
+        seat.close(std::mem::take(&mut node.history), model, answer.as_ref().err()).await;
+    }
     kernel.shutdown().await;
-    answer
+    answer.map(|_| std::mem::take(&mut node.text))
 }
+
+/// A node agent's conversation, and the reply in it the agent writes into.
+/// The reply has a run of its own (`Registry::register_unqueued`, a `chat`
+/// run on the conversation), so the conversation's page follows it as it
+/// follows a chat turn: its text and steps as they come, a stop, a message
+/// sent meanwhile.
+struct Seat {
+    run: Arc<Run>,
+    runs: Arc<Registry>,
+    pool: sqlx::SqlitePool,
+    conversation_id: String,
+    message_id: String,
+    /// The next `steps.seq`.
+    seq: i64,
+    /// What the agent has said so far.
+    said: String,
+    closed: bool,
+}
+
+impl Seat {
+    /// The conversation, the prompt as its user's message, and the reply,
+    /// running. None outside a workflow's own run, or if it can't be written
+    /// — the agent runs all the same.
+    async fn open(env: &Env<'_>, node_id: &str, model: &str, thread_id: &str, query: &str) -> Option<Seat> {
+        let workflow = env.run.as_ref()?;
+        let pool = &env.agent.pool;
+        let message_id = new_id();
+        let started = now_stored();
+        let opened = async {
+            let mut tx = crate::db::write_tx(pool).await?;
+            sqlx::query(
+                "INSERT INTO conversations (id, title, model, created_at, surface, pinned, project_id, ephemeral, spawned_by) \
+                 VALUES (?, ?, ?, ?, ?, 0, NULL, 0, ?)",
+            )
+            .bind(thread_id)
+            .bind(format!("{} · {node_id}", workflow.meta.label))
+            .bind(model)
+            .bind(&started)
+            .bind(SURFACE)
+            .bind(&workflow.id)
+            .execute(&mut *tx)
+            .await?;
+            crate::gql::start::insert_message(&mut *tx, thread_id, "user", query, None, "done").await?;
+            sqlx::query(
+                "INSERT INTO messages (id, conversation_id, role, content, model, created_at, status) \
+                 VALUES (?, ?, 'assistant', '', ?, ?, 'running')",
+            )
+            .bind(&message_id)
+            .bind(thread_id)
+            .bind(model)
+            .bind(now_stored())
+            .execute(&mut *tx)
+            .await?;
+            // Registered before the reply can be seen, as a trigger's run is.
+            let meta = Meta {
+                kind: "chat".into(),
+                label: crate::gql::start::first_chars(query, 60),
+                parent_id: Some(thread_id.into()),
+                started_at: crate::gql::codec::iso_from_db(&started).utc().0,
+            };
+            let run = env.agent.runs.register_unqueued(&message_id, meta);
+            match tx.commit().await {
+                Ok(()) => Ok(run),
+                Err(e) => {
+                    env.agent.runs.discard_pending(&message_id);
+                    Err(e)
+                }
+            }
+        };
+        match opened.await {
+            Ok(run) => Some(Seat {
+                run,
+                runs: env.agent.runs.clone(),
+                pool: pool.clone(),
+                conversation_id: thread_id.into(),
+                message_id,
+                seq: 0,
+                said: String::new(),
+                closed: false,
+            }),
+            Err(e) => {
+                tracing::warn!("workflow run {}: node {node_id}'s conversation: {e}", workflow.id);
+                None
+            }
+        }
+    }
+
+    fn token(&mut self, text: &str) {
+        self.said.push_str(text);
+        self.run.emit_local("token", &json!({"text": text, "source": "main"}));
+    }
+
+    /// A finished step: its row, then its event, as a chat turn's.
+    async fn step(&mut self, node: &str, data: String) {
+        let written = sqlx::query(
+            "INSERT INTO steps (id, message_id, conversation_id, node, source, subagent, data, seq, created_at) \
+             VALUES (?, ?, ?, ?, 'main', NULL, ?, ?, ?)",
+        )
+        .bind(new_id())
+        .bind(&self.message_id)
+        .bind(&self.conversation_id)
+        .bind(node)
+        .bind(&data)
+        .bind(self.seq)
+        .bind(now_stored())
+        .execute(&self.pool)
+        .await;
+        match written {
+            Ok(_) => {
+                self.seq += 1;
+                self.run.emit_local("step", &json!({"node": node, "source": "main", "subagent": null, "data": data}));
+            }
+            Err(e) => tracing::warn!("workflow agent {}: writing a step: {e}", self.conversation_id),
+        }
+    }
+
+    /// Whether the reply was stopped from its conversation.
+    fn stopped(&self) -> bool {
+        self.run.fields().cancelled
+    }
+
+    /// The reply as it ended, and the agent's history as the conversation's
+    /// thread: a message sent there later — or meanwhile, which becomes the
+    /// next turn now — goes on from all of it.
+    async fn close(mut self, history: Vec<Message>, model: &str, error: Option<&String>) {
+        self.closed = true;
+        let (content, status) = match error {
+            _ if self.stopped() => (self.said.clone(), "stopped"),
+            Some(error) if self.said.is_empty() => (format!("The run failed before completing: {error}"), "error"),
+            Some(_) => (self.said.clone(), "error"),
+            None => (self.said.clone(), "done"),
+        };
+        let closed = async {
+            sqlx::query("UPDATE messages SET content = ?, status = ? WHERE id = ?")
+                .bind(&content)
+                .bind(status)
+                .bind(&self.message_id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Thread::load(&self.pool, &self.conversation_id).await?.apply(&self.pool, history).await
+        };
+        if let Err(e) = closed.await {
+            tracing::warn!("workflow agent {}: writing its conversation: {e}", self.conversation_id);
+        }
+        match (status, error) {
+            ("error", Some(error)) => self.run.emit_local("error", &json!({"error": error})),
+            _ => self.run.emit_local(status, &json!({"message": content, "conversation_id": self.conversation_id})),
+        }
+        self.end();
+        if status == "done" {
+            crate::gql::start::redispatch_queued(&self.pool, &self.runs, &self.conversation_id, model).await;
+        }
+    }
+
+    fn end(&self) {
+        self.run.update(|st| st.fields.done = true);
+        self.runs.retire(&self.message_id);
+    }
+}
+
+/// A stopped workflow drops its agents where they stand: the reply ends
+/// stopped, with what it had said.
+impl Drop for Seat {
+    fn drop(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.run.emit_local("stopped", &json!({"message": self.said, "conversation_id": self.conversation_id}));
+        self.end();
+        let (pool, id, said) = (self.pool.clone(), self.message_id.clone(), std::mem::take(&mut self.said));
+        tokio::spawn(async move {
+            let written = sqlx::query("UPDATE messages SET content = ?, status = 'stopped' WHERE id = ? AND status = 'running'")
+                .bind(said)
+                .bind(&id)
+                .execute(&pool)
+                .await;
+            if let Err(e) = written {
+                tracing::warn!("workflow agent's reply {id}: recording its stop: {e}");
+            }
+        });
+    }
+}
+
+/// `conversations.surface` of a workflow agent's conversation.
+pub const SURFACE: &str = "workflow";
 
 /// The agent's last reply — `main.py run`'s `agent.ainvoke(...)["messages"][-1]`:
 /// the same agent, on a history and kernel of its own, with no conversation.
@@ -55,6 +256,10 @@ struct NodeAgent<'a, 'e> {
     ends: Endpoints,
     retrieved: Vec<Segment>,
     thread_id: String,
+    /// Its conversation, in a workflow's run.
+    seat: Option<Seat>,
+    /// What it and the model said, kept for its conversation's thread.
+    history: Vec<Message>,
     todos: Vec<Value>,
     text: String,
     steps: u32,
@@ -83,6 +288,8 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             ends,
             retrieved,
             thread_id,
+            seat: None,
+            history: vec![],
             todos: vec![],
             text: String::new(),
             steps: 0,
@@ -92,10 +299,19 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
     /// The loop, to the reply with no tool calls.
     async fn run(&mut self, query: String) -> Result<Message, String> {
         let mut history = vec![Message::new(Role::User, Content::Text(query))];
+        let answer = self.steps(&mut history).await;
+        self.history = history;
+        answer
+    }
+
+    async fn steps(&mut self, history: &mut Vec<Message>) -> Result<Message, String> {
         loop {
             self.take_step()?;
-            let reply = self.model_step(&mut history).await?;
+            let reply = self.model_step(history).await?;
             history.push(reply.clone());
+            if let Some(seat) = &mut self.seat {
+                seat.step("model_request", turn::model_step_data(&reply)).await;
+            }
             if let Some(why) = llm::cut_short(&reply) {
                 return Err(why);
             }
@@ -104,11 +320,17 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             }
             self.take_step()?;
             let results = self.tool_step(&reply.tool_calls).await?;
+            if let Some(seat) = &mut self.seat {
+                seat.step("tools", turn::tools_step_data(&results)).await;
+            }
             history.extend(results);
         }
     }
 
     fn take_step(&mut self) -> Result<(), String> {
+        if self.seat.as_ref().is_some_and(Seat::stopped) {
+            return Err("the agent was stopped from its conversation".into());
+        }
         if self.steps >= RECURSION_LIMIT {
             return Err(format!("agent 'main' reached its limit of {RECURSION_LIMIT} steps"));
         }
@@ -145,12 +367,15 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
             effort: crate::agent::effort(pool, self.model, "workflow", None).await,
             cache_key: None,
         };
-        let (env, node_id, text) = (self.env, self.node_id, &mut self.text);
+        let (env, node_id, text, seat) = (self.env, self.node_id, &mut self.text, &mut self.seat);
         let mut on_delta = |d: Delta| {
             if let Delta::Text(t) = d {
                 if !t.is_empty() {
                     text.push_str(t);
                     env.emit("node_token", json!({"node_id": node_id, "text": t}));
+                    if let Some(seat) = seat {
+                        seat.token(t);
+                    }
                 }
             }
         };
@@ -225,7 +450,9 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
         let agent = self.env.agent;
         match native {
             Native::RunCell { code } => {
-                let cell = crate::kernels::Cell { code: &code, timeout: tools::CELL_TIMEOUT, conversation_id: None, project_id: None };
+                // With a conversation, the SDK is scoped to it.
+                let conversation_id = self.seat.as_ref().map(|_| self.thread_id.as_str());
+                let cell = crate::kernels::Cell { code: &code, timeout: tools::CELL_TIMEOUT, conversation_id, project_id: None };
                 agent.kernels.run(&self.thread_id, &cell).await
             }
             Native::WriteTodos { todos } => {
@@ -259,8 +486,8 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
                     pool: &agent.pool,
                     dir: &agent.artifacts_dir,
                     cwd: &cwd,
-                    conversation_id: None,
-                    message_id: None,
+                    conversation_id: self.seat.as_ref().map(|_| self.thread_id.as_str()),
+                    message_id: self.seat.as_ref().map(|s| s.message_id.as_str()),
                 };
                 let written =
                     artifacts::write(&scope, &title, content.as_deref(), file_path.as_deref(), artifact_id.as_deref()).await?;
