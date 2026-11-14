@@ -194,17 +194,17 @@ class FakeOllama:
             gate.set()
 
 
-# How each worker role's prompt begins (`core/agents.py:_ROLE_PROMPTS`).
+# How the prompt of whoever isn't the main agent begins. There are no roles:
+# every sub-agent of `run_agents`, and every worker of a workflow node's
+# `spawn_workers`, has the one prompt (`workers::SUBAGENT_PROMPT`).
 ROLE_PROMPTS = {
-    "general": "You are a focused worker agent.",
-    "researcher": "You are a research worker.",
-    "coder": "You are a code worker.",
-    "writer": "You are a writing worker.",
+    "subagent": "You are a sub-agent:",
 }
 
 
 class ByRole:
-    """Replies for the main agent and for each worker role, each in its own
+    """Replies for the main agent and for `subagent` (the sub-agents of
+    `run_agents` and a workflow node's workers), each in its own
     order: workers run at once, so which request comes first is timing. A
     reply may be a function of the request (to read an id back)."""
 

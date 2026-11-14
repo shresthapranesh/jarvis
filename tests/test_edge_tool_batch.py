@@ -61,7 +61,7 @@ async def test_workers_run_on_the_worker_model(database: Path, work_dir: Path, e
     """`workers.model` names a model in the catalog: the sub-agents run on
     it, the run itself on its own."""
     haiku = "anthropic:claude-haiku-5-5"
-    fake = FakeAnthropic([("run_agents", {"tasks": [{"task": "Look it up", "role": "researcher"}]}),
+    fake = FakeAnthropic([("run_agents", {"tasks": [{"task": "Look it up"}]}),
                           "Found it.", "Done."])
     try:
         insert(database, "config_settings", key="models.custom",
@@ -76,14 +76,14 @@ async def test_workers_run_on_the_worker_model(database: Path, work_dir: Path, e
         fake.server.shutdown()
     assert job["status"] == "done", job
     assert [r["body"]["model"] for r in fake.requests] == ["claude-opus-5-5", "claude-haiku-5-5", "claude-opus-5-5"]
-    assert "You are a research worker." in json.dumps(fake.requests[1]["body"]["system"])
+    assert "You are a sub-agent:" in json.dumps(fake.requests[1]["body"]["system"])
 
 
 async def test_more_workers_than_pool_connections(database: Path, work_dir: Path, edge_binary: Path):
     """Six sub-agents on a pool of four connections, each a turn of its
     own writing as it goes while the run waits for them all (`db.rs`)."""
     workers = 6
-    tasks = [{"task": f"Look up {i}", "role": "researcher"} for i in range(workers)]
+    tasks = [{"task": f"Look up {i}"} for i in range(workers)]
     fake = FakeAnthropic([("run_agents", {"tasks": tasks}), *["Found it."] * workers, "Done."])
     try:
         insert(database, "config_settings", key="models.custom", value=json.dumps([{"id": MODEL, "label": "Opus"}]))

@@ -332,10 +332,12 @@ Every chat turn, automation run, board task and workflow run.
   any other.
 - **Sub-agents** (`turn.rs`, `gql/start.rs`): `run_agents` gives each task
   to a sub-agent — a conversation of its own (`surface = 'subagent'`,
-  `parent_id`, `agent_role`, `spawned_by`) whose turns are `subagent` jobs,
-  claimed under their own slots and run as a chat turn with the role's
-  prompt and tools (`Kind::Subagent`; the roles are `workers::role`, the file
-  and artifact tools `files.rs`, `artifacts.rs`). A task naming an `agent_id`
+  `parent_id`, `spawned_by`) whose turns are `subagent` jobs, claimed under
+  their own slots and run as a chat turn with the sub-agent prompt and tools
+  (`Kind::Subagent`; `workers::SUBAGENT_PROMPT` / `SUBAGENT_TOOLS`, the file
+  and artifact tools `files.rs`, `artifacts.rs`). Sub-agents have no roles:
+  each is the same general worker, steered by its task (the
+  `conversations.agent_role` column is left from when they had, and unused). A task naming an `agent_id`
   goes to that sub-agent's thread. With `wait` the turn waits on the runs and
   reads each one's last reply; without it (a web chat only) the answer comes
   back as a `source = 'subagent:<id>'` message that joins the parent's run or
@@ -346,10 +348,10 @@ Every chat turn, automation run, board task and workflow run.
   conversation lists them (`Conversation.subagents`). After a restart the
   turn answers its open `run_agents` call from the turns it had started. The
   user can write to a sub-agent's conversation like any other.
-- **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py` and the
-  roles in `core/agents.py`): a workflow's agent node has no conversation to
-  hang sub-agents on, so its `spawn_workers` runs its tasks at once in
-  memory, each on the node's model with its role's prompt and tools, a
+- **Workers** (`src/agent/workers.rs`, a port of `tools/workers.py`): a
+  workflow's agent node has no conversation to hang sub-agents on, so its
+  `spawn_workers` runs its tasks at once in memory, each on the node's model
+  with the sub-agent prompt and tools (no roles here either), a
   history and a kernel of its own. It answers unknown tools, bad arguments
   (`tools::Args`) and gates itself; its model and tool calls count against
   the workflow's budget; a batch's calls run in order (Python ran them at

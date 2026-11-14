@@ -512,16 +512,16 @@ function MessageSource({source, note}: {source?: string | null; note?: string | 
 }
 
 // The line the server puts above a sub-agent's delivered answer, for the
-// model to read (`[Sub-agent <id> (<role>) finished: <status>]`). The reader
-// gets it as the label instead.
-const DELIVERED = /^\[Sub-agent \S+ \(([^)]+)\) finished: (\w+)\]\n?/;
+// model to read (`[Sub-agent <id> finished: <status>]`; older ones name a role
+// after the id). The reader gets it as the label instead.
+const DELIVERED = /^\[Sub-agent \S+(?: \([^)]+\))? finished: (\w+)\]\n?/;
 
 function splitDelivered(message: Message): {note: string | null; content: string} {
   const head = message.source?.startsWith('subagent:') ? DELIVERED.exec(message.content) : null;
   if (!head) return {note: null, content: message.content};
-  const [line, role, status] = head;
+  const [line, status] = head;
   return {
-    note: status === 'done' ? role : `${role}, ${status}`,
+    note: status === 'done' ? null : status,
     content: message.content.slice(line.length),
   };
 }

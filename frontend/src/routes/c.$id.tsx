@@ -16,9 +16,10 @@ import {DeferredApprovals} from '../components/DeferredApprovals';
 import {InputBox} from '../components/InputBox';
 import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
-import {isLive, SubagentBar, type SubagentInfo} from '../components/SubagentBar';
+import {isLive, SubagentChip, type SubagentInfo} from '../components/SubagentChip';
+import {SubagentPanel} from '../components/SubagentPanel';
 import {ThreadSpine} from '../components/ThreadSpine';
-import {page} from '../components/ui';
+import {page, useResizableWidth} from '../components/ui';
 import {useBrowserAvailable} from '../hooks/useBrowserAvailable';
 import {refreshRunningTasks} from '../hooks/useRunningTasks';
 import {useTaskEvents} from '../hooks/useTaskEvents';
@@ -206,7 +207,13 @@ function ConversationPage() {
     [artifacts],
   );
 
+  function handleOpenBrowser() {
+    setOpenSubagentId(null);
+    setBrowserPanelOpen(true);
+  }
+
   function handleOpenArtifact(artifactId: string) {
+    setOpenSubagentId(null);
     setSelectedArtifactId(artifactId);
     setArtifactPanelOpen(true);
   }
@@ -239,6 +246,24 @@ function ConversationPage() {
     const timer = window.setInterval(() => void loadConversationPage(id), 3000);
     return () => window.clearInterval(timer);
   }, [subagentsLive, id]);
+
+  // The sub-agent whose conversation is open beside this one. Held by id and
+  // looked up in the list, so its header follows the live status, and the
+  // panel goes when the sub-agent does (or when the page moves to another
+  // conversation).
+  const [openSubagentId, setOpenSubagentId] = useState<string | null>(null);
+  const openSubagent = subagents.find((s) => s.conversationId === openSubagentId) ?? null;
+  const [subagentWidth, setSubagentWidth] = useResizableWidth('jarvis.subagentPanelWidth', 520);
+  // On a wide screen the page makes room, so the two conversations sit side
+  // by side; where that would squeeze this one too far, the panel floats over.
+  const subagentDocked = !!openSubagent && window.innerWidth - subagentWidth >= 560;
+
+  function openSubagentPanel(conversationId: string) {
+    setPanelOpen(false);
+    setArtifactPanelOpen(false);
+    setBrowserPanelOpen(false);
+    setOpenSubagentId(conversationId);
+  }
 
   useEffect(() => {
     if ((streaming || !!runningMsg) && panelOpen && steps.length > 0) {
@@ -393,6 +418,7 @@ function ConversationPage() {
   }, [hasPrevious, isLoadingPrevious, loadPrevious]);
 
   function handleShowSteps(s: Step[]) {
+    setOpenSubagentId(null);
     setPanelSteps(s);
     setPanelOpen(true);
   }
@@ -550,7 +576,11 @@ function ConversationPage() {
   }, [isActive, steps, allMessages]);
 
   const showSpine =
-    !panelOpen && !artifactPanelOpen && !browserPanelOpen && (isActive || messages.length > 0);
+    !panelOpen &&
+    !artifactPanelOpen &&
+    !browserPanelOpen &&
+    !openSubagent &&
+    (isActive || messages.length > 0);
 
   // Jumping from the spine is the reader taking over the scroll position, so
   // it must release the pin first — otherwise the settle-window re-pin above
@@ -584,12 +614,14 @@ function ConversationPage() {
   }, [id, isEphemeral]);
 
   return (
-    <div {...stylex.props(page.root)}>
+    <div
+      {...stylex.props(page.root)}
+      style={subagentDocked ? {paddingInlineEnd: subagentWidth} : undefined}
+    >
       <ConversationHeader
         title={data.title ?? null}
         project={data.project ?? null}
         parent={data.parent ?? null}
-        agentRole={data.agentRole ?? null}
         createdAt={data.createdAt}
         runState={pendingInterrupt ? 'waiting' : isActive ? 'running' : null}
         spine={!showSpine ? 'none' : isActive ? 'open' : 'collapsed'}
@@ -634,7 +666,7 @@ function ConversationPage() {
         isLoadingOlder={isLoadingPrevious}
         onShowSteps={handleShowSteps}
         browsing={browsing}
-        onOpenBrowser={() => setBrowserPanelOpen(true)}
+        onOpenBrowser={handleOpenBrowser}
         artifactsByMessage={artifactsByMessage}
         streamingArtifacts={isActive ? streamingArtifacts : undefined}
         onOpenArtifact={handleOpenArtifact}
@@ -655,7 +687,7 @@ function ConversationPage() {
           isLive={isActive}
           budget={liveBudget}
           onExpand={() => handleShowSteps(spineSteps)}
-          onOpenBrowser={browserAvailable ? () => setBrowserPanelOpen(true) : undefined}
+          onOpenBrowser={browserAvailable ? handleOpenBrowser : undefined}
           onJump={jumpToMessage}
         />
       )}
@@ -678,6 +710,14 @@ function ConversationPage() {
           onClose={() => setArtifactPanelOpen(false)}
         />
       )}
+      {openSubagent && (
+        <SubagentPanel
+          subagent={openSubagent}
+          width={subagentWidth}
+          onResize={setSubagentWidth}
+          onClose={() => setOpenSubagentId(null)}
+        />
+      )}
       <footer
         {...stylex.props(
           conv.footer,
@@ -686,7 +726,11 @@ function ConversationPage() {
           panelOpen && conv.footerWithPanel,
         )}
       >
-        <SubagentBar subagents={subagents} />
+        <SubagentChip
+          subagents={subagents}
+          openId={openSubagent?.conversationId ?? null}
+          onOpen={openSubagentPanel}
+        />
         <DeferredApprovals conversationId={id} />
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt key={pendingInterrupt.approvalId} interrupt={pendingInterrupt} />

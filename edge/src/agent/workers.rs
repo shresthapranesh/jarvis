@@ -1,15 +1,16 @@
-//! The roles an agent delegates to (`_ROLE_PROMPTS`, `_ROLE_TOOLS` of
-//! `core/agents.py`), and `spawn_workers` (a port of `tools/workers.py`) for
-//! a workflow's agent node.
+//! What an agent delegates to: the one sub-agent prompt and toolset, and
+//! `spawn_workers` (a port of `tools/workers.py`) for a workflow's agent node.
+//!
+//! There are no roles: every sub-agent and worker is the same general
+//! worker, and what it is for is whatever its task says.
 //!
 //! A turn's sub-agents are conversations of their own, run as jobs
-//! (`turn.rs`, `Kind::Subagent`); they take only their role from here
-//! (`role`). A workflow's agent node has no conversation to hang them on, so
-//! its `spawn_workers` still runs each task on a worker in memory, all at
-//! once: the node's model (or the `workers.model` setting's), a role's prompt
-//! and tools, a history and a kernel of its own, gone when it answers. A
-//! worker's model and tool calls reach the node as `Note`s, which count
-//! against the workflow's budget.
+//! (`turn.rs`, `Kind::Subagent`). A workflow's agent node has no
+//! conversation to hang them on, so its `spawn_workers` still runs each task
+//! on a worker in memory, all at once: the node's model (or the
+//! `workers.model` setting's), the same prompt and tools, a history and a
+//! kernel of its own, gone when it answers. A worker's model and tool calls
+//! reach the node as `Note`s, which count against the workflow's budget.
 //!
 //! A worker answers unknown tools, arguments its tool's signature won't take
 //! (`tools::Args`) and gated calls itself.
@@ -26,81 +27,31 @@ use crate::llm::transcript::{Content, Message, Part, Role, ToolCall, Typed};
 use crate::llm::{self, Delta, Endpoints, Request, compact};
 use crate::{pyjson, pystr};
 
-const DEFAULT_ROLE: &str = "general";
 /// A worker's `recursion_limit`: generous, but under the main agent's.
 const RECURSION_LIMIT: u32 = 50;
 
-/// `_ROLE_PROMPTS`.
-const ROLES: [(&str, &str); 4] = [
-    (
-        "general",
-        "You are a focused worker agent. Complete the task given to you using run_cell(code) — a stateful \
-         Python/IPython session with full network/filesystem access, where variables and imports persist across \
-         calls like notebook cells. Use read_file/write_file/list_files for filesystem access if needed. When you \
-         have a complete answer, return it concisely as your final response.",
-    ),
-    (
-        "researcher",
-        "You are a research worker. Your job is to find and verify information. Work in run_cell(code): \
-         search(query) returns [{title, url, snippet}] leads and read(url) returns a page's main text — never \
-         conclude from snippets alone; read() the promising results. Use httpx for APIs and read_file when given \
-         local source material. Cross-check claims that matter across independent sources and prefer primary ones. \
-         Cite the URLs you actually read in your final answer. If you cannot find something, say so explicitly — do \
-         not guess. Return your findings concisely.",
-    ),
-    (
-        "coder",
-        "You are a code worker. Your job is to write or modify code precisely. Read the existing code (read_file / \
-         list_files) before changing it. Make minimal, focused edits. Use run_cell(code) to run, test, and verify. \
-         When something fails, fix the underlying cause; do not paper over it. Return a short summary of what you \
-         changed and any test output.",
-    ),
-    (
-        "writer",
-        "You are a writing worker. Your job is to produce final-quality prose. Read source material via read_file \
-         before drafting. Match the requested length, tone, and audience. You do NOT run code — no shell, no \
-         run_cell. Save drafts via write_file when asked. Return the final text.",
-    ),
-];
+/// A sub-agent's system prompt (`turn.rs`), and a workflow node's worker's.
+/// There is one kind of either: what it is for, and how it should go about
+/// it, is whatever the agent that tasked it says.
+pub const SUBAGENT_PROMPT: &str = "You are a sub-agent: another agent has delegated a task to you, and your reply goes back to that agent, not \
+     to a person. Do what the task asks, the way it asks — its instructions on approach, sources, scope, format \
+     and length are yours to follow. You see only this conversation: everything you were given is in the task and \
+     its context, and later messages here are follow-ups on the same work. Work in run_cell(code) — a stateful \
+     Python/IPython session with full network/filesystem access, where variables and imports persist across calls \
+     like notebook cells; search(query) returns [{title, url, snippet}] leads and read(url) returns a page's main \
+     text. Use read_file/write_file/list_files for files and the artifact tools for documents worth keeping. \
+     Verify before you report: run what you wrote, read what you cite. If you cannot do or find something, say so \
+     explicitly — do not guess. When you are done, give your complete answer concisely as your final response.";
 
-/// `_ROLE_TOOLS[role]`, and whether the `always` MCP servers' tools follow.
-fn role_tools(role: &str) -> (&'static [&'static str], bool) {
-    match role {
-        "general" => (
-            &["run_cell", "read_file", "write_file", "list_files", "write_artifact", "read_artifact", "list_artifacts"],
-            true,
-        ),
-        "researcher" => (&["run_cell", "read_file", "read_artifact", "list_artifacts"], true),
-        "coder" => (&["run_cell", "read_file", "write_file", "list_files"], false),
-        _ => (&["read_file", "write_file", "write_artifact", "read_artifact", "list_artifacts"], false),
-    }
-}
-
-/// A role a sub-agent's turn runs as (`turn.rs`): its prompt, its tools,
-/// and whether the `always` MCP servers' tools follow.
-#[derive(Clone, Copy, Debug)]
-pub struct RoleSpec {
-    pub name: &'static str,
-    pub prompt: &'static str,
-    pub tools: &'static [&'static str],
-    pub mcp: bool,
-}
-
-/// The role named `name` — the default one for none.
-pub fn role(name: Option<&str>) -> Option<RoleSpec> {
-    let name = name.filter(|n| !n.is_empty()).unwrap_or(DEFAULT_ROLE);
-    let &(name, prompt) = ROLES.iter().find(|(r, _)| *r == name)?;
-    let (tools, mcp) = role_tools(name);
-    Some(RoleSpec { name, prompt, tools, mcp })
-}
+/// The tools every sub-agent and worker has; the `always` MCP servers' follow.
+pub const SUBAGENT_TOOLS: &[&str] =
+    &["run_cell", "read_file", "write_file", "list_files", "write_artifact", "read_artifact", "list_artifacts"];
 
 /// One task, as far as Python reads it before the worker starts.
 #[derive(Debug, PartialEq)]
 pub struct Task {
     /// `None`: the spec has no `task`, which fails its worker (`KeyError`).
     pub task: Option<String>,
-    /// `spec.get("role") or "general"` — perhaps no role at all.
-    pub role: String,
     /// `str()` of a truthy `context`.
     pub context: Option<String>,
 }
@@ -118,13 +69,8 @@ pub fn tasks(raw: &Value) -> Option<Vec<Task>> {
                 Some(Value::String(s)) => Some(s.clone()),
                 Some(_) => return None,
             };
-            let role = match spec.get("role") {
-                Some(Value::String(s)) if !s.is_empty() => s.clone(),
-                Some(v) if pyjson::truthy(v) => return None,
-                _ => DEFAULT_ROLE.to_string(),
-            };
             let context = spec.get("context").filter(|v| pyjson::truthy(v)).map(pyjson::py_str);
-            Some(Task { task, role, context })
+            Some(Task { task, context })
         })
         .collect()
 }
@@ -183,11 +129,7 @@ pub async fn spawn(ctx: &Ctx<'_>, tasks: Vec<Task>) -> String {
 /// `run_one`: its part of the answer.
 async fn one(ctx: &Ctx<'_>, spec: Task, idx: usize) -> String {
     let label = pystr::prefix(spec.task.as_deref().unwrap_or(""), 80).to_string();
-    let prefix = format!("Task ({}): {label}", spec.role);
-    let Some(&(role, prompt)) = ROLES.iter().find(|(r, _)| *r == spec.role) else {
-        let err = format!("Unknown role '{}' (available: coder, general, researcher, writer)", spec.role);
-        return format!("{prefix}\n{err}");
-    };
+    let prefix = format!("Task: {label}");
     // A kernel of its own, so concurrent workers' cells don't collide;
     // freed as soon as the worker is done.
     let key = format!("worker::w{idx}::{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
@@ -199,17 +141,17 @@ async fn one(ctx: &Ctx<'_>, spec: Task, idx: usize) -> String {
                 Some(c) => format!("Context: {c}\n\nTask: {task}"),
                 None => task,
             };
-            Worker::new(ctx, idx, role, prompt, key).run(query).await
+            Worker::new(ctx, idx, key).run(query).await
         }
     };
     kernel.shutdown().await;
     match outcome {
         Ok(answer) => {
-            tracing::info!("worker {idx} ({role}) done ({} chars): {label}", pystr::len(&answer));
+            tracing::info!("worker {idx} done ({} chars): {label}", pystr::len(&answer));
             format!("{prefix}\n{answer}")
         }
         Err(e) => {
-            tracing::warn!("worker {idx} ({role}) failed: {label} — {e}");
+            tracing::warn!("worker {idx} failed: {label} — {e}");
             format!("{prefix}\nERROR: {e}")
         }
     }
@@ -268,20 +210,17 @@ enum Planned {
 struct Worker<'c, 'a> {
     ctx: &'c Ctx<'a>,
     idx: usize,
-    role: &'static str,
-    prompt: &'static str,
     kernel: String,
     tools: Toolset,
     steps: u32,
 }
 
 impl<'c, 'a> Worker<'c, 'a> {
-    fn new(ctx: &'c Ctx<'a>, idx: usize, role: &'static str, prompt: &'static str, kernel: String) -> Self {
-        let (names, with_mcp) = role_tools(role);
+    fn new(ctx: &'c Ctx<'a>, idx: usize, kernel: String) -> Self {
         // The main agent's policy: a tool a human switched off doesn't come
         // back through a worker, and a gated one still asks.
-        let tools = super::tools::bound_named(ctx.policy, names, with_mcp.then_some(ctx.mcp));
-        Worker { ctx, idx, role, prompt, kernel, tools, steps: 0 }
+        let tools = super::tools::bound_named(ctx.policy, SUBAGENT_TOOLS, Some(ctx.mcp));
+        Worker { ctx, idx, kernel, tools, steps: 0 }
     }
 
     async fn run(&mut self, query: String) -> Result<String, String> {
@@ -304,13 +243,13 @@ impl<'c, 'a> Worker<'c, 'a> {
 
     fn take_step(&mut self) -> Result<(), String> {
         if self.steps >= RECURSION_LIMIT {
-            return Err(format!("agent '{}' reached its limit of {RECURSION_LIMIT} steps", self.role));
+            return Err(format!("worker {} reached its limit of {RECURSION_LIMIT} steps", self.idx));
         }
         self.steps += 1;
         Ok(())
     }
 
-    /// `role_model`: the role's prompt, and the history trimmed and repaired
+    /// The worker prompt, and the history trimmed and repaired
     /// as every model call's is.
     async fn model_step(&mut self, history: &[Message]) -> Result<Message, String> {
         let ctx = self.ctx;
@@ -318,7 +257,7 @@ impl<'c, 'a> Worker<'c, 'a> {
         let history = compact::per_call_for(&ctx.model, history.to_vec());
         let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(&ctx.model, history));
         let append_only = llm::preserves_thinking(&ctx.model);
-        let layout = Layout { system: self.prompt, segments: &[], volatile: "", cache: ctx.cache, provider, append_only };
+        let layout = Layout { system: SUBAGENT_PROMPT, segments: &[], volatile: "", cache: ctx.cache, provider, append_only };
         let prompt = shape::build(&layout, shaped);
         let blobs = Default::default();
         let req = Request {
@@ -509,17 +448,17 @@ mod tests {
     fn specs_python_reads_without_raising() {
         let got = tasks(&json!([
             {"task": "a"},
-            {"task": "b", "role": "", "context": 0},
+            {"task": "b", "context": 0},
+            // A `role` from when workers had them is ignored.
             {"task": "c", "role": "coder", "context": {"k": 1}},
-            {"role": "writer"},
+            {"context": "x"},
         ]))
         .unwrap();
-        assert_eq!(got[0], Task { task: Some("a".into()), role: "general".into(), context: None });
-        assert_eq!(got[1].role, "general");
+        assert_eq!(got[0], Task { task: Some("a".into()), context: None });
         assert_eq!(got[1].context, None);
         assert_eq!(got[2].context.as_deref(), Some("{'k': 1}"));
         assert_eq!(got[3].task, None);
-        for odd in [json!([{"task": 5}]), json!([{"task": "x", "role": 3}]), json!(["x"]), json!({"task": "x"})] {
+        for odd in [json!([{"task": 5}]), json!(["x"]), json!({"task": "x"})] {
             assert_eq!(tasks(&odd), None, "{odd}");
         }
     }
@@ -566,11 +505,5 @@ mod tests {
         .unwrap();
         assert_eq!(answer(&parts), "a b");
         assert_eq!(answer(&Message::new(Role::Assistant, Content::Text("x".into()))), "x");
-    }
-
-    #[test]
-    fn each_role_has_its_prompt_and_tools() {
-        assert_eq!(ROLES.map(|(r, _)| r), ["general", "researcher", "coder", "writer"]);
-        assert!(!role_tools("writer").0.contains(&"run_cell"));
     }
 }

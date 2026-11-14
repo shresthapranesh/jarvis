@@ -129,7 +129,7 @@ pub(crate) async fn insert_message(
 }
 
 /// `conversations.surface` of a sub-agent's conversation: one an agent
-/// spawned (`parent_id`), answered by its `agent_role`.
+/// spawned (`parent_id`), answered as a sub-agent.
 pub const SUBAGENT: &str = "subagent";
 
 /// Register the run, then commit its rows and wake the agent loop.
@@ -296,16 +296,14 @@ async fn enqueue_turn(
     if !attachments.is_empty() {
         payload["attachments"] = serde_json::to_value(attachments)?;
     }
-    // A sub-agent's conversation is answered by its role, whoever wrote to
-    // it — the agent that spawned it, or the user on its page.
-    let role: Option<(String, Option<String>)> =
-        sqlx::query_as("SELECT surface, agent_role FROM conversations WHERE id = ?")
-            .bind(conversation_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    let kind = match role {
-        Some((surface, role)) if surface == SUBAGENT => {
-            payload["role"] = json!(role);
+    // A sub-agent's conversation is answered as a sub-agent, whoever wrote
+    // to it — the agent that spawned it, or the user on its page.
+    let surface: Option<String> = sqlx::query_scalar("SELECT surface FROM conversations WHERE id = ?")
+        .bind(conversation_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let kind = match surface {
+        Some(surface) if surface == SUBAGENT => {
             if let Some(from) = from_agent {
                 // The agent that spawned it set the task: a stop of that
                 // agent stops this turn, and `deliver` sends its answer back
@@ -372,7 +370,6 @@ pub struct Spawn<'a> {
     pub parent_id: Option<&'a str>,
     /// The run spawning it (a chat's is its reply's id).
     pub spawned_by: &'a str,
-    pub role: &'a str,
     /// Already resolved.
     pub model: &'a str,
     pub title: &'a str,
@@ -389,7 +386,7 @@ pub async fn spawn_subagent(pool: &SqlitePool, registry: &Registry, spawn: Spawn
     let id = new_id();
     sqlx::query(
         "INSERT INTO conversations (id, title, model, created_at, surface, pinned, project_id, ephemeral, parent_id, \
-         agent_role, spawned_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+         spawned_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(spawn.title)
@@ -399,7 +396,6 @@ pub async fn spawn_subagent(pool: &SqlitePool, registry: &Registry, spawn: Spawn
     .bind(spawn.project_id)
     .bind(spawn.ephemeral)
     .bind(spawn.parent_id)
-    .bind(spawn.role)
     .bind(spawn.spawned_by)
     .execute(&mut *tx)
     .await?;

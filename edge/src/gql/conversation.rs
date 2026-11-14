@@ -34,13 +34,11 @@ pub struct Conversation {
     /// A sub-agent's conversation: the one whose agent spawned it.
     #[graphql(skip)]
     pub parent_id: Option<String>,
-    /// A sub-agent's role (`researcher`, `coder`, `writer`, `general`).
-    pub agent_role: Option<String>,
 }
 
 /// Selects from `conversations` unaliased; `last_active_at` is a column alias,
 /// so a query can `ORDER BY` it.
-pub const CONVERSATION_COLUMNS: &str = "id, title, model, surface, pinned, ephemeral, project_id, created_at, effort, parent_id, agent_role, \
+pub const CONVERSATION_COLUMNS: &str = "id, title, model, surface, pinned, ephemeral, project_id, created_at, effort, parent_id, \
      COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.conversation_id = conversations.id), created_at) \
      AS last_active_at";
 
@@ -79,7 +77,7 @@ impl Conversation {
     async fn subagents(&self, ctx: &Context<'_>) -> Result<Vec<Subagent>> {
         let pool: &SqlitePool = ctx.data()?;
         Ok(sqlx::query_as(
-            "SELECT c.id AS conversation_id, c.title, c.agent_role, c.spawned_by, c.created_at, m.id AS task_id, \
+            "SELECT c.id AS conversation_id, c.title, c.spawned_by, c.created_at, m.id AS task_id, \
              m.status, m.content, COALESCE(m.created_at, c.created_at) AS last_active_at \
              FROM conversations c LEFT JOIN messages m ON m.id = (SELECT id FROM messages WHERE conversation_id = c.id \
              AND role = 'assistant' ORDER BY created_at DESC, rowid DESC LIMIT 1) \
@@ -153,8 +151,6 @@ pub struct Subagent {
     pub conversation_id: String,
     /// The task it was spawned for, shortened.
     pub title: Option<String>,
-    #[graphql(skip)]
-    pub agent_role: Option<String>,
     /// The parent's reply (a Message's raw id) it was spawned from.
     pub spawned_by: Option<String>,
     pub created_at: DateTime,
@@ -171,10 +167,6 @@ pub struct Subagent {
 impl Subagent {
     async fn id(&self) -> ID {
         global_id("Subagent", &self.conversation_id)
-    }
-
-    async fn role(&self) -> &str {
-        self.agent_role.as_deref().unwrap_or("general")
     }
 
     /// `running`, `done`, `error` or `stopped` — its latest turn's; `pending`

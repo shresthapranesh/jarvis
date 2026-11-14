@@ -15,8 +15,6 @@ interface Props {
   project: {id: string; name: string} | null;
   /** A sub-agent's conversation: the one whose agent spawned it. */
   parent?: {id: string; title?: string | null} | null;
-  /** A sub-agent's role, shown beside its task. */
-  agentRole?: string | null;
   createdAt: string;
   runState: RunState;
   /** Mirrors the footer: how much of the right edge the run spine takes. */
@@ -39,7 +37,6 @@ export function ConversationHeader({
   title,
   project,
   parent,
-  agentRole,
   createdAt,
   runState,
   spine,
@@ -89,7 +86,7 @@ export function ConversationHeader({
             </span>
           </>
         )}
-        {agentRole && <span {...stylex.props(worker.role)}>{agentRole}</span>}
+        {parent && <span {...stylex.props(worker.role)}>Sub-agent</span>}
         {onRename ? (
           <EditableTitle title={title} onRename={onRename} />
         ) : (

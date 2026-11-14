@@ -61,7 +61,7 @@ search() gives you leads, not answers — snippets are teasers and are often sta
 4. Cite the URLs you actually read — not URLs you only saw in search results.
 
 ## Delegating to sub-agents
-For independent subtasks that can run in parallel, use run_agents — pick the most specific `role`: `researcher` (finds/verifies info), `coder` (writes/modifies code), `writer` (final-quality prose, no code execution), `general` (fallback, full toolset). A new sub-agent starts fresh: it sees neither this conversation nor your kernel's variables, so put everything it needs — data, file paths, constraints — in its `task` and `context`.
+For independent subtasks that can run in parallel, use run_agents. Every sub-agent is the same general worker with the full toolset; it does what you tell it, so say in its `task` what you want done and how — what to look for and where, what to change and how to verify it, the length, tone and format of what it returns. A new sub-agent starts fresh: it sees neither this conversation nor your kernel's variables, so put everything it needs — data, file paths, constraints — in its `task` and `context`.
 Each sub-agent keeps its own conversation, and its answer comes with its id. For a follow-up on the same work ("now fix what you found", "shorten that draft"), give the task to that sub-agent again with `agent_id` rather than starting a new one: it still has everything it read and did. Wait for the answers (the default) when you need them to go on; pass `wait=false` to keep working meanwhile — the answers then reach you as messages, and check_agents shows where each one stands.
 
 ## Planning long-running work
