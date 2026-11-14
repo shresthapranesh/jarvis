@@ -1,6 +1,6 @@
 //! Automations — `server/automation_runtime.py`, for the runs the edge
 //! serves. A prompt or monitor run's agent turn is `turn.rs`'s; this is what
-//! is around it — the `AutomationRun` row, the stateful conversation, the
+//! is around it — the `AutomationRun` row, the run's conversation, the
 //! monitor's prompt and its "nothing changed" gate, the end and its
 //! notifications — and the code and webhook runs, which need no model.
 //! A change to the Python module is made here too.
@@ -53,10 +53,17 @@ pub struct Spec {
 }
 
 impl Spec {
-    /// The thread the agent runs on: the automation's own conversation when
-    /// it is stateful, else one for this run alone.
+    /// The thread the agent runs on, which is its conversation
+    /// (`surface = 'automation'`, so out of the sidebar): the automation's
+    /// own when it is stateful — every run goes on from the last — else one
+    /// for this run alone.
     pub fn thread_id(&self) -> String {
-        if self.stateful { conversation_id(&self.automation_id) } else { format!("automation_{}", self.run_id) }
+        if self.stateful { conversation_id(&self.automation_id) } else { run_conversation_id(&self.run_id) }
+    }
+
+    /// A run an agent answers; a code or webhook run has no conversation.
+    pub fn llm(&self) -> bool {
+        self.input_type == "prompt" || self.input_type == "monitor"
     }
 
     /// The agent's prompt: a monitor's target goes inside its instructions.
@@ -65,9 +72,14 @@ impl Spec {
     }
 }
 
-/// `automation_conversation_id`.
+/// `automation_conversation_id`: a stateful automation's conversation.
 pub fn conversation_id(automation_id: &str) -> String {
     format!("automation_{automation_id}")
+}
+
+/// The conversation of one run of an automation that isn't stateful.
+pub fn run_conversation_id(run_id: &str) -> String {
+    format!("automation_{run_id}")
 }
 
 /// What the claim found.
@@ -148,24 +160,52 @@ pub async fn sibling_running(pool: &SqlitePool, spec: &Spec) -> sqlx::Result<boo
     }))
 }
 
-/// A stateful run's start: its conversation (`surface = 'automation'`) and
-/// the prompt as the user's message — the target alone, not the wrapper.
+/// An agent run's start: its conversation (`surface = 'automation'`), the
+/// prompt as the user's message — the target alone, not the wrapper — and
+/// the reply the run writes into, whose id is the run's so its steps hang
+/// off it as a chat turn's do.
 pub async fn begin_conversation(pool: &SqlitePool, spec: &Spec) -> sqlx::Result<()> {
     let mut tx = crate::db::write_tx(pool).await?;
-    let id = conversation_id(&spec.automation_id);
+    let id = spec.thread_id();
     crate::gql::start::conversation_for(&mut tx, Some(&id), &spec.model, Some(spec.name.clone()), "automation", None, false)
         .await?;
-    crate::gql::start::insert_message(&mut *tx, &id, "user", &spec.prompt_text, None, "done").await?;
+    // A run claimed again after a restart has both already.
+    let begun: Option<String> =
+        sqlx::query_scalar("SELECT id FROM messages WHERE id = ?").bind(&spec.run_id).fetch_optional(&mut *tx).await?;
+    if begun.is_none() {
+        crate::gql::start::insert_message(&mut *tx, &id, "user", &spec.prompt_text, None, "done").await?;
+        sqlx::query(
+            "INSERT INTO messages (id, conversation_id, role, content, model, created_at, status) \
+             VALUES (?, ?, 'assistant', '', NULL, ?, 'running')",
+        )
+        .bind(&spec.run_id)
+        .bind(&id)
+        .bind(now_stored())
+        .execute(&mut *tx)
+        .await?;
+    }
     tx.commit().await
 }
 
 /// `_persist_stateful_message`: the run's reply in its conversation.
 pub async fn reply(pool: &SqlitePool, spec: &Spec, content: &str, status: &str) {
-    if !spec.stateful {
+    if !spec.llm() {
         return;
     }
-    let conversation = conversation_id(&spec.automation_id);
-    if let Err(e) = crate::gql::start::insert_message(pool, &conversation, "assistant", content, None, status).await {
+    let written = async {
+        let updated = sqlx::query("UPDATE messages SET content = ?, status = ? WHERE id = ?")
+            .bind(content)
+            .bind(status)
+            .bind(&spec.run_id)
+            .execute(pool)
+            .await?;
+        // A run that failed before it began has no reply to write into.
+        if updated.rows_affected() == 0 {
+            crate::gql::start::insert_message(pool, &spec.thread_id(), "assistant", content, None, status).await?;
+        }
+        Ok::<_, sqlx::Error>(())
+    };
+    if let Err(e) = written.await {
         tracing::warn!("automation {}: writing its reply: {e}", spec.automation_id);
     }
 }
@@ -198,8 +238,8 @@ pub enum End {
     Failed(String),
 }
 
-/// The end of `_run_automation_inner`: the run's row, its reply in a
-/// stateful conversation, notifications, and the closing event. Returns the
+/// The end of `_run_automation_inner`: the run's row, its reply in its
+/// conversation, notifications, and the closing event. Returns the
 /// final status. A monitor that saw nothing new finishes `no_change`, silently.
 pub async fn finish(pool: &SqlitePool, run: &Run, spec: &Spec, end: End) -> &'static str {
     let emit = |event: &str, data: Value| {

@@ -150,12 +150,14 @@ impl<'a> Turn<'a> {
         Some(turn)
     }
 
-    /// An automation's run: its own thread or its conversation's, steps
-    /// announced but not written as rows, as `_execute_prompt_type` runs it.
+    /// An automation's run, on its conversation — the run's own, or the
+    /// automation's when it is stateful — which `run_cell`'s SDK is scoped to
+    /// too. Its steps are rows of the reply it writes into
+    /// (`automation::begin_conversation`).
     pub fn automation(agent: &'a Agent, job: &Job, run: Arc<Run>, spec: Spec) -> Self {
         let (thread, model, prompt) = (spec.thread_id(), spec.model.clone(), spec.prompt());
-        let mut turn = Self::new(agent, job, run, Kind::Automation(spec), thread, &model, &prompt);
-        turn.events = turn.events.without_rows();
+        let mut turn = Self::new(agent, job, run, Kind::Automation(spec), thread.clone(), &model, &prompt);
+        turn.conversation = Some(thread);
         turn
     }
 
@@ -264,9 +266,7 @@ impl<'a> Turn<'a> {
             }
             Kind::Automation(spec) => {
                 let wrote = async {
-                    if spec.stateful {
-                        automation::begin_conversation(self.pool(), spec).await.map_err(|e| e.to_string())?;
-                    }
+                    automation::begin_conversation(self.pool(), spec).await.map_err(|e| e.to_string())?;
                     thread.apply(self.pool(), vec![prompt]).await
                 };
                 wrote.await

@@ -17,6 +17,7 @@ export const automationRunsQuery = graphql`
       error
       startedAt
       finishedAt
+      conversationId
     }
   }
 `;
@@ -33,6 +34,7 @@ export function mapAutomationRun(r: RunNode): AutomationRun {
     error: r.error ?? null,
     started_at: r.startedAt,
     finished_at: r.finishedAt ?? null,
+    conversation_id: r.conversationId ?? null,
   };
 }
 

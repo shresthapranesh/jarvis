@@ -235,7 +235,7 @@ async fn execute(ctx: &Context<'_>, action: &str, payload: Option<&str>) -> Resu
     };
     let pool: &SqlitePool = ctx.data()?;
     let (deleted, gone) = match action {
-        "delete_workflow" => (super::workflow::delete_workflow(pool, &id("workflow_id")?).await?, "Workflow"),
+        "delete_workflow" => (super::workflow::delete_workflow(pool, &id("workflow_id")?, ctx.data()?).await?, "Workflow"),
         "delete_automation" => {
             (super::automation::delete_automation(pool, &id("automation_id")?, ctx.data()?).await?, "Automation")
         }

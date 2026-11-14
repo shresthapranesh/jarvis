@@ -10,6 +10,7 @@
 
 mod artifacts;
 mod automation;
+pub use automation::run_conversation_id;
 mod board;
 pub mod embed;
 mod events;

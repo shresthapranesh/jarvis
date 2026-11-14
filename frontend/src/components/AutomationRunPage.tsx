@@ -126,6 +126,15 @@ function RunFacts({run}: {run: AutomationRun}) {
       ) : (
         duration && <span {...stylex.props(detail.meta)}>Took {duration}</span>
       )}
+      {run.conversation_id && (
+        <Link
+          to="/c/$id"
+          params={{id: run.conversation_id}}
+          {...stylex.props(detail.meta, detail.metaLink)}
+        >
+          Open conversation
+        </Link>
+      )}
     </div>
   );
 }

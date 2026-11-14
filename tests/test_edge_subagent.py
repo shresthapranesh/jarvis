@@ -360,10 +360,11 @@ async def test_a_conversation_lists_its_sub_agents_and_deletes_them_with_it(data
 TRIGGER = "mutation($id: ID!) { triggerAutomation(id: $id) }"
 
 
-async def test_a_run_without_a_conversation_takes_its_sub_agents_with_it(database, work_dir: Path, edge_binary: Path,
-                                                                        fake: FakeOllama):
-    """An automation's run has nowhere to keep sub-agents: it waits for them
-    whatever it asked, reads their answers, and deletes them as it ends."""
+async def test_an_automation_run_keeps_its_sub_agents_under_its_conversation(database, work_dir: Path, edge_binary: Path,
+                                                                           fake: FakeOllama):
+    """An automation's run can't be told later: it waits for its sub-agents
+    whatever it asked and reads their answers. They stay, under the run's
+    conversation."""
     insert(database, "config_settings", key="models.custom", value=json.dumps([{"id": MODEL, "label": "Fake"}]))
     insert(database, "automations", id="auto-1", name="Daily", input_type="prompt", prompt_text="Summarise the news",
            model=MODEL)
@@ -375,8 +376,8 @@ async def test_a_run_without_a_conversation_takes_its_sub_agents_with_it(databas
     answer = _tool_results(_main(fake.requests)[1])[-1]
     assert "— done: Summarise the thing\nThe summary." in answer
     assert row(database, "automation_runs", run)["status"] == "done"
-    assert _rows(database, "SELECT id FROM conversations WHERE surface = 'subagent'") == []
-    assert _rows(database, "SELECT id FROM thread_messages WHERE thread_id NOT LIKE 'automation%'") == []
+    assert _rows(database, "SELECT parent_id, spawned_by FROM conversations WHERE surface = 'subagent'") == [
+        {"parent_id": f"automation_{run}", "spawned_by": run}]
 
 
 async def test_a_wait_on_sub_agents_is_picked_up_after_a_restart(database, work_dir: Path, edge_binary: Path,

@@ -150,6 +150,17 @@ impl AutomationRun {
     pub async fn id(&self) -> ID {
         global_id("AutomationRun", &self.raw_id)
     }
+
+    /// The conversation the run's agent answered in — the run's own, or its
+    /// stateful automation's. None for a code or webhook run, and for a run
+    /// from before runs had conversations.
+    async fn conversation_id(&self, ctx: &Context<'_>) -> Result<Option<String>> {
+        // The reply the run wrote into has its id.
+        Ok(sqlx::query_scalar("SELECT conversation_id FROM messages WHERE id = ? AND role = 'assistant'")
+            .bind(&self.raw_id)
+            .fetch_optional(ctx.data::<SqlitePool>()?)
+            .await?)
+    }
 }
 
 #[derive(Default)]
@@ -275,7 +286,7 @@ impl AutomationMutation {
 
     // An agent's delete may need a human's approval first (`gate_action`),
     // asked before anything is unscheduled. Its runs go with it, as the ORM
-    // cascade takes them, and so does a stateful automation's conversation.
+    // cascade takes them, and so do its conversations — a stateful one's, and each run's.
     async fn delete_automation(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
         let (_, raw) = decode_global_id(&id)?;
         if ctx.data::<super::RequestFrom>()?.caller == super::router::Caller::Agent {
@@ -302,12 +313,20 @@ pub async fn delete_automation(pool: &SqlitePool, raw_id: &str, data: &EdgeData)
     if exists.is_none() {
         return Ok(false);
     }
-    let teardown = delete_conversation(&mut tx, &format!("automation_{raw_id}"), &data.artifacts_dir).await?;
+    let mut teardowns: Vec<_> =
+        delete_conversation(&mut tx, &format!("automation_{raw_id}"), &data.artifacts_dir).await?.into_iter().collect();
+    // And each run's own.
+    let runs: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM automation_runs WHERE automation_id = ?").bind(raw_id).fetch_all(&mut *tx).await?;
+    for run in runs {
+        let conversation = crate::agent::run_conversation_id(&run);
+        teardowns.extend(delete_conversation(&mut tx, &conversation, &data.artifacts_dir).await?);
+    }
     sqlx::query("DELETE FROM automation_runs WHERE automation_id = ?").bind(raw_id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM automations WHERE id = ?").bind(raw_id).execute(&mut *tx).await?;
     tx.commit().await?;
     data.scheduler.schedules_changed();
-    if let Some(t) = teardown {
+    for t in teardowns {
         t.finish(&data.kernels).await;
     }
     Ok(true)
