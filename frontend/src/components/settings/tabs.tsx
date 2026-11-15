@@ -25,9 +25,9 @@ export const SETTINGS_TABS = [
     label: 'Models',
     subtitle: (
       <>
-        Language models available across providers. Add your own as <code>provider:model_name</code>{' '}
-        — no code change needed — and pick which one runs by default. Built-ins are compiled in and
-        can only be set as the default.
+        The models Jarvis can run on, and which one it uses by default. Add any other as{' '}
+        <code>provider:model_name</code>. Built-in models can&apos;t be edited, only chosen as the
+        default.
       </>
     ),
   },
@@ -37,8 +37,8 @@ export const SETTINGS_TABS = [
     label: 'Notifications',
     subtitle: (
       <>
-        Define Telegram/Discord delivery targets once, then pick them by name when configuring
-        automations or workflows.
+        Set up Telegram or Discord destinations once, then pick them by name in an automation or
+        workflow.
       </>
     ),
   },
@@ -48,10 +48,10 @@ export const SETTINGS_TABS = [
     label: 'Tools',
     subtitle: (
       <>
-        Every tool the agent can reach — the ones bound to its graph, the <code>jarvis</code> SDK it
-        calls from <code>run_cell</code>, and each MCP server&apos;s tools. Switch one off to remove
-        it entirely, or require approval: a gated call blocks until you answer it here or in{' '}
-        <code>/approvals</code>, on every surface including automations and board tasks.
+        Everything the agent can use: its built-in tools, the Python helpers it calls from its
+        notebook, and tools from MCP servers. Turn one off to take it away, or tick Ask first to
+        make every call wait for your approval — here or on the Approvals page, including in
+        automations and board tasks.
       </>
     ),
   },
@@ -61,11 +61,10 @@ export const SETTINGS_TABS = [
     label: 'MCP servers',
     subtitle: (
       <>
-        Connect external tools via the Model Context Protocol. Servers run as subprocesses or HTTP
-        endpoints and expose their tools to the agent — either bound to every LLM call, or loaded on
-        demand to keep their schemas out of the prompt. Config merges from env{' '}
-        <code>JARVIS_MCP_SERVERS</code>, file <code>~/.jarvis/mcp.json</code>, and this UI (which
-        wins).
+        Connect outside tools through MCP (Model Context Protocol) servers. A server can load its
+        tools into every request, or only when the agent asks for them, which keeps requests
+        smaller. Servers can also come from the <code>JARVIS_MCP_SERVERS</code> environment variable
+        or <code>~/.jarvis/mcp.json</code>; one defined here wins.
       </>
     ),
   },
@@ -75,11 +74,10 @@ export const SETTINGS_TABS = [
     label: 'Config',
     subtitle: (
       <>
-        The <code>config_settings</code> table — bot allowlists, the embedding model, the scheduler
-        timezone, which agent actions need approval. The same rows{' '}
-        <code>jarvis-edge config set/get/list/delete</code> writes, except that a write here is also
-        pushed into the running server instead of waiting for a restart. Keys another tab owns are
-        shown read-only.
+        Advanced settings: who may use the bots, the embedding model, the scheduler&apos;s timezone,
+        which agent actions need approval. They are the values <code>jarvis-edge config</code> reads
+        and writes, and a change here applies at once unless it is marked as needing a restart.
+        Settings another tab manages are read-only here.
       </>
     ),
   },

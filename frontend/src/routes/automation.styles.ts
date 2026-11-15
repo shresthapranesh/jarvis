@@ -284,13 +284,16 @@ export const card = stylex.create({
     cursor: 'pointer',
     transition: 'background 0.12s, color 0.12s, border-color 0.12s',
   },
+  // The two actions used most carry their name; the rest sit in the "…" menu.
+  actionLabelled: {
+    gap: 6,
+    paddingInline: 8,
+    fontSize: type.tSmall,
+    fontFamily: 'inherit',
+  },
   actionPlay: {
     backgroundColor: {default: colors.surface, ':hover': `rgba(${channels.accent}, 0.15)`},
     color: {default: colors.textDim, ':hover': colors.accent},
-  },
-  actionDanger: {
-    backgroundColor: {default: colors.surface, ':hover': `rgba(${channels.danger}, 0.12)`},
-    color: {default: colors.textDim, ':hover': colors.danger},
   },
 
   toggle: {

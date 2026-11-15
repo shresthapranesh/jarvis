@@ -6,6 +6,7 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {ConversationListQuery as TConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
 import type {ProjectQuery as TProjectQuery} from '../__generated__/ProjectQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
+import {usePageTitle} from '../lib/pageTitle';
 import type {UploadedFile} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {commitDeleteProject} from '../relay/DeleteProjectMutation';
@@ -44,6 +45,7 @@ export function ProjectDetail({id}: Props) {
     () => (data.project ? mapProjectDetail(data.project) : null),
     [data.project],
   );
+  usePageTitle(project?.name);
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [instructions, setInstructions] = useState('');

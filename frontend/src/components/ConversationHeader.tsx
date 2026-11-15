@@ -2,6 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import {Link} from '@tanstack/react-router';
 import {useEffect, useRef, useState} from 'react';
 
+import {usePageTitle} from '../lib/pageTitle';
 import {decodeGlobalId} from '../relay/globalId';
 import {kf} from '../theme/keyframes.stylex';
 import {colors, layout, radii, space, type} from '../theme/tokens.stylex';
@@ -43,6 +44,7 @@ export function ConversationHeader({
   panelOpen,
   onRename,
 }: Props) {
+  usePageTitle(title);
   return (
     <header
       {...stylex.props(

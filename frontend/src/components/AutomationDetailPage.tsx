@@ -8,6 +8,7 @@ import type {AutomationRunsQuery as TAutomationRunsQuery} from '../__generated__
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
 import {formatDuration, formatNextRun} from '../lib/api';
+import {usePageTitle} from '../lib/pageTitle';
 import {useToast} from '../lib/toast';
 import type {Automation, AutomationRun} from '../lib/types';
 import {
@@ -75,6 +76,7 @@ function AutomationDetail() {
   );
   const node = listData.automations.find((a) => decodeGlobalId(a.id) === id);
   const auto = useMemo(() => (node ? mapAutomation(node) : null), [node]);
+  usePageTitle(auto?.name);
 
   const runsData = useLazyLoadQuery<TAutomationRunsQuery>(
     automationRunsQuery,
