@@ -577,6 +577,25 @@ export interface BoardTask {
   finished_at: string | null;
 }
 
+/** The board's columns: what a conversation is doing. */
+export type BoardState = 'todo' | 'working' | 'needs_me' | 'blocked' | 'done';
+
+/** One card: a chat, or a board task and the conversation its runs answer in. */
+export interface BoardItem {
+  /** The conversation's id — a task's even before its first run made it. */
+  id: string;
+  state: BoardState;
+  title: string | null;
+  last_active_at: string;
+  /** Null for a task that has not run: nothing to open yet. */
+  conversation_id: string | null;
+  run_id: string | null;
+  /** The question it waits on, or why it stopped. */
+  reason: string | null;
+  /** Null for a chat. */
+  task: BoardTask | null;
+}
+
 export interface CreateBoardTaskPayload {
   title: string;
   body?: string;

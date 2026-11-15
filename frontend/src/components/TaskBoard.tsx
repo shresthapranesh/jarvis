@@ -3,13 +3,14 @@ import {Link} from '@tanstack/react-router';
 import {useCallback, useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
-import type {BoardTasksQuery as TBoardTasksQuery} from '../__generated__/BoardTasksQuery.graphql';
+import type {BoardQuery as TBoardQuery} from '../__generated__/BoardQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {useBoardTaskEvents} from '../hooks/useBoardTaskEvents';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
-import type {BoardTask, BoardTaskStatus} from '../lib/types';
+import {relativeTime} from '../lib/format';
+import type {BoardItem, BoardState, BoardTask} from '../lib/types';
 import {commitAnswerBoardTask} from '../relay/AnswerBoardTaskMutation';
-import {boardTasksQuery, mapBoardTask, refreshBoardTasks} from '../relay/BoardTasksQuery';
+import {boardQuery, DONE_PAGE, mapBoardItem, refreshBoard} from '../relay/BoardQuery';
 import {commitCreateBoardTask} from '../relay/CreateBoardTaskMutation';
 import {commitDecomposeBoardTask} from '../relay/DecomposeBoardTaskMutation';
 import {commitDeleteBoardTask} from '../relay/DeleteBoardTaskMutation';
@@ -40,10 +41,12 @@ import {
 } from './TaskBoard.styles';
 import {btn, field, iconBtn, page, PageHeader, Switch} from './ui';
 
-const COLUMNS: Array<{key: BoardTaskStatus; label: string}> = [
+// What a conversation is doing — a chat or a board task. Todo holds only
+// tasks: a chat exists once it has been sent.
+const COLUMNS: Array<{key: BoardState; label: string}> = [
   {key: 'todo', label: 'Todo'},
-  {key: 'ready', label: 'Ready'},
-  {key: 'running', label: 'Running'},
+  {key: 'working', label: 'Working'},
+  {key: 'needs_me', label: 'Needs me'},
   {key: 'blocked', label: 'Blocked'},
   {key: 'done', label: 'Done'},
 ];
@@ -73,9 +76,9 @@ const TAIL_CHARS = 280;
 // The old rules reached this through `.board-col--running .board-col-head
 // span:first-child`. The column already knows its key, so the tint is applied
 // directly to the title.
-function colTitleStyle(key: BoardTaskStatus) {
-  if (key === 'running') return board.colTitleRunning;
-  if (key === 'blocked') return board.colTitleBlocked;
+function colTitleStyle(key: BoardState) {
+  if (key === 'working') return board.colTitleRunning;
+  if (key === 'needs_me' || key === 'blocked') return board.colTitleBlocked;
   if (key === 'done') return board.colTitleDone;
   return null;
 }
@@ -127,14 +130,21 @@ function AnswerBox({taskId, onAnswered}: {taskId: string; onAnswered: () => void
 }
 
 export function TaskBoard() {
-  const data = useLazyLoadQuery<TBoardTasksQuery>(
-    boardTasksQuery,
-    {includeArchived: false},
+  // Done shows its most recent; "Show more" asks for another page of them.
+  const [doneLimit, setDoneLimit] = useState(DONE_PAGE);
+  const data = useLazyLoadQuery<TBoardQuery>(
+    boardQuery,
+    {doneLimit},
     {fetchPolicy: 'store-and-network', fetchKey: useQueryRetry()},
   );
-  const tasks = useMemo(() => data.boardTasks.map(mapBoardTask), [data.boardTasks]);
+  const items = useMemo(() => data.board.items.map(mapBoardItem), [data.board.items]);
+  const doneTotal = data.board.doneTotal;
+  const tasks = useMemo(
+    () => items.map((i) => i.task).filter((t): t is BoardTask => t !== null),
+    [items],
+  );
 
-  const refresh = useCallback(() => refreshBoardTasks(false), []);
+  const refresh = useCallback(() => refreshBoard(doneLimit), [doneLimit]);
 
   // Cards move on their own — the dispatcher promotes and claims tasks server
   // side — so the board polls regardless of what this user is doing.
@@ -145,7 +155,7 @@ export function TaskBoard() {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [deleteTarget, setDeleteTarget] = useState<BoardTask | null>(null);
   // The one column a phone shows; wider screens show them all and ignore it.
-  const [phoneCol, setPhoneCol] = useState<BoardTaskStatus>('todo');
+  const [phoneCol, setPhoneCol] = useState<BoardState>('todo');
 
   function closeEditor() {
     setEditor(null);
@@ -264,11 +274,49 @@ export function TaskBoard() {
   const all = tasks ?? [];
   const byId = new Map(all.map((t) => [t.id, t]));
 
+  // Done is counted whole, not by the cards the cut left on screen.
+  function countIn(state: BoardState): number {
+    return state === 'done' ? doneTotal : items.filter((i) => i.state === state).length;
+  }
+
   function waitingOn(t: BoardTask): string[] {
     return t.parent_ids
       .map((pid) => byId.get(pid))
       .filter((p): p is BoardTask => Boolean(p) && p!.status !== 'done')
       .map((p) => p.title);
+  }
+
+  // A chat: the card is the way into the conversation.
+  function renderChat(item: BoardItem) {
+    return (
+      <li key={item.id}>
+        <Link
+          to="/c/$id"
+          params={{id: item.id}}
+          {...stylex.props(
+            card.root,
+            card.link,
+            item.state === 'working' && card.running,
+            (item.state === 'needs_me' || item.state === 'blocked') && card.blocked,
+          )}
+        >
+          <div {...stylex.props(card.title)}>{item.title || 'Untitled chat'}</div>
+          <div {...stylex.props(card.meta)}>
+            <span {...stylex.props(chip.base)}>chat</span>
+            <span {...stylex.props(card.time)}>{relativeTime(item.last_active_at)}</span>
+          </div>
+          {item.reason && (
+            <p {...stylex.props(card.reason, item.state === 'needs_me' && card.reasonQuestion)}>
+              {item.reason}
+            </p>
+          )}
+        </Link>
+      </li>
+    );
+  }
+
+  function renderItem(item: BoardItem) {
+    return item.task ? renderCard(item.task) : renderChat(item);
   }
 
   function renderCard(t: BoardTask) {
@@ -287,6 +335,7 @@ export function TaskBoard() {
           {t.priority !== 0 && (
             <span {...stylex.props(chip.base, chip.priority)}>P{t.priority}</span>
           )}
+          {t.status === 'ready' && <span {...stylex.props(chip.base)}>queued</span>}
           {t.created_by === 'agent' && <span {...stylex.props(chip.base)}>agent</span>}
           {t.skill && <span {...stylex.props(chip.base)}>skill: {t.skill}</span>}
           {t.failure_count > 0 && (
@@ -391,9 +440,9 @@ export function TaskBoard() {
               to="/c/$id"
               params={{id: t.conversation_id}}
               {...stylex.props(card.transcript)}
-              title="Open run transcript"
+              title="Open the task's conversation"
             >
-              transcript
+              open
             </Link>
           )}
         </div>
@@ -405,12 +454,12 @@ export function TaskBoard() {
     <div {...stylex.props(board.page)}>
       <PageHeader
         title="Board"
-        subtitle="Background tasks the agent works through on its own."
+        subtitle="Every chat and background task, by what it is doing."
         details={
           <>
-            Cards in <strong>Ready</strong> are picked up automatically. A task that depends on
-            others waits until they finish, then gets their summaries as context. The agent can add
-            tasks here too.
+            A chat appears here once it is sent. A task waits in <strong>Todo</strong>: queued ones
+            are picked up automatically, and one that depends on others waits until they finish,
+            then gets their summaries as context. The agent can add tasks here too.
           </>
         }
         actions={
@@ -434,9 +483,7 @@ export function TaskBoard() {
               onClick={() => setPhoneCol(col.key)}
             >
               {col.label}
-              <span {...stylex.props(board.tabCount)}>
-                {all.filter((t) => t.status === col.key).length}
-              </span>
+              <span {...stylex.props(board.tabCount)}>{countIn(col.key)}</span>
             </button>
           ))}
         </div>
@@ -444,7 +491,8 @@ export function TaskBoard() {
       {
         <div {...stylex.props(board.columns)}>
           {COLUMNS.map((col) => {
-            const cards = all.filter((t) => t.status === col.key);
+            const cards = items.filter((i) => i.state === col.key);
+            const hidden = col.key === 'done' ? doneTotal - cards.length : 0;
             return (
               <section
                 key={col.key}
@@ -452,13 +500,24 @@ export function TaskBoard() {
               >
                 <header {...stylex.props(board.colHead)}>
                   <span {...stylex.props(colTitleStyle(col.key))}>{col.label}</span>
-                  <span {...stylex.props(board.colCount)}>{cards.length}</span>
+                  <span {...stylex.props(board.colCount)}>{countIn(col.key)}</span>
                 </header>
                 <ul {...stylex.props(board.cards)}>
                   {cards.length > 0 ? (
-                    cards.map(renderCard)
+                    cards.map(renderItem)
                   ) : (
-                    <li {...stylex.props(board.emptyCol)}>No tasks</li>
+                    <li {...stylex.props(board.emptyCol)}>Nothing here</li>
+                  )}
+                  {hidden > 0 && (
+                    <li>
+                      <button
+                        type="button"
+                        {...stylex.props(btn.base, board.more)}
+                        onClick={() => setDoneLimit(doneLimit + DONE_PAGE)}
+                      >
+                        Show more ({hidden} older)
+                      </button>
+                    </li>
                   )}
                 </ul>
               </section>

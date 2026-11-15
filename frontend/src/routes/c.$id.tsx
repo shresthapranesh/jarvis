@@ -18,6 +18,7 @@ import {InterruptPrompt} from '../components/InterruptPrompt';
 import {MessageThread} from '../components/MessageThread';
 import {isLive, SubagentChip, type SubagentInfo} from '../components/SubagentChip';
 import {SubagentPanel} from '../components/SubagentPanel';
+import {ConversationTaskStrip, taskNeedsAnswer} from '../components/TaskStrip';
 import {ThreadSpine} from '../components/ThreadSpine';
 import {page, useResizableWidth} from '../components/ui';
 import {useBrowserAvailable} from '../hooks/useBrowserAvailable';
@@ -28,6 +29,7 @@ import {useToast} from '../lib/toast';
 import type {ArtifactCard, Message, Step, TodoItem, TodoStatus} from '../lib/types';
 import {mapMessage} from '../lib/types';
 import {messageContent, type UploadedFile} from '../lib/uploads';
+import {commitAnswerBoardTask} from '../relay/AnswerBoardTaskMutation';
 import {artifactListQuery} from '../relay/ArtifactListQuery';
 import {refreshConversationList} from '../relay/ConversationListQuery';
 import {conversationPageFragment} from '../relay/ConversationPageFragment';
@@ -36,6 +38,7 @@ import {
   conversationPageQuery,
   loadConversationPage,
 } from '../relay/ConversationPageQuery';
+import {fetchConversationTask} from '../relay/ConversationTaskQuery';
 import {commitDiscardConversation} from '../relay/DiscardConversationMutation';
 import {decodeGlobalId, encodeGlobalId} from '../relay/globalId';
 import {commitQueueMessage} from '../relay/QueueMessageMutation';
@@ -77,6 +80,10 @@ function ConversationPage() {
     () => data.messages.edges.map((e) => mapMessage(e.node)),
     [data.messages.edges],
   );
+
+  // A board task's runs answer in `boardtask_<id>`: its page shows where the
+  // task stands, and a reply to its question resumes it.
+  const isTaskConversation = id.startsWith('boardtask_');
 
   const runningMsg = allMessages.find((m) => m.role === 'assistant' && m.status === 'running');
 
@@ -452,6 +459,15 @@ function ConversationPage() {
     followRef.current = true;
     bottomRef.current?.scrollIntoView({behavior: 'smooth'});
     try {
+      // A task waiting on a question: the reply is its answer, and resumes it
+      // as a board run rather than starting a chat turn beside it.
+      const boardTask = isTaskConversation ? await fetchConversationTask(id) : null;
+      if (boardTask && taskNeedsAnswer(boardTask)) {
+        await commitAnswerBoardTask(decodeGlobalId(boardTask.id), query);
+        await Promise.all([loadConversationPage(id), fetchConversationTask(id)]);
+        void refreshRunningTasks();
+        return;
+      }
       const {taskId} = await commitStartTask({
         input: {
           query,
@@ -731,6 +747,7 @@ function ConversationPage() {
           openId={openSubagent?.conversationId ?? null}
           onOpen={openSubagentPanel}
         />
+        {isTaskConversation && <ConversationTaskStrip conversationId={id} />}
         <DeferredApprovals conversationId={id} />
         {pendingInterrupt && runningMsg && (
           <InterruptPrompt key={pendingInterrupt.approvalId} interrupt={pendingInterrupt} />

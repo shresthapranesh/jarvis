@@ -72,6 +72,15 @@ impl Conversation {
         }
     }
 
+    /// The board task whose runs answer here (`surface = 'task'`); none for
+    /// any other conversation.
+    async fn board_task(&self, ctx: &Context<'_>) -> Result<Option<super::board::BoardTask>> {
+        match self.raw_id.strip_prefix("boardtask_").filter(|_| self.surface == "task") {
+            Some(task) => super::board::BoardTask::by_id(ctx.data()?, task).await,
+            None => Ok(None),
+        }
+    }
+
     /// The sub-agents its agent spawned, oldest first, each with where its
     /// latest turn stands.
     async fn subagents(&self, ctx: &Context<'_>) -> Result<Vec<Subagent>> {
