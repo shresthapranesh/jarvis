@@ -9,7 +9,7 @@ import {channels, colors, type} from '../theme/tokens.stylex';
 
 /**
  * Deferred approvals raised by *this* conversation, shown where they were asked
- * for rather than only in `/approvals`.
+ * for rather than only on the Activity page.
  *
  * Read from the polled inbox, not from the run's event stream, and that is the
  * whole point of the shape. A deferred request blocks nothing — the agent's

@@ -15,7 +15,6 @@ import {
   BoltIcon,
   BrandMark,
   ChevronLeftIcon,
-  ClockIcon,
   FileIcon,
   FolderIcon,
   GearIcon,
@@ -24,7 +23,6 @@ import {
   MenuIcon,
   MoonIcon,
   PlusIcon,
-  ShieldCheckIcon,
   StarIcon,
   SunIcon,
   WorkflowIcon,
@@ -81,17 +79,16 @@ interface NavItem {
   label: string;
   Icon: (p: {size?: number; style?: stylex.StyleXStyles}) => React.ReactElement;
   /** Which live count to hang off this row, if any. */
-  badge?: 'running' | 'approvals';
+  /** Shows how many requests are waiting on the user. */
+  badge?: 'approvals';
 }
 
 // The rail carries only what is worked in day to day.
 const NAV_ITEMS: NavItem[] = [
-  {to: '/board', label: 'Board', Icon: KanbanIcon},
+  {to: '/activity', label: 'Activity', Icon: KanbanIcon, badge: 'approvals'},
   {to: '/projects', label: 'Projects', Icon: FolderIcon},
   {to: '/workflow', label: 'Workflows', Icon: WorkflowIcon},
   {to: '/automation', label: 'Automations', Icon: BoltIcon},
-  {to: '/tasks', label: 'Running', Icon: ClockIcon, badge: 'running'},
-  {to: '/approvals', label: 'Approvals', Icon: ShieldCheckIcon, badge: 'approvals'},
 ];
 
 // What the agent knows and how it is tuned: reached from the gear in the rail
@@ -138,7 +135,7 @@ function RootLayout() {
 
   // The tab's title: what this page is, and — first, where a narrow tab still
   // shows it — how many things are waiting on the user. The count is the
-  // Approvals badge's, so the two never disagree.
+  // Activity badge's, so the two never disagree.
   const pageName = useCurrentPageTitle();
   useEffect(() => {
     const section = [...NAV_ITEMS, ...MORE_ITEMS].find((i) => onPage(pathname, i.to))?.label;
@@ -333,8 +330,7 @@ function RootLayout() {
       <div {...stylex.props(nav.group)}>
         {!railCollapsed && <p {...stylex.props(nav.heading)}>Work</p>}
         {NAV_ITEMS.map(({to, label, Icon, badge}) => {
-          const count =
-            badge === 'running' ? runningCount : badge === 'approvals' ? approvalCount : 0;
+          const count = badge === 'approvals' ? approvalCount : 0;
           // Prefix match, matching the router's default non-exact
           // behaviour: /workflow stays lit on /workflow/<id>.
           const active = onPage(pathname, to);

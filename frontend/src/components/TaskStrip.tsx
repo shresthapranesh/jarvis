@@ -99,8 +99,8 @@ function TaskStrip({task, onChanged}: {task: StripTask; onChanged: () => Promise
       <div {...stylex.props(strip.root)}>
         <span {...stylex.props(strip.label)}>
           {task.status === 'ready' ? 'Task is queued to run' : 'Task is parked'} ·{' '}
-          <Link to="/board" {...stylex.props(strip.link)}>
-            board
+          <Link to="/activity" {...stylex.props(strip.link)}>
+            activity
           </Link>
         </span>
       </div>

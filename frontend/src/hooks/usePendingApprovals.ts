@@ -4,7 +4,7 @@ import type {PendingApproval} from '../lib/types';
 import {fetchPendingApprovals} from '../relay/PendingApprovalsQuery';
 
 /**
- * The pending-approval inbox, shared by the nav badge and the /approvals page.
+ * The pending-approval inbox, shared by the nav badge and the Activity page.
  *
  * Built on the same external-store shape as `useRunningTasks`, for the same
  * two reasons: several components read it at once (so one poll, not N), and
