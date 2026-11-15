@@ -14,7 +14,6 @@ import {
   BookIcon,
   BoltIcon,
   BrandMark,
-  ChevronDownIcon,
   ChevronLeftIcon,
   ClockIcon,
   FileIcon,
@@ -31,6 +30,7 @@ import {
   WorkflowIcon,
 } from '../components/icons';
 import {QueryBoundary} from '../components/QueryBoundary';
+import {OverflowMenu} from '../components/ui';
 import {useHealth} from '../hooks/useHealth';
 import {useIsMobile} from '../hooks/useIsMobile';
 import {usePendingApprovals} from '../hooks/usePendingApprovals';
@@ -76,8 +76,6 @@ function useKeyboardInset() {
   }, []);
 }
 
-// Grouped so the rail reads as three intents rather than eleven equal rows:
-// what the agent is *doing*, what it *knows*, and how you *tune* it.
 interface NavItem {
   to: string;
   label: string;
@@ -86,69 +84,29 @@ interface NavItem {
   badge?: 'running' | 'approvals';
 }
 
-interface NavGroup {
-  heading: string;
-  items: NavItem[];
-  /** Sits below the conversations and folds to its heading. */
-  secondary?: boolean;
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    heading: 'Work',
-    items: [
-      {to: '/board', label: 'Board', Icon: KanbanIcon},
-      {to: '/workflow', label: 'Workflows', Icon: WorkflowIcon},
-      {to: '/automation', label: 'Automations', Icon: BoltIcon},
-      {to: '/tasks', label: 'Running', Icon: ClockIcon, badge: 'running'},
-      {to: '/approvals', label: 'Approvals', Icon: ShieldCheckIcon, badge: 'approvals'},
-    ],
-  },
-  {
-    heading: 'Context',
-    secondary: true,
-    items: [
-      {to: '/projects', label: 'Projects', Icon: FolderIcon},
-      {to: '/artifacts', label: 'Artifacts', Icon: FileIcon},
-      {to: '/memory', label: 'Memory', Icon: BookIcon},
-      {to: '/skills', label: 'Skills', Icon: StarIcon},
-    ],
-  },
-  {
-    heading: 'System',
-    secondary: true,
-    items: [
-      {to: '/logs', label: 'Logs', Icon: ListIcon},
-      {to: '/settings', label: 'Settings', Icon: GearIcon},
-    ],
-  },
+// The rail carries only what is worked in day to day.
+const NAV_ITEMS: NavItem[] = [
+  {to: '/board', label: 'Board', Icon: KanbanIcon},
+  {to: '/projects', label: 'Projects', Icon: FolderIcon},
+  {to: '/workflow', label: 'Workflows', Icon: WorkflowIcon},
+  {to: '/automation', label: 'Automations', Icon: BoltIcon},
+  {to: '/tasks', label: 'Running', Icon: ClockIcon, badge: 'running'},
+  {to: '/approvals', label: 'Approvals', Icon: ShieldCheckIcon, badge: 'approvals'},
 ];
 
-// The rail is ordered by how often each part is reached for: starting a chat,
-// the work in flight, the conversations themselves, and only then the
-// reference and system pages.
-const PRIMARY_GROUPS = NAV_GROUPS.filter((g) => !g.secondary);
-const SECONDARY_GROUPS = NAV_GROUPS.filter((g) => g.secondary);
+// What the agent knows and how it is tuned: reached from the gear in the rail
+// header, so these pages cost the rail no rows.
+const MORE_ITEMS: NavItem[] = [
+  {to: '/settings', label: 'Settings', Icon: GearIcon},
+  {to: '/memory', label: 'Memory', Icon: BookIcon},
+  {to: '/skills', label: 'Skills', Icon: StarIcon},
+  {to: '/artifacts', label: 'Artifacts', Icon: FileIcon},
+  {to: '/logs', label: 'Logs', Icon: ListIcon},
+];
+
+const onPage = (pathname: string, to: string) => pathname === to || pathname.startsWith(`${to}/`);
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-
-function readFoldedGroups(): string[] {
-  try {
-    const raw = localStorage.getItem('nav-groups-folded');
-    if (raw !== null) {
-      const saved: unknown = JSON.parse(raw);
-      return Array.isArray(saved) ? saved.filter((h) => typeof h === 'string') : [];
-    }
-  } catch {
-    /* fall through to the default */
-  }
-  // Until the user chooses: open on a desktop, where there is room for both,
-  // folded in the phone drawer, where open groups leave the conversations
-  // about three rows.
-  return window.matchMedia('(max-width: 860px)').matches
-    ? SECONDARY_GROUPS.map((g) => g.heading)
-    : [];
-}
 
 function focusComposer() {
   setTimeout(() => {
@@ -183,9 +141,7 @@ function RootLayout() {
   // Approvals badge's, so the two never disagree.
   const pageName = useCurrentPageTitle();
   useEffect(() => {
-    const section = NAV_GROUPS.flatMap((g) => g.items).find(
-      (i) => pathname === i.to || pathname.startsWith(`${i.to}/`),
-    )?.label;
+    const section = [...NAV_ITEMS, ...MORE_ITEMS].find((i) => onPage(pathname, i.to))?.label;
     const name = pageName ?? section;
     const base = name ? `${name} · Jarvis` : 'Jarvis';
     document.title = approvalCount > 0 ? `(${approvalCount}) ${base}` : base;
@@ -230,19 +186,6 @@ function RootLayout() {
   const resetNavWidth = useCallback(() => {
     setNavWidth(NAV_DEFAULT_W);
     localStorage.setItem('nav-width', String(NAV_DEFAULT_W));
-  }, []);
-
-  const [foldedGroups, setFoldedGroups] = useState(readFoldedGroups);
-  const toggleGroup = useCallback((heading: string) => {
-    setFoldedGroups((prev) => {
-      const next = prev.includes(heading) ? prev.filter((h) => h !== heading) : [...prev, heading];
-      try {
-        localStorage.setItem('nav-groups-folded', JSON.stringify(next));
-      } catch {
-        /* localStorage unavailable — keep the in-memory choice */
-      }
-      return next;
-    });
   }, []);
 
   const navigate = useNavigate();
@@ -370,68 +313,53 @@ function RootLayout() {
     </button>
   );
 
-  const navGroups = (groups: NavGroup[], secondary = false) => (
-    <div
-      {...stylex.props(
-        nav.list,
-        secondary && nav.listSecondary,
-        railCollapsed && nav.listCollapsed,
-      )}
-    >
-      {groups.map((group) => {
-        // The icon rail has no headings to fold under, so it shows every row.
-        const folded = !railCollapsed && !!group.secondary && foldedGroups.includes(group.heading);
-        return (
-          <div {...stylex.props(nav.group)} key={group.heading}>
-            {!railCollapsed &&
-              (group.secondary ? (
-                <button
-                  {...stylex.props(nav.heading, nav.headingButton)}
-                  onClick={() => toggleGroup(group.heading)}
-                  aria-expanded={!folded}
-                >
-                  {group.heading}
-                  <ChevronDownIcon
-                    size={12}
-                    style={[nav.headingChevron, folded && nav.headingChevronFolded]}
-                  />
-                </button>
-              ) : (
-                <p {...stylex.props(nav.heading)}>{group.heading}</p>
-              ))}
-            {group.items.map(({to, label, Icon, badge}) => {
-              const count =
-                badge === 'running' ? runningCount : badge === 'approvals' ? approvalCount : 0;
-              // Prefix match, matching the router's default non-exact
-              // behaviour: /workflow stays lit on /workflow/<id>.
-              const active = pathname === to || pathname.startsWith(`${to}/`);
-              // A folded group keeps the row you are on, so the rail still
-              // says where you are.
-              if (folded && !active) return null;
-              return (
-                <Link
-                  key={to}
-                  to={to}
-                  {...stylex.props(
-                    nav.link,
-                    active && nav.linkActive,
-                    railCollapsed && nav.linkCollapsed,
-                  )}
-                  title={label}
-                >
-                  <Icon size={15} style={nav.icon} />
-                  {!railCollapsed && <span>{label}</span>}
-                  {count > 0 && (
-                    <span {...stylex.props(nav.badge, railCollapsed && nav.badgeCompact)}>
-                      {count}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        );
-      })}
+  // Settings and the reference pages, behind one button. Lit while one of them
+  // is the page on screen, since the rail has no row to light for it.
+  const moreMenu = (
+    <OverflowMenu
+      label="Settings and more"
+      icon={<GearIcon size={14} />}
+      style={[control.ghost, MORE_ITEMS.some((i) => onPage(pathname, i.to)) && control.ghostActive]}
+      items={MORE_ITEMS.map(({to, label, Icon}) => ({
+        label,
+        icon: <Icon size={14} />,
+        onSelect: () => void navigate({to}),
+      }))}
+    />
+  );
+
+  const navList = (
+    <div {...stylex.props(nav.list, railCollapsed && nav.listCollapsed)}>
+      <div {...stylex.props(nav.group)}>
+        {!railCollapsed && <p {...stylex.props(nav.heading)}>Work</p>}
+        {NAV_ITEMS.map(({to, label, Icon, badge}) => {
+          const count =
+            badge === 'running' ? runningCount : badge === 'approvals' ? approvalCount : 0;
+          // Prefix match, matching the router's default non-exact
+          // behaviour: /workflow stays lit on /workflow/<id>.
+          const active = onPage(pathname, to);
+          return (
+            <Link
+              key={to}
+              to={to}
+              {...stylex.props(
+                nav.link,
+                active && nav.linkActive,
+                railCollapsed && nav.linkCollapsed,
+              )}
+              title={label}
+            >
+              <Icon size={15} style={nav.icon} />
+              {!railCollapsed && <span>{label}</span>}
+              {count > 0 && (
+                <span {...stylex.props(nav.badge, railCollapsed && nav.badgeCompact)}>{count}</span>
+              )}
+            </Link>
+          );
+        })}
+      </div>
+      {/* The icon rail's header has room for the mark and the chevron only. */}
+      {railCollapsed && moreMenu}
     </div>
   );
 
@@ -463,6 +391,7 @@ function RootLayout() {
               </div>
             )}
             {!railCollapsed && themeButton(14)}
+            {!railCollapsed && moreMenu}
             {/* On mobile the rail cannot collapse — it is either open or off
                 canvas — so the chevron closes the drawer instead. */}
             <button
@@ -493,7 +422,7 @@ function RootLayout() {
               <kbd {...stylex.props(nav.newChatKbd)}>{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
             )}
           </Link>
-          {navGroups(PRIMARY_GROUPS)}
+          {navList}
           {/* The sidebar renders outside every route, so an unguarded throw
               here blanks the whole app rather than one page. */}
           {!railCollapsed && (
@@ -501,7 +430,6 @@ function RootLayout() {
               <ConversationList />
             </QueryBoundary>
           )}
-          {navGroups(SECONDARY_GROUPS, true)}
           {!railCollapsed && (
             <div
               {...stylex.props(rail.handle, navResizing && rail.handleActive)}

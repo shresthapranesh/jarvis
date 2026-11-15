@@ -18,6 +18,8 @@ interface Props {
   label?: string;
   /** Extra styles for the trigger, e.g. to show it only on a narrow screen. */
   style?: stylex.StyleXStyles;
+  /** The trigger's glyph, in place of the three dots. */
+  icon?: ReactNode;
 }
 
 /**
@@ -25,7 +27,7 @@ interface Props {
  * frequent actions go when there is no room to show them all as buttons.
  * The list is portalled to the body so a card's `overflow: hidden` can't clip it.
  */
-export function OverflowMenu({items, label = 'More actions', style}: Props) {
+export function OverflowMenu({items, label = 'More actions', style, icon}: Props) {
   const [pos, setPos] = useState<{x: number; y: number} | null>(null);
 
   useEffect(() => {
@@ -60,11 +62,13 @@ export function OverflowMenu({items, label = 'More actions', style}: Props) {
           setPos(pos ? null : {x: r.right, y: r.bottom + 4});
         }}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="5" cy="12" r="1.8" />
-          <circle cx="12" cy="12" r="1.8" />
-          <circle cx="19" cy="12" r="1.8" />
-        </svg>
+        {icon ?? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        )}
       </button>
       {pos &&
         createPortal(

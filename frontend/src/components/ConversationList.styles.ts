@@ -9,9 +9,7 @@ import {bp, channels, colors, radii, space, type} from '../theme/tokens.stylex';
 
 /** The scrolling list and its header. */
 export const list = stylex.create({
-  // The floor keeps a few rows on screen when the window is short; the nav
-  // block below the list is the one that gives way.
-  root: {display: 'flex', flexDirection: 'column', flex: 1, minHeight: 120, overflow: 'hidden'},
+  root: {display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden'},
   header: {
     display: 'flex',
     alignItems: 'center',
