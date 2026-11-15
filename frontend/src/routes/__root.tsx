@@ -14,6 +14,7 @@ import {
   BookIcon,
   BoltIcon,
   BrandMark,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ClockIcon,
   FileIcon,
@@ -23,6 +24,7 @@ import {
   ListIcon,
   MenuIcon,
   MoonIcon,
+  PlusIcon,
   ShieldCheckIcon,
   StarIcon,
   SunIcon,
@@ -83,19 +85,27 @@ interface NavItem {
   badge?: 'running' | 'approvals';
 }
 
-const NAV_GROUPS: {heading: string; items: NavItem[]}[] = [
+interface NavGroup {
+  heading: string;
+  items: NavItem[];
+  /** Sits below the conversations and folds to its heading. */
+  secondary?: boolean;
+}
+
+const NAV_GROUPS: NavGroup[] = [
   {
     heading: 'Work',
     items: [
       {to: '/board', label: 'Board', Icon: KanbanIcon},
       {to: '/workflow', label: 'Workflows', Icon: WorkflowIcon},
       {to: '/automation', label: 'Automations', Icon: BoltIcon},
-      {to: '/tasks', label: 'Tasks', Icon: ClockIcon, badge: 'running'},
+      {to: '/tasks', label: 'Running', Icon: ClockIcon, badge: 'running'},
       {to: '/approvals', label: 'Approvals', Icon: ShieldCheckIcon, badge: 'approvals'},
     ],
   },
   {
     heading: 'Context',
+    secondary: true,
     items: [
       {to: '/projects', label: 'Projects', Icon: FolderIcon},
       {to: '/artifacts', label: 'Artifacts', Icon: FileIcon},
@@ -105,12 +115,45 @@ const NAV_GROUPS: {heading: string; items: NavItem[]}[] = [
   },
   {
     heading: 'System',
+    secondary: true,
     items: [
       {to: '/logs', label: 'Logs', Icon: ListIcon},
       {to: '/settings', label: 'Settings', Icon: GearIcon},
     ],
   },
 ];
+
+// The rail is ordered by how often each part is reached for: starting a chat,
+// the work in flight, the conversations themselves, and only then the
+// reference and system pages.
+const PRIMARY_GROUPS = NAV_GROUPS.filter((g) => !g.secondary);
+const SECONDARY_GROUPS = NAV_GROUPS.filter((g) => g.secondary);
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
+function readFoldedGroups(): string[] {
+  try {
+    const raw = localStorage.getItem('nav-groups-folded');
+    if (raw !== null) {
+      const saved: unknown = JSON.parse(raw);
+      return Array.isArray(saved) ? saved.filter((h) => typeof h === 'string') : [];
+    }
+  } catch {
+    /* fall through to the default */
+  }
+  // Until the user chooses: open on a desktop, where there is room for both,
+  // folded in the phone drawer, where open groups leave the conversations
+  // about three rows.
+  return window.matchMedia('(max-width: 860px)').matches
+    ? SECONDARY_GROUPS.map((g) => g.heading)
+    : [];
+}
+
+function focusComposer() {
+  setTimeout(() => {
+    document.querySelector<HTMLElement>('[data-input-textarea]')?.focus();
+  }, 50);
+}
 
 function RootLayout() {
   const healthy = useHealth();
@@ -173,6 +216,19 @@ function RootLayout() {
   const resetNavWidth = useCallback(() => {
     setNavWidth(NAV_DEFAULT_W);
     localStorage.setItem('nav-width', String(NAV_DEFAULT_W));
+  }, []);
+
+  const [foldedGroups, setFoldedGroups] = useState(readFoldedGroups);
+  const toggleGroup = useCallback((heading: string) => {
+    setFoldedGroups((prev) => {
+      const next = prev.includes(heading) ? prev.filter((h) => h !== heading) : [...prev, heading];
+      try {
+        localStorage.setItem('nav-groups-folded', JSON.stringify(next));
+      } catch {
+        /* localStorage unavailable — keep the in-memory choice */
+      }
+      return next;
+    });
   }, []);
 
   const navigate = useNavigate();
@@ -250,9 +306,7 @@ function RootLayout() {
         )
           document.startViewTransition(doNav);
         else doNav();
-        setTimeout(() => {
-          document.querySelector<HTMLElement>('[data-input-textarea]')?.focus();
-        }, 50);
+        focusComposer();
       } else if (e.key === '/') {
         e.preventDefault();
         document.querySelector<HTMLElement>('[data-input-textarea]')?.focus();
@@ -302,6 +356,71 @@ function RootLayout() {
     </button>
   );
 
+  const navGroups = (groups: NavGroup[], secondary = false) => (
+    <div
+      {...stylex.props(
+        nav.list,
+        secondary && nav.listSecondary,
+        railCollapsed && nav.listCollapsed,
+      )}
+    >
+      {groups.map((group) => {
+        // The icon rail has no headings to fold under, so it shows every row.
+        const folded = !railCollapsed && !!group.secondary && foldedGroups.includes(group.heading);
+        return (
+          <div {...stylex.props(nav.group)} key={group.heading}>
+            {!railCollapsed &&
+              (group.secondary ? (
+                <button
+                  {...stylex.props(nav.heading, nav.headingButton)}
+                  onClick={() => toggleGroup(group.heading)}
+                  aria-expanded={!folded}
+                >
+                  {group.heading}
+                  <ChevronDownIcon
+                    size={12}
+                    style={[nav.headingChevron, folded && nav.headingChevronFolded]}
+                  />
+                </button>
+              ) : (
+                <p {...stylex.props(nav.heading)}>{group.heading}</p>
+              ))}
+            {group.items.map(({to, label, Icon, badge}) => {
+              const count =
+                badge === 'running' ? runningCount : badge === 'approvals' ? approvalCount : 0;
+              // Prefix match, matching the router's default non-exact
+              // behaviour: /workflow stays lit on /workflow/<id>.
+              const active = pathname === to || pathname.startsWith(`${to}/`);
+              // A folded group keeps the row you are on, so the rail still
+              // says where you are.
+              if (folded && !active) return null;
+              return (
+                <Link
+                  key={to}
+                  to={to}
+                  {...stylex.props(
+                    nav.link,
+                    active && nav.linkActive,
+                    railCollapsed && nav.linkCollapsed,
+                  )}
+                  title={label}
+                >
+                  <Icon size={15} style={nav.icon} />
+                  {!railCollapsed && <span>{label}</span>}
+                  {count > 0 && (
+                    <span {...stylex.props(nav.badge, railCollapsed && nav.badgeCompact)}>
+                      {count}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <ToastProvider>
       <div {...stylex.props(shell.appShell)}>
@@ -348,40 +467,19 @@ function RootLayout() {
               />
             </button>
           </div>
-          <div {...stylex.props(nav.list, railCollapsed && nav.listCollapsed)}>
-            {NAV_GROUPS.map((group) => (
-              <div {...stylex.props(nav.group)} key={group.heading}>
-                {!railCollapsed && <p {...stylex.props(nav.heading)}>{group.heading}</p>}
-                {group.items.map(({to, label, Icon, badge}) => {
-                  const count =
-                    badge === 'running' ? runningCount : badge === 'approvals' ? approvalCount : 0;
-                  // Prefix match, matching the router's default non-exact
-                  // behaviour: /workflow stays lit on /workflow/<id>.
-                  const active = pathname === to || pathname.startsWith(`${to}/`);
-                  return (
-                    <Link
-                      key={to}
-                      to={to}
-                      {...stylex.props(
-                        nav.link,
-                        active && nav.linkActive,
-                        railCollapsed && nav.linkCollapsed,
-                      )}
-                      title={label}
-                    >
-                      <Icon size={15} style={nav.icon} />
-                      {!railCollapsed && <span>{label}</span>}
-                      {count > 0 && (
-                        <span {...stylex.props(nav.badge, railCollapsed && nav.badgeCompact)}>
-                          {count}
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+          <Link
+            to="/"
+            {...stylex.props(nav.newChat, railCollapsed && nav.newChatCollapsed)}
+            title="New chat"
+            onClick={focusComposer}
+          >
+            <PlusIcon size={15} />
+            {!railCollapsed && <span>New chat</span>}
+            {!railCollapsed && (
+              <kbd {...stylex.props(nav.newChatKbd)}>{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
+            )}
+          </Link>
+          {navGroups(PRIMARY_GROUPS)}
           {/* The sidebar renders outside every route, so an unguarded throw
               here blanks the whole app rather than one page. */}
           {!railCollapsed && (
@@ -389,6 +487,7 @@ function RootLayout() {
               <ConversationList />
             </QueryBoundary>
           )}
+          {navGroups(SECONDARY_GROUPS, true)}
           {!railCollapsed && (
             <div
               {...stylex.props(rail.handle, navResizing && rail.handleActive)}

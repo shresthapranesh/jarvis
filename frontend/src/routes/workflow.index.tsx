@@ -1,12 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
-import {createFileRoute, useNavigate} from '@tanstack/react-router';
+import {createFileRoute, Link, useNavigate} from '@tanstack/react-router';
 import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {WorkflowListQuery as TWorkflowListQuery} from '../__generated__/WorkflowListQuery.graphql';
-import {PlusIcon} from '../components/icons';
+import {PlusIcon, TrashIcon} from '../components/icons';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
-import {btn, page, PageHeader, TimeAgo} from '../components/ui';
+import {btn, OverflowMenu, page, PageHeader, TimeAgo} from '../components/ui';
 import {config, list, modal, wfBtn} from '../components/workflow.styles';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {commitCreateWorkflow} from '../relay/CreateWorkflowMutation';
@@ -129,28 +129,25 @@ function WorkflowListPage() {
       )}
 
       {workflows.map((wf) => (
-        <div
-          key={wf.id}
-          {...stylex.props(list.row)}
-          onClick={() => void navigate({to: '/workflow/$id', params: {id: wf.id}})}
-        >
-          <div {...stylex.props(list.rowInfo)}>
+        <div key={wf.id} {...stylex.props(list.row)}>
+          <Link to="/workflow/$id" params={{id: wf.id}} {...stylex.props(list.rowInfo)}>
             <div {...stylex.props(list.rowName)}>{wf.name}</div>
             {wf.description && <div {...stylex.props(list.rowDesc)}>{wf.description}</div>}
             <div {...stylex.props(list.rowMeta)}>
               <TimeAgo iso={wf.updated_at} />
             </div>
-          </div>
+          </Link>
           <div {...stylex.props(list.rowActions)}>
-            <button
-              {...stylex.props(wfBtn.del, wfBtn.delInline)}
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmDeleteId(wf.id);
-              }}
-            >
-              Delete
-            </button>
+            <OverflowMenu
+              items={[
+                {
+                  label: 'Delete',
+                  icon: <TrashIcon size={12} />,
+                  danger: true,
+                  onSelect: () => setConfirmDeleteId(wf.id),
+                },
+              ]}
+            />
           </div>
         </div>
       ))}

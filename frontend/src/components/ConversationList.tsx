@@ -12,6 +12,7 @@ import {decodeGlobalId} from '../relay/globalId';
 import {commitUpdateConversation} from '../relay/UpdateConversationMutation';
 import {ConfirmDialog} from './ConfirmDialog';
 import {list, menu as menuStyles, row} from './ConversationList.styles';
+import {SearchIcon, XIcon} from './icons';
 import {useQueryRetry} from './QueryBoundary';
 import {TimeAgo} from './ui';
 
@@ -42,11 +43,18 @@ export function ConversationList() {
     [data.conversations],
   );
 
+  // `null` is "not searching"; an empty string is the open, still-empty box.
+  const [search, setSearch] = useState<string | null>(null);
+  const needle = search?.trim().toLowerCase() ?? '';
+
   // Pinned float to their own section; everything else falls into calendar
-  // buckets so a long history stays scannable without a search box.
+  // buckets, so a long history stays scannable. A search narrows both by title.
   const sections = useMemo(() => {
-    const pinned = conversations.filter((c) => c.pinned);
-    const rest = conversations.filter((c) => !c.pinned);
+    const shown = needle
+      ? conversations.filter((c) => (c.title ?? 'Untitled').toLowerCase().includes(needle))
+      : conversations;
+    const pinned = shown.filter((c) => c.pinned);
+    const rest = shown.filter((c) => !c.pinned);
 
     const byBucket = new Map<TimeBucket, typeof rest>();
     for (const conv of rest) {
@@ -63,7 +71,7 @@ export function ConversationList() {
       if (items?.length) out.push({heading: bucket, items});
     }
     return out;
-  }, [conversations]);
+  }, [conversations, needle]);
 
   const params = useParams({strict: false}) as {id?: string};
   const activeId = params.id;
@@ -126,28 +134,55 @@ export function ConversationList() {
   return (
     <nav {...stylex.props(list.root)}>
       <div {...stylex.props(list.header)}>
-        <span {...stylex.props(list.title)}>Conversations</span>
-        <Link to="/" {...stylex.props(list.newChat)} title="New chat">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-        </Link>
+        {search === null ? (
+          <>
+            <span {...stylex.props(list.title)}>Conversations</span>
+            <button
+              {...stylex.props(list.headerBtn)}
+              title="Search conversations"
+              aria-label="Search conversations"
+              onClick={() => setSearch('')}
+            >
+              <SearchIcon size={13} />
+            </button>
+          </>
+        ) : (
+          <>
+            <input
+              {...stylex.props(list.search)}
+              value={search}
+              autoFocus
+              placeholder="Search by title…"
+              aria-label="Search conversations"
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setSearch(null);
+              }}
+              onBlur={() => {
+                if (!search.trim()) setSearch(null);
+              }}
+            />
+            <button
+              {...stylex.props(list.headerBtn)}
+              title="Clear search"
+              aria-label="Clear search"
+              // Before the input's blur, which would otherwise close the box
+              // and move this button out from under the click.
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => setSearch(null)}
+            >
+              <XIcon size={13} />
+            </button>
+          </>
+        )}
       </div>
       <div {...stylex.props(list.body)}>
         {conversations.length === 0 ? (
           <p {...stylex.props(list.empty)}>
             No conversations yet. Press <kbd {...stylex.props(list.kbd)}>⌘K</kbd> to start one.
           </p>
+        ) : sections.length === 0 ? (
+          <p {...stylex.props(list.empty)}>No conversation titles match “{search?.trim()}”.</p>
         ) : (
           sections.map((section) => (
             <section {...stylex.props(list.section)} key={section.heading}>

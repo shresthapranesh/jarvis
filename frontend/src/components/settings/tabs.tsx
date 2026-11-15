@@ -16,18 +16,29 @@ export interface SettingsTabInfo {
   subtitle: ReactNode;
 }
 
+// Ordered by when a new install needs them: a model to run on, somewhere to be
+// told, then what the agent may touch.
 export const SETTINGS_TABS = [
   {
-    id: 'mcp',
-    to: '/settings/mcp',
-    label: 'MCP servers',
+    id: 'models',
+    to: '/settings/models',
+    label: 'Models',
     subtitle: (
       <>
-        Connect external tools via the Model Context Protocol. Servers run as subprocesses or HTTP
-        endpoints and expose their tools to the agent — either bound to every LLM call, or loaded on
-        demand to keep their schemas out of the prompt. Config merges from env{' '}
-        <code>JARVIS_MCP_SERVERS</code>, file <code>~/.jarvis/mcp.json</code>, and this UI (which
-        wins).
+        Language models available across providers. Add your own as <code>provider:model_name</code>{' '}
+        — no code change needed — and pick which one runs by default. Built-ins are compiled in and
+        can only be set as the default.
+      </>
+    ),
+  },
+  {
+    id: 'notifications',
+    to: '/settings/notifications',
+    label: 'Notifications',
+    subtitle: (
+      <>
+        Define Telegram/Discord delivery targets once, then pick them by name when configuring
+        automations or workflows.
       </>
     ),
   },
@@ -45,25 +56,16 @@ export const SETTINGS_TABS = [
     ),
   },
   {
-    id: 'notifications',
-    to: '/settings/notifications',
-    label: 'Notifications',
+    id: 'mcp',
+    to: '/settings/mcp',
+    label: 'MCP servers',
     subtitle: (
       <>
-        Define Telegram/Discord delivery targets once, then pick them by name when configuring
-        automations or workflows.
-      </>
-    ),
-  },
-  {
-    id: 'models',
-    to: '/settings/models',
-    label: 'Models',
-    subtitle: (
-      <>
-        Language models available across providers. Add your own as <code>provider:model_name</code>{' '}
-        — no code change needed — and pick which one runs by default. Built-ins are compiled in and
-        can only be set as the default.
+        Connect external tools via the Model Context Protocol. Servers run as subprocesses or HTTP
+        endpoints and expose their tools to the agent — either bound to every LLM call, or loaded on
+        demand to keep their schemas out of the prompt. Config merges from env{' '}
+        <code>JARVIS_MCP_SERVERS</code>, file <code>~/.jarvis/mcp.json</code>, and this UI (which
+        wins).
       </>
     ),
   },

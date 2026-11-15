@@ -40,13 +40,21 @@ export const list = stylex.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    paddingBlock: 14,
     paddingInline: layout.pageGutter,
     backgroundColor: {default: null, ':hover': colors.surface2},
     transition: 'background 0.12s',
-    cursor: 'pointer',
   },
-  rowInfo: {display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0},
+  // The link is the row: it carries the row's height, so the whole line but
+  // the actions opens the workflow.
+  rowInfo: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
+    minWidth: 0,
+    paddingBlock: 14,
+    textDecoration: 'none',
+  },
   rowName: {fontSize: type.tBody, fontWeight: 600, color: colors.text},
   rowDesc: {
     fontSize: type.tUi,
@@ -288,8 +296,16 @@ export const palette = stylex.create({
     fontSize: type.tNano,
     color: colors.textDim,
     padding: 4,
-    opacity: 0.6,
     lineHeight: 1.4,
+  },
+  hintCode: {fontFamily: type.mono, color: colors.text},
+  group: {
+    fontSize: type.tNano,
+    color: colors.textFaint,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    paddingInline: 4,
+    paddingBlockStart: 6,
   },
   item: {
     backgroundColor: {default: colors.surface2, ':hover': colors.surface3},
