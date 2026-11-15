@@ -1,5 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 
+import {kf} from '../theme/keyframes.stylex';
 import {bp, channels, colors, radii, space, type} from '../theme/tokens.stylex';
 
 /* ── Styles for ConversationList.tsx ───────────────────────────────────
@@ -165,6 +166,28 @@ export const row = stylex.create({
     textOverflow: 'ellipsis',
   },
   titleActive: {fontWeight: 500},
+
+  /* What the conversation is doing now. Green and pulsing while a run works;
+     amber and still once it has stopped to ask — the one that needs a click. */
+  live: {
+    flexShrink: 0,
+    alignSelf: 'center',
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    marginInlineEnd: space.s2,
+  },
+  liveRunning: {
+    backgroundColor: colors.signalLive,
+    animationName: kf.brandPulse,
+    animationDuration: '1.6s',
+    animationTimingFunction: 'ease-in-out',
+    animationIterationCount: 'infinite',
+  },
+  liveWaiting: {
+    backgroundColor: colors.warningText,
+    boxShadow: `0 0 0 3px rgba(${channels.tint}, 0.08)`,
+  },
 
   /* Collapsed to zero width until hover — otherwise it reserves horizontal
      space in every row and truncates titles that would otherwise fit. */

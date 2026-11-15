@@ -7,6 +7,7 @@ import {useLazyLoadQuery} from 'react-relay';
 import type {WorkflowDetailQuery as TWorkflowDetailQuery} from '../__generated__/WorkflowDetailQuery.graphql';
 import type {WorkflowRunsQuery as TWorkflowRunsQuery} from '../__generated__/WorkflowRunsQuery.graphql';
 import {useWorkflowRunEvents} from '../hooks/useWorkflowRunEvents';
+import {usePageTitle} from '../lib/pageTitle';
 import {parseDefinition, serializeDefinition} from '../lib/types';
 import type {NotificationConfig, Workflow, WorkflowRFEdge, WorkflowRFNode} from '../lib/types';
 import {commitRunWorkflow} from '../relay/RunWorkflowMutation';
@@ -301,6 +302,7 @@ export default function WorkflowEditorPage() {
     () => (data.workflow ? mapWorkflow(data.workflow) : null),
     [data.workflow],
   );
+  usePageTitle(workflow?.name);
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);

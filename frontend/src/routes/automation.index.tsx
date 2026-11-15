@@ -24,7 +24,7 @@ import {
   XIcon,
 } from '../components/icons';
 import {QueryBoundary, useQueryRetry} from '../components/QueryBoundary';
-import {btn, field, OverflowMenu, overflowSplit, page, PageHeader, TimeAgo} from '../components/ui';
+import {btn, field, OverflowMenu, page, PageHeader, TimeAgo} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
 import {formatNextRun} from '../lib/api';
@@ -156,43 +156,33 @@ function AutomationCard({auto, onOpen, onEdit, onDelete, onTrigger, onToggle}: C
 
       <div {...stylex.props(card.actions)} onClick={(e) => e.stopPropagation()}>
         <button
-          {...stylex.props(card.action)}
-          title={auto.enabled ? 'Pause schedule' : 'Resume schedule'}
+          {...stylex.props(card.action, card.actionLabelled)}
+          role="switch"
+          aria-checked={auto.enabled}
+          title={
+            auto.enabled
+              ? 'On — click to pause its schedule'
+              : 'Paused — click to resume its schedule'
+          }
           onClick={() => onToggle(auto)}
         >
-          {auto.enabled ? (
-            <span {...stylex.props(card.toggle, card.toggleOn)} aria-label="Enabled">
-              <span {...stylex.props(card.toggleDot)} />
-            </span>
-          ) : (
-            <span {...stylex.props(card.toggle, card.toggleOff)} aria-label="Disabled">
-              <span {...stylex.props(card.toggleDot)} />
-            </span>
-          )}
+          <span
+            {...stylex.props(card.toggle, auto.enabled ? card.toggleOn : card.toggleOff)}
+            aria-hidden="true"
+          >
+            <span {...stylex.props(card.toggleDot)} />
+          </span>
+          {auto.enabled ? 'On' : 'Off'}
         </button>
         <button
-          {...stylex.props(card.action, card.actionPlay)}
+          {...stylex.props(card.action, card.actionLabelled, card.actionPlay)}
           title="Run now"
           onClick={() => onTrigger(auto)}
         >
-          <PlayIcon size={13} />
-        </button>
-        <button
-          {...stylex.props(card.action, overflowSplit.wideOnly)}
-          title="Edit"
-          onClick={() => onEdit(auto)}
-        >
-          <EditIcon size={14} />
-        </button>
-        <button
-          {...stylex.props(card.action, card.actionDanger, overflowSplit.wideOnly)}
-          title="Delete"
-          onClick={() => onDelete(auto)}
-        >
-          <TrashIcon size={14} />
+          <PlayIcon size={12} />
+          Run
         </button>
         <OverflowMenu
-          style={overflowSplit.narrowOnly}
           items={[
             {label: 'Edit', icon: <EditIcon size={14} />, onSelect: () => onEdit(auto)},
             {

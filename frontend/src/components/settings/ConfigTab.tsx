@@ -52,9 +52,7 @@ export function ConfigTab() {
     <div {...stylex.props(page.section)}>
       <h2 {...stylex.props(page.sectionTitle)}>
         Config <span {...stylex.props(page.count)}>{settings.length}</span>
-        <span {...stylex.props(page.sectionHint)}>
-          {setCount} set · the same rows as <code>jarvis-edge config list</code>
-        </span>
+        <span {...stylex.props(page.sectionHint)}>{setCount} set</span>
       </h2>
 
       <div {...stylex.props(sx.filterRow)}>
@@ -62,21 +60,24 @@ export function ConfigTab() {
           <SearchIcon size={14} />
           <input
             {...stylex.props(sx.searchInput)}
-            placeholder="Search keys…"
+            placeholder="Search settings…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
-        <label {...stylex.props(toolStyles.toggle)} title="Show keys owned by another Settings tab">
+        <label
+          {...stylex.props(toolStyles.toggle)}
+          title="Show settings that another tab manages; they are read-only here"
+        >
           <input
             type="checkbox"
             checked={showManaged}
             onChange={(e) => setShowManaged(e.target.checked)}
           />
-          <span>Show managed keys</span>
+          <span>Show settings managed by other tabs</span>
         </label>
         <button {...stylex.props(btn.base)} onClick={() => setAdding(true)}>
-          Add key
+          Add custom key
         </button>
       </div>
 

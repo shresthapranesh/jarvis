@@ -15,17 +15,17 @@ import {settings as sx, tools as toolStyles} from './settings.styles';
 type Tool = TToolsQuery['response']['tools'][number];
 
 const KIND_LABEL: Record<string, string> = {
-  bound: 'Agent tools',
-  sdk: 'jarvis SDK',
-  mcp: 'MCP',
+  bound: 'Built-in tools',
+  sdk: 'Notebook helpers',
+  mcp: 'MCP servers',
 };
 
 // What each family costs and how it is reached — the thing a tool's row cannot
 // say on its own, and the reason the page groups by kind at all.
 const KIND_BLURB: Record<string, string> = {
-  bound: 'Coupled to the agent graph. Their schemas are sent to the model on every LLM call.',
-  sdk: 'Python functions inside run_cell, discovered on demand. They cost nothing until used.',
-  mcp: 'Tools from external MCP servers. Bound ones cost tokens per call; on-demand ones do not.',
+  bound: 'Part of the agent itself. The model is told about each one on every request.',
+  sdk: 'Python functions (the jarvis SDK) the agent looks up and calls from its notebook. They add nothing to a request until used.',
+  mcp: 'Tools from the servers you connected. Ones set to always load add to every request; on-demand ones do not.',
 };
 
 export function ToolsTab() {
@@ -110,9 +110,9 @@ export function ToolsTab() {
           onChange={(e) => setKindFilter(e.target.value)}
         >
           <option value="all">All kinds</option>
-          <option value="bound">Agent tools</option>
-          <option value="sdk">jarvis SDK</option>
-          <option value="mcp">MCP</option>
+          <option value="bound">Built-in tools</option>
+          <option value="sdk">Notebook helpers</option>
+          <option value="mcp">MCP servers</option>
         </select>
       </div>
 
@@ -164,9 +164,9 @@ function ToolRow({
           {tool.inPrompt && (
             <span
               {...stylex.props(badge.base)}
-              title="This tool's schema is sent to the model on every LLM call, used or not."
+              title="The model is told about this tool on every request, used or not, which makes each request a little larger."
             >
-              in prompt
+              always loaded
             </span>
           )}
           {!tool.available && (
@@ -193,7 +193,7 @@ function ToolRow({
         </label>
         <label
           {...stylex.props(toolStyles.toggle)}
-          title="Every call blocks until a human approves it, wherever it runs — chat, board task, automation or the SDK."
+          title="Every call waits for your approval, wherever it runs — a chat, a board task or an automation."
         >
           <input
             type="checkbox"

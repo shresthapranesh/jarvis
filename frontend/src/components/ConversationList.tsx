@@ -5,6 +5,8 @@ import {createPortal} from 'react-dom';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
+import {usePendingApprovals} from '../hooks/usePendingApprovals';
+import {useRunningTasks} from '../hooks/useRunningTasks';
 import {BUCKET_ORDER, timeBucket, type TimeBucket} from '../lib/format';
 import {conversationListQuery, refreshConversationList} from '../relay/ConversationListQuery';
 import {commitDeleteConversation} from '../relay/DeleteConversationMutation';
@@ -42,6 +44,24 @@ export function ConversationList() {
       })),
     [data.conversations],
   );
+
+  // Which conversations are doing something now, from the two lists the shell
+  // already polls. Waiting wins: a run stopped on a question is still a run,
+  // but the question is what the user can act on.
+  const running = useRunningTasks();
+  const approvals = usePendingApprovals();
+  const live = useMemo(() => {
+    const out = new Map<string, 'running' | 'waiting'>();
+    for (const t of running) {
+      if (!t.parent_id || t.done) continue;
+      if (t.kind === 'automation' || t.kind === 'workflow' || t.kind === 'board_task') continue;
+      out.set(t.parent_id, t.has_interrupt ? 'waiting' : 'running');
+    }
+    for (const a of approvals) {
+      if (a.parent_id && !a.deferred && a.source === 'chat') out.set(a.parent_id, 'waiting');
+    }
+    return out;
+  }, [running, approvals]);
 
   // `null` is "not searching"; an empty string is the open, still-empty box.
   const [search, setSearch] = useState<string | null>(null);
@@ -190,6 +210,7 @@ export function ConversationList() {
               {section.items.map((conv) => {
                 const active = conv.id === activeId;
                 const menuOpen = menu?.id === conv.id;
+                const state = live.get(conv.id);
                 return (
                   <div
                     key={conv.id}
@@ -209,6 +230,17 @@ export function ConversationList() {
                       />
                     ) : (
                       <Link to="/c/$id" params={{id: conv.id}} {...stylex.props(row.link)}>
+                        {state && (
+                          <span
+                            {...stylex.props(
+                              row.live,
+                              state === 'waiting' ? row.liveWaiting : row.liveRunning,
+                            )}
+                            role="img"
+                            aria-label={state === 'waiting' ? 'Waiting for your answer' : 'Running'}
+                            title={state === 'waiting' ? 'Waiting for your answer' : 'Running'}
+                          />
+                        )}
                         <span {...stylex.props(row.title, active && row.titleActive)}>
                           {conv.title ?? 'Untitled'}
                         </span>

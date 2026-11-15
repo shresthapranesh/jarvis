@@ -35,6 +35,7 @@ import {useHealth} from '../hooks/useHealth';
 import {useIsMobile} from '../hooks/useIsMobile';
 import {usePendingApprovals} from '../hooks/usePendingApprovals';
 import {useRunningTasks} from '../hooks/useRunningTasks';
+import {useCurrentPageTitle} from '../lib/pageTitle';
 import {ToastProvider} from '../lib/toast';
 import {applyTheme, resolvedTheme, type Theme} from '../theme/applyTheme';
 import {brand, control, mobile, nav, rail, shell} from './__root.styles';
@@ -176,6 +177,19 @@ function RootLayout() {
   const railCollapsed = navCollapsed && !isMobile;
 
   const pathname = useRouterState({select: (s) => s.location.pathname});
+
+  // The tab's title: what this page is, and — first, where a narrow tab still
+  // shows it — how many things are waiting on the user. The count is the
+  // Approvals badge's, so the two never disagree.
+  const pageName = useCurrentPageTitle();
+  useEffect(() => {
+    const section = NAV_GROUPS.flatMap((g) => g.items).find(
+      (i) => pathname === i.to || pathname.startsWith(`${i.to}/`),
+    )?.label;
+    const name = pageName ?? section;
+    const base = name ? `${name} · Jarvis` : 'Jarvis';
+    document.title = approvalCount > 0 ? `(${approvalCount}) ${base}` : base;
+  }, [pageName, pathname, approvalCount]);
   useEffect(() => {
     setNavOpen(false);
   }, [pathname]);
