@@ -8,11 +8,16 @@ import {bp, channels, colors, radii, space, type} from '../theme/tokens.stylex';
 
 /** The scrolling list and its header. */
 export const list = stylex.create({
-  root: {display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden'},
+  // The floor keeps a few rows on screen when the window is short; the nav
+  // block below the list is the one that gives way.
+  root: {display: 'flex', flexDirection: 'column', flex: 1, minHeight: 120, overflow: 'hidden'},
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 6,
+    // Fixed, so swapping the title for the search box does not move the list.
+    minHeight: 38,
     paddingBlock: '10px 6px',
     paddingInline: 14,
     flexShrink: 0,
@@ -24,17 +29,36 @@ export const list = stylex.create({
     letterSpacing: type.trackMicro,
     color: colors.textDim,
   },
-  newChat: {
+  headerBtn: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 22,
-    height: 22,
+    // A finger needs more than the 22px a pointer does.
+    width: {default: 22, [bp.coarse]: 32},
+    height: {default: 22, [bp.coarse]: 32},
+    flexShrink: 0,
+    padding: 0,
+    borderWidth: 0,
     borderRadius: 2,
     backgroundColor: {default: 'transparent', ':hover': colors.surface3},
     color: {default: colors.textDim, ':hover': colors.text},
-    textDecoration: 'none',
+    cursor: 'pointer',
     transition: 'color 0.15s, background 0.15s',
+  },
+  search: {
+    flex: 1,
+    minWidth: 0,
+    height: 22,
+    backgroundColor: colors.surface2,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {default: colors.border, ':focus': colors.accentDim},
+    borderRadius: 2,
+    color: colors.text,
+    fontSize: type.tSmall,
+    paddingBlock: 0,
+    paddingInline: 6,
+    outline: 'none',
   },
   body: {
     flex: 1,

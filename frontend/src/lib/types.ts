@@ -422,7 +422,7 @@ export interface Skill {
 
 // ── Running tasks (global registry) ──────────────────────────────────────────
 
-export type TaskKind = 'chat' | 'automation' | 'workflow';
+export type TaskKind = 'chat' | 'automation' | 'workflow' | 'board_task';
 
 export interface RunningTask {
   id: string;

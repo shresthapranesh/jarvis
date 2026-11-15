@@ -14,7 +14,7 @@ import {
   type Connection,
   type NodeProps,
 } from '@xyflow/react';
-import {useCallback, useEffect, useState} from 'react';
+import {Fragment, useCallback, useEffect, useState} from 'react';
 
 import {useModels} from '../hooks/useModels';
 import type {
@@ -26,8 +26,8 @@ import type {
   WorkflowRFNode,
 } from '../lib/types';
 import {fetchWorkflowList} from '../relay/WorkflowListQuery';
-import {config, editor, node as nodeStyles, palette, wfBtn} from './workflow.styles';
 import {field} from './ui';
+import {config, editor, node as nodeStyles, palette, wfBtn} from './workflow.styles';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1264,39 +1264,67 @@ export function WorkflowEditor({
     await onSave(nodes as WorkflowRFNode[], edges as WorkflowRFEdge[]);
   }
 
-  const paletteItems: Array<{type: WorkflowNodeType; label: string; hint: string}> = [
-    {type: 'start', label: 'Start', hint: 'entry point'},
-    {type: 'agent', label: 'Agent', hint: 'LLM + tools'},
-    {type: 'planner', label: 'Planner', hint: 'plan steps (JSON)'},
-    {type: 'conditional', label: 'Conditional', hint: 'true / false'},
-    {type: 'router', label: 'Router', hint: 'N-way classify'},
-    {type: 'sequential', label: 'Sequential', hint: 'steps in order'},
-    {type: 'parallel', label: 'Parallel', hint: 'fan-out'},
-    {type: 'loop', label: 'Loop', hint: 'iterate until PASS'},
-    {type: 'refine', label: 'Refine', hint: 'gen → eval loop'},
-    {type: 'map', label: 'Map', hint: 'per item sub-flow'},
-    {type: 'approval', label: 'Approval', hint: 'human gate'},
-    {type: 'human_input', label: 'Human Input', hint: 'ask user'},
+  // Grouped by what a node is for, in the order a first graph is built:
+  // something that does work, then ways to route it, then where a person
+  // steps in.
+  const paletteGroups: Array<{
+    heading: string;
+    items: Array<{type: WorkflowNodeType; label: string; hint: string}>;
+  }> = [
+    {
+      heading: 'Basics',
+      items: [
+        {type: 'start', label: 'Start', hint: 'where a run begins'},
+        {type: 'agent', label: 'Agent', hint: 'a model with tools'},
+        {type: 'planner', label: 'Planner', hint: 'writes a plan of steps'},
+      ],
+    },
+    {
+      heading: 'Flow',
+      items: [
+        {type: 'conditional', label: 'Conditional', hint: 'true or false branch'},
+        {type: 'router', label: 'Router', hint: 'picks one of several paths'},
+        {type: 'sequential', label: 'Sequential', hint: 'steps in order'},
+        {type: 'parallel', label: 'Parallel', hint: 'branches at the same time'},
+        {type: 'loop', label: 'Loop', hint: 'repeats until it passes'},
+        {type: 'refine', label: 'Refine', hint: 'draft, review, redo'},
+        {type: 'map', label: 'Map', hint: 'a sub-flow per item'},
+      ],
+    },
+    {
+      heading: 'People',
+      items: [
+        {type: 'approval', label: 'Approval', hint: 'waits for your OK'},
+        {type: 'human_input', label: 'Human Input', hint: 'asks you a question'},
+      ],
+    },
   ];
 
   return (
     <div {...stylex.props(editor.inner)}>
       <div {...stylex.props(palette.root)}>
         <div {...stylex.props(palette.label)}>Nodes</div>
-        {paletteItems.map((it) => (
-          <div
-            key={it.type}
-            {...stylex.props(palette.item)}
-            draggable
-            onDragStart={(e) => e.dataTransfer.setData('nodeType', it.type)}
-          >
-            <strong>{it.label}</strong>
-            <div {...stylex.props(palette.itemHint)}>{it.hint}</div>
-          </div>
-        ))}
         <div {...stylex.props(palette.hint)}>
-          Drag nodes onto canvas — use {'{{nodes.id.port}}'} in prompts
+          Drag a node onto the canvas. In a prompt,{' '}
+          <span {...stylex.props(palette.hintCode)}>{'{{nodes.id.port}}'}</span> stands for another
+          node&apos;s output.
         </div>
+        {paletteGroups.map((group) => (
+          <Fragment key={group.heading}>
+            <div {...stylex.props(palette.group)}>{group.heading}</div>
+            {group.items.map((it) => (
+              <div
+                key={it.type}
+                {...stylex.props(palette.item)}
+                draggable
+                onDragStart={(e) => e.dataTransfer.setData('nodeType', it.type)}
+              >
+                <strong>{it.label}</strong>
+                <div {...stylex.props(palette.itemHint)}>{it.hint}</div>
+              </div>
+            ))}
+          </Fragment>
+        ))}
       </div>
 
       <div {...stylex.props(editor.canvas)} onDrop={onDrop} onDragOver={onDragOver}>
@@ -1334,6 +1362,7 @@ export function WorkflowEditor({
         <button
           {...stylex.props(wfBtn.run)}
           disabled={running}
+          title="Saves the graph, then runs it"
           onClick={() => onRun(nodes as WorkflowRFNode[], edges as WorkflowRFEdge[])}
         >
           {running ? '⏳ Running' : '▶ Run'}

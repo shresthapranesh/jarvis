@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import {createFileRoute, useNavigate} from '@tanstack/react-router';
+import {createFileRoute, Link} from '@tanstack/react-router';
 
 import {kindBadge, kindBadgeStyle, page, PageHeader, TimeAgo} from '../components/ui';
 import {useAsyncAction} from '../hooks/useAsyncAction';
@@ -8,9 +8,10 @@ import {
   useRunningTasks,
   useRunningTasksLoaded,
 } from '../hooks/useRunningTasks';
-import type {RunningTask, TaskKind} from '../lib/types';
+import {runLink} from '../lib/runLink';
+import type {TaskKind} from '../lib/types';
 import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
-import {channels, colors, type} from '../theme/tokens.stylex';
+import {bp, channels, colors, type} from '../theme/tokens.stylex';
 
 export const Route = createFileRoute('/tasks')({
   component: TasksPage,
@@ -20,11 +21,10 @@ const KIND_LABEL: Record<TaskKind, string> = {
   chat: 'Chat',
   automation: 'Automation',
   workflow: 'Workflow',
+  board_task: 'Board task',
 };
 
 function TasksPage() {
-  const navigate = useNavigate();
-
   const tasks = useRunningTasks();
   const loaded = useRunningTasksLoaded();
 
@@ -33,21 +33,10 @@ function TasksPage() {
     commitStopRunningTask(id).then(refreshRunningTasks),
   );
 
-  function goTo(task: RunningTask) {
-    if (!task.parent_id) return;
-    if (task.kind === 'chat') {
-      navigate({to: '/c/$id', params: {id: task.parent_id}});
-    } else if (task.kind === 'automation') {
-      navigate({to: '/automation'});
-    } else if (task.kind === 'workflow') {
-      navigate({to: '/workflow/$id', params: {id: task.parent_id}});
-    }
-  }
-
   return (
     <div {...stylex.props(page.scroll)}>
       <PageHeader
-        title="Tasks"
+        title="Running"
         subtitle="Everything running right now, across chats, automations and workflows."
       />
 
@@ -64,36 +53,37 @@ function TasksPage() {
             const pct = task.total_tokens
               ? Math.min(100, Math.round(((task.total_tokens || 0) / 500000) * 100))
               : 0;
+            const link = runLink(task);
+            const main = (
+              <>
+                <span {...stylex.props(kindBadge.base, kindBadgeStyle(task.kind))}>
+                  {KIND_LABEL[task.kind] ?? task.kind}
+                </span>
+                <span {...stylex.props(styles.label)}>{task.label || task.id}</span>
+                <span {...stylex.props(styles.elapsed)}>
+                  started <TimeAgo iso={task.started_at} />
+                </span>
+                {task.has_interrupt && (
+                  <span {...stylex.props(styles.flag, styles.flagInterrupt)}>awaiting input</span>
+                )}
+                {task.cancelled && (
+                  <span {...stylex.props(styles.flag, styles.flagCancelling)}>stopping…</span>
+                )}
+                {task.budget_exceeded && (
+                  <span {...stylex.props(styles.flag, styles.flagCancelling)}>budget exceeded</span>
+                )}
+              </>
+            );
             return (
               <li key={task.id} {...stylex.props(styles.row)}>
                 <div {...stylex.props(styles.rowBody)}>
-                  <button
-                    {...stylex.props(styles.rowMain)}
-                    type="button"
-                    onClick={() => goTo(task)}
-                    disabled={!task.parent_id}
-                  >
-                    <span {...stylex.props(kindBadge.base, kindBadgeStyle(task.kind))}>
-                      {KIND_LABEL[task.kind]}
-                    </span>
-                    <span {...stylex.props(styles.label)}>{task.label || task.id}</span>
-                    <span {...stylex.props(styles.elapsed)}>
-                      started <TimeAgo iso={task.started_at} />
-                    </span>
-                    {task.has_interrupt && (
-                      <span {...stylex.props(styles.flag, styles.flagInterrupt)}>
-                        awaiting input
-                      </span>
-                    )}
-                    {task.cancelled && (
-                      <span {...stylex.props(styles.flag, styles.flagCancelling)}>stopping…</span>
-                    )}
-                    {task.budget_exceeded && (
-                      <span {...stylex.props(styles.flag, styles.flagCancelling)}>
-                        budget exceeded
-                      </span>
-                    )}
-                  </button>
+                  {link ? (
+                    <Link {...link} {...stylex.props(styles.rowMain, styles.rowMainLink)}>
+                      {main}
+                    </Link>
+                  ) : (
+                    <div {...stylex.props(styles.rowMain)}>{main}</div>
+                  )}
                   <div {...stylex.props(styles.budget)}>
                     <span title={`${task.input_tokens} in / ${task.output_tokens} out`}>
                       {task.total_tokens?.toLocaleString() ?? 0} tokens · {task.llm_calls} llm ·{' '}
@@ -158,18 +148,17 @@ const styles = stylex.create({
     flex: 1,
     display: 'flex',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    borderStyle: 'none',
+    // On a phone the start time drops to its own line, so the name keeps the
+    // width beside the badge instead of being cut to a few letters.
+    flexWrap: {default: 'nowrap', [bp.compact]: 'wrap'},
+    columnGap: 12,
+    rowGap: 4,
     color: colors.text,
     fontSize: type.tBody,
-    fontFamily: 'inherit',
-    textAlign: 'left',
     paddingBlock: 8,
     paddingInline: 4,
-    cursor: {default: 'pointer', ':disabled': 'default'},
   },
+  rowMainLink: {textDecoration: 'none', cursor: 'pointer'},
   label: {
     fontWeight: 500,
     whiteSpace: 'nowrap',
@@ -177,7 +166,12 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     flex: 1,
   },
-  elapsed: {fontSize: type.tUi, color: colors.textDim, flexShrink: 0},
+  elapsed: {
+    fontSize: type.tUi,
+    color: colors.textDim,
+    flexShrink: 0,
+    flexBasis: {default: 'auto', [bp.compact]: '100%'},
+  },
 
   flag: {fontSize: type.tMicro, paddingBlock: 2, paddingInline: 6, borderRadius: 2, flexShrink: 0},
   flagInterrupt: {backgroundColor: `rgba(${channels.accent}, 0.18)`, color: colors.accent},

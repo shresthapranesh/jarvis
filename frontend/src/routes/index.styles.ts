@@ -1,11 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
 
 import {kf} from '../theme/keyframes.stylex';
-import {channels, colors, radii, space, type} from '../theme/tokens.stylex';
+import {bp, channels, colors, radii, space, type} from '../theme/tokens.stylex';
 
 /* ── Styles for routes/index.tsx ───────────────────────────────────────
-   The dispatch screen: a greeting, the composer as hero, and two short
-   lists — what is running now, and what was asked recently. */
+   The dispatch screen: a greeting, the composer as hero, the other ways
+   to start work, and two short lists — what is running now, and what was
+   asked recently. */
 
 /** The centred column and its header. */
 export const dispatch = stylex.create({
@@ -79,6 +80,35 @@ export const dispatch = stylex.create({
   },
 });
 
+/** The other ways to start work, under the composer. */
+export const start = stylex.create({
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: {default: 'repeat(3, minmax(0, 1fr))', [bp.compact]: 'minmax(0, 1fr)'},
+    gap: space.s2,
+  },
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space.s1,
+    paddingBlock: space.s3,
+    paddingInline: space.s3,
+    borderRadius: radii.sm,
+    textDecoration: 'none',
+    backgroundColor: {default: colors.surface, ':hover': colors.surface2},
+    transition: 'background 0.18s cubic-bezier(0.2, 0.8, 0.2, 1)',
+  },
+  title: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space.s2,
+    fontSize: type.tUi,
+    fontWeight: 550,
+    color: colors.text,
+  },
+  line: {fontSize: type.tSmall, lineHeight: 1.45, color: colors.textDim},
+});
+
 /** The "recent conversations" rows. */
 export const recent = stylex.create({
   list: {listStyle: 'none', display: 'flex', flexDirection: 'column'},
@@ -129,6 +159,11 @@ export const run = stylex.create({
     fontSize: type.tUi,
     backgroundColor: colors.signalLiveDim,
     marginBlockEnd: 2,
+  },
+  rowLink: {
+    textDecoration: 'none',
+    filter: {default: null, ':hover': 'brightness(1.25)'},
+    transition: 'filter 0.15s',
   },
   mark: {
     width: 5,

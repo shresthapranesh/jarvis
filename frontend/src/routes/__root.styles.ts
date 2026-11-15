@@ -217,7 +217,42 @@ export const nav = stylex.create({
     flexDirection: 'column',
     gap: space.s4,
   },
+  // Below the conversations. It gives way before they do: on a short window
+  // this block scrolls rather than squeezing the list above it to nothing.
+  listSecondary: {flexShrink: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'thin'},
   listCollapsed: {paddingBlock: 6, paddingInline: 0, alignItems: 'center'},
+  /* The one action the rail leads with. */
+  newChat: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 0,
+    marginBlockStart: space.s1,
+    marginInline: space.s2,
+    paddingBlock: {default: 7, [bp.compact]: 11},
+    paddingInline: 10,
+    fontSize: type.tUi,
+    fontWeight: 550,
+    letterSpacing: '-0.01em',
+    color: colors.text,
+    textDecoration: 'none',
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: {default: colors.border, ':hover': colors.accentDim},
+    backgroundColor: {default: colors.surface2, ':hover': colors.surface3},
+    transition: 'background 0.18s, border-color 0.18s',
+  },
+  newChatCollapsed: {justifyContent: 'center', paddingInline: 0, marginInline: 6},
+  // A keyboard hint means nothing on a touch screen.
+  newChatKbd: {
+    display: {default: 'inline', [bp.coarse]: 'none'},
+    marginInlineStart: 'auto',
+    fontFamily: type.mono,
+    fontSize: type.tMicro,
+    fontWeight: 400,
+    color: colors.textFaint,
+  },
   group: {display: 'flex', flexDirection: 'column', gap: 1},
   /* Eyebrow — the device that turns 11 equal rows into 3 readable intents. */
   heading: {
@@ -229,6 +264,23 @@ export const nav = stylex.create({
     paddingBlock: `0 ${space.s2}`,
     paddingInline: 10,
   },
+  headingButton: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    // Tall enough for a finger where there is no pointer.
+    paddingBlock: {default: `0 ${space.s2}`, [bp.coarse]: 10},
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    fontFamily: 'inherit',
+    textAlign: 'start',
+    cursor: 'pointer',
+    color: {default: colors.textFaint, ':hover': colors.text},
+    transition: 'color 0.15s',
+  },
+  headingChevron: {transition: 'transform 0.18s ease'},
+  headingChevronFolded: {transform: 'rotate(-90deg)'},
   link: {
     position: 'relative',
     display: 'flex',

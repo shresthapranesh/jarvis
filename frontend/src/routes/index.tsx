@@ -4,19 +4,44 @@ import {useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {ConversationListQuery} from '../__generated__/ConversationListQuery.graphql';
+import {BoltIcon, KanbanIcon, WorkflowIcon} from '../components/icons';
 import {InputBox} from '../components/InputBox';
 import {errorBubble, page, TimeAgo} from '../components/ui';
 import {useRunningTasks} from '../hooks/useRunningTasks';
 import {greeting} from '../lib/format';
+import {runLink} from '../lib/runLink';
 import type {UploadedFile} from '../lib/uploads';
 import {conversationListQuery} from '../relay/ConversationListQuery';
 import {decodeGlobalId} from '../relay/globalId';
 import {commitStartTask} from '../relay/StartTaskMutation';
-import {dispatch, recent as recentStyles, run} from './index.styles';
+import {dispatch, recent as recentStyles, run, start} from './index.styles';
 
 export const Route = createFileRoute('/')({component: IndexPage});
 
 const RECENT_LIMIT = 5;
+
+// The three ways to hand work off rather than chat about it, each said as
+// the moment you would reach for it.
+const STARTING_POINTS = [
+  {
+    to: '/board',
+    Icon: KanbanIcon,
+    title: 'Queue a task',
+    line: 'Put it on the board and the agent works through it on its own.',
+  },
+  {
+    to: '/automation',
+    Icon: BoltIcon,
+    title: 'Schedule it',
+    line: 'Run a prompt on a schedule, or when a webhook calls.',
+  },
+  {
+    to: '/workflow',
+    Icon: WorkflowIcon,
+    title: 'Build a workflow',
+    line: 'Chain agents and approvals into steps you can run again.',
+  },
+] as const;
 
 function IndexPage() {
   const navigate = useNavigate();
@@ -107,23 +132,49 @@ function IndexPage() {
             />
           </div>
 
+          <nav {...stylex.props(start.grid)} aria-label="Other ways to start work">
+            {STARTING_POINTS.map(({to, Icon, title, line}) => (
+              <Link key={to} to={to} {...stylex.props(start.card)}>
+                <span {...stylex.props(start.title)}>
+                  <Icon size={14} />
+                  {title}
+                </span>
+                <span {...stylex.props(start.line)}>{line}</span>
+              </Link>
+            ))}
+          </nav>
+
           {running.length > 0 && (
             <section {...stylex.props(dispatch.section)}>
               <h2 {...stylex.props(dispatch.heading)}>In flight</h2>
               <ul {...stylex.props(recentStyles.list)}>
-                {running.map((task) => (
-                  <li {...stylex.props(run.row)} key={task.id}>
-                    <span {...stylex.props(run.mark)} aria-hidden="true" />
-                    <span {...stylex.props(run.label)}>{task.label}</span>
-                    <span {...stylex.props(run.time)}>{task.kind}</span>
-                    <span {...stylex.props(run.time)}>
-                      <TimeAgo iso={task.started_at} compact />
-                    </span>
-                  </li>
-                ))}
+                {running.map((task) => {
+                  const link = runLink(task);
+                  const body = (
+                    <>
+                      <span {...stylex.props(run.mark)} aria-hidden="true" />
+                      <span {...stylex.props(run.label)}>{task.label}</span>
+                      <span {...stylex.props(run.time)}>{task.kind.replace('_', ' ')}</span>
+                      <span {...stylex.props(run.time)}>
+                        <TimeAgo iso={task.started_at} compact />
+                      </span>
+                    </>
+                  );
+                  return (
+                    <li key={task.id}>
+                      {link ? (
+                        <Link {...link} {...stylex.props(run.row, run.rowLink)}>
+                          {body}
+                        </Link>
+                      ) : (
+                        <div {...stylex.props(run.row)}>{body}</div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
               <Link to="/tasks" {...stylex.props(dispatch.more)}>
-                All tasks →
+                Everything running →
               </Link>
             </section>
           )}
