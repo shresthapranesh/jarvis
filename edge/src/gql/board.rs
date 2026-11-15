@@ -48,7 +48,7 @@ pub struct BoardTask {
     pub finished_at: Option<DateTime>,
 }
 
-const TASK_COLUMNS: &str = "id, title, body, status, priority, created_by, model, skill, blocked_reason, \
+pub(super) const TASK_COLUMNS: &str = "id, title, body, status, priority, created_by, model, skill, blocked_reason, \
      blocked_kind, failure_count, summary, result_metadata, job_id, created_at, updated_at, started_at, finished_at";
 
 impl BoardTask {
@@ -81,7 +81,7 @@ impl BoardTask {
 
 /// Every link as (parent, child), in table order — the order Python appends
 /// them to each task's id lists.
-async fn links(pool: &SqlitePool) -> Result<Vec<(String, String)>> {
+pub(super) async fn links(pool: &SqlitePool) -> Result<Vec<(String, String)>> {
     Ok(sqlx::query_as("SELECT parent_id, child_id FROM board_task_links").fetch_all(pool).await?)
 }
 

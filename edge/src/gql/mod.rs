@@ -5,6 +5,7 @@ pub mod approval;
 pub mod artifact;
 pub mod automation;
 pub mod board;
+pub mod board_view;
 pub mod browser;
 pub mod codec;
 pub mod conversation;
@@ -37,6 +38,7 @@ pub struct Query(
     artifact::ArtifactQuery,
     automation::AutomationQuery,
     board::BoardTaskQuery,
+    board_view::BoardQuery,
     workflow::WorkflowQuery,
     settings_lists::ListsQuery,
     settings::SettingQuery,

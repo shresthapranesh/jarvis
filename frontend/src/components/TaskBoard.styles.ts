@@ -119,6 +119,7 @@ export const board = stylex.create({
   },
   tabActive: {backgroundColor: colors.surface3, color: colors.text, fontWeight: 500},
   tabCount: {fontSize: type.tMicro, color: colors.textFaint},
+  more: {width: '100%', justifyContent: 'center', fontSize: type.tMicro},
 });
 
 export const card = stylex.create({
@@ -132,6 +133,9 @@ export const card = stylex.create({
   },
   running: {borderColor: colors.accent, boxShadow: `0 0 0 1px ${colors.accentDim}`},
   blocked: {borderColor: colors.warningBorder},
+  // A chat's card is a link: the whole card opens the conversation.
+  link: {display: 'block', textDecoration: 'none', color: 'inherit', cursor: 'pointer'},
+  time: {fontSize: type.tMicro, color: colors.textFaint, alignSelf: 'center'},
 
   title: {fontSize: type.tUi, fontWeight: 600, color: colors.text, lineHeight: 1.35},
   meta: {

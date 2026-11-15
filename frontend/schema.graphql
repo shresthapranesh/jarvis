@@ -160,6 +160,48 @@ type AutomationStoppedEvent {
 	runId: String!
 }
 
+type Board {
+	"""
+	In column order: todo by priority, then age; every other column
+	newest first.
+	"""
+	items: [BoardItem!]!
+	"""
+	How many are done, before `doneLimit` cut the list.
+	"""
+	doneTotal: Int!
+}
+
+type BoardItem {
+	"""
+	The conversation's id — for a task, the one its runs answer in,
+	whether or not it has run yet.
+	"""
+	id: String!
+	"""
+	`todo`, `working`, `needs_me`, `blocked` or `done`.
+	"""
+	state: String!
+	title: String
+	lastActiveAt: DateTime!
+	"""
+	None for a task that has not run: it has no conversation to open.
+	"""
+	conversationId: String
+	"""
+	The run working in it now.
+	"""
+	runId: String
+	"""
+	What it is waiting on or why it stopped: the question, the error.
+	"""
+	reason: String
+	"""
+	The task behind the conversation; none for a chat.
+	"""
+	task: BoardTask
+}
+
 type BoardTask implements Node {
 	title: String!
 	body: String
@@ -265,6 +307,11 @@ type Conversation implements Node {
 	A sub-agent's conversation: the conversation whose agent spawned it.
 	"""
 	parent: Conversation
+	"""
+	The board task whose runs answer here (`surface = 'task'`); none for
+	any other conversation.
+	"""
+	boardTask: BoardTask
 	"""
 	The sub-agents its agent spawned, oldest first, each with where its
 	latest turn stands.
@@ -811,6 +858,11 @@ type Query {
 	automationRuns(automationId: ID!): [AutomationRun!]!
 	boardTasks(includeArchived: Boolean! = false): [BoardTask!]!
 	boardTask(id: ID!): BoardTask
+	"""
+	Chats and board tasks, each in the column of what it is doing. Done
+	keeps its `doneLimit` most recent.
+	"""
+	board(doneLimit: Int! = 20): Board!
 	workflows: [Workflow!]!
 	workflow(id: ID!): Workflow
 	workflowRuns(workflowId: ID!): [WorkflowRun!]!
