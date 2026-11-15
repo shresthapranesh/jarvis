@@ -186,6 +186,7 @@ export const control = stylex.create({
     transition: 'color 0.15s, border-color 0.15s, background 0.15s',
     padding: 0,
   },
+  ghostActive: {color: colors.accent, borderColor: colors.accentDim},
   // The icon's rotation is driven from the *button's* hover, which no selector
   // on the icon itself can see — so the button publishes it as a custom
   // property and the icon reads it. Same trick as `navIcon` below.
@@ -217,9 +218,6 @@ export const nav = stylex.create({
     flexDirection: 'column',
     gap: space.s4,
   },
-  // Below the conversations. It gives way before they do: on a short window
-  // this block scrolls rather than squeezing the list above it to nothing.
-  listSecondary: {flexShrink: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'thin'},
   listCollapsed: {paddingBlock: 6, paddingInline: 0, alignItems: 'center'},
   /* The one action the rail leads with. */
   newChat: {
@@ -264,23 +262,6 @@ export const nav = stylex.create({
     paddingBlock: `0 ${space.s2}`,
     paddingInline: 10,
   },
-  headingButton: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    // Tall enough for a finger where there is no pointer.
-    paddingBlock: {default: `0 ${space.s2}`, [bp.coarse]: 10},
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    fontFamily: 'inherit',
-    textAlign: 'start',
-    cursor: 'pointer',
-    color: {default: colors.textFaint, ':hover': colors.text},
-    transition: 'color 0.15s',
-  },
-  headingChevron: {transition: 'transform 0.18s ease'},
-  headingChevronFolded: {transform: 'rotate(-90deg)'},
   link: {
     position: 'relative',
     display: 'flex',
