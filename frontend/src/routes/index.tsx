@@ -24,10 +24,10 @@ const RECENT_LIMIT = 5;
 // the moment you would reach for it.
 const STARTING_POINTS = [
   {
-    to: '/board',
+    to: '/activity',
     Icon: KanbanIcon,
     title: 'Queue a task',
-    line: 'Put it on the board and the agent works through it on its own.',
+    line: 'Add it to Activity and the agent works through it on its own.',
   },
   {
     to: '/automation',
@@ -173,8 +173,8 @@ function IndexPage() {
                   );
                 })}
               </ul>
-              <Link to="/tasks" {...stylex.props(dispatch.more)}>
-                Everything running →
+              <Link to="/activity" {...stylex.props(dispatch.more)}>
+                All activity →
               </Link>
             </section>
           )}

@@ -1,14 +1,17 @@
 import * as stylex from '@stylexjs/stylex';
-import {Link} from '@tanstack/react-router';
-import {useCallback, useMemo, useState} from 'react';
+import {Link, type LinkProps} from '@tanstack/react-router';
+import {type ReactNode, useCallback, useMemo, useState} from 'react';
 import {useLazyLoadQuery} from 'react-relay';
 
 import type {BoardQuery as TBoardQuery} from '../__generated__/BoardQuery.graphql';
 import {useAsyncAction} from '../hooks/useAsyncAction';
 import {useBoardTaskEvents} from '../hooks/useBoardTaskEvents';
+import {usePendingApprovals} from '../hooks/usePendingApprovals';
 import {usePollingRefresh} from '../hooks/usePollingRefresh';
+import {refreshRunningTasks, useRunningTasks} from '../hooks/useRunningTasks';
 import {relativeTime} from '../lib/format';
-import type {BoardItem, BoardState, BoardTask} from '../lib/types';
+import {runLink} from '../lib/runLink';
+import type {BoardItem, BoardState, BoardTask, PendingApproval, RunningTask} from '../lib/types';
 import {commitAnswerBoardTask} from '../relay/AnswerBoardTaskMutation';
 import {boardQuery, DONE_PAGE, mapBoardItem, refreshBoard} from '../relay/BoardQuery';
 import {commitCreateBoardTask} from '../relay/CreateBoardTaskMutation';
@@ -16,8 +19,10 @@ import {commitDecomposeBoardTask} from '../relay/DecomposeBoardTaskMutation';
 import {commitDeleteBoardTask} from '../relay/DeleteBoardTaskMutation';
 import {commitSetBoardTaskStatus} from '../relay/SetBoardTaskStatusMutation';
 import {commitStopBoardTask} from '../relay/StopBoardTaskMutation';
+import {commitStopRunningTask} from '../relay/StopRunningTaskMutation';
 import {commitUpdateBoardTask} from '../relay/UpdateBoardTaskMutation';
 import {kf} from '../theme/keyframes.stylex';
+import {ApprovalControls} from './ApprovalControls';
 import {ConfirmDialog} from './ConfirmDialog';
 import {FormModal} from './FormModal';
 import {
@@ -39,10 +44,10 @@ import {
   parentDotStyle,
   parents,
 } from './TaskBoard.styles';
-import {btn, field, iconBtn, page, PageHeader, Switch} from './ui';
+import {btn, field, iconBtn, kindBadge, kindBadgeStyle, page, PageHeader, Switch} from './ui';
 
-// What a conversation is doing — a chat or a board task. Todo holds only
-// tasks: a chat exists once it has been sent.
+// What each piece of work is doing — a chat, a board task, an automation's or
+// a workflow's run. Todo holds only tasks: nothing else exists before it runs.
 const COLUMNS: Array<{key: BoardState; label: string}> = [
   {key: 'todo', label: 'Todo'},
   {key: 'working', label: 'Working'},
@@ -72,6 +77,22 @@ const EMPTY_DRAFT: Draft = {
 type Editor = {mode: 'add'} | {mode: 'edit'; task: BoardTask};
 
 const TAIL_CHARS = 280;
+
+/** Where a request came from, when that is a page: its workflow, its conversation. */
+function requestLink(a: PendingApproval): LinkProps | null {
+  if (a.source === 'workflow' && a.parent_id) {
+    return {to: '/workflow/$id', params: {id: a.parent_id}};
+  }
+  if (a.source === 'automation') return {to: '/automation'};
+  if (a.parent_id) return {to: '/c/$id', params: {id: a.parent_id}};
+  return null;
+}
+
+const RUN_LABEL: Record<string, string> = {
+  chat: 'chat',
+  automation: 'automation',
+  workflow: 'workflow',
+};
 
 // The old rules reached this through `.board-col--running .board-col-head
 // span:first-child`. The column already knows its key, so the tint is applied
@@ -145,6 +166,40 @@ export function TaskBoard() {
   );
 
   const refresh = useCallback(() => refreshBoard(doneLimit), [doneLimit]);
+
+  // The runs and the requests the shell already polls. A request joins the
+  // card of what asked it — a chat, a task — and one with no card here (a
+  // workflow's, an automation's, a deferred action) gets a card of its own.
+  const running = useRunningTasks();
+  const approvals = usePendingApprovals();
+  const {asked, loose, runs} = useMemo(() => {
+    const ids = new Set(items.map((i) => i.id));
+    const taskIds = new Set(tasks.map((t) => t.id));
+    const asked = new Map<string, PendingApproval[]>();
+    const loose: PendingApproval[] = [];
+    for (const a of approvals) {
+      // A task's own question is the answer box on its card.
+      if (a.board_task_id && taskIds.has(a.board_task_id)) continue;
+      if (!a.deferred && a.parent_id && ids.has(a.parent_id)) {
+        asked.set(a.parent_id, [...(asked.get(a.parent_id) ?? []), a]);
+      } else {
+        loose.push(a);
+      }
+    }
+    // Runs with no card: an automation's, a workflow's, a chat that is not
+    // listed (incognito, a bot's). A task's run and a sub-agent's turn are
+    // its task's and its parent's.
+    const runs = running.filter(
+      (r) =>
+        !r.done &&
+        r.kind !== 'board_task' &&
+        (r.kind as string) !== 'subagent' &&
+        !(r.parent_id && ids.has(r.parent_id)) &&
+        // Stopped on a request shown as a card of its own.
+        !(r.has_interrupt && loose.some((a) => a.parent_id && a.parent_id === r.parent_id)),
+    );
+    return {asked, loose, runs};
+  }, [items, tasks, approvals, running]);
 
   // Cards move on their own — the dispatcher promotes and claims tasks server
   // side — so the board polls regardless of what this user is doing.
@@ -251,6 +306,15 @@ export function TaskBoard() {
     {onError: (e) => setActionError(e.message)},
   );
 
+  // A chat's turn or a run with no task behind it: stopped by its run id.
+  const stopRunAction = useAsyncAction(
+    async (runId: string) => {
+      await commitStopRunningTask(runId);
+      await Promise.all([refreshRunningTasks(), refresh()]);
+    },
+    {onError: (e) => setActionError(e.message)},
+  );
+
   const deleteAction = useAsyncAction(
     async (id: string) => {
       await commitDeleteBoardTask(id);
@@ -276,7 +340,7 @@ export function TaskBoard() {
 
   // Done is counted whole, not by the cards the cut left on screen.
   function countIn(state: BoardState): number {
-    return state === 'done' ? doneTotal : items.filter((i) => i.state === state).length;
+    return state === 'done' ? doneTotal : columns.get(state)!.length;
   }
 
   function waitingOn(t: BoardTask): string[] {
@@ -286,40 +350,135 @@ export function TaskBoard() {
       .map((p) => p.title);
   }
 
-  // A chat: the card is the way into the conversation.
-  function renderChat(item: BoardItem) {
+  // A chat: its title is the way into the conversation.
+  function renderChat(item: BoardItem, state: BoardState) {
+    const requests = asked.get(item.id) ?? [];
     return (
-      <li key={item.id}>
-        <Link
-          to="/c/$id"
-          params={{id: item.id}}
-          {...stylex.props(
-            card.root,
-            card.link,
-            item.state === 'working' && card.running,
-            (item.state === 'needs_me' || item.state === 'blocked') && card.blocked,
-          )}
-        >
-          <div {...stylex.props(card.title)}>{item.title || 'Untitled chat'}</div>
-          <div {...stylex.props(card.meta)}>
-            <span {...stylex.props(chip.base)}>chat</span>
-            <span {...stylex.props(card.time)}>{relativeTime(item.last_active_at)}</span>
-          </div>
-          {item.reason && (
-            <p {...stylex.props(card.reason, item.state === 'needs_me' && card.reasonQuestion)}>
-              {item.reason}
-            </p>
-          )}
+      <li
+        key={item.id}
+        {...stylex.props(
+          card.root,
+          state === 'working' && card.running,
+          (state === 'needs_me' || state === 'blocked') && card.blocked,
+        )}
+      >
+        <Link to="/c/$id" params={{id: item.id}} {...stylex.props(card.title, card.link)}>
+          {item.title || 'Untitled chat'}
         </Link>
+        <div {...stylex.props(card.meta)}>
+          <span {...stylex.props(chip.base)}>chat</span>
+          <span {...stylex.props(card.time)}>{relativeTime(item.last_active_at)}</span>
+        </div>
+        {requests.length === 0 && item.reason && (
+          <p {...stylex.props(card.reason, state === 'needs_me' && card.reasonQuestion)}>
+            {item.reason}
+          </p>
+        )}
+        {requests.map(renderRequest)}
+        {state === 'working' && item.run_id && (
+          <div {...stylex.props(card.actions)}>{stopButton(item.run_id)}</div>
+        )}
       </li>
     );
   }
 
-  function renderItem(item: BoardItem) {
-    return item.task ? renderCard(item.task) : renderChat(item);
+  // A request on the card of what asked it: the question, then the answer.
+  function renderRequest(a: PendingApproval) {
+    return (
+      <div key={a.id}>
+        <p {...stylex.props(card.reason, card.reasonQuestion)}>{a.question}</p>
+        <ApprovalControls approval={a} onResolved={() => void refresh()} />
+      </div>
+    );
   }
 
-  function renderCard(t: BoardTask) {
+  function stopButton(runId: string) {
+    return (
+      <button
+        {...stylex.props(iconBtn.base, iconBtn.danger)}
+        title="Stop run"
+        disabled={stopRunAction.pending}
+        onClick={() => void stopRunAction.run(runId)}
+      >
+        <StopIcon size={13} />
+      </button>
+    );
+  }
+
+  // A request with no card of its own: what asks, the question, the answer.
+  function renderLoose(a: PendingApproval) {
+    const link = requestLink(a);
+    return (
+      <li key={a.id} {...stylex.props(card.root, card.blocked)}>
+        <div {...stylex.props(card.title)}>{a.label}</div>
+        <div {...stylex.props(card.meta)}>
+          <span {...stylex.props(kindBadge.base, kindBadgeStyle(a.source))}>{a.source}</span>
+          {a.deferred && (
+            <span
+              {...stylex.props(chip.base)}
+              title="Nothing is blocked — approving is what runs it"
+            >
+              runs on approval
+            </span>
+          )}
+          <span {...stylex.props(card.time)}>{relativeTime(a.requested_at)}</span>
+        </div>
+        <p {...stylex.props(card.reason, card.reasonQuestion)}>{a.question}</p>
+        <ApprovalControls approval={a} onResolved={() => void refresh()} />
+        {link && (
+          <div {...stylex.props(card.actions)}>
+            <Link {...link} {...stylex.props(card.transcript)} title="Open what asked">
+              open
+            </Link>
+          </div>
+        )}
+      </li>
+    );
+  }
+
+  // A run with no conversation on the board: an automation's, a workflow's.
+  function renderRun(r: RunningTask) {
+    const link = runLink(r);
+    return (
+      <li key={r.id} {...stylex.props(card.root, !r.has_interrupt && card.running)}>
+        <div {...stylex.props(card.title)}>{r.label || 'Untitled run'}</div>
+        <div {...stylex.props(card.meta)}>
+          <span {...stylex.props(kindBadge.base, kindBadgeStyle(r.kind))}>
+            {RUN_LABEL[r.kind] ?? r.kind}
+          </span>
+          <span {...stylex.props(card.time)}>{relativeTime(r.started_at)}</span>
+          {r.cancelled && <span {...stylex.props(chip.base)}>stopping…</span>}
+        </div>
+        <div {...stylex.props(card.actions)}>
+          {!r.cancelled && stopButton(r.id)}
+          {link && (
+            <Link {...link} {...stylex.props(card.transcript)} title="Open the run">
+              open
+            </Link>
+          )}
+        </div>
+      </li>
+    );
+  }
+
+  // A request on a card moves it to Needs me, whatever its run is doing.
+  function stateOf(item: BoardItem): BoardState {
+    return asked.has(item.id) ? 'needs_me' : item.state;
+  }
+
+  // Each column's cards: requests with no card of their own lead Needs me,
+  // and runs with none follow the conversations in theirs.
+  const columns = new Map<BoardState, ReactNode[]>(COLUMNS.map((c) => [c.key, []]));
+  for (const a of loose) {
+    columns.get('needs_me')!.push(renderLoose(a));
+  }
+  for (const item of items) {
+    const state = stateOf(item);
+    columns.get(state)!.push(item.task ? renderCard(item.task, item) : renderChat(item, state));
+  }
+  for (const r of runs) columns.get(r.has_interrupt ? 'needs_me' : 'working')!.push(renderRun(r));
+
+  function renderCard(t: BoardTask, item: BoardItem) {
     const pendingParents = t.status === 'todo' ? waitingOn(t) : [];
     return (
       <li
@@ -365,6 +524,7 @@ export function TaskBoard() {
           <AnswerBox taskId={t.id} onAnswered={refresh} />
         )}
         {t.status === 'done' && t.summary && <p {...stylex.props(card.summary)}>{t.summary}</p>}
+        {(asked.get(item.id) ?? []).map(renderRequest)}
         <div {...stylex.props(card.actions)}>
           {(t.status === 'todo' || t.status === 'blocked') && (
             <button
@@ -453,13 +613,16 @@ export function TaskBoard() {
   return (
     <div {...stylex.props(board.page)}>
       <PageHeader
-        title="Board"
-        subtitle="Every chat and background task, by what it is doing."
+        title="Activity"
+        subtitle="Everything the agent is doing, and what is waiting on you."
         details={
           <>
-            A chat appears here once it is sent. A task waits in <strong>Todo</strong>: queued ones
-            are picked up automatically, and one that depends on others waits until they finish,
-            then gets their summaries as context. The agent can add tasks here too.
+            Chats, tasks and the runs of automations and workflows, each in the column of what it is
+            doing. <strong>Needs me</strong> holds every question and approval: answer it on its
+            card. A task waits in <strong>Todo</strong>: queued ones are picked up automatically,
+            and one that depends on others waits until they finish, then gets their summaries as
+            context. A paused workflow does not survive a restart; its request is dropped when the
+            server starts.
           </>
         }
         actions={
@@ -491,7 +654,7 @@ export function TaskBoard() {
       {
         <div {...stylex.props(board.columns)}>
           {COLUMNS.map((col) => {
-            const cards = items.filter((i) => i.state === col.key);
+            const cards = columns.get(col.key)!;
             const hidden = col.key === 'done' ? doneTotal - cards.length : 0;
             return (
               <section
@@ -504,7 +667,7 @@ export function TaskBoard() {
                 </header>
                 <ul {...stylex.props(board.cards)}>
                   {cards.length > 0 ? (
-                    cards.map(renderItem)
+                    cards
                   ) : (
                     <li {...stylex.props(board.emptyCol)}>Nothing here</li>
                   )}

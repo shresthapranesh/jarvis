@@ -9,7 +9,7 @@ import type {RunningTask} from './types';
  */
 export function runLink(task: RunningTask): LinkProps | null {
   const parent = task.parent_id;
-  if (!parent) return task.kind === 'board_task' ? {to: '/board'} : null;
+  if (!parent) return task.kind === 'board_task' ? {to: '/activity'} : null;
   // A board task's run answers in the task's own conversation.
   if (task.kind === 'board_task') return {to: '/c/$id', params: {id: `boardtask_${parent}`}};
   if (task.kind === 'chat') return {to: '/c/$id', params: {id: parent}};
