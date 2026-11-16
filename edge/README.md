@@ -190,7 +190,15 @@ port of `core/kernels.py`;
   characters), a 60 s timeout that interrupts (SIGINT to the group) and keeps
   the session, held while a tool approval for the conversation is open (the
   `approvals` row, up to 30 minutes), 12 live kernels at most (least recently
-  used goes), and one idle 30 minutes reaped (checked every 10).
+  used goes), and one idle 30 minutes reaped.
+- **The edge's own**: `run_cell` takes a `timeout` (1–600 s); a timed-out
+  result says how to give work more room. The cap and the idle timeout are
+  `JARVIS_MAX_KERNELS` / `JARVIS_KERNEL_IDLE_TIMEOUT`; a sub-agent's kernel
+  goes after `JARVIS_SUBAGENT_KERNEL_IDLE_TIMEOUT` (300 s) once no job of its
+  conversation is pending or running; the reaper never takes one with a cell
+  in it, and the cap takes an idle one before a busy one. The reaper checks every
+  half of the shorter timeout (at most 10 minutes). A kernel started again
+  after cells ran in its last one says so on its first cell.
 - **A cell whose run stops** is interrupted; the session's next cell first
   waits for that interrupt to land. A request the kernel receives before it
   has raised is aborted (`stop_on_error`) and would read as no output at all

@@ -1,11 +1,15 @@
 [
  {
   "name": "run_cell",
-  "description": "Run Python in this conversation's stateful IPython kernel; returns its output.\n\nVariables and imports persist across calls, like Jupyter cells. The last\nexpression is echoed (no print needed). 60s timeout; state survives it.\nPreloaded: search(query), read(url), jarvis SDK (`jarvis.help()`).",
+  "description": "Run Python in this conversation's stateful IPython kernel; returns its output.\n\nVariables and imports persist across calls, like Jupyter cells. The last\nexpression is echoed (no print needed). Interrupted after `timeout`\nseconds (default 60, at most 600); state survives it.\nPreloaded: search(query), read(url), jarvis SDK (`jarvis.help()`).",
   "parameters": {
    "properties": {
     "code": {
      "type": "string"
+    },
+    "timeout": {
+     "default": 60,
+     "type": "integer"
     }
    },
    "required": [

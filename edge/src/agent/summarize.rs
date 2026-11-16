@@ -238,10 +238,10 @@ mod tests {
         // core.agents._schema_tokens over the main agent's tools as Python
         // bound them — a workflow agent node's now (952 in Python;
         // write_artifact's description has since grown by 9 chars,
-        // remember gained its topic, and spawn_workers' says its workers
-        // have no roles)
+        // remember gained its topic, spawn_workers' says its workers have
+        // no roles, and run_cell gained its timeout)
         let none = crate::mcp::Snapshot { default_mode: crate::mcp::config::ALWAYS, ..Default::default() };
         let tools = crate::agent::tools::bound_for(&crate::agent::tools::Policy::default(), false, false, &none);
-        assert_eq!(schema_tokens(&tools.schemas), 1030);
+        assert_eq!(schema_tokens(&tools.schemas), 1055);
     }
 }

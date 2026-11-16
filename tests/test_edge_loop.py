@@ -619,6 +619,18 @@ _REWORDED = re.compile(r"^(?:- (?:Only write text when giving your FINAL answer\
 _WEB_AND_SDK = re.compile(r"^  read(?:_many)?\([^\n]*\n|, read_many(?=; import tools\.sdk)"
                           r"|^2\. Pick the 2–3 most promising URLs[^\n]*\n"
                           r"| (?:Don't guess a signature|A call with wrong arguments)[^\n]*", re.M)
+# The edge's own too: a cell's `timeout` (`run_cell`'s argument, its
+# description, the prompt's paragraph on long work, which names `jarvis.start_job`).
+_CELL_TIME = re.compile(r"^Each cell gets 60 seconds[^\n]*\n", re.M)
+_CELL_TIMEOUT_DOC = re.compile(r"(?<=\(no print needed\)\. ).*?(?=\nPreloaded:)", re.S)
+
+
+def _without_cell_timeout(tools: list[dict]) -> None:
+    for t in tools:
+        f = t["function"]
+        if f["name"] == "run_cell":
+            f["description"] = _CELL_TIMEOUT_DOC.sub("", f["description"])
+            f["parameters"]["properties"].pop("timeout", None)
 
 
 def _requests(python: list[dict], edge: list[dict]) -> None:
@@ -635,9 +647,10 @@ def _requests(python: list[dict], edge: list[dict]) -> None:
         for side, own in ((p, {"spawn_workers"}), (e, {"run_agents", "check_agents"})):
             if "tools" in side:
                 side["tools"] = [t for t in side["tools"] if t["function"]["name"] not in own]
+                _without_cell_timeout(side["tools"])
             for m in side["messages"]:
                 if m["role"] == "system" and isinstance(m.get("content"), str):
-                    m["content"] = _WEB_AND_SDK.sub("", _REWORDED.sub("", _TODAY.sub("", _DELEGATING.sub("", m["content"]))))
+                    m["content"] = _CELL_TIME.sub("", _WEB_AND_SDK.sub("", _REWORDED.sub("", _TODAY.sub("", _DELEGATING.sub("", m["content"])))))
         assert e["messages"] == p["messages"]
         assert [t["function"]["name"] for t in e.get("tools", [])] == [t["function"]["name"] for t in p.get("tools", [])]
         for et, pt in zip(e.get("tools", []), p.get("tools", [])):

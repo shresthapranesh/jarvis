@@ -1348,7 +1348,7 @@ impl<'a> Turn<'a> {
     /// the model is told of (`tool_failed`).
     async fn run_native(&mut self, thread: &mut Thread, native: Native) -> Result<Content, String> {
         match native {
-            Native::RunCell { code } => self.run_cell(thread, &code).await,
+            Native::RunCell { code, timeout } => self.run_cell(thread, &code, timeout).await,
             other => self.run_text_tool(thread, other).await.map(Content::Text),
         }
     }
@@ -1357,10 +1357,10 @@ impl<'a> Turn<'a> {
     /// the text as image parts, their bytes `transcript_blobs` rows, when
     /// the model reads images in a tool result and the call has room for
     /// them (`image_room`); otherwise each is a line of the text.
-    async fn run_cell(&mut self, thread: &mut Thread, code: &str) -> Result<Content, String> {
+    async fn run_cell(&mut self, thread: &mut Thread, code: &str, timeout: std::time::Duration) -> Result<Content, String> {
         let cell = crate::kernels::Cell {
             code,
-            timeout: tools::CELL_TIMEOUT,
+            timeout,
             conversation_id: self.conversation.as_deref(),
             project_id: self.project_id.as_deref(),
         };

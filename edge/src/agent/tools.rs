@@ -150,7 +150,7 @@ impl Toolset {
 /// A call the edge runs itself, its arguments checked.
 #[derive(Debug, PartialEq)]
 pub enum Native {
-    RunCell { code: String },
+    RunCell { code: String, timeout: Duration },
     WriteTodos { todos: Vec<String> },
     SetTodoStatus { index: i64, status: String },
     Remember { text: String, kind: String, topic: Option<String> },
@@ -276,7 +276,7 @@ fn native(name: &str, args: &Value) -> Result<Native, String> {
     };
     let mut a = Args::new(obj);
     let call = match name {
-        "run_cell" => Native::RunCell { code: a.str("code") },
+        "run_cell" => Native::RunCell { code: a.str("code"), timeout: a.cell_timeout() },
         "write_todos" => Native::WriteTodos { todos: a.str_list("todos") },
         "set_todo_status" => {
             Native::SetTodoStatus { index: a.int("index"), status: a.choice("status", &["pending", "in_progress", "done"]) }
@@ -456,6 +456,15 @@ impl<'v> Args<'v> {
         }
     }
 
+    /// `run_cell`'s `timeout`: whole seconds, `CELL_TIMEOUT` when absent,
+    /// held between 1 s and `kernels::MAX_TIMEOUT` rather than refused.
+    pub fn cell_timeout(&mut self) -> Duration {
+        match self.opt_int("timeout") {
+            None => CELL_TIMEOUT,
+            Some(secs) => Duration::from_secs(secs.clamp(1, crate::kernels::MAX_TIMEOUT.as_secs() as i64) as u64),
+        }
+    }
+
     /// A string that must be one of `choices`.
     pub fn choice(&mut self, key: &str, choices: &[&str]) -> String {
         let value = self.str(key);
@@ -606,7 +615,7 @@ fn py_repr_str(s: &str) -> String {
     format!("'{s}'")
 }
 
-/// `DEFAULT_CELL_TIMEOUT`.
+/// `DEFAULT_CELL_TIMEOUT`: a cell's when `run_cell` gives no `timeout`.
 pub const CELL_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(test)]
@@ -630,7 +639,7 @@ mod tests {
             &tools,
             &policy,
         );
-        assert_eq!(steps[0], Step::Run(Native::RunCell { code: "1".into() }));
+        assert_eq!(steps[0], Step::Run(Native::RunCell { code: "1".into(), timeout: CELL_TIMEOUT }));
         assert_eq!(
             steps[1],
             Step::Refused(
@@ -652,7 +661,17 @@ mod tests {
             Step::Run(Native::RunWorkflow { workflow_id: "w".into(), inputs_json: None })
         );
         // Pydantic's lax reading: extra keys ignored, a numeric string an integer.
-        assert_eq!(plan_one(call("run_cell", json!({"code": "1", "extra": true})), &tools, &policy), Step::Run(Native::RunCell { code: "1".into() }));
+        assert_eq!(
+            plan_one(call("run_cell", json!({"code": "1", "extra": true})), &tools, &policy),
+            Step::Run(Native::RunCell { code: "1".into(), timeout: CELL_TIMEOUT })
+        );
+        // A cell's own timeout, held between a second and the ceiling.
+        let timeout = |t: Value| match plan_one(call("run_cell", json!({"code": "1", "timeout": t})), &tools, &policy) {
+            Step::Run(Native::RunCell { timeout, .. }) => timeout.as_secs(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((timeout(json!(300)), timeout(json!("90")), timeout(json!(null))), (300, 90, 60));
+        assert_eq!((timeout(json!(5000)), timeout(json!(0)), timeout(json!(-3))), (600, 1, 1));
         assert_eq!(
             plan_one(call("set_todo_status", json!({"index": "2", "status": "done"})), &tools, &policy),
             Step::Run(Native::SetTodoStatus { index: 2, status: "done".into() })
@@ -722,6 +741,7 @@ mod tests {
         );
         assert!(refused(call("write_todos", json!({"todos": ["a", 2]}))).contains("todos.1: Input should be a valid string"));
         assert!(refused(call("run_cell", json!("print(1)"))).contains("Input should be a valid dictionary"));
+        assert!(refused(call("run_cell", json!({"code": "1", "timeout": "long"}))).contains("timeout: Input should be a valid integer"));
     }
 
     fn plan_one(c: ToolCall, tools: &Toolset, policy: &Policy) -> Step {
@@ -741,7 +761,7 @@ mod tests {
         let tools = bound_for(&policy, false, true, &no_mcp());
         assert!(!tools.schemas.iter().any(|t| t.name == "remember"));
         let gated = plan_one(call("run_cell", json!({"code": "1"})), &tools, &policy);
-        assert_eq!(gated, Step::Gated(Native::RunCell { code: "1".into() }));
+        assert_eq!(gated, Step::Gated(Native::RunCell { code: "1".into(), timeout: CELL_TIMEOUT }));
     }
 
     #[test]

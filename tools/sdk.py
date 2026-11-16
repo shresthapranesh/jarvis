@@ -1192,6 +1192,181 @@ def _policed(fn):
     return wrapper
 
 
+# ── Jobs ──────────────────────────────────────────────────────────────────────
+# Shell commands too long for a cell, run detached from the kernel: each in a
+# session of its own, so an interrupted cell or a restarted kernel doesn't
+# take it down. Local process management, not a server write, so nothing here
+# goes through the API. Under `$WORK_DIR/jobs`, a job is `<id>.json` (what was
+# started), `<id>.log` (its stdout and stderr) and `<id>.exit` (its exit code,
+# written by the shell that ran it) — files, so a restarted kernel finds them.
+
+_JOB_TAIL_BYTES = 64_000
+_job_procs: dict[str, Any] = {}
+
+
+def _jobs_dir() -> Path:
+    return _work_dir() / "jobs"
+
+
+def _job_record(job_id: str) -> dict:
+    path = _jobs_dir() / f"{job_id}.json"
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        raise ValueError(f"No job {job_id!r} — see jarvis.list_jobs().") from None
+
+
+def _job_alive(record: dict) -> bool:
+    proc = _job_procs.get(record["id"])
+    if proc is not None:
+        return proc.poll() is None  # reaps it once it has exited
+    try:
+        os.kill(record["pid"], 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _job_state(record: dict, lines: int | None) -> dict:
+    jobs = _jobs_dir()
+    exit_file = jobs / f"{record['id']}.exit"
+    out = {k: record.get(k) for k in ("id", "name", "command", "pid", "started_at", "log")}
+    exit_code = None
+    ended = None
+    if exit_file.exists():
+        try:
+            exit_code = int(exit_file.read_text().strip())
+        except ValueError:
+            pass
+        ended = exit_file.stat().st_mtime
+        status = "exited"
+    elif record.get("stopped_at"):
+        status, ended = "stopped", record["stopped_at"]
+    elif _job_alive(record):
+        status = "running"
+    else:
+        status = "gone"  # ended without a word — killed, or the machine restarted
+    out.update(status=status, exit_code=exit_code)
+    out["elapsed"] = round((ended or time.time()) - record["started_at"], 1)
+    if lines:
+        try:
+            with open(record["log"], "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - _JOB_TAIL_BYTES))
+                text = f.read().decode("utf-8", errors="replace")
+            out["tail"] = "\n".join(text.splitlines()[-lines:])
+        except OSError:
+            out["tail"] = ""
+    return out
+
+
+def start_job(command: str | list[str], name: str | None = None) -> str:
+    """Start a shell command in the background and return its job id at once.
+
+    For work longer than a cell's timeout — a big download, a build, a
+    training run. It runs in the kernel's working directory, in a session of
+    its own (interrupts and kernel restarts don't stop it), stdout and stderr
+    going to a log file. Check on it with job(id); stop it with stop_job(id).
+
+    Args:
+        command: A shell command line, or a list of arguments (quoted for you).
+        name: A short label to tell it by in list_jobs().
+    """
+    import shlex
+    import subprocess
+
+    if not isinstance(command, str):
+        command = shlex.join(str(a) for a in command)
+    if not command.strip():
+        raise ValueError("command is empty")
+    jobs = _jobs_dir()
+    jobs.mkdir(parents=True, exist_ok=True)
+    job_id = uuid4().hex[:8]
+    log, exit_file = jobs / f"{job_id}.log", jobs / f"{job_id}.exit"
+    # The subshell keeps an `exit` in the command from skipping the exit code.
+    script = f"(\n{command}\n)\nprintf '%s' \"$?\" > {shlex.quote(str(exit_file))}\n"
+    with open(log, "ab") as out:
+        proc = subprocess.Popen(
+            ["/bin/sh", "-c", script],
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    _job_procs[job_id] = proc
+    record = {
+        "id": job_id,
+        "name": name or command[:60],
+        "command": command,
+        "pid": proc.pid,
+        "cwd": os.getcwd(),
+        "log": str(log),
+        "started_at": time.time(),
+        "conversation_id": _conversation_id,
+    }
+    (jobs / f"{job_id}.json").write_text(json.dumps(record))
+    return job_id
+
+
+def job(job_id: str, lines: int = 20) -> dict:
+    """Where a job stands, and the last `lines` lines of its log.
+
+    Returns {id, name, command, pid, status, exit_code, elapsed, log, tail}:
+    status is "running", "exited" (exit_code says how), "stopped" (by
+    stop_job) or "gone" (ended without an exit code — killed, or the machine
+    restarted). elapsed is seconds since it started, until it ended. The full
+    log is the file at `log`.
+    """
+    return _job_state(_job_record(job_id), lines)
+
+
+def stop_job(job_id: str, grace: float = 5.0) -> dict:
+    """Stop a running job and everything it started.
+
+    SIGTERM, then SIGKILL after `grace` seconds. Returns job(job_id).
+    """
+    import signal
+
+    record = _job_record(job_id)
+    if _job_state(record, None)["status"] == "running":
+        pgid = record["pid"]  # its own session, so its own process group
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+            deadline = time.time() + grace
+            while time.time() < deadline and _job_alive(record):
+                time.sleep(0.1)
+            if _job_alive(record):
+                os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        _job_alive(record)  # reap it, if it was ours
+        if not (_jobs_dir() / f"{job_id}.exit").exists():
+            record["stopped_at"] = time.time()
+            (_jobs_dir() / f"{job_id}.json").write_text(json.dumps(record))
+    return _job_state(record, 20)
+
+
+def list_jobs(all_conversations: bool = False) -> list[dict]:
+    """Jobs started with start_job, newest first.
+
+    This conversation's, or every conversation's with all_conversations=True;
+    each as job() gives it, without the log's tail.
+    """
+    jobs = _jobs_dir()
+    records = []
+    for path in (jobs.glob("*.json") if jobs.is_dir() else []):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if all_conversations or not _conversation_id or record.get("conversation_id") == _conversation_id:
+            records.append(record)
+    records.sort(key=lambda r: r.get("started_at", 0), reverse=True)
+    return [_job_state(r, None) for r in records]
+
+
 # ── Discovery ─────────────────────────────────────────────────────────────────
 
 _CATEGORIES: dict[str, tuple[str, list]] = {
@@ -1233,6 +1408,10 @@ _CATEGORIES: dict[str, tuple[str, list]] = {
     "mcp": (
         "external MCP tool servers loaded on demand",
         [mcp_servers, mcp_tools, mcp_help, mcp_call],
+    ),
+    "jobs": (
+        "shell commands too long for a cell, run in the background with a log",
+        [start_job, job, stop_job, list_jobs],
     ),
 }
 
