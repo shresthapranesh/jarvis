@@ -1138,9 +1138,38 @@ def _enforce_policy(fn_name: str, args: dict) -> None:
         raise RuntimeError(_denial(f"jarvis.{fn_name}", answer))
 
 
+def _usage(fn, signature, problem: Exception, kw: dict) -> str:
+    """A wrong call's error, worded so the agent can fix it in one step: what
+    was wrong, the real signature, and the head of the docstring `help()` shows.
+
+    A misspelt keyword is named first, as Python names it — `bind` would
+    report the required argument it left missing instead."""
+    import inspect
+
+    params = signature.parameters
+    unknown = [] if any(p.kind is p.VAR_KEYWORD for p in params.values()) else [
+        k for k in kw if k not in params or params[k].kind is inspect.Parameter.POSITIONAL_ONLY
+    ]
+    if unknown:
+        which = "unexpected keyword arguments" if len(unknown) > 1 else "an unexpected keyword argument"
+        problem_text = f"got {which} {', '.join(map(repr, unknown))}"
+    else:
+        problem_text = str(problem)
+    name = f"jarvis.{fn.__name__}"
+    lines = [f"{name}(): {problem_text}", f"Usage: {name}{signature}"]
+    doc = (inspect.getdoc(fn) or "").split("\n\n", 1)[0].strip()
+    lines += [f"    {line}" for line in doc.splitlines()[:2]]
+    return "\n".join(lines)
+
+
 def _policed(fn):
     """Wrap one SDK function with its policy check, preserving its signature —
-    `help()` renders from `inspect.signature`, so the wrapper must be transparent."""
+    `help()` renders from `inspect.signature`, so the wrapper must be transparent.
+
+    A call whose arguments don't fit the signature raises a TypeError carrying
+    the signature and docstring head (`_usage`), checked with `bind` before the
+    function runs — so a TypeError raised from inside the function is its own
+    and passes through untouched."""
     import functools
     import inspect
 
@@ -1154,6 +1183,10 @@ def _policed(fn):
         except TypeError:
             shown = dict(kw)
         _enforce_policy(fn.__name__, shown)
+        try:
+            signature.bind(*a, **kw)
+        except TypeError as exc:
+            raise TypeError(_usage(fn, signature, exc, kw)) from None
         return fn(*a, **kw)
 
     return wrapper

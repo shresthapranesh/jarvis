@@ -17,9 +17,9 @@ import subprocess
 __all__: list[str] = ["datetime", "subprocess"]
 
 try:
-    from tools.research import read, search
+    from tools.research import read, read_many, search
 
-    __all__ += ["search", "read"]
+    __all__ += ["search", "read", "read_many"]
 except Exception:
     pass
 try:

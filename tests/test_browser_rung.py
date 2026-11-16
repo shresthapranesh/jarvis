@@ -18,6 +18,29 @@ import pytest
 from tools import browser, research
 
 
+@pytest.fixture(autouse=True)
+def _no_cached_reads():
+    """Every test here reads the same URL; a cached read would skip the rungs."""
+    research._cache_clear()
+    yield
+    research._cache_clear()
+
+
+def _html(*a, **k) -> research._Body:
+    return research._Body("html", "text/html", b"<html/>", "utf-8", 7, True)
+
+
+def _refused(message: str):
+    def fetch(*a, **k):
+        raise research.httpx.ConnectError(message)
+
+    return fetch
+
+
+def _no_http(why: str):
+    return lambda *a, **k: pytest.fail(why)
+
+
 # ── Executable resolution ────────────────────────────────────────────────────
 
 def test_configured_executable_wins_over_probe(monkeypatch, tmp_path):
@@ -100,13 +123,7 @@ def test_handoff_is_skipped_when_there_is_nobody_to_ask(monkeypatch):
 
 def test_browser_rung_is_not_reached_when_the_cheap_one_worked(monkeypatch):
     monkeypatch.setattr(research, "_extract", lambda html, url: "x" * 5_000)
-
-    class _Resp:
-        text = "<html/>"
-
-        def raise_for_status(self) -> None: ...
-
-    monkeypatch.setattr(research.httpx, "get", lambda *a, **k: _Resp())
+    monkeypatch.setattr(research, "_fetch", _html)
     monkeypatch.setattr(
         research, "_read_cdp", lambda url: pytest.fail("escalated on a page that read fine")
     )
@@ -114,27 +131,20 @@ def test_browser_rung_is_not_reached_when_the_cheap_one_worked(monkeypatch):
 
 
 def test_browser_rung_runs_when_the_plain_fetch_comes_back_empty(monkeypatch):
-    def _fail(*a, **k):
-        raise research.httpx.ConnectError("blocked")
-
-    monkeypatch.setattr(research.httpx, "get", _fail)
+    monkeypatch.setattr(research, "_fetch", _refused("blocked"))
     monkeypatch.setattr(research, "_read_cdp", lambda url: "the real article text " * 40)
     assert "the real article text" in research.read("https://example.com")
 
 
 def test_browser_true_skips_straight_to_the_last_rung(monkeypatch):
-    monkeypatch.setattr(
-        research.httpx, "get", lambda *a, **k: pytest.fail("browser=True must not fetch over http")
-    )
+    monkeypatch.setattr(research, "_fetch", _no_http("browser=True must not fetch over http"))
     monkeypatch.setattr(research, "_read_cdp", lambda url: "from the real browser " * 40)
     assert "from the real browser" in research.read("https://example.com", browser=True)
 
 
 def test_every_rung_failing_reports_what_broke(monkeypatch):
-    def _fail(*a, **k):
-        raise research.httpx.ConnectError("connection refused")
+    monkeypatch.setattr(research, "_fetch", _refused("connection refused"))
 
-    monkeypatch.setattr(research.httpx, "get", _fail)
     def _no_browser(url):
         raise browser.BrowserUnavailable("no display available")
 
@@ -149,11 +159,7 @@ def test_every_rung_failing_reports_what_broke(monkeypatch):
 def test_failed_read_names_the_way_past_a_block(monkeypatch):
     """The only mention of the browser when none is running — the "Live
     browser" segment is absent then, and both suggestions launch one."""
-
-    def _fail(*a, **k):
-        raise research.httpx.ConnectError("refused")
-
-    monkeypatch.setattr(research.httpx, "get", _fail)
+    monkeypatch.setattr(research, "_fetch", _refused("refused"))
     monkeypatch.setattr(research, "_read_cdp", lambda url: "")
     out = research.read("https://example.com")
     assert "browser=True" in out
@@ -169,11 +175,7 @@ def test_an_explicit_browser_read_does_not_suggest_itself(monkeypatch):
 def test_rung_errors_are_capped(monkeypatch):
     """Playwright answers a missing binary with a multi-line ASCII box; uncapped
     it spends hundreds of tokens telling the agent nothing actionable."""
-
-    def _fail(*a, **k):
-        raise research.httpx.ConnectError("x" * 4000)
-
-    monkeypatch.setattr(research.httpx, "get", _fail)
+    monkeypatch.setattr(research, "_fetch", _refused("x" * 4000))
     monkeypatch.setattr(research, "_read_cdp", lambda url: "")
     out = research.read("https://example.com")
     assert len(out) < 800
@@ -217,9 +219,7 @@ def test_read_never_launches_a_browser_itself():
 
 def test_js_still_forces_the_browser(monkeypatch):
     """Older callers (and any conversation history) say js=True."""
-    monkeypatch.setattr(
-        research.httpx, "get", lambda *a, **k: pytest.fail("js=True must not fetch over http")
-    )
+    monkeypatch.setattr(research, "_fetch", _no_http("js=True must not fetch over http"))
     monkeypatch.setattr(research, "_read_cdp", lambda url: "rendered text " * 40)
     assert "rendered text" in research.read("https://example.com", js=True)
 
