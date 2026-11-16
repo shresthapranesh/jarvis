@@ -2,8 +2,8 @@
 //! `model_request_node`'s context assembly in `core/agents.py`: the system
 //! prompt, the cacheable segments (memory how-to and core memory, the skill
 //! catalog, the on-demand MCP servers, the live browser, the project), and
-//! the volatile tail (project memory, then the todo list or, when
-//! `JARVIS_PLANNING_MODE` asks for it, the planning directive).
+//! the volatile tail (today's date, project memory, then the todo list or,
+//! when `JARVIS_PLANNING_MODE` asks for it, the planning directive).
 //!
 //! What is retrieved for the request — relevant memories, a ranked skill
 //! shortlist, earlier episodes, the lazy MCP servers, the browser — is
@@ -87,8 +87,8 @@ pub async fn build(
 
     let mut segments: Vec<Segment> = parts.iter().filter(|s| s.cacheable && !s.content.trim().is_empty()).cloned().collect();
     segments.sort_by_key(|s| stability(&s.name));
-    let mut volatile: Vec<String> =
-        parts.into_iter().filter(|s| !s.cacheable && !s.content.trim().is_empty()).map(|s| s.content).collect();
+    let mut volatile = vec![today(pool).await];
+    volatile.extend(parts.into_iter().filter(|s| !s.cacheable && !s.content.trim().is_empty()).map(|s| s.content));
     let todos = crate::agent::tools::normalise_todos(todos);
     if !todos.is_empty() {
         let lines: Vec<String> = todos
@@ -107,6 +107,35 @@ pub async fn build(
         volatile.push(directive);
     }
     Ok(Context { system, segments, volatile: volatile.join("\n\n") })
+}
+
+/// A sub-agent's context: its prompt, the instructions of the project it
+/// works in, and the date. No memory, skills or project memory — its task
+/// says what it needs.
+pub async fn for_subagent(pool: &SqlitePool, system: &str, project_id: Option<&str>) -> Result<Context, Unbuilt> {
+    let mut segments = vec![];
+    if let Some(project_id) = project_id {
+        let row: Option<(String, String)> =
+            db(sqlx::query_as("SELECT name, instructions FROM projects WHERE id = ?").bind(project_id).fetch_optional(pool).await)?;
+        if let Some((name, instructions)) = row.filter(|(_, i)| !py_strip(i).is_empty()) {
+            let content = format!(
+                "## Project: {name}\n\nThe work you were given is part of this project. Its instructions apply to \
+                 what you do:\n\n{}",
+                py_strip(&instructions)
+            );
+            segments.push(seg("project_instructions", content, true));
+        }
+    }
+    Ok(Context { system: system.to_string(), segments, volatile: today(pool).await })
+}
+
+/// The date, in the zone the schedules are read in — so the model needn't
+/// spend a tool call finding out. The day only: it changes the tail once a
+/// day, not on every call.
+async fn today(pool: &SqlitePool) -> String {
+    let tz = crate::schedule::resolve_tz(pool).await;
+    let now = chrono::Utc::now().with_timezone(&tz);
+    format!("## Today\n\n{} ({tz})", now.format("%A, %-d %B %Y"))
 }
 
 fn seg(name: &str, content: impl Into<String>, cacheable: bool) -> Segment {

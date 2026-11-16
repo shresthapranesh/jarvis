@@ -4,7 +4,7 @@
 //! `budget_update` (throttled — every event stays in the run's replay
 //! buffer) and `budget_exceeded` once.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 
@@ -87,6 +87,8 @@ pub struct Budget {
     pub llm_calls: i64,
     pub tool_calls: i64,
     started: Instant,
+    /// Time since `started` spent waiting on someone else (`waited`).
+    waiting: Duration,
     exceeded: Option<String>,
     last_emitted_tokens: i64,
     last_emitted_calls: i64,
@@ -101,6 +103,7 @@ impl Budget {
             llm_calls: 0,
             tool_calls: 0,
             started: Instant::now(),
+            waiting: Duration::ZERO,
             exceeded: None,
             last_emitted_tokens: -1,
             last_emitted_calls: -1,
@@ -114,6 +117,44 @@ impl Budget {
     /// Why the run went over, once it has.
     pub fn exceeded(&self) -> Option<&str> {
         self.exceeded.as_deref()
+    }
+
+    /// Time the run spent waiting — on a person's answer or approval, on its
+    /// sub-agents — which the duration limit doesn't count: a question
+    /// answered after half an hour must not be what stops the run.
+    pub fn waited(&mut self, time: Duration) {
+        self.waiting += time;
+    }
+
+    /// How long the run has been at work.
+    fn elapsed(&self) -> Duration {
+        self.started.elapsed().saturating_sub(self.waiting)
+    }
+
+    /// What a run had spent before a restart interrupted it, read back from
+    /// its thread: the limits hold across the restart.
+    pub fn seed(&mut self, input: i64, output: i64, llm_calls: i64, tool_calls: i64) {
+        self.input_tokens += input;
+        self.output_tokens += output;
+        self.llm_calls += llm_calls;
+        self.tool_calls += tool_calls;
+    }
+
+    /// Whether any limit is at least `fraction` used — the run is told it
+    /// is running low while it can still wrap up.
+    pub fn nearing(&self, fraction: f64) -> bool {
+        let l = &self.limits;
+        let elapsed = self.elapsed().as_secs() as i64;
+        [
+            (self.total_tokens(), l.max_total_tokens),
+            (self.input_tokens, l.max_input_tokens),
+            (self.output_tokens, l.max_output_tokens),
+            (self.llm_calls, l.max_llm_calls),
+            (self.tool_calls, l.max_tool_calls),
+            (elapsed, l.max_duration_seconds),
+        ]
+        .into_iter()
+        .any(|(n, max)| max.is_some_and(|m| n as f64 >= m as f64 * fraction))
     }
 
     /// A model call, with the usage it reported. A call that reported none
@@ -171,7 +212,7 @@ impl Budget {
         if self.exceeded.is_some() {
             return None;
         }
-        let elapsed = self.started.elapsed().as_secs_f64();
+        let elapsed = self.elapsed().as_secs_f64();
         let l = &self.limits;
         let over = |n: i64, max: Option<i64>| max.filter(|&m| n > m);
         let reason = if let Some(m) = over(self.total_tokens(), l.max_total_tokens) {
@@ -201,7 +242,7 @@ impl Budget {
             "total_tokens": self.total_tokens(),
             "llm_calls": self.llm_calls,
             "tool_calls": self.tool_calls,
-            "elapsed_seconds": self.started.elapsed().as_secs(),
+            "elapsed_seconds": self.elapsed().as_secs(),
             "limits": self.limits.to_json(),
             "exceeded_reason": self.exceeded,
         })
@@ -266,6 +307,35 @@ mod tests {
         // Once over, every change updates, and the reason isn't repeated.
         assert_eq!(names(&b.record_tool(1)), ["budget_update"]);
         assert!(b.check().is_empty());
+    }
+
+    #[test]
+    fn waiting_is_not_the_run_s_time() {
+        let mut b = Budget::new(Limits { max_duration_seconds: Some(0), ..Default::default() });
+        std::thread::sleep(Duration::from_millis(5));
+        b.waited(Duration::from_secs(60));
+        assert!(b.check().is_empty());
+        assert_eq!(b.snapshot()["elapsed_seconds"], json!(0));
+    }
+
+    #[test]
+    fn a_seeded_budget_goes_on_from_what_was_spent() {
+        let mut b = Budget::new(Limits { max_llm_calls: Some(2), ..Default::default() });
+        b.seed(100, 10, 2, 3);
+        assert_eq!((b.total_tokens(), b.llm_calls, b.tool_calls), (110, 2, 3));
+        assert_eq!(names(&b.record_llm(Some(1), Some(1))), ["budget_update", "budget_exceeded"]);
+    }
+
+    #[test]
+    fn nearing_a_limit() {
+        let mut b = Budget::new(Limits { max_llm_calls: Some(10), ..Default::default() });
+        for _ in 0..7 {
+            b.record_llm(None, None);
+        }
+        assert!(!b.nearing(0.8));
+        b.record_llm(None, None);
+        assert!(b.nearing(0.8));
+        assert!(!Budget::new(Limits::default()).nearing(0.8));
     }
 
     #[test]

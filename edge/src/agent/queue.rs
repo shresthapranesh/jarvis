@@ -15,6 +15,10 @@ pub struct Job {
     pub id: String,
     pub kind: String,
     pub payload: Value,
+    /// How many times it has been claimed, this one included, and how many
+    /// it may be: every claim after the first follows a restart.
+    pub attempts: i64,
+    pub max_attempts: i64,
     /// As stored: the run's clock starts here.
     pub created_at: String,
     /// A stop reached it before the claim.
@@ -38,7 +42,7 @@ pub async fn claim(pool: &SqlitePool, kinds: &[&str], worker: &str) -> sqlx::Res
     let now = now_stored();
     let marks = vec!["?"; kinds.len()].join(", ");
     let sql = format!(
-        "SELECT id, kind, payload, created_at, cancel_requested FROM jobs \
+        "SELECT id, kind, payload, created_at, cancel_requested, attempts, max_attempts FROM jobs \
          WHERE kind IN ({marks}) AND status = 'pending' AND run_at <= ? AND {THREAD_FREE} \
          ORDER BY run_at ASC LIMIT 1"
     );
@@ -72,6 +76,8 @@ pub async fn claim(pool: &SqlitePool, kinds: &[&str], worker: &str) -> sqlx::Res
         id,
         kind: row.get("kind"),
         payload: serde_json::from_str(&payload).unwrap_or(Value::Null),
+        attempts: row.get::<i64, _>("attempts") + 1,
+        max_attempts: row.get("max_attempts"),
         created_at: row.get("created_at"),
         cancel_requested: row.get::<Option<bool>, _>("cancel_requested").unwrap_or(false),
     }))

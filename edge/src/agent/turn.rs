@@ -7,6 +7,18 @@
 //! each result once it and the calls before it are done — so a turn
 //! re-claimed after a crash goes on from the rows.
 //!
+//! What goes wrong short of an answer goes back to the model rather than
+//! ending the run: a tool that fails on the server's side is an error result
+//! (`tool_failed`), a reply cut off at the output limit is asked for again
+//! in smaller pieces (`cut_off`), and a run out of budget — told it was
+//! running low at 80% — gets one closing reply (`last_word`). The first two
+//! give up after a few in a row. Tested in `edge/tests/limits.rs`.
+//!
+//! The budget (`budget.rs`) is a run's only ceiling: there is no step limit
+//! beside it. Its clock stops while the run waits on a person or on its
+//! sub-agents, and a run claimed again after a restart starts from what its
+//! thread says it had already spent (`spent`).
+//!
 //! A history that outgrows the model's threshold is summarized before the
 //! call (`summarize.rs`). `run_agents` gives tasks to sub-agents — each a
 //! conversation of its own, its turns queued jobs (`Kind::Subagent`) — and
@@ -15,6 +27,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use sha2::Digest;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
@@ -35,8 +48,39 @@ use crate::llm::{self, Delta, Endpoints, Request};
 use crate::pyjson;
 use crate::runs::Run;
 
-/// `recursion_limit` for a chat turn: steps, so about 50 model calls.
-const RECURSION_LIMIT: u32 = 100;
+/// Tool calls in a row that may fail on the server's side — a kernel that
+/// won't start, an MCP server that dropped — before the run fails with the
+/// last one. Until then the model reads the failure and goes another way.
+const MAX_TOOL_FAILURES: u32 = 3;
+
+/// Replies in a row that may hit the model's output limit before the run fails.
+const MAX_CUT_OFFS: u32 = 2;
+
+/// Tool batches in a row with the same calls and the same results before
+/// the model is told so. Nothing judges the run: the note is appended to the
+/// result it has just read again.
+const REPEATS_NOTED: u32 = 3;
+
+/// How far into its budget a run is told it is running low.
+const LOW_AT: f64 = 0.8;
+
+/// How long a run past its limit has to say where it got to.
+const CLOSING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+const LOW_NOTE: &str = "## Running low\n\nThis run has used most of the budget it is allowed and will be \
+stopped soon. Finish what matters most, put anything half-done where it can be found again, then write your answer: \
+what is done and what is left.";
+
+/// What a reply cut off at the output limit is answered with: its calls…
+const CUT_CALLS: &str = "Not run: your reply reached the output limit before this call was complete. Do it in smaller \
+pieces — several shorter cells, or a file or document written a part at a time.";
+/// …or, when it was text, the message after it.
+const CUT_TEXT: &str = "[Your reply was cut off at the output limit. Go on from exactly where it stopped, without \
+repeating what you already wrote.]";
+
+/// On a message the loop wrote into the thread itself (`CUT_TEXT`): not what
+/// the user asked, so not what memory is retrieved for.
+const NOTICE_KEY: &str = "notice";
 
 /// `user_message_id`: the prompt's thread id, derived from the task so a
 /// re-claimed turn replaces its prompt rather than adding a second.
@@ -48,8 +92,6 @@ pub fn user_message_id(task_id: &str) -> String {
 enum Stop {
     /// Stopped by a human, or by its budget.
     Cancelled,
-    /// `RecursionLimitReached`.
-    Limit,
     /// The model call or a tool failed.
     Failed(String),
 }
@@ -113,7 +155,8 @@ pub struct Turn<'a> {
     input_tokens: i64,
     output_tokens: i64,
     has_usage: bool,
-    steps: u32,
+    /// Claimed before: a restart interrupted it.
+    resumed: bool,
     /// A sub-agent's parent conversation.
     parent: Option<String>,
     /// A sub-agent's turn whose answer goes to its parent as a message,
@@ -121,6 +164,17 @@ pub struct Turn<'a> {
     deliver: bool,
     /// The sub-agent turns whose usage this run has counted.
     collected: std::collections::HashSet<String>,
+    /// Tool calls that failed on the server's side, in a row.
+    tool_failures: u32,
+    /// The last tool batch — its calls and their results, hashed — and how
+    /// many in a row have been just that.
+    repeated: (String, u32),
+    /// Replies that hit the output limit, in a row.
+    cut_offs: u32,
+    /// The next reply goes on from one that was cut off mid-text.
+    continuing: bool,
+    /// The run is past its limit and this is its last call: what it is told.
+    closing: Option<String>,
 }
 
 /// A sub-agent one of `run_agents`' tasks went to.
@@ -194,10 +248,15 @@ impl<'a> Turn<'a> {
             input_tokens: 0,
             output_tokens: 0,
             has_usage: false,
-            steps: 0,
+            resumed: job.attempts > 1,
             parent: None,
             deliver: false,
             collected: Default::default(),
+            tool_failures: 0,
+            repeated: Default::default(),
+            cut_offs: 0,
+            continuing: false,
+            closing: None,
         }
     }
 
@@ -234,8 +293,7 @@ impl<'a> Turn<'a> {
             Kind::Chat | Kind::Subagent => {}
         }
         match result {
-            Ok(()) => self.finish_done(false).await,
-            Err(Stop::Limit) => self.finish_done(true).await,
+            Ok(()) => self.finish_done().await,
             Err(Stop::Cancelled) => self.finish_stopped().await,
             Err(Stop::Failed(e)) => self.finish_failed(e).await,
         }
@@ -280,9 +338,47 @@ impl<'a> Turn<'a> {
             }
         };
         match wrote {
-            Ok(()) => self.turn(thread).await,
+            Ok(()) => {
+                if self.resumed {
+                    self.spent(thread);
+                }
+                self.turn(thread).await
+            }
             Err(e) => Err(Stop::Failed(e)),
         }
+    }
+
+    /// A run claimed again after a restart has spent what its thread shows
+    /// since its prompt: the replies and their usage, the tool results. Its
+    /// budget goes on from there rather than from nothing — a run that keeps
+    /// being interrupted still ends. (Replies a compaction summarized away
+    /// since aren't counted, nor the time it had run.)
+    fn spent(&mut self, thread: &Thread) {
+        let prompt = user_message_id(&self.task_id);
+        let Some(at) = thread.messages.iter().position(|m| m.id.as_deref() == Some(prompt.as_str())) else { return };
+        let (mut input, mut output, mut replies, mut results) = (0, 0, 0, 0);
+        for m in &thread.messages[at + 1..] {
+            match m.role {
+                Role::Assistant => {
+                    replies += 1;
+                    if let Some(usage) = &m.usage {
+                        self.has_usage |= usage.input.is_some() || usage.output.is_some();
+                        input += usage.input.unwrap_or(0);
+                        output += usage.output.unwrap_or(0);
+                    }
+                }
+                Role::Tool => results += 1,
+                _ => {}
+            }
+        }
+        if replies == 0 {
+            return;
+        }
+        tracing::info!("run {}: resumed with {replies} model call(s) and {} tokens already spent", self.task_id, input + output);
+        self.input_tokens += input;
+        self.output_tokens += output;
+        self.budget.seed(input, output, replies, results);
+        self.sync_fields();
     }
 
     // ── the loop ────────────────────────────────────────────────────────────
@@ -301,32 +397,125 @@ impl<'a> Turn<'a> {
             tools::bind_ask_user(&mut bound, &policy);
         }
         self.resume_agents(thread).await?;
+        let ended = self.steps(thread, &bound, &policy, &mcp).await;
+        // Out of budget: one more reply, to say where it got to.
+        if let (Err(Stop::Cancelled), Some(reason)) = (&ended, self.budget.exceeded()) {
+            let limit = format!("its budget ({reason})");
+            self.last_word(thread, &bound.schemas, &mcp, &limit).await;
+        }
+        ended
+    }
+
+    async fn steps(
+        &mut self,
+        thread: &mut Thread,
+        bound: &tools::Toolset,
+        policy: &Policy,
+        mcp: &crate::mcp::Snapshot,
+    ) -> Result<(), Stop> {
         loop {
-            self.take_step()?;
-            let reply = self.model_step(thread, &bound.schemas, &mcp).await?;
+            self.check_stop()?;
+            let reply = self.model_step(thread, &bound.schemas, mcp).await?;
             // What it said stays in the thread; calls it may have been cut
             // off in the middle of don't run.
+            if llm::hit_output_limit(&reply) {
+                self.cut_off(thread, &reply).await?;
+                continue;
+            }
+            self.cut_offs = 0;
             if let Some(why) = llm::cut_short(&reply) {
                 return Err(Stop::Failed(why));
             }
             if reply.tool_calls.is_empty() {
                 return Ok(());
             }
-            let steps = tools::plan(&reply.tool_calls, &bound, &policy);
-            self.take_step()?;
-            self.tool_step(thread, &reply.tool_calls, steps, &policy).await?;
+            let steps = tools::plan(&reply.tool_calls, bound, policy);
+            self.check_stop()?;
+            self.tool_step(thread, &reply.tool_calls, steps, policy).await?;
         }
     }
 
-    fn take_step(&mut self) -> Result<(), Stop> {
-        if self.cancelled() {
-            return Err(Stop::Cancelled);
+    /// A reply that hit the output limit — usually one huge cell or document
+    /// written in a single call. The model is told, and tries again smaller:
+    /// its calls are answered as not run, or a reply that was text is gone on
+    /// with. A second in a row fails the run.
+    async fn cut_off(&mut self, thread: &mut Thread, reply: &Message) -> Result<(), Stop> {
+        self.cut_offs += 1;
+        if self.cut_offs >= MAX_CUT_OFFS {
+            return Err(Stop::Failed(format!("the reply hit the model's output limit {MAX_CUT_OFFS} times in a row")));
         }
-        if self.steps >= RECURSION_LIMIT {
-            return Err(Stop::Limit);
+        tracing::warn!("run {}: the reply hit the output limit; asking for it in smaller pieces", self.task_id);
+        if !reply.tool_calls.is_empty() {
+            return self.answer_open_calls(thread, CUT_CALLS).await.map_err(Stop::Failed);
         }
-        self.steps += 1;
-        Ok(())
+        let mut notice = Message { id: Some(Uuid::new_v4().to_string()), ..Message::new(Role::User, Content::Text(CUT_TEXT.into())) };
+        notice.extras.insert(NOTICE_KEY.into(), Value::Bool(true));
+        self.continuing = true;
+        thread.apply(self.pool(), vec![notice]).await.map_err(Stop::Failed)
+    }
+
+    /// Every call of the thread's last reply that has no result is given
+    /// `answer` as one, an error: the call didn't run and won't.
+    async fn answer_open_calls(&mut self, thread: &mut Thread, answer: &str) -> Result<(), String> {
+        let Some(at) = thread.messages.iter().rposition(|m| m.role == Role::Assistant) else { return Ok(()) };
+        let after = &thread.messages[at + 1..];
+        let unrun: Vec<Message> = thread.messages[at]
+            .tool_calls
+            .iter()
+            .filter(|call| !after.iter().any(|m| m.role == Role::Tool && m.tool_call_id == call.id))
+            .map(|call| Message {
+                name: Some(call.name.clone()),
+                tool_call_id: call.id.clone(),
+                status: Some("error".into()),
+                ..Message::new(Role::Tool, Content::Text(answer.into()))
+            })
+            .collect();
+        if unrun.is_empty() {
+            return Ok(());
+        }
+        thread.apply(self.pool(), unrun).await
+    }
+
+    /// A run out of budget gets one more reply, to say what is done,
+    /// what isn't and where its work is — rather than ending on whatever it
+    /// had streamed. Nothing it calls runs. Not for a run a person stopped,
+    /// nor one whose last reply was already its answer. Whatever comes of
+    /// it, the run ends as its limit ends it.
+    async fn last_word(&mut self, thread: &mut Thread, bound: &[llm::Tool], mcp: &crate::mcp::Snapshot, limit: &str) {
+        if super::queue::cancel_requested(self.pool(), &self.task_id).await.unwrap_or(true) {
+            return;
+        }
+        if thread.messages.last().is_some_and(|m| m.role == Role::Assistant && m.tool_calls.is_empty()) {
+            return;
+        }
+        let unrun = format!("Not run: this run reached {limit}.");
+        if let Err(e) = self.answer_open_calls(thread, &unrun).await {
+            return tracing::warn!("run {}: closing its open calls: {e}", self.task_id);
+        }
+        self.closing = Some(format!(
+            "## Wrap up now\n\nThis run reached {limit}. This is its last reply, and no tool call in it will run. \
+             Write your final answer from what you have: what is done, what is not, and where anything half-finished \
+             is (files, kernel variables, artifacts) so the work can be picked up from there."
+        ));
+        match self.model_step(thread, bound, mcp).await {
+            Ok(reply) if !reply.tool_calls.is_empty() => {
+                if let Err(e) = self.answer_open_calls(thread, &unrun).await {
+                    tracing::warn!("run {}: closing its open calls: {e}", self.task_id);
+                }
+            }
+            Ok(_) | Err(Stop::Cancelled) => {}
+            Err(Stop::Failed(e)) => tracing::warn!("run {}: its closing reply failed: {e}", self.task_id),
+        }
+        self.closing = None;
+    }
+
+    /// Most of the run's budget is spent.
+    fn low(&self) -> bool {
+        self.budget.nearing(LOW_AT)
+    }
+
+    fn check_stop(&self) -> Result<(), Stop> {
+        if self.cancelled() { Err(Stop::Cancelled) } else { Ok(()) }
     }
 
     fn cancelled(&self) -> bool {
@@ -367,9 +556,11 @@ impl<'a> Turn<'a> {
         .map_err(|e| e.to_string())?;
         self.events.emit("question_request", &request.event);
         tracing::info!("ask_user: waiting on {}", request.id);
-        let outcome = crate::approvals::wait(self.pool(), &request.id, crate::approvals::gate_timeout())
-            .await
-            .map_err(|e| e.to_string())?;
+        let since = std::time::Instant::now();
+        let outcome = crate::approvals::wait(self.pool(), &request.id, crate::approvals::gate_timeout()).await;
+        // The person's time, not the run's.
+        self.budget.waited(since.elapsed());
+        let outcome = outcome.map_err(|e| e.to_string())?;
         if matches!(outcome, crate::approvals::Outcome::TimedOut) {
             self.events.emit("question_resolved", &crate::approvals::answered_event(&request.id, ""));
         }
@@ -379,16 +570,23 @@ impl<'a> Turn<'a> {
 
     async fn model_step(&mut self, thread: &mut Thread, bound: &[llm::Tool], mcp: &crate::mcp::Snapshot) -> Result<Message, Stop> {
         // Mid-run messages are a conversation's; nothing queues behind other runs.
-        let mut queued = if self.kind.conversational() { self.drain_queued().await.map_err(Stop::Failed)? } else { vec![] };
+        // A closing reply takes none in: they start the next turn.
+        let mut queued = if self.kind.conversational() && self.closing.is_none() {
+            self.drain_queued().await.map_err(Stop::Failed)?
+        } else {
+            vec![]
+        };
         let mut history = thread.messages.clone();
         history.extend(queued.iter().cloned());
         let query = latest_user_text(&history);
-        let message_id = history.iter().rev().find(|m| m.role == Role::User).and_then(|m| m.id.clone());
+        let message_id = history.iter().rev().find(|m| asked(m)).and_then(|m| m.id.clone());
 
         let context = if matches!(self.kind, Kind::Subagent) {
-            // The sub-agent prompt is the whole of it: a sub-agent is told
-            // what it needs in its task, and retrieves nothing.
-            Ok(prompt::Context { system: workers::SUBAGENT_PROMPT.to_string(), segments: vec![], volatile: String::new() })
+            // A sub-agent is told what it needs in its task, and retrieves
+            // nothing: its prompt, its project's instructions — the parent
+            // works under them and can't be relied on to repeat them — and
+            // the date.
+            prompt::for_subagent(self.pool(), workers::SUBAGENT_PROMPT, self.project_id.as_deref()).await
         } else {
             let retrieved = match &self.retrieved {
                 Some((id, parts)) if *id == message_id => Ok(parts.clone()),
@@ -402,7 +600,7 @@ impl<'a> Turn<'a> {
                 Err(e) => Err(e),
             }
         };
-        let context = match context {
+        let mut context = match context {
             Ok(c) => c,
             Err(prompt::Unbuilt(why)) => {
                 // Delivered already: they go into the thread, not lost.
@@ -410,6 +608,13 @@ impl<'a> Turn<'a> {
                 return Err(Stop::Failed(format!("the prompt couldn't be built: {why}")));
             }
         };
+        // Where the run stands against its limits, last in the volatile tail.
+        if let Some(note) = self.closing.as_deref().or_else(|| self.low().then_some(LOW_NOTE)) {
+            if !context.volatile.is_empty() {
+                context.volatile.push_str("\n\n");
+            }
+            context.volatile.push_str(note);
+        }
 
         let provider = self.model.split_once(':').map_or("", |(p, _)| p);
         let layout = Layout {
@@ -448,7 +653,7 @@ impl<'a> Turn<'a> {
         let summarizer = Summarizer { http: &self.agent.http, ends: &ends, model: &self.model, blobs: &thread.blobs };
         let compaction = tokio::select! {
             c = summarize::maybe_compact(&summarizer, &history, threshold, overhead) => c,
-            () = until_stopped(self.run.clone()) => return Err(Stop::Cancelled),
+            () = self.stopped() => return Err(Stop::Cancelled),
         };
         if let Some((text, evicted)) = &compaction.episode {
             // Awaited, so it can't race the next turn's retrieval. Losing one
@@ -477,16 +682,23 @@ impl<'a> Turn<'a> {
             cache_key: Some(&self.thread_id),
         };
 
+        let stopped = self.stopped();
+        let continuing = std::mem::take(&mut self.continuing);
+        let mut first = true;
         let events = &mut self.events;
         let text = &mut self.text;
-        let mut first = true;
         let mut on_delta = |d: Delta| match d {
             Delta::Text(t) => {
                 // A call's text after an earlier call's ("Searching
                 // Eventbrite…" → tools → "Found 12 events…") is set apart.
                 if first && !t.is_empty() {
                     first = false;
-                    let joint = joint(text, t);
+                    // One going on from a reply cut off mid-text carries on its line.
+                    let joint = match continuing {
+                        true if text.is_empty() || text.ends_with(char::is_whitespace) || t.starts_with(char::is_whitespace) => "",
+                        true => " ",
+                        false => joint(text, t),
+                    };
                     text.push_str(joint);
                     events.token(joint);
                 }
@@ -499,7 +711,7 @@ impl<'a> Turn<'a> {
         let call = llm::complete(&self.agent.http, &ends, &req, &mut on_delta);
         let reply = tokio::select! {
             r = call => r,
-            () = until_stopped(self.run.clone()) => return Err(Stop::Cancelled),
+            () = stopped => return Err(Stop::Cancelled),
         };
         let reply = reply.map_err(|e| Stop::Failed(e.message))?;
 
@@ -512,11 +724,54 @@ impl<'a> Turn<'a> {
         update.extend(queued);
         update.push(message.clone());
         thread.update(self.pool(), &removed, update).await.map_err(Stop::Failed)?;
-        if self.cancelled() {
+        // A closing reply is made on a run its budget has already stopped.
+        if self.closing.is_none() && self.cancelled() {
             return Err(Stop::Cancelled);
         }
         self.events.step("model_request", model_step_data(&message)).await.map_err(Stop::Failed)?;
         Ok(message)
+    }
+
+    /// Resolves when the model call under way should be dropped: the run was
+    /// stopped. A closing reply's run is stopped already — by its own budget
+    /// — so it is dropped when a person stops it (the job says so), or when
+    /// it has taken too long.
+    fn stopped(&self) -> impl Future<Output = ()> + Send + 'static {
+        let (run, pool, id, closing) = (self.run.clone(), self.pool().clone(), self.task_id.clone(), self.closing.is_some());
+        async move {
+            if !closing {
+                return until_stopped(run).await;
+            }
+            let asked = async {
+                while !super::queue::cancel_requested(&pool, &id).await.unwrap_or(false) {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            };
+            let _ = tokio::time::timeout(CLOSING_TIMEOUT, asked).await;
+        }
+    }
+
+    /// A tool batch's hash, counted against the one before it: how many in
+    /// a row have made these calls and got these results, once that is
+    /// `REPEATS_NOTED` — a model going round in a circle.
+    fn repeats(&mut self, batch: String) -> Option<u32> {
+        if self.repeated.0 == batch {
+            self.repeated.1 += 1;
+        } else {
+            self.repeated = (batch, 1);
+        }
+        (self.repeated.1 >= REPEATS_NOTED).then_some(self.repeated.1)
+    }
+
+    /// A tool that failed on the server's side: the model reads why, as it
+    /// reads a tool's own error — until it has happened too often in a row.
+    fn tool_failed(&mut self, name: &str, error: String) -> Result<Answered, Stop> {
+        self.tool_failures += 1;
+        tracing::warn!("run {}: {name} failed ({} in a row): {error}", self.task_id, self.tool_failures);
+        if self.tool_failures >= MAX_TOOL_FAILURES {
+            return Err(Stop::Failed(format!("{name} failed, the last of {MAX_TOOL_FAILURES} tool failures in a row: {error}")));
+        }
+        Ok((Content::Text(format!("Error: {name} failed: {error}")), "error", None))
     }
 
     /// A model call's usage and throughput — the turn's own, or a worker's,
@@ -564,11 +819,12 @@ impl<'a> Turn<'a> {
         // so results are written in call order as before.
         let mut beside: Vec<Option<Beside>> = ready.iter().map(|step| self.start_beside(step)).collect();
         let mut results = Vec::with_capacity(calls.len());
-        for ((call, step), beside) in calls.iter().zip(ready).zip(beside.iter_mut()) {
+        let mut batch = sha2::Sha256::new();
+        for (i, ((call, step), beside)) in calls.iter().zip(ready).zip(beside.iter_mut()).enumerate() {
             if self.cancelled() {
                 return Err(Stop::Cancelled);
             }
-            let (content, status, artifact) = match (step, beside.take()) {
+            let (mut content, status, artifact) = match (step, beside.take()) {
                 (_, Some(mut task)) => {
                     self.count_tool();
                     let run = self.run.clone();
@@ -576,7 +832,14 @@ impl<'a> Turn<'a> {
                         r = &mut task.0 => r,
                         () = until_stopped(run) => return Err(Stop::Cancelled),
                     };
-                    ran.map_err(|e| Stop::Failed(e.to_string()))?.map_err(Stop::Failed)?
+                    match ran {
+                        Ok(Ok(answered)) => {
+                            self.tool_failures = 0;
+                            answered
+                        }
+                        Ok(Err(e)) => self.tool_failed(&call.name, e)?,
+                        Err(e) => self.tool_failed(&call.name, e.to_string())?,
+                    }
                 }
                 (step, None) => match step {
                     Step::Refused(error) | Step::Denied(error) => (Content::Text(error), "error", None),
@@ -600,10 +863,22 @@ impl<'a> Turn<'a> {
                             r = self.run_native(thread, native) => r,
                             () = until_stopped(run) => return Err(Stop::Cancelled),
                         };
-                        (Content::Text(ran.map_err(Stop::Failed)?), "success", None)
+                        match ran {
+                            Ok(answer) => {
+                                self.tool_failures = 0;
+                                (Content::Text(answer), "success", None)
+                            }
+                            Err(e) => self.tool_failed(&call.name, e)?,
+                        }
                     }
                 },
             };
+            batch.update(pyjson::dumps(&json!([call.name, call.args, content])));
+            if i + 1 == calls.len()
+                && let Some(times) = self.repeats(hex::encode(std::mem::take(&mut batch).finalize()))
+            {
+                content = noted(content, &repeat_note(times));
+            }
             let result = Message {
                 name: Some(call.name.clone()),
                 tool_call_id: call.id.clone(),
@@ -774,11 +1049,15 @@ impl<'a> Turn<'a> {
         let agent = self.agent;
         let _waiting = agent.wait_on(turns);
         let all = futures_util::future::join_all(turns.iter().map(|turn| until_answered(agent, turn)));
-        tokio::select! {
+        let since = std::time::Instant::now();
+        let ended = tokio::select! {
             biased;
             () = until_stopped(self.run.clone()) => Err(Stop::Cancelled),
             _ = all => Ok(()),
-        }
+        };
+        // Their time is on their own budgets, not this run's.
+        self.budget.waited(since.elapsed());
+        ended
     }
 
     /// A sub-agent turn's end and answer, read here: its usage counts
@@ -1037,10 +1316,13 @@ impl<'a> Turn<'a> {
         }
         tracing::info!("tool gate: waiting on approval {} for {}", request.id, call.name);
         let run = self.run.clone();
+        let since = std::time::Instant::now();
         let outcome = tokio::select! {
             o = crate::approvals::wait(self.pool(), &request.id, crate::approvals::gate_timeout()) => o,
             () = until_stopped(run) => return Err(Stop::Cancelled),
         };
+        // The person's time, not the run's.
+        self.budget.waited(since.elapsed());
         let (approved, answer) = match outcome.map_err(|e| Stop::Failed(e.to_string()))? {
             crate::approvals::Outcome::Answered { approved, answer } => (approved, answer),
             crate::approvals::Outcome::TimedOut => {
@@ -1057,8 +1339,8 @@ impl<'a> Turn<'a> {
         Ok(if approved { Step::Run(native) } else { Step::Denied(crate::approvals::denial_message(&call.name, &answer)) })
     }
 
-    /// One of the edge's tools; an `Err` fails the run, as a tool that raises
-    /// does in Python.
+    /// One of the edge's tools; an `Err` is a failure of the server's, which
+    /// the model is told of (`tool_failed`).
     async fn run_native(&mut self, thread: &mut Thread, native: Native) -> Result<String, String> {
         match native {
             Native::RunCell { code } => {
@@ -1205,20 +1487,15 @@ impl<'a> Turn<'a> {
 
     // ── the end ─────────────────────────────────────────────────────────────
 
-    async fn finish_done(mut self, limit: bool) -> Outcome {
+    async fn finish_done(mut self) -> Outcome {
         self.events.flush();
-        let mut message = self.text.clone();
-        if limit && message.is_empty() {
-            message = "(agent reached iteration limit)".into();
-        }
+        let message = self.text.clone();
         if self.budget.exceeded().is_some() {
             return self.finish_stopped().await;
         }
         self.finalize(&message, "done").await;
         self.events.emit("done", &json!({"message": message, "conversation_id": self.thread_id}));
-        if !limit {
-            crate::gql::start::redispatch_queued(self.pool(), &self.agent.runs, &self.thread_id, &self.model).await;
-        }
+        crate::gql::start::redispatch_queued(self.pool(), &self.agent.runs, &self.thread_id, &self.model).await;
         self.finished("done");
         Outcome::Finished
     }
@@ -1258,7 +1535,7 @@ impl<'a> Turn<'a> {
 
     /// `_run_automation_inner` after the agent: the run's row, its reply in a
     /// stateful conversation, notifications, and the closing event. A failed
-    /// run (the step limit included — Python raises it) records the error; a
+    /// run records the error; a
     /// spent budget is an error too; a stop keeps what was said; a monitor
     /// that saw nothing new finishes `no_change`, silently.
     async fn finish_automation(mut self, result: Result<(), Stop>) -> Outcome {
@@ -1267,7 +1544,6 @@ impl<'a> Turn<'a> {
         let output = self.text.clone();
         let end = match result {
             Err(Stop::Failed(e)) => automation::End::Failed(e),
-            Err(Stop::Limit) => automation::End::Failed(format!("agent 'main' reached its limit of {RECURSION_LIMIT} steps")),
             _ => match self.budget.exceeded() {
                 Some(reason) => automation::End::Budget { output, reason: reason.to_string() },
                 None if self.cancelled() => automation::End::Stopped(Some(output)),
@@ -1290,7 +1566,6 @@ impl<'a> Turn<'a> {
         let output = self.text.clone();
         let end = match result {
             Err(Stop::Failed(e)) => automation::End::Failed(e),
-            Err(Stop::Limit) => automation::End::Failed(format!("agent 'main' reached its limit of {RECURSION_LIMIT} steps")),
             _ => match self.budget.exceeded() {
                 Some(reason) => automation::End::Budget { output, reason: reason.to_string() },
                 None if self.cancelled() => automation::End::Stopped(Some(output)),
@@ -1374,7 +1649,7 @@ impl<'a> Turn<'a> {
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 /// A call running beside its batch (`Turn::start_beside`): what it answers
-/// the model with, or why the run fails. Dropped — the run stopped or
+/// the model with, or why it failed. Dropped — the run stopped or
 /// failed — it is aborted.
 struct Beside(tokio::task::JoinHandle<Result<Answered, String>>);
 
@@ -1384,6 +1659,27 @@ type Answered = (Content, &'static str, Option<Value>);
 impl Drop for Beside {
     fn drop(&mut self) {
         self.0.abort();
+    }
+}
+
+/// What a result says after itself when its batch has been made `times` in
+/// a row with nothing changing.
+fn repeat_note(times: u32) -> String {
+    format!(
+        "[Note from the application: this is the same call with the same result, {times} times in a row. Making it \
+         again will not change anything. Try something different — or, if you are waiting on something, wait longer \
+         between checks — or say what is in your way and stop.]"
+    )
+}
+
+/// `content` with `note` after it.
+fn noted(content: Content, note: &str) -> Content {
+    match content {
+        Content::Text(text) => Content::Text(format!("{text}\n\n{note}")),
+        Content::Parts(mut parts) => {
+            parts.push(Part::Typed(Typed::Text { text: note.into(), signature: None, extras: Default::default() }));
+            Content::Parts(parts)
+        }
     }
 }
 
@@ -1468,7 +1764,12 @@ fn parse_stamp(stored: &str) -> chrono::DateTime<chrono::Utc> {
 
 /// `_latest_user_text`: the newest user message's text, stripped.
 fn latest_user_text(history: &[Message]) -> String {
-    history.iter().rev().find(|m| m.role == Role::User).map(user_text).unwrap_or_default()
+    history.iter().rev().find(|m| asked(m)).map(user_text).unwrap_or_default()
+}
+
+/// A user message someone sent — not one the loop wrote (`NOTICE_KEY`).
+fn asked(m: &Message) -> bool {
+    m.role == Role::User && !m.extras.contains_key(NOTICE_KEY)
 }
 
 fn user_text(m: &Message) -> String {
@@ -1501,7 +1802,7 @@ fn retrieval_query(history: &[Message]) -> String {
     let previous = history
         .iter()
         .rev()
-        .filter(|m| m.role == Role::User)
+        .filter(|m| asked(m))
         .skip(1)
         .map(user_text)
         .find(|t| !t.is_empty());

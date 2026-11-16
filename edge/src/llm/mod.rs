@@ -281,10 +281,11 @@ fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
 /// tools. What it said is kept, but its calls may be cut off mid-argument,
 /// so nothing should run them.
 pub fn cut_short(m: &Message) -> Option<String> {
+    if hit_output_limit(m) {
+        return Some("the reply hit the model's output limit".into());
+    }
     let reason = m.finish_reason.as_ref()?.as_str()?;
     Some(match reason {
-        // Anthropic and Bedrock; OpenAI-style and Ollama; Gemini; Responses.
-        "max_tokens" | "length" | "MAX_TOKENS" | "incomplete" => "the reply hit the model's output limit".into(),
         "model_context_window_exceeded" => "the conversation no longer fits in the model's context window".into(),
         "refusal" | "content_filter" | "content_filtered" | "guardrail_intervened" | "SAFETY" | "PROHIBITED_CONTENT"
         | "BLOCKLIST" | "SPII" | "RECITATION" => {
@@ -295,6 +296,14 @@ pub fn cut_short(m: &Message) -> Option<String> {
         }
         _ => return None,
     })
+}
+
+/// The reply stopped at the model's output limit, not where the model
+/// meant it to: one a caller can ask for again in smaller pieces.
+pub fn hit_output_limit(m: &Message) -> bool {
+    // Anthropic and Bedrock; OpenAI-style and Ollama; Gemini; Responses.
+    let reason = m.finish_reason.as_ref().and_then(Value::as_str);
+    matches!(reason, Some("max_tokens" | "length" | "MAX_TOKENS" | "incomplete"))
 }
 
 async fn call(
