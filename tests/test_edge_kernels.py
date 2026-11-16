@@ -56,10 +56,26 @@ async def _edge_run(edge: EdgeKernels, key: str, code: str, **kw: Any) -> str:
     return out["output"]
 
 
+# The edge's own, after Python was gone: a note that the kernel was restarted
+# on the first cell after it, and how to give longer work room after a timeout.
+_RESTARTED = "[This kernel was restarted since your last cell"
+_LONGER = ("\n[Give longer work a larger `timeout`", "\n[Run work this long in the background")
+
+
+def _as_python(output: str) -> str:
+    if output.startswith(_RESTARTED):
+        output = output.split("\n", 1)[1]
+    for note in _LONGER:
+        if note in output:
+            output = output[: output.index(note)]
+    return output
+
+
 async def _both(edge: EdgeKernels, key: str, cells: list) -> tuple[list, list]:
-    """What Python's registry read for each `(code, kwargs)`, and the edge."""
+    """What Python's registry read for each `(code, kwargs)`, and the edge —
+    without the edge's own notes (`_as_python`)."""
     python = await recorded()
-    got = [await _edge_run(edge, key, code, **kw) for code, kw in cells]
+    got = [_as_python(await _edge_run(edge, key, code, **kw)) for code, kw in cells]
     return python, got
 
 
@@ -126,9 +142,11 @@ async def test_shutdown_forgets_the_session(edge):
 
 async def test_a_dead_kernel_is_restarted(edge):
     cells = [("x = 1", {}), ("import os\nos._exit(1)", {"timeout": 2}), ("x", {})]
-    python, got = await _both(edge, "k", cells)
-    assert got == python
-    assert "NameError" in got[2]
+    python = await recorded()
+    raw = [await _edge_run(edge, "k", code, **kw) for code, kw in cells]
+    assert [_as_python(r) for r in raw] == python
+    # …and the cell after it is told.
+    assert raw[2].startswith(_RESTARTED) and "NameError" in raw[2]
 
 
 async def test_input_fails_at_once(edge):

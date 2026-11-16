@@ -308,7 +308,7 @@ async fn serve() {
     tokio::spawn(sweep_pending_runs(runs.clone(), pool.clone()));
 
     bots::spawn(pool.clone(), runs.clone());
-    tokio::spawn(kernels.clone().reap_forever(kernels::IDLE_TIMEOUT));
+    tokio::spawn(kernels.clone().reap_forever());
     // The chat turns the edge runs itself (`agent/`), and the recovery of any
     // a previous edge left running.
     tokio::spawn(agent::Agent::new(pool.clone(), runs.clone(), kernels.clone(), mcp.clone(), Some(scheduler.clone()), config.artifacts_dir.clone()).run());

@@ -20,6 +20,7 @@ Everything else lives in `sdk.py`, preloaded as `jarvis` in every kernel and dis
 - The SDK imports only the standard library, `httpx` and `tools.text_dedupe` (`numpy` is the agent's, not the SDK's). It finds the database as the server does (`DATABASE_URL`, else `$WORK_DIR/database.db`), and the tool policy is the `tools.policy` setting, re-read every 2 s.
 - Need a side effect with no mutation? Add the mutation; don't write the DB from the kernel.
 - Scope (`_conversation_id`, `_project_id`) is injected per kernel by the server (`edge/src/kernels/`) — the agent can't choose a project. `list_conversations` raises outside a project; all conversation reads drop incognito (`ephemeral`) conversations.
+- `jobs` (`start_job`/`job`/`stop_job`/`list_jobs`) is local process management, not a server write: a shell command in a session of its own (an interrupt or kernel restart doesn't stop it), state in `$WORK_DIR/jobs/<id>.json|.log|.exit` so a restarted kernel finds it. Policed like any SDK function; no sandboxing (root `CLAUDE.md`).
 
 ## Web vs browser
 - `research.py` is the **web**: `search()` (Tavily/Brave, ddgs fallback), `read(url)` and `read_many(urls)`. `browser.py` is the **browser**: one persistent headed Chromium reached over CDP. research may import browser, never the reverse.

@@ -449,10 +449,10 @@ impl<'a, 'e> NodeAgent<'a, 'e> {
     async fn run_native(&mut self, native: Native) -> Result<String, String> {
         let agent = self.env.agent;
         match native {
-            Native::RunCell { code } => {
+            Native::RunCell { code, timeout } => {
                 // With a conversation, the SDK is scoped to it.
                 let conversation_id = self.seat.as_ref().map(|_| self.thread_id.as_str());
-                let cell = crate::kernels::Cell { code: &code, timeout: tools::CELL_TIMEOUT, conversation_id, project_id: None };
+                let cell = crate::kernels::Cell { code: &code, timeout, conversation_id, project_id: None };
                 agent.kernels.run(&self.thread_id, &cell).await
             }
             Native::WriteTodos { todos } => {

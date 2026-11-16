@@ -6,20 +6,27 @@
 //! - Every kernel preloads what `tools/preload.py` names — `search`/`read`,
 //!   the `jarvis` SDK (scoped to the cell's conversation and project), and
 //!   the cheap modules; not pandas and the like, for the RAM.
-//! - A cell gets `timeout` seconds, then is interrupted — the session
-//!   survives. Not while a tool approval for its conversation is open (the
-//!   SDK waits for one inside the cell), up to 30 minutes.
-//! - At most `MAX_KERNELS` live kernels (least recently used goes), and one
-//!   untouched for 30 minutes is shut down.
+//! - A cell gets `timeout` seconds (`run_cell` allows up to `MAX_TIMEOUT`),
+//!   then is interrupted — the session survives. Not while a tool approval
+//!   for its conversation is open (the SDK waits for one inside the cell),
+//!   up to 30 minutes.
+//! - At most `Limits::max_kernels` live kernels (the least recently used
+//!   goes, one with no cell in it first), and one untouched for
+//!   `Limits::idle` is shut down — a sub-agent's (`surface = 'subagent'`)
+//!   after `Limits::subagent_idle`, once its turn is over — unless a cell is
+//!   running in it or waiting to.
+//! - A kernel started again for a session whose last one ran cells — reaped,
+//!   evicted, or dead — says so on its first cell's result.
 //! - A cell's output is text; the PNG and JPEG images it shows are kept
 //!   beside it (`Output`), for a caller whose model reads them.
 
 mod kernel;
 mod wire;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -32,6 +39,15 @@ use kernel::Kernel;
 
 pub const MAX_KERNELS: usize = 12;
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// How long a sub-agent's kernel is kept once its turn is over: a sub-agent
+/// given more work later starts a fresh one.
+pub const SUBAGENT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// The longest a caller may give a cell.
+pub const MAX_TIMEOUT: Duration = Duration::from_secs(600);
+/// How many sessions whose kernel went with cells run in it are remembered.
+const LOST_CAP: usize = 512;
+const RESTARTED: &str = "[This kernel was restarted since your last cell (it sat idle, or stopped): variables, \
+imports and data from earlier cells are gone.]";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const INTERRUPT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const HOLD_POLL: Duration = Duration::from_secs(5);
@@ -77,6 +93,8 @@ pub struct Output {
     pieces: Vec<Piece>,
     interrupted: bool,
     timeout: Duration,
+    /// The kernel was started again since the session's last cell.
+    restarted: bool,
 }
 
 /// One output message, in order.
@@ -105,7 +123,12 @@ impl Output {
                 Piece::Rich { .. } => {}
             }
         }
-        finish(&out, self.interrupted, self.timeout)
+        self.closed(&out)
+    }
+
+    /// The text trimmed and capped, with the notes on a restart and a timeout.
+    fn closed(&self, out: &str) -> String {
+        noted(finish(out, self.interrupted, self.timeout), self.restarted, self.interrupted.then_some(self.timeout))
     }
 
     /// Whether the cell showed an image the model could be sent.
@@ -116,10 +139,10 @@ impl Output {
     /// The result as text naming each image where it was shown, and the
     /// images that fit in `room`, in order; one that doesn't fit, or can't
     /// be sent at all, is a line saying why.
-    pub fn seen(self, mut room: Room) -> (String, Vec<Image>) {
+    pub fn seen(mut self, mut room: Room) -> (String, Vec<Image>) {
         let mut out = String::new();
         let mut images = vec![];
-        for piece in self.pieces {
+        for piece in std::mem::take(&mut self.pieces) {
             let (types, said, picture) = match piece {
                 Piece::Text(t) => {
                     out.push_str(&t);
@@ -155,7 +178,7 @@ impl Output {
                 images.push(image);
             }
         }
-        (finish(&out, self.interrupted, self.timeout), images)
+        (self.closed(&out), images)
     }
 }
 
@@ -165,13 +188,66 @@ fn not_text<S: AsRef<str>>(types: &[S]) -> String {
     format!("[{} output — not shown as text]", types.join(", "))
 }
 
+/// How many kernels may live, and how long one may sit idle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Limits {
+    pub max_kernels: usize,
+    pub idle: Duration,
+    /// A sub-agent's kernel, once its turn is over.
+    pub subagent_idle: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits { max_kernels: MAX_KERNELS, idle: IDLE_TIMEOUT, subagent_idle: SUBAGENT_IDLE_TIMEOUT }
+    }
+}
+
+impl Limits {
+    /// `JARVIS_MAX_KERNELS`, and `JARVIS_KERNEL_IDLE_TIMEOUT` /
+    /// `JARVIS_SUBAGENT_KERNEL_IDLE_TIMEOUT` in seconds — each else its
+    /// default, as is a value that isn't a positive number.
+    pub fn from_env() -> Self {
+        Self::from_vars(|key| std::env::var(key).ok())
+    }
+
+    fn from_vars(var: impl Fn(&str) -> Option<String>) -> Self {
+        let d = Limits::default();
+        let read = |key: &str| var(key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let secs = |key: &str, default: Duration| {
+            let v = read(key)?;
+            let s = v.parse::<f64>().ok().filter(|s| s.is_finite() && *s > 0.0);
+            if s.is_none() {
+                tracing::warn!("{key}={v:?} is not a number of seconds — using {}s", default.as_secs());
+            }
+            s.map(Duration::from_secs_f64)
+        };
+        let max_kernels = read("JARVIS_MAX_KERNELS").and_then(|v| {
+            let n = v.parse::<usize>().ok().filter(|n| *n > 0);
+            if n.is_none() {
+                tracing::warn!("JARVIS_MAX_KERNELS={v:?} is not a positive whole number — using {}", d.max_kernels);
+            }
+            n
+        });
+        Limits {
+            max_kernels: max_kernels.unwrap_or(d.max_kernels),
+            idle: secs("JARVIS_KERNEL_IDLE_TIMEOUT", d.idle).unwrap_or(d.idle),
+            subagent_idle: secs("JARVIS_SUBAGENT_KERNEL_IDLE_TIMEOUT", d.subagent_idle).unwrap_or(d.subagent_idle),
+        }
+    }
+}
+
 pub struct Kernels {
     launch: Launch,
     /// Run silently in every kernel right after it starts.
     bootstrap: String,
-    /// For the approval hold.
+    /// For the approval hold, and to tell a sub-agent's session.
     pool: SqlitePool,
+    limits: Limits,
     sessions: tokio::sync::Mutex<HashMap<String, Arc<Session>>>,
+    /// Sessions whose kernel was reaped or evicted after cells ran in it: the
+    /// next cell there is told its variables are gone.
+    lost: std::sync::Mutex<HashSet<String>>,
 }
 
 struct Session {
@@ -180,6 +256,13 @@ struct Session {
     last_used: std::sync::Mutex<Instant>,
     /// A cell whose caller went away, interrupted but not yet settled.
     abandoned: std::sync::Mutex<Option<String>>,
+    /// Cells running or waiting for the one running (`InUse`).
+    users: AtomicUsize,
+    /// A cell has been sent to one of its kernels.
+    ran: AtomicBool,
+    /// Its kernel was started again after cells ran in an earlier one; the
+    /// next cell's result says so.
+    restarted: AtomicBool,
 }
 
 #[derive(Default)]
@@ -191,8 +274,20 @@ struct State {
 }
 
 impl Kernels {
+    /// With the limits the environment sets (`Limits::from_env`).
     pub fn new(launch: Launch, root: &Path, pool: SqlitePool) -> Arc<Self> {
-        Arc::new(Kernels { bootstrap: bootstrap(root), launch, pool, sessions: Default::default() })
+        Self::with_limits(launch, root, pool, Limits::from_env())
+    }
+
+    pub fn with_limits(launch: Launch, root: &Path, pool: SqlitePool, limits: Limits) -> Arc<Self> {
+        Arc::new(Kernels {
+            bootstrap: bootstrap(root),
+            launch,
+            pool,
+            limits,
+            sessions: Default::default(),
+            lost: Default::default(),
+        })
     }
 
     /// Run one cell in `key`'s kernel, starting it if need be. The output
@@ -211,18 +306,25 @@ impl Kernels {
         let (session, victim) = {
             let mut sessions = self.sessions.lock().await;
             if let Some(s) = sessions.get(key) {
+                // Under the lock, so the reaper can't take it before its cell starts.
+                s.touch();
                 return s.clone();
             }
-            let victim = (sessions.len() >= MAX_KERNELS)
-                .then(|| sessions.iter().min_by_key(|(_, s)| s.last_used()).map(|(k, _)| k.clone()))
+            // The least recently used — one with no cell running, if any.
+            let victim = (sessions.len() >= self.limits.max_kernels)
+                .then(|| sessions.iter().min_by_key(|(_, s)| (s.in_use(), s.last_used())).map(|(k, _)| k.clone()))
                 .flatten()
                 .and_then(|k| sessions.remove(&k));
             let session = Arc::new(Session::new(key));
+            if self.lost.lock().expect("not poisoned").remove(key) {
+                session.restarted.store(true, Ordering::Relaxed);
+            }
             sessions.insert(key.to_string(), session.clone());
             (session, victim)
         };
         if let Some(victim) = victim {
-            tracing::info!("evicting LRU kernel {} (capacity {MAX_KERNELS})", victim.key);
+            tracing::info!("evicting LRU kernel {} (capacity {})", victim.key, self.limits.max_kernels);
+            self.lose(&victim);
             // Outside the registry's lock: the victim may be mid-cell, and
             // waiting for it mustn't stall every other session.
             victim.shutdown().await;
@@ -230,7 +332,24 @@ impl Kernels {
         session
     }
 
+    /// Remember that `session`'s kernel went with cells run in it, so its
+    /// next cell is told.
+    fn lose(&self, session: &Session) {
+        if !(session.ran.load(Ordering::Relaxed) || session.restarted.load(Ordering::Relaxed)) {
+            return;
+        }
+        let mut lost = self.lost.lock().expect("not poisoned");
+        if lost.len() >= LOST_CAP
+            && let Some(any) = lost.iter().next().cloned()
+        {
+            lost.remove(&any);
+        }
+        lost.insert(session.key.clone());
+    }
+
+    /// Shut `key`'s kernel down for good — its conversation or worker is gone.
     pub async fn shutdown(&self, key: &str) {
+        self.lost.lock().expect("not poisoned").remove(key);
         let session = self.sessions.lock().await.remove(key);
         if let Some(s) = session {
             s.shutdown().await;
@@ -244,15 +363,26 @@ impl Kernels {
         }
     }
 
-    /// Shut down every kernel untouched for longer than `max_idle`.
-    pub async fn reap_idle(&self, max_idle: Duration) -> usize {
+    /// Shut down every kernel with no cell running that has been untouched
+    /// for longer than `Limits::idle` — or, a sub-agent's whose turn is
+    /// over, `Limits::subagent_idle`.
+    pub async fn reap_idle(&self) -> usize {
+        let Limits { idle, subagent_idle, .. } = self.limits;
+        let idle_for = |s: &Session, d: Duration| !s.in_use() && s.last_used().elapsed() > d;
+        let early: Vec<String> =
+            self.sessions.lock().await.values().filter(|s| idle_for(s, subagent_idle)).map(|s| s.key.clone()).collect();
+        let finished = if early.is_empty() { HashSet::new() } else { self.finished_subagents(&early).await };
         let stale: Vec<Arc<Session>> = {
             let mut sessions = self.sessions.lock().await;
-            let keys: Vec<String> =
-                sessions.iter().filter(|(_, s)| s.last_used().elapsed() > max_idle).map(|(k, _)| k.clone()).collect();
+            let keys: Vec<String> = sessions
+                .iter()
+                .filter(|(k, s)| idle_for(s, idle) || (finished.contains(*k) && idle_for(s, subagent_idle)))
+                .map(|(k, _)| k.clone())
+                .collect();
             keys.iter().filter_map(|k| sessions.remove(k)).collect()
         };
         for s in &stale {
+            self.lose(s);
             s.shutdown().await;
         }
         if !stale.is_empty() {
@@ -262,14 +392,35 @@ impl Kernels {
         stale.len()
     }
 
-    /// The idle reaper, for the life of the edge.
-    pub async fn reap_forever(self: Arc<Self>, max_idle: Duration) {
-        let mut tick = tokio::time::interval(REAP_EVERY.min(max_idle));
+    /// The idle reaper, for the life of the edge: a kernel goes at most half
+    /// its timeout late.
+    pub async fn reap_forever(self: Arc<Self>) {
+        let Limits { idle, subagent_idle, .. } = self.limits;
+        let every = REAP_EVERY.min(idle / 2).min(subagent_idle / 2).max(Duration::from_millis(100));
+        let mut tick = tokio::time::interval(every);
         tick.tick().await;
         loop {
             tick.tick().await;
-            self.reap_idle(max_idle).await;
+            self.reap_idle().await;
         }
+    }
+
+    /// Which of `keys` are sub-agents' conversations with no turn running or
+    /// waiting to run — whose kernels can go early.
+    async fn finished_subagents(&self, keys: &[String]) -> HashSet<String> {
+        let keys = serde_json::to_string(keys).expect("strings serialize");
+        sqlx::query_scalar::<_, String>(
+            "SELECT c.id FROM conversations c WHERE c.surface = 'subagent' AND c.id IN (SELECT value FROM json_each(?)) \
+             AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.thread_id = c.id AND j.status IN ('pending', 'running'))",
+        )
+        .bind(keys)
+        .fetch_all(&self.pool)
+        .await
+        .map(|ids| ids.into_iter().collect())
+        .unwrap_or_else(|e| {
+            tracing::warn!("kernel reaper: can't tell which kernels are sub-agents': {e}");
+            HashSet::new()
+        })
     }
 
     /// Whether `conversation_id` has a tool call waiting on a human
@@ -294,6 +445,9 @@ impl Session {
             state: Default::default(),
             last_used: std::sync::Mutex::new(Instant::now()),
             abandoned: Default::default(),
+            users: AtomicUsize::new(0),
+            ran: AtomicBool::new(false),
+            restarted: AtomicBool::new(false),
         }
     }
 
@@ -305,7 +459,12 @@ impl Session {
         *self.last_used.lock().expect("not poisoned") = Instant::now();
     }
 
+    fn in_use(&self) -> bool {
+        self.users.load(Ordering::SeqCst) > 0
+    }
+
     async fn run(&self, kernels: &Kernels, cell: &Cell<'_>) -> Result<Output, String> {
+        let _in_use = InUse::new(self);
         let mut st = self.state.lock().await;
         self.ensure_started(kernels, &mut st).await?;
         self.touch();
@@ -327,6 +486,7 @@ impl Session {
             *scope = Some(wanted);
         }
 
+        self.ran.store(true, Ordering::Relaxed);
         let id = kernel.execute(cell.code, false).await?;
         let mut busy = Busy::new(self, kernel.pid(), &id);
         let mut out = vec![];
@@ -339,7 +499,8 @@ impl Session {
             let _ = tokio::time::timeout(INTERRUPT_DRAIN_TIMEOUT, drain(kernel, &id, &mut out)).await;
         }
         busy.done();
-        Ok(Output { pieces: out, interrupted, timeout: cell.timeout })
+        let restarted = self.restarted.swap(false, Ordering::Relaxed);
+        Ok(Output { pieces: out, interrupted, timeout: cell.timeout, restarted })
     }
 
     /// Start the kernel if it isn't running — or restart one that died.
@@ -349,6 +510,7 @@ impl Session {
                 return Ok(());
             }
             st.kernel.take().expect("present").shutdown().await;
+            self.restarted.store(true, Ordering::Relaxed);
         }
         let mut k = Kernel::start(&kernels.launch, STARTUP_TIMEOUT).await?;
         // Its output carries another parent id, so the cell after ignores it.
@@ -365,6 +527,25 @@ impl Session {
             k.shutdown().await;
         }
         tracing::info!("kernel shut down for session {}", self.key);
+    }
+}
+
+/// A cell in a session, from before it waits for the one running to its
+/// end: the reaper and the cap leave the session alone meanwhile, however
+/// long the cell's timeout or approval hold.
+struct InUse<'a>(&'a Session);
+
+impl<'a> InUse<'a> {
+    fn new(session: &'a Session) -> Self {
+        session.users.fetch_add(1, Ordering::SeqCst);
+        InUse(session)
+    }
+}
+
+impl Drop for InUse<'_> {
+    fn drop(&mut self) {
+        self.0.touch();
+        self.0.users.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -547,6 +728,25 @@ fn cut_middle(s: &str, len: usize) -> String {
     format!("{}{}{}", &s[..at(head)], marker(len - head - tail), &s[at(len - tail)..])
 }
 
+/// The result with what the agent should know besides: that its kernel was
+/// restarted (first), and, when the cell ran out of time (`timed_out`), how
+/// to give work that long room.
+fn noted(result: String, restarted: bool, timed_out: Option<Duration>) -> String {
+    let mut out = if restarted { format!("{RESTARTED}\n{result}") } else { result };
+    if let Some(timeout) = timed_out {
+        out.push_str(&if timeout < MAX_TIMEOUT {
+            format!(
+                "\n[Give longer work a larger `timeout` (at most {}s), or run it in the background with \
+                 `jarvis.start_job(command)`.]",
+                MAX_TIMEOUT.as_secs()
+            )
+        } else {
+            "\n[Run work this long in the background with `jarvis.start_job(command)`.]".to_string()
+        });
+    }
+    out
+}
+
 /// IPython colours its tracebacks; the model reads plain text.
 fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -642,7 +842,7 @@ mod tests {
     }
 
     fn output(pieces: Vec<Piece>) -> Output {
-        Output { pieces, interrupted: false, timeout: Duration::from_secs(60) }
+        Output { pieces, interrupted: false, timeout: Duration::from_secs(60), restarted: false }
     }
 
     fn display(d: &Map<String, Value>, kept: usize) -> Piece {
@@ -719,10 +919,53 @@ mod tests {
         assert_eq!(plain.seen(Room { images: 4, bytes: 1 << 20 }).0, "1");
     }
 
+    #[test]
+    fn notes_say_what_happened() {
+        assert_eq!(noted("2".into(), false, None), "2");
+        assert!(noted("2".into(), true, None).starts_with("[This kernel was restarted") && noted("2".into(), true, None).ends_with("]\n2"));
+        assert!(noted("x".into(), false, Some(Duration::from_secs(60))).ends_with("(at most 600s), or run it in the background with `jarvis.start_job(command)`.]"));
+        assert!(noted("x".into(), false, Some(MAX_TIMEOUT)).ends_with("\n[Run work this long in the background with `jarvis.start_job(command)`.]"));
+    }
+
+    #[test]
+    fn limits_come_from_the_environment() {
+        let vars = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(name, _)| *name == k).map(|(_, v)| v.to_string())
+        };
+        assert_eq!(Limits::from_vars(vars(&[])), Limits::default());
+        assert_eq!(Limits::default().subagent_idle, Duration::from_secs(300));
+        let set = Limits::from_vars(vars(&[
+            ("JARVIS_MAX_KERNELS", "3"),
+            ("JARVIS_KERNEL_IDLE_TIMEOUT", "600"),
+            ("JARVIS_SUBAGENT_KERNEL_IDLE_TIMEOUT", " 0.5 "),
+        ]));
+        assert_eq!(set, Limits { max_kernels: 3, idle: Duration::from_secs(600), subagent_idle: Duration::from_millis(500) });
+        // A value that isn't a positive number is the default.
+        let odd = Limits::from_vars(vars(&[
+            ("JARVIS_MAX_KERNELS", "0"),
+            ("JARVIS_KERNEL_IDLE_TIMEOUT", "soon"),
+            ("JARVIS_SUBAGENT_KERNEL_IDLE_TIMEOUT", "-1"),
+        ]));
+        assert_eq!(odd, Limits::default());
+    }
+
     async fn registry() -> Arc<Kernels> {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        registry_with(Limits::default()).await
+    }
+
+    /// A registry over one in-memory database with the tables the reaper reads.
+    async fn registry_with(limits: Limits) -> Arc<Kernels> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE conversations (id VARCHAR PRIMARY KEY, surface VARCHAR NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE jobs (id VARCHAR PRIMARY KEY, status VARCHAR NOT NULL, thread_id VARCHAR)")
+            .execute(&pool)
+            .await
+            .unwrap();
         let launch = Launch { python: "python3".into(), dir: ".".into(), env: vec![] };
-        Kernels::new(launch, Path::new("/app"), pool)
+        Kernels::with_limits(launch, Path::new("/app"), pool, limits)
     }
 
     async fn keys(k: &Kernels) -> Vec<String> {
@@ -748,15 +991,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_cap_takes_an_idle_session_before_a_busy_one() {
+        let k = registry_with(Limits { max_kernels: 2, ..Limits::default() }).await;
+        let busy = k.session("busy").await;
+        let _cell = InUse::new(&busy);
+        k.session("idle").await;
+        k.session("new").await;
+        assert_eq!(keys(&k).await, ["busy", "new"]);
+    }
+
+    #[tokio::test]
     async fn idle_sessions_are_reaped() {
-        let k = registry().await;
+        let k = registry_with(Limits { idle: Duration::from_millis(10), ..Limits::default() }).await;
         k.session("old").await;
         tokio::time::sleep(Duration::from_millis(20)).await;
         k.session("fresh").await;
-        assert_eq!(k.reap_idle(Duration::from_millis(10)).await, 1);
+        assert_eq!(k.reap_idle().await, 1);
         assert_eq!(keys(&k).await, ["fresh"]);
         k.shutdown("fresh").await;
         assert!(keys(&k).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_session_with_a_cell_in_it_is_not_reaped() {
+        let k = registry_with(Limits { idle: Duration::from_millis(10), ..Limits::default() }).await;
+        let s = k.session("long").await;
+        let cell = InUse::new(&s);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(k.reap_idle().await, 0);
+        // Its end counts as a use: idle from then.
+        drop(cell);
+        assert_eq!(k.reap_idle().await, 0);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(k.reap_idle().await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_finished_sub_agents_kernel_goes_sooner_and_is_noted_when_it_comes_back() {
+        let limits = Limits { subagent_idle: Duration::from_millis(10), ..Limits::default() };
+        let k = registry_with(limits).await;
+        for (id, surface) in [("sub", "subagent"), ("working", "subagent"), ("chat", "web")] {
+            sqlx::query("INSERT INTO conversations VALUES (?, ?)").bind(id).bind(surface).execute(&k.pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO jobs VALUES ('j', 'running', 'working')").execute(&k.pool).await.unwrap();
+        for key in ["sub", "working", "chat", "worker::w1"] {
+            k.session(key).await.ran.store(true, Ordering::Relaxed);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // A sub-agent's whose turn is over; not one still at work, nor a chat's.
+        assert_eq!(k.reap_idle().await, 1);
+        assert_eq!(keys(&k).await, ["chat", "worker::w1", "working"]);
+        // Given work again, it starts afresh — and its first cell is told.
+        assert!(k.session("sub").await.restarted.load(Ordering::Relaxed));
+        assert!(!k.session("chat").await.restarted.load(Ordering::Relaxed));
+        // A session shut down on purpose isn't.
+        k.lost.lock().unwrap().insert("gone".into());
+        k.shutdown("gone").await;
+        assert!(!k.session("gone").await.restarted.load(Ordering::Relaxed));
+    }
+
+    /// A real kernel, when this checkout's `.venv` has one: a sub-agent's
+    /// reaped kernel comes back fresh, scoped again, and says so.
+    #[tokio::test]
+    async fn a_reaped_kernel_restarts_scoped_and_says_so() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("the checkout").to_path_buf();
+        let python = root.join(".venv/bin/python");
+        if !python.is_file() {
+            eprintln!("skipped: no {}", python.display());
+            return;
+        }
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE conversations (id VARCHAR PRIMARY KEY, surface VARCHAR NOT NULL)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE jobs (id VARCHAR PRIMARY KEY, status VARCHAR NOT NULL, thread_id VARCHAR)").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO conversations VALUES ('sub-1', 'subagent')").execute(&pool).await.unwrap();
+        let launch = Launch { python, dir: root.clone(), env: vec![] };
+        let limits = Limits { subagent_idle: Duration::from_millis(10), ..Limits::default() };
+        let k = Kernels::with_limits(launch, &root, pool, limits);
+        let cell = |code: &'static str| Cell { code, timeout: Duration::from_secs(30), conversation_id: Some("sub-1"), project_id: None };
+        assert_eq!(k.run("sub-1", &cell("x = 1\nx")).await.unwrap(), "1");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(k.reap_idle().await, 1);
+        let after = k.run("sub-1", &cell("jarvis._conversation_id")).await.unwrap();
+        assert_eq!(after, format!("{RESTARTED}\n'sub-1'"));
+        let gone = k.run("sub-1", &cell("x")).await.unwrap();
+        assert!(gone.contains("NameError") && !gone.contains("restarted"), "{gone}");
+        k.shutdown_all().await;
     }
 
     #[test]

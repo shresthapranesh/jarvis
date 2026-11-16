@@ -168,5 +168,25 @@
   "name": "mcp_call",
   "description": "Call one MCP tool and return its output as text.",
   "group": "mcp"
+ },
+ {
+  "name": "start_job",
+  "description": "Start a shell command in the background and return its job id at once.",
+  "group": "jobs"
+ },
+ {
+  "name": "job",
+  "description": "Where a job stands, and the last `lines` lines of its log.",
+  "group": "jobs"
+ },
+ {
+  "name": "stop_job",
+  "description": "Stop a running job and everything it started.",
+  "group": "jobs"
+ },
+ {
+  "name": "list_jobs",
+  "description": "Jobs started with start_job, newest first.",
+  "group": "jobs"
  }
 ]

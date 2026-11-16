@@ -16,7 +16,7 @@ Preloaded in every kernel — load results once into a variable, then reuse them
   httpx, datetime, subprocess      # imported; pandas, numpy, yfinance are installed — import them when needed
   Files: pathlib / open() directly — there are no separate file tools.
 
-Each cell gets 60 seconds; one that runs over is interrupted, and the kernel and its variables survive. For anything longer — a large download, a build, a training run — start it in the background with `subprocess.Popen(..., start_new_session=True)` writing to a log file (without the new session, the next interrupted cell stops it too) and check on it in later cells, or hand it to a board task.
+Each cell gets 60 seconds unless you pass run_cell a larger `timeout` (at most 600); one that runs over is interrupted, and the kernel and its variables survive. For anything longer — a large download, a build, a training run — start it with `jarvis.start_job("<shell command>")`, which runs it in the background with a log and outlives interrupts and restarts, then check on it in later cells with `jarvis.job(id)`, or hand it to a board task.
 
 `%reset -f` clears the slate, preloads included — restore them with `from tools.preload import *`.
 

@@ -189,7 +189,7 @@ impl Drop for Kernel {
 /// A worker's tool call, its arguments checked.
 #[derive(Debug, PartialEq)]
 enum Call {
-    RunCell { code: String },
+    RunCell { code: String, timeout: std::time::Duration },
     ReadFile { filepath: String },
     WriteFile { filepath: String, content: String },
     ListFiles { directory: String },
@@ -360,10 +360,10 @@ impl<'c, 'a> Worker<'c, 'a> {
         let pool = &ctx.agent.pool;
         let cwd = crate::config::app_dir();
         match call {
-            Call::RunCell { code } => {
+            Call::RunCell { code, timeout } => {
                 let cell = crate::kernels::Cell {
                     code: &code,
-                    timeout: super::tools::CELL_TIMEOUT,
+                    timeout,
                     conversation_id: None,
                     project_id: None,
                 };
@@ -421,7 +421,7 @@ fn check(name: &str, args: &Value) -> Result<Call, String> {
     let empty = Map::new();
     let mut a = Args::new(args.as_object().unwrap_or(&empty));
     let call = match name {
-        "run_cell" => Call::RunCell { code: a.str("code") },
+        "run_cell" => Call::RunCell { code: a.str("code"), timeout: a.cell_timeout() },
         "read_file" => Call::ReadFile { filepath: a.str("filepath") },
         "write_file" => Call::WriteFile { filepath: a.str("filepath"), content: a.str("content") },
         "list_files" => Call::ListFiles { directory: a.str("directory") },
