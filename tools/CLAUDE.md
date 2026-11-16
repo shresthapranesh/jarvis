@@ -38,3 +38,5 @@ The server's (`edge/src/browser/`), attached to the same browser the kernels dri
 
 ## Package imports
 `tools/__init__.py` imports nothing — kernels import `tools.research` at boot and must stay fast. Don't add a registry there.
+
+`preload.py` is what every kernel preloads (`from tools.preload import *`, also the agent's restore line after `%reset -f`): `search`/`read`, `jarvis`, `httpx`, `datetime`, `subprocess`. Keep it cheap — this runs on low-RAM hardware; pandas, numpy and yfinance are installed, not preloaded, and a lazy binding doesn't hold (the first traceback's `inspect.getmodule` touches every module in `sys.modules`). Change the prompt's preload lines (`edge/src/system_prompt.md`) with it.

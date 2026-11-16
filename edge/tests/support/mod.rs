@@ -91,34 +91,47 @@ struct Script {
 }
 
 /// An Ollama: `/api/chat` answers the n-th request with the n-th reply of
-/// its script, `/api/embed` with a vector per input.
+/// its script, `/api/embed` with a vector per input, `/api/show` with the
+/// model's capabilities.
 #[derive(Clone)]
 pub struct FakeModel {
     pub url: String,
     script: Arc<Mutex<Script>>,
     arrived: Arc<Semaphore>,
     released: Arc<Semaphore>,
+    /// It reads images (`vision` among its capabilities).
+    vision: bool,
 }
 
 impl FakeModel {
     pub async fn start(replies: Vec<Reply>) -> Self {
-        Self::serve(replies, None).await
+        Self::serve(replies, None, false).await
     }
 
     /// As `start`, with request `hold` kept waiting until `release`.
     pub async fn holding(replies: Vec<Reply>, hold: usize) -> Self {
-        Self::serve(replies, Some(hold)).await
+        Self::serve(replies, Some(hold), false).await
     }
 
-    async fn serve(replies: Vec<Reply>, hold: Option<usize>) -> Self {
+    /// As `start`, a model that reads images.
+    pub async fn seeing(replies: Vec<Reply>) -> Self {
+        Self::serve(replies, None, true).await
+    }
+
+    async fn serve(replies: Vec<Reply>, hold: Option<usize>, vision: bool) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let fake = FakeModel {
             url: format!("http://{}", listener.local_addr().unwrap()),
             script: Arc::new(Mutex::new(Script { replies, requests: Vec::new(), hold })),
             arrived: Arc::new(Semaphore::new(0)),
             released: Arc::new(Semaphore::new(0)),
+            vision,
         };
-        let app = Router::new().route("/api/chat", post(chat)).route("/api/embed", post(embed)).with_state(fake.clone());
+        let app = Router::new()
+            .route("/api/chat", post(chat))
+            .route("/api/embed", post(embed))
+            .route("/api/show", post(show))
+            .with_state(fake.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         fake
     }
@@ -181,6 +194,14 @@ async fn chat(State(fake): State<FakeModel>, Json(body): Json<Value>) -> impl In
     }
     out += &line(json!({"role": "assistant", "content": ""}), true);
     ([(CONTENT_TYPE, "application/x-ndjson")], out)
+}
+
+async fn show(State(fake): State<FakeModel>) -> Json<Value> {
+    let mut capabilities = vec!["completion", "tools"];
+    if fake.vision {
+        capabilities.push("vision");
+    }
+    Json(json!({"capabilities": capabilities}))
 }
 
 async fn embed(Json(body): Json<Value>) -> Json<Value> {

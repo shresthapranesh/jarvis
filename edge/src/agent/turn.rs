@@ -43,7 +43,7 @@ use crate::budget::{Budget, Limits};
 use crate::gql::codec::now_stored;
 use crate::llm::perf::PerfTracker;
 use crate::llm::shape::{self, Layout};
-use crate::llm::transcript::{Content, Message, Part, Role, ToolCall, Typed};
+use crate::llm::transcript::{Content, Media, Message, Part, Role, ToolCall, Typed};
 use crate::llm::{self, Delta, Endpoints, Request};
 use crate::pyjson;
 use crate::runs::Run;
@@ -663,7 +663,12 @@ impl<'a> Turn<'a> {
             }
         }
 
-        let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(&self.model, compaction.messages));
+        let mut seen = compaction.messages;
+        // A cell's images, kept for a model that read them, as lines for one that can't.
+        if shape::has_tool_images(&seen) && !llm::sees_tool_images(&self.agent.http, &ends, &self.model).await {
+            seen = shape::unseen_tool_images(seen);
+        }
+        let shaped = shape::repair_orphan_tool_calls(shape::strip_thinking_for(&self.model, seen));
         let prompt = shape::build(&layout, shaped);
         // Read each step, so a pick changed mid-run applies from the next call.
         let chosen: Option<String> = sqlx::query_scalar("SELECT effort FROM conversations WHERE id = ?")
@@ -866,7 +871,7 @@ impl<'a> Turn<'a> {
                         match ran {
                             Ok(answer) => {
                                 self.tool_failures = 0;
-                                (Content::Text(answer), "success", None)
+                                (answer, "success", None)
                             }
                             Err(e) => self.tool_failed(&call.name, e)?,
                         }
@@ -1341,17 +1346,49 @@ impl<'a> Turn<'a> {
 
     /// One of the edge's tools; an `Err` is a failure of the server's, which
     /// the model is told of (`tool_failed`).
-    async fn run_native(&mut self, thread: &mut Thread, native: Native) -> Result<String, String> {
+    async fn run_native(&mut self, thread: &mut Thread, native: Native) -> Result<Content, String> {
         match native {
-            Native::RunCell { code } => {
-                let cell = crate::kernels::Cell {
-                    code: &code,
-                    timeout: tools::CELL_TIMEOUT,
-                    conversation_id: self.conversation.as_deref(),
-                    project_id: self.project_id.as_deref(),
-                };
-                self.agent.kernels.run(&self.thread_id, &cell).await
-            }
+            Native::RunCell { code } => self.run_cell(thread, &code).await,
+            other => self.run_text_tool(thread, other).await.map(Content::Text),
+        }
+    }
+
+    /// `run_cell`: what the cell put out. The images it showed ride after
+    /// the text as image parts, their bytes `transcript_blobs` rows, when
+    /// the model reads images in a tool result and the call has room for
+    /// them (`image_room`); otherwise each is a line of the text.
+    async fn run_cell(&mut self, thread: &mut Thread, code: &str) -> Result<Content, String> {
+        let cell = crate::kernels::Cell {
+            code,
+            timeout: tools::CELL_TIMEOUT,
+            conversation_id: self.conversation.as_deref(),
+            project_id: self.project_id.as_deref(),
+        };
+        let output = self.agent.kernels.run_with_images(&self.thread_id, &cell).await?;
+        if !output.has_images() || !llm::sees_tool_images(&self.agent.http, &Endpoints::from_env(), &self.model).await {
+            return Ok(Content::Text(output.text()));
+        }
+        let (text, images) = output.seen(image_room(&self.model, &thread.messages, &thread.blobs));
+        if images.is_empty() {
+            return Ok(Content::Text(text));
+        }
+        let mut parts = vec![Part::Typed(Typed::Text { text, signature: None, extras: Default::default() })];
+        for image in images {
+            let blob = super::thread::store_blob(self.pool(), &mut thread.blobs, &image.mime_type, &image.data).await?;
+            parts.push(Part::Typed(Typed::Image(Media {
+                mime_type: Some(image.mime_type),
+                blob: Some(blob),
+                data: None,
+                url: None,
+                extras: Default::default(),
+            })));
+        }
+        Ok(Content::Parts(parts))
+    }
+
+    /// The edge's tools whose answer is text.
+    async fn run_text_tool(&mut self, thread: &mut Thread, native: Native) -> Result<String, String> {
+        match native {
             Native::WriteTodos { todos } => {
                 let items: Vec<Value> = todos.iter().map(|t| json!({"text": t, "status": "pending"})).collect();
                 self.events.emit("todos_updated", &json!({"todos": items, "source": "main"}));
@@ -1410,6 +1447,7 @@ impl<'a> Turn<'a> {
             Native::ListArtifacts { all_conversations } => {
                 super::artifacts::list(self.pool(), self.conversation.as_deref(), all_conversations).await
             }
+            Native::RunCell { .. } => unreachable!("runs in run_native"),
             Native::Mcp { .. }
             | Native::Remember { .. }
             | Native::RunAgents { .. }
@@ -1956,13 +1994,51 @@ pub(super) fn lc_blocks(parts: &[Part]) -> Value {
     )
 }
 
+/// The most images, and decoded bytes of them, one model call carries:
+/// Bedrock's 20, and well under Anthropic's 32 MB request once base64.
+const MAX_CALL_IMAGES: usize = 20;
+const MAX_CALL_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+
+/// What room the next call to `model` has for a cell's images: the caps,
+/// less the images the history already sends it — those in the view
+/// `per_call_for` leaves (every one, for a model that preserves thinking,
+/// whose history only grows; a collapsed tool group takes its images with it).
+fn image_room(model: &str, messages: &[Message], blobs: &llm::Blobs) -> crate::kernels::Room {
+    let (mut images, mut bytes) = (0, 0);
+    for m in llm::compact::per_call_for(model, messages.to_vec()) {
+        let Content::Parts(parts) = &m.content else { continue };
+        for p in parts {
+            if let Part::Typed(Typed::Image(media)) = p {
+                images += 1;
+                let encoded = media.data.as_ref().or_else(|| media.blob.as_ref().and_then(|b| blobs.get(b)));
+                bytes += encoded.map_or(0, |e| e.len() / 4 * 3);
+            }
+        }
+    }
+    crate::kernels::Room {
+        images: MAX_CALL_IMAGES.saturating_sub(images),
+        bytes: MAX_CALL_IMAGE_BYTES.saturating_sub(bytes),
+    }
+}
+
 pub(super) fn tools_step_data(results: &[Message]) -> String {
     let entries: Vec<Value> = results
         .iter()
         .map(|m| {
-            // `str(msg.content)[:400]`.
+            // `str(msg.content)[:400]`; a result with images (`run_cell`'s)
+            // is its text, which names them — not a repr of the parts.
             let output = match &m.content {
                 Content::Text(s) => s.chars().take(400).collect::<String>(),
+                Content::Parts(parts) if parts.iter().any(|p| matches!(p, Part::Typed(Typed::Image(_)))) => parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        Part::Str(s) | Part::Typed(Typed::Text { text: s, .. }) => Some(s.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>()
+                    .chars()
+                    .take(400)
+                    .collect(),
                 Content::Parts(parts) => pyjson::py_repr(&lc_blocks(parts)).chars().take(400).collect(),
             };
             json!({"tool": m.name.clone().unwrap_or_default(), "output": output})
@@ -2016,6 +2092,29 @@ mod tests {
         assert_eq!(joint("I found events on", "eventbrite and meetup."), " ");
         assert_eq!(joint("I found events on ", "meetup."), "");
         assert_eq!(joint("Twelve events", ", mostly free."), "");
+    }
+
+    #[test]
+    fn the_images_a_call_already_carries_leave_less_room() {
+        let mut history: Vec<Message> = vec![serde_json::from_value(json!({"v": 1, "role": "user", "content": "draw"})).unwrap()];
+        for i in 0..9 {
+            history.extend(serde_json::from_value::<Vec<Message>>(json!([
+                {"v": 1, "role": "assistant", "content": "", "tool_calls": [{"id": format!("c{i}"), "name": "run_cell", "args": {}}]},
+                {"v": 1, "role": "tool", "name": "run_cell", "tool_call_id": format!("c{i}"), "content": [
+                    {"type": "text", "text": "drawn"}, {"type": "image", "mime_type": "image/png", "blob": "sha256:ab"}]},
+            ]))
+            .unwrap());
+        }
+        // 3 KB decoded.
+        let blobs = llm::Blobs::from([("sha256:ab".to_string(), "A".repeat(4096))]);
+        // Four of the nine groups are collapsed to stubs, their images with them…
+        let room = image_room("ollama:fake", &history, &blobs);
+        assert_eq!((room.images, room.bytes), (MAX_CALL_IMAGES - 5, MAX_CALL_IMAGE_BYTES - 5 * 3072));
+        // …but a history that only grows sends every one.
+        let room = image_room("anthropic:claude-opus-5-5", &history, &blobs);
+        assert_eq!((room.images, room.bytes), (MAX_CALL_IMAGES - 9, MAX_CALL_IMAGE_BYTES - 9 * 3072));
+        // The step shows the result's text.
+        assert_eq!(tools_step_data(&history[2..3]), r#"{"tool": "run_cell", "output": "drawn"}"#);
     }
 
     #[test]

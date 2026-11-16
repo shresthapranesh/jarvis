@@ -211,6 +211,38 @@ pub fn repair_orphan_tool_calls(messages: Vec<Message>) -> Vec<Message> {
     out
 }
 
+// ── images in tool results ───────────────────────────────────────────────────
+
+fn tool_image(m: &Message, p: &Part) -> bool {
+    m.role == Role::Tool && matches!(p, Part::Typed(Typed::Image(_)))
+}
+
+/// Whether a tool result carries an image part (`run_cell`'s).
+pub fn has_tool_images(messages: &[Message]) -> bool {
+    messages.iter().any(|m| parts(m).iter().any(|p| tool_image(m, p)))
+}
+
+/// Each image in a tool result as a line saying it was there, for a model
+/// that can't be sent one (`llm::sees_tool_images`) — the thread went on
+/// with another model. Only the call's copy changes.
+pub fn unseen_tool_images(messages: Vec<Message>) -> Vec<Message> {
+    messages
+        .into_iter()
+        .map(|mut m| {
+            if let (Role::Tool, Content::Parts(parts)) = (m.role, &mut m.content) {
+                for p in parts.iter_mut() {
+                    if let Part::Typed(Typed::Image(media)) = p {
+                        let mime = media.mime_type.as_deref().unwrap_or("image");
+                        let text = format!("[{mime} output — not shown: this model isn't sent images in tool results]");
+                        *p = Part::Typed(Typed::Text { text, signature: None, extras: Map::new() });
+                    }
+                }
+            }
+            m
+        })
+        .collect()
+}
+
 // ── build_llm_messages ───────────────────────────────────────────────────────
 
 /// Volatile context rides at the end as a user message, so it says plainly
@@ -459,6 +491,24 @@ mod tests {
 
     fn tool(id: &str) -> Message {
         msg(json!({"v": 1, "role": "tool", "content": "r", "tool_call_id": id, "status": "success"}))
+    }
+
+    #[test]
+    fn a_tool_result_s_images_become_lines_for_a_model_that_cant_have_them() {
+        let image = json!({"type": "image", "mime_type": "image/png", "blob": "sha256:ab"});
+        let shown = msg(json!({"v": 1, "role": "tool", "tool_call_id": "c", "content": [{"type": "text", "text": "drawn"}, image]}));
+        // An attachment's image is the user's, and stays.
+        let attached = msg(json!({"v": 1, "role": "user", "content": [{"type": "text", "text": "look"}, image]}));
+        assert!(!has_tool_images(std::slice::from_ref(&attached)));
+        assert!(has_tool_images(&[attached.clone(), shown.clone()]));
+        let out = unseen_tool_images(vec![attached.clone(), shown]);
+        assert_eq!(out[0], attached);
+        assert_eq!(
+            serde_json::to_value(&out[1].content).unwrap(),
+            json!([{"type": "text", "text": "drawn"},
+                   {"type": "text", "text": "[image/png output — not shown: this model isn't sent images in tool results]"}])
+        );
+        assert!(!has_tool_images(&out));
     }
 
     #[test]

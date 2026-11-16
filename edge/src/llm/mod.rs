@@ -235,6 +235,22 @@ pub fn preserves_thinking(model: &str) -> bool {
     matches!(model.split_once(':'), Some(("anthropic", name)) if anthropic::thinks_by_default(name))
 }
 
+/// Whether a call to `model` can be sent images inside a tool result — so
+/// `run_cell` hands it the images a cell shows. Claude (Anthropic's API, and
+/// Bedrock's Converse), Gemini (inline beside the function response), and an
+/// Ollama model that lists `vision`. Chat Completions has no image in a tool
+/// message, Gemma and Meta's Responses are unverified, and Bedrock's other
+/// models vary: they are told in text.
+pub async fn sees_tool_images(http: &reqwest::Client, ends: &Endpoints, model: &str) -> bool {
+    match model.split_once(':') {
+        Some(("anthropic", _)) => true,
+        Some(("bedrock", name)) => bedrock::claude_name(name).is_some(),
+        Some(("google_genai", name)) => name.contains("gemini"),
+        Some(("ollama", name)) => ollama::sees_images(http, &ends.ollama_base, name).await,
+        _ => false,
+    }
+}
+
 /// Every effort level, lowest first: the vocabulary a model's levels are
 /// picked from. Each client sends a level as its provider's own setting —
 /// Anthropic's `output_config.effort` (Bedrock's too, for Claude), OpenAI's
@@ -519,7 +535,60 @@ pub async fn cli(call: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use transcript::{Content, Role};
+
+    #[tokio::test]
+    async fn tool_result_images_go_to_the_models_that_take_them() {
+        let (http, ends) = (reqwest::Client::new(), Endpoints::from_env());
+        let sees = |model: &'static str| {
+            let (http, ends) = (http.clone(), &ends);
+            async move { sees_tool_images(&http, ends, model).await }
+        };
+        assert!(sees("anthropic:claude-sonnet-5-5").await);
+        assert!(sees("bedrock:us.anthropic.claude-sonnet-4-6").await);
+        assert!(!sees("bedrock:us.meta.llama4-maverick-17b-instruct-v1:0").await);
+        assert!(sees("google_genai:gemini-2.5-pro").await);
+        assert!(!sees("google_genai:gemma-4-31b-it").await);
+        assert!(!sees("openrouter:anthropic/claude-sonnet-4.5").await);
+        assert!(!sees("meta:llama-4").await);
+    }
+
+    #[test]
+    fn a_tool_result_s_image_rides_in_it() {
+        let history: Vec<Message> = serde_json::from_value(json!([
+            {"v": 1, "role": "user", "content": "draw"},
+            {"v": 1, "role": "assistant", "content": "", "tool_calls": [{"id": "toolu_1", "name": "run_cell", "args": {"code": "plot()"}}]},
+            {"v": 1, "role": "tool", "name": "run_cell", "tool_call_id": "toolu_1", "status": "success", "content": [
+                {"type": "text", "text": "[image/png output — image 1, shown after this text]"},
+                {"type": "image", "mime_type": "image/png", "blob": "sha256:ab"}]},
+        ]))
+        .unwrap();
+        let prompt = Prompt {
+            system: vec![shape::SystemBlock { text: "S".into(), breakpoint: false }],
+            messages: history,
+            history_breakpoint: None,
+            cached: false,
+        };
+        let blobs = Blobs::from([("sha256:ab".to_string(), "iVBO".to_string())]);
+        let req = Request { model: "", prompt: &prompt, tools: &[], blobs: &blobs, effort: None, cache_key: None };
+        let text = json!("[image/png output — image 1, shown after this text]");
+
+        let a = anthropic::render("claude-sonnet-5-5", &req).unwrap();
+        assert_eq!(a["messages"][2]["content"][0]["type"], "tool_result");
+        assert_eq!(a["messages"][2]["content"][0]["content"], json!([
+            {"type": "text", "text": text},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBO"}}]));
+        let b = bedrock::render(&req).unwrap();
+        assert_eq!(b["messages"][2]["content"][0]["toolResult"]["content"], json!([
+            {"text": text}, {"image": {"format": "png", "source": {"bytes": "iVBO"}}}]));
+        // Gemini: beside the function response, in the same turn.
+        let g = google::render("gemini-2.5-pro", &req).unwrap();
+        assert_eq!(g["contents"][2]["parts"][0], json!({"inlineData": {"mimeType": "image/png", "data": "iVBO"}}));
+        assert_eq!(g["contents"][2]["parts"][1]["functionResponse"]["name"], "run_cell");
+        let o = ollama::render("fake", &req).unwrap();
+        assert_eq!(o["messages"][3], json!({"role": "tool", "content": text, "images": ["iVBO"], "tool_name": "run_cell"}));
+    }
 
     fn ended(reason: &str) -> Message {
         let mut m = Message::new(Role::Assistant, Content::Text("partial".into()));

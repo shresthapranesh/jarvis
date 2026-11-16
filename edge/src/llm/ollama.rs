@@ -42,6 +42,30 @@ pub fn host(raw: Option<&str>) -> String {
     format!("http://{hostport}{path}")
 }
 
+/// Whether Ollama's `name` reads images: `vision` among the capabilities
+/// `/api/show` lists. Asked once per server and model; a failed ask counts
+/// as no and is asked again next time.
+pub async fn sees_images(http: &reqwest::Client, base: &str, name: &str) -> bool {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    let key = format!("{base} {name}");
+    if let Some(&known) = seen.lock().expect("not poisoned").get(&key) {
+        return known;
+    }
+    let asked = http
+        .post(format!("{base}/api/show"))
+        .json(&json!({"model": name}))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status);
+    let Ok(shown) = asked else { return false };
+    let Ok(body) = shown.json::<Value>().await else { return false };
+    let vision = body["capabilities"].as_array().is_some_and(|c| c.iter().any(|c| c == "vision"));
+    seen.lock().expect("not poisoned").insert(key, vision);
+    vision
+}
+
 pub async fn complete(
     http: &reqwest::Client,
     ends: &Endpoints,
