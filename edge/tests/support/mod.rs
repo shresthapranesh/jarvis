@@ -64,11 +64,22 @@ fn binary(work_dir: &Path, db: &Path) -> Command {
 pub struct Reply {
     pub text: String,
     pub calls: Vec<(String, Value)>,
+    /// It stops at the model's output limit (`done_reason: "length"`).
+    pub cut: bool,
 }
 
 impl Reply {
     pub fn text(text: &str) -> Self {
-        Reply { text: text.into(), calls: Vec::new() }
+        Reply { text: text.into(), ..Default::default() }
+    }
+
+    pub fn call(name: &str, arguments: Value) -> Self {
+        Reply { calls: vec![(name.into(), arguments)], ..Default::default() }
+    }
+
+    pub fn cut(mut self) -> Self {
+        self.cut = true;
+        self
     }
 }
 
@@ -146,7 +157,7 @@ async fn chat(State(fake): State<FakeModel>, Json(body): Json<Value>) -> impl In
         let mut chunk = json!({"model": "fake", "created_at": "2026-10-04T00:00:00Z", "message": message, "done": done});
         if done {
             for (key, value) in [
-                ("done_reason", json!("stop")),
+                ("done_reason", json!(if reply.cut { "length" } else { "stop" })),
                 ("total_duration", json!(5)),
                 ("load_duration", json!(1)),
                 ("prompt_eval_count", json!(100 + n)),
@@ -185,6 +196,8 @@ pub struct Edge {
     http: reqwest::Client,
     work_dir: PathBuf,
     server: Option<Child>,
+    /// What the server is started with, besides its own.
+    env: Vec<(String, String)>,
 }
 
 impl Edge {
@@ -197,7 +210,12 @@ impl Edge {
         let swept = binary(&work_dir, &db).arg("--startup-sweep").status().unwrap();
         assert!(swept.success(), "the database could not be made");
         let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db)).await.unwrap();
-        Edge { url: String::new(), pool, http: reqwest::Client::new(), work_dir, server: None }
+        Edge { url: String::new(), pool, http: reqwest::Client::new(), work_dir, server: None, env: Vec::new() }
+    }
+
+    /// An environment variable for the server `start` starts.
+    pub fn env(&mut self, name: &str, value: &str) {
+        self.env.push((name.into(), value.into()));
     }
 
     /// Start the server, running its jobs on `model`.
@@ -210,6 +228,7 @@ impl Edge {
             .env("JARVIS_APP_DIR", Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
             // No browser to find.
             .env("JARVIS_BROWSER_CDP_URL", format!("http://127.0.0.1:{}", free_port()))
+            .envs(self.env.iter().map(|(name, value)| (name.as_str(), value.as_str())))
             .stdin(Stdio::null())
             .spawn()
             .unwrap();
@@ -222,6 +241,15 @@ impl Edge {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("the server did not start");
+    }
+
+    /// Kill the server, as a crash would; `start` brings it back over the
+    /// same database.
+    pub fn stop(&mut self) {
+        if let Some(mut server) = self.server.take() {
+            let _ = server.kill();
+            let _ = server.wait();
+        }
     }
 
     /// Rows are written as the ORM wrote them: every column it defaulted is given.
@@ -310,10 +338,7 @@ fn object(row: &SqliteRow) -> Value {
 
 impl Drop for Edge {
     fn drop(&mut self) {
-        if let Some(mut server) = self.server.take() {
-            let _ = server.kill();
-            let _ = server.wait();
-        }
+        self.stop();
         let _ = std::fs::remove_dir_all(&self.work_dir);
     }
 }

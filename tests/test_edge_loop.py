@@ -606,6 +606,11 @@ def _record_of(turn: Turn) -> dict[str, Any]:
 
 
 _DELEGATING = re.compile(r"## Delegating to [^\n]*\n.*?(?=\n## )", re.S)
+# The edge's own, after Python was gone: today's date in the volatile tail,
+# and the two prompt rules it rewrote (text while working; the date).
+_TODAY = re.compile(r"\n\n## Today\n\n[^\n]*")
+_REWORDED = re.compile(r"^- (?:Only write text when giving your FINAL answer\.|Your text is for your FINAL answer\.|"
+                       r"You don't inherently know today's date|Today's date is in the turn context\.)[^\n]*\n", re.M)
 
 
 def _requests(python: list[dict], edge: list[dict]) -> None:
@@ -624,7 +629,7 @@ def _requests(python: list[dict], edge: list[dict]) -> None:
                 side["tools"] = [t for t in side["tools"] if t["function"]["name"] not in own]
             for m in side["messages"]:
                 if m["role"] == "system" and isinstance(m.get("content"), str):
-                    m["content"] = _DELEGATING.sub("", m["content"])
+                    m["content"] = _REWORDED.sub("", _TODAY.sub("", _DELEGATING.sub("", m["content"])))
         assert e["messages"] == p["messages"]
         assert [t["function"]["name"] for t in e.get("tools", [])] == [t["function"]["name"] for t in p.get("tools", [])]
         for et, pt in zip(e.get("tools", []), p.get("tools", [])):

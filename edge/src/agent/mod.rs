@@ -273,6 +273,13 @@ impl Agent {
 
     async fn serve(&self, job: &Job, run: &Arc<Run>) -> Outcome {
         tracing::info!("agent: {} run {} claimed", job.kind, job.id);
+        // Each claim after the first follows a restart that interrupted the
+        // run. One that has been through `max_attempts` of them may be what
+        // brings the server down; it isn't run again.
+        if job.attempts > job.max_attempts {
+            let error = format!("the server restarted {} times while this was running; it was not started again", job.max_attempts);
+            return self.fail_start(job, run, error).await;
+        }
         match job.kind.as_str() {
             "automation" => return self.serve_automation(job, run).await,
             "board_task" => return self.serve_board(job, run).await,

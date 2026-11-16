@@ -126,14 +126,15 @@ async def test_each_request_starts_with_the_last(database: Path, work_dir: Path,
     assert sent[1][1]["content"][0] == {"type": "thinking", "thinking": "step 0", "signature": "sig-0"}
     assert sent[2][3]["content"][0]["signature"] == "sig-1"
     assert sent[1][1]["content"][1]["id"] == "toolu_0_0"
-    # Each turn context where it was sent: none before there was a plan
-    # (no directive by default), then the list as written, then with its
-    # first step done.
+    # Each turn context where it was sent: the date alone before there was a
+    # plan (no directive by default), then the list as written, then with
+    # its first step done.
     contexts = [b["text"] for m in sent[-1] if m["role"] == "user" for b in m["content"]
                 if b.get("type") == "text" and b["text"].startswith("<turn_context>")]
-    assert len(contexts) == 2
+    assert len(contexts) == 3
     assert "Planning Required" not in json.dumps(sent)
-    assert "[ ] survey" in contexts[0] and "[x] survey" in contexts[1]
+    assert all("## Today\n\n" in c for c in contexts) and "Current Tasks" not in contexts[0]
+    assert "[ ] survey" in contexts[1] and "[x] survey" in contexts[2]
     for r in anthropic.requests:
         assert r["headers"]["anthropic-beta"] == "context-management-2025-06-27,thinking-binding-controls-2026-08-01"
         assert r["body"]["thinking"]["block_binding"] == {"prefix_mismatch_behavior": "drop_block"}
@@ -144,7 +145,7 @@ async def test_each_request_starts_with_the_last(database: Path, work_dir: Path,
             "SELECT data FROM thread_messages WHERE thread_id = (SELECT thread_id FROM jobs WHERE id = ?) "
             "AND evicted_at IS NULL ORDER BY seq", (task_id,))]
     carried = [m["role"] for m in rows if "turn_context" in m.get("extras", {})]
-    assert carried == ["tool", "tool"]
+    assert carried == ["user", "tool", "tool"]
 
 
 def _thinking(message: dict) -> list[dict]:

@@ -36,7 +36,8 @@ const RECURSION_LIMIT: u32 = 50;
 pub const SUBAGENT_PROMPT: &str = "You are a sub-agent: another agent has delegated a task to you, and your reply goes back to that agent, not \
      to a person. Do what the task asks, the way it asks — its instructions on approach, sources, scope, format \
      and length are yours to follow. You see only this conversation: everything you were given is in the task and \
-     its context, and later messages here are follow-ups on the same work. Work in run_cell(code) — a stateful \
+     its context — and the project's instructions, when the work is part of one — and later messages here are \
+     follow-ups on the same work. Work in run_cell(code) — a stateful \
      Python/IPython session with full network/filesystem access, where variables and imports persist across calls \
      like notebook cells; search(query) returns [{title, url, snippet}] leads and read(url) returns a page's main \
      text. Use read_file/write_file/list_files for files and the artifact tools for documents worth keeping. \
