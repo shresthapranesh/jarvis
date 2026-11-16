@@ -614,6 +614,11 @@ _REWORDED = re.compile(r"^(?:- (?:Only write text when giving your FINAL answer\
                        r"You don't inherently know today's date|Today's date is in the turn context\.)|"
                        r"  import httpx, pandas as pd|  httpx, datetime, subprocess |"
                        r"`%reset -f` clears the slate)[^\n]*\n", re.M)
+# And the web and SDK lines it rewrote: `read` reads PDFs, `read_many` reads
+# several at once, and a wrong SDK call's error shows the signature.
+_WEB_AND_SDK = re.compile(r"^  read(?:_many)?\([^\n]*\n|, read_many(?=; import tools\.sdk)"
+                          r"|^2\. Pick the 2–3 most promising URLs[^\n]*\n"
+                          r"| (?:Don't guess a signature|A call with wrong arguments)[^\n]*", re.M)
 
 
 def _requests(python: list[dict], edge: list[dict]) -> None:
@@ -632,7 +637,7 @@ def _requests(python: list[dict], edge: list[dict]) -> None:
                 side["tools"] = [t for t in side["tools"] if t["function"]["name"] not in own]
             for m in side["messages"]:
                 if m["role"] == "system" and isinstance(m.get("content"), str):
-                    m["content"] = _REWORDED.sub("", _TODAY.sub("", _DELEGATING.sub("", m["content"])))
+                    m["content"] = _WEB_AND_SDK.sub("", _REWORDED.sub("", _TODAY.sub("", _DELEGATING.sub("", m["content"]))))
         assert e["messages"] == p["messages"]
         assert [t["function"]["name"] for t in e.get("tools", [])] == [t["function"]["name"] for t in p.get("tools", [])]
         for et, pt in zip(e.get("tools", []), p.get("tools", [])):
