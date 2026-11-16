@@ -124,6 +124,43 @@ Add a function to the `jarvis` SDK (`tools/sdk.py`), which the agent calls from 
 
 ---
 
+## Optional: Parallel Search MCP
+
+Add [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) for
+web search and page fetching without a Parallel account or API key. Anonymous
+search uses Fast mode and has free-tier rate limits. Jarvis still needs its usual
+AI model configuration.
+
+After building Jarvis, run these commands from the project root, using the same
+`WORK_DIR` and `DATABASE_URL` as your server:
+
+```bash
+edge/target/release/jarvis-edge mcp add parallel-search https://search.parallel.ai/mcp \
+  --transport http --lazy -H 'User-Agent: jarvis/0.1.0'
+edge/target/release/jarvis-edge mcp get parallel-search
+```
+
+The CLI saves the server in `mcp.servers` and reconnects a running Jarvis server.
+If Jarvis is stopped, start it as in Quick Start, then run `mcp get` again. Check
+that the tool list includes `web_search` and `web_fetch`; if it is empty, inspect
+the server log for the connection error. No token or OAuth login is needed for
+this endpoint.
+
+`--lazy` keeps these tools out of the model's regular tool list. The agent can
+inspect their schemas with `jarvis.mcp_help` and call them with `jarvis.mcp_call`
+from its notebook. In a new chat, try:
+
+> Use the parallel-search MCP server to research the latest Rust release. Search
+> for the official announcement, fetch that page, and summarize the changes with
+> source links.
+
+This adds an optional tool server alongside the existing search helpers. To
+remove the server added above:
+
+```bash
+edge/target/release/jarvis-edge mcp remove parallel-search
+```
+
 ## Optional: Browser Automation
 
 Some agent tasks use Playwright for full browser automation. Install the Chromium browser once:
