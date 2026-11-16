@@ -83,10 +83,15 @@ CELLS: list[tuple[str, dict[str, Any]]] = [
 
 async def test_cells_read_the_same(edge):
     python, got = await _both(edge, "k", CELLS)
-    assert got == python
+    long = 6
+    assert got[:long] + got[long + 1:] == python[:long] + python[long + 1:]
     assert got[1] == "42" and "NameError" in got[4] and got[-1] == "('conv-1', 'p1')"
-    # 30,010 characters and a newline, trimmed.
-    assert got[6].endswith("\n... [truncated 10 chars]")
+    # 30,010 characters and a newline, trimmed. Intended: the edge keeps the
+    # head and the tail, where a traceback or a final result is; Python
+    # kept the head.
+    assert python[long].endswith("\n... [truncated 10 chars]")
+    assert len(got[long]) <= 30_000 and got[long].startswith("é" * 14_000) and got[long].endswith("é" * 14_000)
+    assert " chars truncated from the middle] ..." in got[long]
     assert "\x1b[" not in got[5]
 
 

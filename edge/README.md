@@ -183,7 +183,8 @@ port of `core/kernels.py`;
 - **The interpreter** is `JARVIS_KERNEL_PYTHON`, else `$JARVIS_APP_DIR/.venv/bin/python`,
   else `python3`; the kernel runs in the checkout with it on `sys.path`, and
   `JARVIS_API_URL` pointed at this edge unless already set.
-- **As `core/kernels.py` does it**: the `search`/`read` + `jarvis` preload, the
+- **As `core/kernels.py` does it**: the `search`/`read` + `jarvis` preload (now
+  `from tools.preload import *`, with `httpx`, `datetime`, `subprocess`), the
   SDK scoped per conversation and project, output assembled the same way
   (streams, results, a note for rich output, ANSI-free tracebacks, 30,000
   characters), a 60 s timeout that interrupts (SIGINT to the group) and keeps
@@ -200,7 +201,16 @@ port of `core/kernels.py`;
   `core/kernels.py`'s recorded output.
 - **Departures**, named in `tests/test_edge_kernels.py`: stdin is never
   offered, so `input()` raises at once (Python's client offered it with nobody
-  to answer, and the cell hung until its timeout).
+  to answer, and the cell hung until its timeout); output past 30,000
+  characters keeps its head and its tail around a note of how many were cut
+  (Python kept the head, losing the traceback or result at the end).
+- **Images** (`Output`, `run_with_images`): a `display_data` or
+  `execute_result` PNG/JPEG is kept beside the text — at most 4 a cell, each
+  ≤ 1.5 MB decoded and ≤ 8000 px a side, its type read from its bytes — and
+  `seen` names each in the text where it was shown. Only a chat, automation,
+  board or sub-agent turn asks for them (`turn.rs: run_cell`); `run` and
+  `--kernel-cells` give today's text, an image a `[image/png output — not
+  shown as text]` line.
 
 ## MCP (`src/mcp/`)
 

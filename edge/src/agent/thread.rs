@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::{Row, SqlitePool};
 
 use crate::gql::codec::{new_id, now_stored};
@@ -157,6 +158,24 @@ impl Thread {
         self.exists = true;
         Ok(())
     }
+}
+
+/// Keep `bytes` as a `transcript_blobs` row — one per content — and in
+/// `blobs` for this turn's calls: how the transcript holds all media. The
+/// reference a part names it by, `sha256:<hex>`.
+pub async fn store_blob(pool: &SqlitePool, blobs: &mut Blobs, mime_type: &str, bytes: &[u8]) -> Result<String, String> {
+    let hash = format!("sha256:{:x}", Sha256::digest(bytes));
+    sqlx::query("INSERT OR IGNORE INTO transcript_blobs (hash, mime_type, size, data, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(&hash)
+        .bind(mime_type)
+        .bind(bytes.len() as i64)
+        .bind(bytes)
+        .bind(now_stored())
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    blobs.insert(hash.clone(), STANDARD.encode(bytes));
+    Ok(hash)
 }
 
 /// The `transcript_blobs` the messages' media parts name, as base64.

@@ -15,15 +15,11 @@ use axum::Json;
 use axum::extract::{FromRequest, Multipart, Request};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use tokio::io::AsyncWriteExt;
 
-use crate::gql::codec::now_stored;
 use crate::llm::Blobs;
 use crate::llm::transcript::{Content, Media, Part, Typed};
 
@@ -310,19 +306,7 @@ pub async fn prompt(
                 continue;
             }
         };
-        let hash = format!("sha256:{:x}", Sha256::digest(&bytes));
-        sqlx::query(
-            "INSERT OR IGNORE INTO transcript_blobs (hash, mime_type, size, data, created_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(&hash)
-        .bind(&a.mime_type)
-        .bind(bytes.len() as i64)
-        .bind(&bytes)
-        .bind(now_stored())
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-        blobs.insert(hash.clone(), STANDARD.encode(&bytes));
+        let hash = crate::agent::thread::store_blob(pool, blobs, &a.mime_type, &bytes).await?;
         parts.push(Part::Typed(Typed::Image(Media {
             mime_type: Some(a.mime_type.clone()),
             blob: Some(hash),

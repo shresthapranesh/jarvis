@@ -20,7 +20,7 @@ mod queue;
 pub mod retrieve;
 mod summarize;
 mod sweep;
-mod thread;
+pub(crate) mod thread;
 pub(crate) mod tools;
 mod turn;
 mod workers;

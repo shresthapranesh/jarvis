@@ -607,10 +607,13 @@ def _record_of(turn: Turn) -> dict[str, Any]:
 
 _DELEGATING = re.compile(r"## Delegating to [^\n]*\n.*?(?=\n## )", re.S)
 # The edge's own, after Python was gone: today's date in the volatile tail,
-# and the two prompt rules it rewrote (text while working; the date).
+# and the prompt lines it rewrote (text while working; the date; what a
+# kernel preloads, and the line that restores it after `%reset -f`).
 _TODAY = re.compile(r"\n\n## Today\n\n[^\n]*")
-_REWORDED = re.compile(r"^- (?:Only write text when giving your FINAL answer\.|Your text is for your FINAL answer\.|"
-                       r"You don't inherently know today's date|Today's date is in the turn context\.)[^\n]*\n", re.M)
+_REWORDED = re.compile(r"^(?:- (?:Only write text when giving your FINAL answer\.|Your text is for your FINAL answer\.|"
+                       r"You don't inherently know today's date|Today's date is in the turn context\.)|"
+                       r"  import httpx, pandas as pd|  httpx, datetime, subprocess |"
+                       r"`%reset -f` clears the slate)[^\n]*\n", re.M)
 
 
 def _requests(python: list[dict], edge: list[dict]) -> None:
